@@ -1,7 +1,8 @@
 import type { MemoryListResult, MemoryTopicEntry } from "@taco-ai/protocol";
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { MemoryDreamPanel } from "../../src/components/memory/MemoryDreamPanel";
 import { MEMORY_ARCHIVE_PREFIX, MEMORY_ROOT_ID } from "../../src/lib/memoryPaneTypes";
 import { MemoryPane } from "../../src/views/MemoryPane";
 
@@ -76,13 +77,12 @@ function actions() {
         onScheduleToggle: vi.fn(),
         dreamConfig: {
             minHours: 24,
-            minChanges: 5,
             staleDays: 90,
             staleDaysDurable: 180,
             archiveCleanupEnabled: false,
-            archiveRetentionDays: 7,
+            archiveRetentionDays: 7 as const,
         },
-        onSaveConfig: vi.fn(),
+        onSaveConfig: vi.fn(async () => true),
     };
 }
 
@@ -123,6 +123,42 @@ describe("MemoryPane dream controls", () => {
         expect(dream.onScheduleToggle).toHaveBeenCalledWith(false);
     });
 
+    it.each(["run", "apply", "undo"] as const)(
+        "prevents repeated run and undo actions while busy with %s",
+        async (busy) => {
+            const user = userEvent.setup({ delay: null });
+            const dream = { ...actions(), dreamConfig: null };
+            const { rerender } = render(
+                <MemoryDreamPanel
+                    {...dream}
+                    state={dreamData.dream}
+                    busy={busy}
+                    onClose={() => {}}
+                />,
+            );
+            const runLabel = busy === "run" ? "memory.dream.running" : "memory.dream.run";
+            const run = screen.getByRole("button", { name: runLabel });
+            expect(run.getAttribute("title")).toBe(runLabel);
+            expect(run.getAttribute("aria-busy")).toBe(String(busy === "run"));
+            expect(run).toHaveProperty("disabled", true);
+            await user.click(run);
+            fireEvent.click(document.querySelector(".memory-dream-history summary") as Element);
+            const undo = screen.getByRole("button", {
+                name: busy === "undo" ? "memory.dream.undoing" : "memory.dream.undo",
+            });
+            expect(undo).toHaveProperty("disabled", true);
+            await user.click(undo);
+            expect(dream.onRun).not.toHaveBeenCalled();
+            expect(dream.onUndo).not.toHaveBeenCalled();
+
+            rerender(<MemoryDreamPanel {...dream} state={dreamData.dream} onClose={() => {}} />);
+            await user.click(screen.getByRole("button", { name: "memory.dream.run" }));
+            await user.click(screen.getByRole("button", { name: "memory.dream.undo" }));
+            expect(dream.onRun).toHaveBeenCalledTimes(1);
+            expect(dream.onUndo).toHaveBeenCalledWith("report-1");
+        },
+    );
+
     it("opens schedule settings from the consolidation panel", async () => {
         const user = userEvent.setup({ delay: null });
         const dream = actions();
@@ -143,6 +179,56 @@ describe("MemoryPane dream controls", () => {
         await user.type(minHours, "48");
         await user.click(screen.getByRole("button", { name: "memory.dream.saveSettings" }));
         expect(dream.onSaveConfig).toHaveBeenCalledWith(expect.objectContaining({ minHours: 48 }));
+        expect(screen.queryByRole("button", { name: "memory.dream.saveSettings" })).toBeNull();
+        expect(
+            screen
+                .getByRole("button", { name: "memory.dream.settings" })
+                .getAttribute("aria-expanded"),
+        ).toBe("false");
+    });
+
+    it("waits for saving to finish and retains the draft after a failed save", async () => {
+        const user = userEvent.setup({ delay: null });
+        const dream = actions();
+        let finish!: (saved: boolean) => void;
+        dream.onSaveConfig.mockImplementationOnce(
+            () =>
+                new Promise<boolean>((resolve) => {
+                    finish = resolve;
+                }),
+        );
+        renderPane(dream);
+        await user.click(screen.getByRole("button", { name: "memory.dream.settings" }));
+        const minHours = screen.getByLabelText("memory.dream.minHours") as HTMLInputElement;
+        await user.clear(minHours);
+        await user.type(minHours, "48");
+        await user.click(screen.getByRole("button", { name: "memory.dream.saveSettings" }));
+        const saving = screen.getByRole("button", { name: "app.saving" });
+        expect(saving).toHaveProperty("disabled", true);
+        await user.click(saving);
+        expect(dream.onSaveConfig).toHaveBeenCalledTimes(1);
+        await act(async () => finish(false));
+        expect(screen.getByRole("button", { name: "memory.dream.saveSettings" })).toHaveProperty(
+            "disabled",
+            false,
+        );
+        expect(screen.getByLabelText("memory.dream.minHours")).toHaveProperty("value", "48");
+        await user.click(screen.getByRole("button", { name: "memory.dream.saveSettings" }));
+        expect(screen.queryByRole("button", { name: "memory.dream.saveSettings" })).toBeNull();
+    });
+
+    it("shows a rejected save and keeps settings open for retry", async () => {
+        const user = userEvent.setup({ delay: null });
+        const dream = actions();
+        dream.onSaveConfig.mockRejectedValueOnce(new Error("connection lost"));
+        renderPane(dream);
+        await user.click(screen.getByRole("button", { name: "memory.dream.settings" }));
+        await user.click(screen.getByRole("button", { name: "memory.dream.saveSettings" }));
+        expect(screen.getByRole("alert").textContent).toBe("memory.dream.error.settings");
+        expect(screen.getByRole("button", { name: "memory.dream.saveSettings" })).toHaveProperty(
+            "disabled",
+            false,
+        );
     });
 
     it("applies the reviewed preview and can discard it", async () => {

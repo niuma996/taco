@@ -15,8 +15,9 @@ import {
 } from "../../src/memory/index.ts";
 import { MemoryExtractorImpl, parseExtractionResult } from "../../src/memory/local/extractor.ts";
 import type { MemoryEntry } from "../../src/memory/types.ts";
-import type { AgentMessage, Api, Model, Models, TextContent } from "../../src/runtime/pi/types.ts";
+import type { AgentMessage, Api, Model, Models } from "../../src/runtime/pi/types.ts";
 import { sidecarVersion } from "../../src/runtime/runtimeResources.ts";
+import { extractionResponse } from "../_helpers/extractionResponse.ts";
 
 describe("store", () => {
     let tmpRoot: string;
@@ -676,23 +677,18 @@ describe("extractor", () => {
                 ) => {
                     calls.context = context;
                     calls.options = options;
-                    return {
-                        role: "assistant",
-                        content: [
-                            {
-                                type: "text",
-                                text: JSON.stringify(
-                                    Array.isArray(response)
-                                        ? response.map((item) => ({
-                                              ...item,
-                                              basis: "durable_preference",
-                                              evidence: "this is a memory-worthy conversation",
-                                          }))
-                                        : response,
-                                ),
-                            } satisfies TextContent,
-                        ],
-                    };
+                    return extractionResponse(
+                        Array.isArray(response)
+                            ? response.map((item) => ({
+                                  ...(item.action === "add" ? { description: item.name } : {}),
+                                  ...item,
+                                  basis: "durable_preference",
+                                  futureUse:
+                                      "In future conversations, apply the user's stated lasting preference when answering.",
+                                  evidence: "this is a memory-worthy conversation",
+                              }))
+                            : response,
+                    );
                 },
             } as unknown as Models;
             const store = {
@@ -735,7 +731,13 @@ describe("extractor", () => {
             const { extractor, appended, updates } = makeExtractor(
                 [
                     { action: "update", id: "user-language", content: "Reply in concise Chinese." },
-                    { action: "add", id: "user-language", name: "Duplicate", type: "user" },
+                    {
+                        action: "add",
+                        id: "user-language",
+                        name: "Duplicate",
+                        type: "user",
+                        content: "Existing fact",
+                    },
                     {
                         action: "add",
                         id: "new-pref",
@@ -743,7 +745,6 @@ describe("extractor", () => {
                         type: "feedback",
                         content: "New fact",
                     },
-                    { action: "update", id: "unknown", content: "Must not be created" },
                 ],
                 [existingTopic()],
             );
@@ -756,6 +757,16 @@ describe("extractor", () => {
                 appended.map((entry) => entry.id),
                 ["new-pref"],
             );
+        });
+
+        it("does not create an unknown update target", async () => {
+            const { extractor, appended, updates } = makeExtractor(
+                [{ action: "update", id: "unknown", content: "Must not be created" }],
+                [existingTopic()],
+            );
+            await extractor.onRunEnd(conversation);
+            assert.deepEqual(updates, []);
+            assert.deepEqual(appended, []);
         });
 
         it("keeps only the first add for a new id within one result", async () => {
@@ -772,7 +783,15 @@ describe("extractor", () => {
 
         it("does not fork a legacy underscore id into a kebab-case duplicate", async () => {
             const { extractor, appended } = makeExtractor(
-                [{ action: "add", id: "user_language", name: "Duplicate", type: "user" }],
+                [
+                    {
+                        action: "add",
+                        id: "userlanguage",
+                        name: "Duplicate",
+                        type: "user",
+                        content: "Existing preference",
+                    },
+                ],
                 [existingTopic({ id: "user_language" })],
             );
             await extractor.onRunEnd(conversation);
@@ -797,20 +816,18 @@ describe("extractor", () => {
             const fakeModels = {
                 completeSimple: async () => ({
                     role: "assistant",
-                    content: [
+                    stopReason: "toolUse",
+                    content: extractionResponse([
                         {
-                            type: "text",
-                            text: JSON.stringify([
-                                {
-                                    action: "update",
-                                    id: "user-language",
-                                    content: "new",
-                                    basis: "correction",
-                                    evidence: "this is a memory-worthy conversation",
-                                },
-                            ]),
-                        } satisfies TextContent,
-                    ],
+                            action: "update",
+                            id: "user-language",
+                            content: "new",
+                            basis: "correction",
+                            futureUse:
+                                "In future answers, use the corrected language preference instead of the old one.",
+                            evidence: "this is a memory-worthy conversation",
+                        },
+                    ]).content,
                 }),
             } as unknown as Models;
             const extractor = new MemoryExtractorImpl(
@@ -856,20 +873,18 @@ describe("extractor", () => {
                         const content = mine === 1 ? "A rewrite of v1" : "B rewrite";
                         return {
                             role: "assistant",
-                            content: [
+                            stopReason: "toolUse",
+                            content: extractionResponse([
                                 {
-                                    type: "text",
-                                    text: JSON.stringify([
-                                        {
-                                            action: "update",
-                                            id: "user-language",
-                                            content,
-                                            basis: "correction",
-                                            evidence: "this is a memory-worthy conversation",
-                                        },
-                                    ]),
-                                } satisfies TextContent,
-                            ],
+                                    action: "update",
+                                    id: "user-language",
+                                    content,
+                                    basis: "correction",
+                                    futureUse:
+                                        "In future answers, use the corrected language preference instead of the old one.",
+                                    evidence: "this is a memory-worthy conversation",
+                                },
+                            ]).content,
                         };
                     },
                 } as unknown as Models;
@@ -908,20 +923,18 @@ describe("extractor", () => {
                         await store.updateTopic("user-language", "edited by user");
                         return {
                             role: "assistant",
-                            content: [
+                            stopReason: "toolUse",
+                            content: extractionResponse([
                                 {
-                                    type: "text",
-                                    text: JSON.stringify([
-                                        {
-                                            action: "update",
-                                            id: "user-language",
-                                            content: "rewrite of v1",
-                                            basis: "correction",
-                                            evidence: "this is a memory-worthy conversation",
-                                        },
-                                    ]),
-                                } satisfies TextContent,
-                            ],
+                                    action: "update",
+                                    id: "user-language",
+                                    content: "rewrite of v1",
+                                    basis: "correction",
+                                    futureUse:
+                                        "In future answers, use the corrected language preference instead of the old one.",
+                                    evidence: "this is a memory-worthy conversation",
+                                },
+                            ]).content,
                         };
                     },
                 } as unknown as Models;
@@ -944,22 +957,22 @@ describe("extractor", () => {
                     if (call === 1) throw new Error("provider down");
                     return {
                         role: "assistant",
-                        content: [
+                        stopReason: "toolUse",
+                        content: extractionResponse([
                             {
-                                type: "text",
-                                text: JSON.stringify([
-                                    {
-                                        action: "add",
-                                        id: "later",
-                                        name: "Later",
-                                        type: "user",
-                                        content: "later fact",
-                                        basis: "durable_preference",
-                                        evidence: "this is a memory-worthy conversation",
-                                    },
-                                ]),
-                            } satisfies TextContent,
-                        ],
+                                action: "add",
+                                id: "later",
+                                name: "Later",
+                                type: "user",
+                                content: "later fact",
+                                basis: "durable_preference",
+                                description:
+                                    "Apply the lasting reply preference in future sessions.",
+                                futureUse:
+                                    "In future conversations, apply this lasting reply preference when answering.",
+                                evidence: "this is a memory-worthy conversation",
+                            },
+                        ]).content,
                     };
                 },
             } as unknown as Models;

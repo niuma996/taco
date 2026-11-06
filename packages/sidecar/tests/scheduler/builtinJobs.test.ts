@@ -286,10 +286,9 @@ describe("built-in dispatch", () => {
 });
 
 describe("parseMemoryDreamArgs", () => {
-    test("accepts in-range integers and a model, drops unknown keys", () => {
+    test("accepts in-range integers, drops unknown keys", () => {
         const parsed = parseMemoryDreamArgs({
             minHours: 12,
-            minChanges: 0,
             staleDays: 30,
             staleDaysDurable: 365,
             model: "anthropic/claude",
@@ -300,10 +299,8 @@ describe("parseMemoryDreamArgs", () => {
         if (parsed.ok) {
             deepStrictEqual(parsed.args, {
                 minHours: 12,
-                minChanges: 0,
                 staleDays: 30,
                 staleDaysDurable: 365,
-                model: "anthropic/claude",
             });
         }
     });
@@ -313,19 +310,11 @@ describe("parseMemoryDreamArgs", () => {
             { minHours: 0 },
             { minHours: 1.5 },
             { staleDays: 3 },
-            { minChanges: -1 },
             { staleDaysDurable: "180" },
-            { model: 42 },
         ]) {
             const parsed = parseMemoryDreamArgs(bad as Record<string, unknown>);
             strictEqual(parsed.ok, false, JSON.stringify(bad));
         }
-    });
-
-    test("an empty model string means the default model", () => {
-        const parsed = parseMemoryDreamArgs({ model: "" });
-        ok(parsed.ok);
-        if (parsed.ok) strictEqual(parsed.args.model, undefined);
     });
 
     test("accepts cleanup settings and defaults scheduled jobs to cleanup off and 7 days", () => {

@@ -16,14 +16,12 @@ import type { ProviderKeyStore } from "../../runtime/models/providerKeyStore.ts"
 import type { Api, Model, Models } from "../../runtime/pi/types.ts";
 
 /**
- * Resolve `override` (job args.model: `provider/id` or bare id), else the
- * configured default model. Returns undefined when neither resolves — the
- * job then fails visibly instead of silently consolidating with an
- * arbitrary first-in-catalog model.
+ * Resolve the configured default model. Returns undefined when it does not
+ * resolve — the job then fails visibly instead of silently consolidating with
+ * an arbitrary first-in-catalog model.
  */
 export function resolveDreamModel(
     keys: ProviderKeyStore,
-    override?: string,
 ): { models: Models; model: Model<Api> } | undefined {
     const cfg = readGlobalConfig();
     const models = createModels({ credentials: keys });
@@ -39,14 +37,6 @@ export function resolveDreamModel(
             ? (models.getModel(provider, id) as Model<Api> | undefined)
             : findModelById(models, id);
 
-    if (override) {
-        const slash = override.indexOf("/");
-        const model =
-            slash > 0
-                ? lookup(override.slice(0, slash), override.slice(slash + 1))
-                : lookup(undefined, override);
-        return model ? { models, model } : undefined;
-    }
     if (!cfg.defaultModel) return undefined;
     const model = lookup(cfg.defaultProvider, cfg.defaultModel);
     return model ? { models, model } : undefined;

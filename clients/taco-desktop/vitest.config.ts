@@ -40,6 +40,7 @@ export default defineConfig({
             "tests/components/FilePreviewGrant.test.tsx",
             "tests/components/MemoryPane.test.tsx",
             "tests/components/MemoryDream.test.tsx",
+            "tests/components/MemoryDreamLocale.test.tsx",
             "tests/components/Sidebar.test.tsx",
             "tests/components/SubagentPanel.test.tsx",
             "tests/components/AgentForm.test.tsx",

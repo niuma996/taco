@@ -24,6 +24,7 @@ import type {
 } from "../../src/runtime/pi/types.ts";
 import { normalizeContext } from "../../src/runtime/pi/values.ts";
 import { TitleSummarizer } from "../../src/runtime/session/titleSummarizer.ts";
+import { extractionResponse } from "../_helpers/extractionResponse.ts";
 import { useTempTacoHome } from "../_helpers/tempTacoHome.ts";
 
 useTempTacoHome("lite-model");
@@ -166,7 +167,9 @@ describe("auxiliary thinking requests", () => {
                 onCall: async (model, options) => {
                     seen.push({ id: model.id, reasoning: options.reasoning });
                     if (failLite && model.id === LITE.id) throw new Error("lite offline");
-                    return assistantMessage(scenario === "memory" ? "[]" : "A title");
+                    return scenario === "memory"
+                        ? extractionResponse([])
+                        : assistantMessage("A title");
                 },
             });
             const caller =
@@ -401,6 +404,53 @@ describe("completeSimpleWithLiteFallback", () => {
         return { models, seen };
     }
 
+    it("accepts a tool-only response with a caller acceptance callback", async () => {
+        const response = extractionResponse([]);
+        const { models, seen } = trackingModels(async () => response);
+        const result = await completeSimpleWithLiteFallback(
+            models,
+            () => windowed(LITE, 128_000),
+            MAIN,
+            testContext(),
+            noopOptions,
+            (value) => value === response,
+        );
+        assert.equal(result, response);
+        assert.deepEqual(
+            seen.map((call) => call.id),
+            [LITE.id],
+        );
+    });
+
+    it("retries rejected text responses and validates the main response too", async () => {
+        const response = extractionResponse([]);
+        const { models, seen } = trackingModels(async (model) =>
+            model.id === LITE.id ? assistantMessage("[]") : response,
+        );
+        const result = await completeSimpleWithLiteFallback(
+            models,
+            () => windowed(LITE, 128_000),
+            MAIN,
+            testContext(),
+            noopOptions,
+            (value) => value === response,
+        );
+        assert.equal(result, response);
+        assert.deepEqual(
+            seen.map((call) => call.id),
+            [LITE.id, MAIN.id],
+        );
+        const rejected = await completeSimpleWithLiteFallback(
+            models,
+            () => undefined,
+            MAIN,
+            testContext(),
+            noopOptions,
+            () => false,
+        );
+        assert.equal(rejected, undefined);
+    });
+
     it("uses the main model directly when no lite model is configured", async () => {
         const { models, seen } = trackingModels(async () => assistantMessage("main response"));
         const res = await completeSimpleWithLiteFallback(
@@ -501,7 +551,7 @@ describe("completeSimpleWithLiteFallback", () => {
             getModel: () => windowed(LITE, 8192),
             onCall: async (model) => {
                 seen.push(model.id);
-                return assistantMessage("[]");
+                return extractionResponse([]);
             },
         });
         const topics = Array.from({ length: 40 }, (_, i) => ({

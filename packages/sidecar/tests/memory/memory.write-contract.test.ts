@@ -131,6 +131,16 @@ describe("memory write contract", () => {
         assert.deepEqual(memoryTypes.unionMemorySources(undefined, undefined), []);
     });
 
+    it("preserves an explicit request when a duplicate source promotes it", () => {
+        assert.deepEqual(
+            memoryTypes.unionMemorySources(
+                [{ ...source, explicitlyRequested: false }],
+                [{ ...source, explicitlyRequested: true }],
+            ),
+            [{ ...source, explicitlyRequested: true }],
+        );
+    });
+
     it("does not rewrite or refresh trim-identical content", async () => {
         await store.appendEntry(entry);
         const before = statSync(topicPath()).mtimeMs;

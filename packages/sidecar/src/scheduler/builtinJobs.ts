@@ -28,17 +28,13 @@ export function isBuiltinJob(job: Pick<Job, "builtin" | "command">): boolean {
 }
 
 /** Args the memory-dream job accepts; every field is optional. */
-export interface MemoryDreamArgs extends Partial<DreamOptions> {
-    /** Model for the consolidation call, as `provider/modelId` or a bare id. */
-    model?: string;
-}
+export type MemoryDreamArgs = Partial<DreamOptions>;
 
 const DREAM_ARG_LIMITS: Record<
-    "minHours" | "minChanges" | "staleDays" | "staleDaysDurable",
+    "minHours" | "staleDays" | "staleDaysDurable",
     { min: number; max: number }
 > = {
     minHours: { min: 1, max: 24 * 30 },
-    minChanges: { min: 0, max: 1000 },
     staleDays: { min: 7, max: 3650 },
     staleDaysDurable: { min: 7, max: 3650 },
 };
@@ -76,12 +72,6 @@ export function parseMemoryDreamArgs(
         }
         out.archiveRetentionDays = args.archiveRetentionDays;
     }
-    if (args.model !== undefined && args.model !== "") {
-        if (typeof args.model !== "string" || args.model.length > 200) {
-            return { ok: false, error: "args.model must be a model id string" };
-        }
-        out.model = args.model;
-    }
     return { ok: true, args: out };
 }
 
@@ -95,7 +85,6 @@ export function defaultMemoryDreamJob(): Job {
         command: MEMORY_DREAM_COMMAND,
         args: {
             minHours: DEFAULT_DREAM_OPTIONS.minHours,
-            minChanges: DEFAULT_DREAM_OPTIONS.minChanges,
             staleDays: DEFAULT_DREAM_OPTIONS.staleDays,
             staleDaysDurable: DEFAULT_DREAM_OPTIONS.staleDaysDurable,
             archiveCleanupEnabled: DEFAULT_DREAM_OPTIONS.archiveCleanupEnabled,

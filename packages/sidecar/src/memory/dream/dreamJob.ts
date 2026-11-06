@@ -46,8 +46,8 @@ export const NO_MODEL_SUMMARY = "skipped: no model is configured for memory cons
 export interface DreamJobDeps {
     /** `false` when `memoryEnabled` is off: every fire is then a no-op. */
     readonly memoryEnabled: () => boolean;
-    /** Resolve the model for consolidation; `override` is the job's args.model. */
-    readonly resolveModel: (override?: string) => { models: Models; model: Model<Api> } | undefined;
+    /** Resolve the model for consolidation, normally the configured default. */
+    readonly resolveModel: () => { models: Models; model: Model<Api> } | undefined;
     /** Directory keys to consider; defaults to every dir under `projects/`. */
     readonly listDirKeys?: () => string[];
 }
@@ -57,7 +57,6 @@ export interface DreamJobRun {
     readonly signal?: AbortSignal;
     readonly force?: boolean;
     readonly options?: Partial<DreamOptions>;
-    readonly model?: string;
 }
 
 /** Per-workspace outcomes plus the history line. */
@@ -77,11 +76,10 @@ export async function runDreamJob(
               run.options.archiveRetentionDays ?? 7,
           )
         : { deleted: 0, skipped: 0 };
-    const resolved = deps.resolveModel(run.model);
+    const resolved = deps.resolveModel();
     // No model is a setup gap, not a broken run: throwing would count toward
     // the failure breaker and disable the job before the user adds a key.
     if (!resolved) {
-        if (run.model) throw new Error(`memory consolidation model not found: ${run.model}`);
         return {
             summary:
                 cleanup.deleted > 0
@@ -159,6 +157,7 @@ function summarize(outcomes: ReadonlyArray<{ outcome: DreamOutcome }>): string {
     let applied = 0;
     let previewed = 0;
     let failed = 0;
+    const skippedReasons = new Map<string, number>();
     let merged = 0;
     let mergedInto = 0;
     let archived = 0;
@@ -174,9 +173,17 @@ function summarize(outcomes: ReadonlyArray<{ outcome: DreamOutcome }>): string {
             previewed++;
         } else if (outcome.status === "failed") {
             failed++;
+        } else {
+            skippedReasons.set(outcome.reason, (skippedReasons.get(outcome.reason) ?? 0) + 1);
         }
     }
-    if (applied + previewed + failed === 0) return "no workspace needed consolidation";
+    if (applied + previewed + failed === 0) {
+        if (skippedReasons.size === 0) return "skipped: no memory workspaces found";
+        const reason =
+            [...skippedReasons.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ??
+            "no eligible workspace";
+        return `skipped: ${reason}`;
+    }
     const parts: string[] = [];
     if (applied > 0) {
         parts.push(
@@ -197,13 +204,12 @@ export function createMemoryDreamHandler(keys: ProviderKeyStore): BuiltinJobHand
     return async (job) => {
         const parsed = parseMemoryDreamArgs(job.args);
         if (!parsed.ok) throw new Error(parsed.error);
-        const { model, ...options } = parsed.args;
         const result = await runDreamJob(
             {
                 memoryEnabled: () => readGlobalConfig().memoryEnabled !== false,
-                resolveModel: (override) => resolveDreamModel(keys, override),
+                resolveModel: () => resolveDreamModel(keys),
             },
-            { options, model },
+            { options: parsed.args },
         );
         return { summary: result.summary };
     };

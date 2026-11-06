@@ -1050,7 +1050,15 @@ describe("memory", () => {
                     calls++;
                     return {
                         role: "assistant",
-                        content: [{ type: "text", text: JSON.stringify(response) }],
+                        stopReason: "toolUse",
+                        content: [
+                            {
+                                type: "toolCall",
+                                id: "result",
+                                name: "submit_memory_dream_plan",
+                                arguments: response,
+                            },
+                        ],
                     };
                 },
                 getModel: () => undefined,
@@ -1196,18 +1204,6 @@ describe("memory", () => {
                 () => call("memory.restoreTopic", workspace, { id: "t1" }),
                 /unknown archived/,
             );
-        });
-
-        it("dreamRun rejects an unknown model override instead of falling back", async () => {
-            const store = await seeded();
-            const { workspace } = workspaceWith(store);
-            const handler = getRegisteredMethod("memory.dreamRun");
-            assert.ok(handler);
-            const ctx = makeCtx(workspace);
-            (ctx as { server?: unknown }).server = {
-                jobs: { get: async () => ({ args: { model: "missing/model" } }) },
-            };
-            await assert.rejects(() => handler.handler(ctx), /model not found: missing\/model/);
         });
 
         it("dreamRun with too few topics skips without a model call", async () => {

@@ -424,7 +424,8 @@
     display: none;
 }
 
-.memory-dream-settings > label {
+.memory-dream-settings > label,
+.memory-dream-settings > .memory-dream-settings-field {
     display: flex;
     flex-direction: column;
     gap: var(--space-1);
@@ -432,8 +433,7 @@
     font-size: var(--text-xs);
 }
 
-.memory-dream-settings input[type="number"],
-.memory-dream-settings select {
+.memory-dream-settings input[type="number"] {
     width: 100%;
     min-height: var(--control-height-sm);
     padding: 0 var(--space-2);
@@ -441,6 +441,10 @@
     border-radius: var(--radius-sm);
     background: var(--bg-elevated);
     color: var(--fg);
+}
+
+.memory-dream-settings .ui-select-trigger {
+    width: 100%;
 }
 
 .memory-dream-settings-check {
@@ -452,7 +456,14 @@
 .memory-dream-settings-actions {
     grid-column: 1 / -1;
     display: flex;
+    align-items: center;
     justify-content: flex-end;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+}
+
+.memory-dream-settings-actions [role="alert"] {
+    color: var(--error);
 }
 
 /* Quiet footer line: identity, age, and the one action that applies. */
@@ -600,6 +611,13 @@
     font-size: var(--text-sm);
 }
 
+.memory-dream-toolbar-actions {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    margin-left: auto;
+}
+
 .memory-dream-note {
     margin: calc(var(--space-2) * -1) 0 0;
     color: var(--fg-dim);
@@ -745,8 +763,25 @@
     white-space: nowrap;
 }
 
+.memory-dream-report-meta > small,
+.memory-dream-undo {
+    font-size: var(--text-xs);
+}
+
 .memory-dream-report-meta > button {
     flex: 0 0 auto;
+}
+
+.memory-dream-report-meta > .memory-dream-undo {
+    padding: 0;
+    border: none;
+    color: var(--accent);
+    line-height: inherit;
+}
+
+.memory-dream-undo:hover:not(:disabled) {
+    color: var(--accent);
+    text-decoration: underline;
 }
 
 .memory-view-meta-time time {

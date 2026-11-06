@@ -24,7 +24,6 @@ export {
 export { buildMemoryContextHook } from "./memoryTag.ts";
 export { NoOpMemoryStore } from "./noopStore.ts";
 export type {
-    ArchiveCategory,
     ArchiveCleanupCandidate,
     ArchiveTopicOptions,
     MEMORY_ENTRY_TYPES,

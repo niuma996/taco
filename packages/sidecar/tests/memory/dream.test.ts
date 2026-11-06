@@ -42,7 +42,6 @@ import {
     capRetirement,
     DEFAULT_DREAM_OPTIONS,
     type DreamAction,
-    parseDreamActions,
     resolveActionIds,
     trimConflictingActions,
     validateDreamPlan,
@@ -65,10 +64,12 @@ import {
     tryAcquireDreamLock,
     writeDreamReport,
 } from "../../src/memory/dream/dreamState.ts";
+import { dreamResultTool } from "../../src/memory/dream/dreamTool.ts";
 import { createTopicUsageTracker } from "../../src/memory/dream/usageTracker.ts";
 import { LocalMemoryStore } from "../../src/memory/index.ts";
+import { readMemorySubmission } from "../../src/memory/submission.ts";
 import type { MemoryEntry } from "../../src/memory/types.ts";
-import type { Api, Model, Models, TextContent } from "../../src/runtime/pi/types.ts";
+import type { Api, AssistantMessage, Model, Models } from "../../src/runtime/pi/types.ts";
 
 const NOW = new Date("2026-10-25T12:00:00.000Z");
 const DAY = 24 * 60 * 60 * 1000;
@@ -112,8 +113,22 @@ async function seed(store: LocalMemoryStore, entries: MemoryEntry[]): Promise<vo
     for (const entry of entries) await store.appendEntry(entry);
 }
 
-/** Model double: returns `plan` as the consolidation JSON, recording each call. */
-function fakeDeps(store: LocalMemoryStore, plan: unknown): DreamDeps & { calls: number } {
+function dreamResponse(plan: unknown): AssistantMessage {
+    return {
+        role: "assistant",
+        stopReason: "toolUse",
+        content:
+            typeof plan === "string"
+                ? [{ type: "text", text: plan }]
+                : [{ type: "toolCall", id: "plan", name: dreamResultTool.name, arguments: plan }],
+    } as AssistantMessage;
+}
+
+function submit(actions: unknown[]) {
+    return readMemorySubmission(dreamResponse({ actions }), dreamResultTool).actions;
+}
+
+function fakeDeps(store: LocalMemoryStore, plan: unknown) {
     const deps = {
         store,
         calls: 0,
@@ -123,15 +138,7 @@ function fakeDeps(store: LocalMemoryStore, plan: unknown): DreamDeps & { calls: 
     deps.models = {
         completeSimple: async () => {
             deps.calls++;
-            return {
-                role: "assistant",
-                content: [
-                    {
-                        type: "text",
-                        text: typeof plan === "string" ? plan : JSON.stringify(plan),
-                    } satisfies TextContent,
-                ],
-            };
+            return dreamResponse(plan);
         },
     } as unknown as Models;
     return deps;
@@ -309,135 +316,11 @@ describe("dream plan", () => {
     const views = (entries: MemoryEntry[], usage: Record<string, string> = {}) =>
         buildTopicViews(entries, usage, DEFAULT_DREAM_OPTIONS, NOW.getTime());
 
-    it("parses the per-kind envelope the model may return", () => {
-        const raw = JSON.stringify({
-            merges: [
-                {
-                    sources: ["a", "b"],
-                    target: {
-                        id: "ab",
-                        name: "AB",
-                        description: "merged",
-                        type: "project",
-                        content: "a and b",
-                    },
-                },
-            ],
-            rewrites: [{ id: "c", content: "tightened c" }],
-            archives: [{ id: "old" }],
-        });
-        const parsed = parseDreamActions(raw);
-        assert.ok(parsed);
-        assert.deepEqual(
-            parsed.actions.map((a) => a.action),
-            ["merge", "rewrite", "archive"],
-        );
-        const merge = parsed.actions[0];
-        assert.ok(merge?.action === "merge" && merge.sourceIds.join() === "a,b");
-        assert.ok(merge?.action === "merge" && merge.id === "ab");
-        const archive = parsed.actions[2];
-        assert.ok(archive?.action === "archive" && archive.reason.length > 0);
-    });
-
-    it("accepts the kind in kind, op, or type instead of action", () => {
-        for (const field of ["kind", "op", "type"]) {
-            const raw = JSON.stringify([{ [field]: "rewrite", id: "c", content: "tightened" }]);
-            const parsed = parseDreamActions(raw);
-            assert.equal(parsed?.actions.length, 1, `kind in ${field}`);
-            assert.equal(parsed?.actions[0]?.action, "rewrite");
-        }
-    });
-
-    it("accepts source ids under alternative keys and a plan envelope", () => {
-        const fromSources = parseDreamActions(
-            JSON.stringify([
-                {
-                    action: "merge",
-                    sources: ["a", "b"],
-                    id: "ab",
-                    name: "AB",
-                    type: "project",
-                    content: "merged",
-                },
-            ]),
-        );
-        assert.equal(fromSources?.actions.length, 1);
-
-        const inPlan = parseDreamActions(
-            JSON.stringify({ plan: [{ action: "rewrite", id: "c", content: "x" }] }),
-        );
-        assert.equal(inPlan?.actions.length, 1);
-    });
-
-    it("parses the actions object, a bare array, and drops malformed items", () => {
-        const plan = {
-            actions: [
-                {
-                    action: "merge",
-                    sourceIds: ["a", "b"],
-                    id: "AB Merged",
-                    name: "n",
-                    type: "user",
-                    content: "c",
-                },
-                { action: "rewrite", id: "c", content: "tight" },
-                { action: "archive", id: "d", reason: "obsolete" },
-                { action: "archive", id: "e" },
-                {
-                    action: "merge",
-                    sourceIds: ["a"],
-                    id: "x",
-                    name: "n",
-                    type: "nope",
-                    content: "c",
-                },
-                { action: "delete", id: "f" },
-                null,
-                42,
-            ],
-        };
-        const parsed = parseDreamActions(`Sure:\n${JSON.stringify(plan)}`);
-        assert.ok(parsed);
-        // The reason-less archive survives with a default reason: the reason
-        // documents the action, it is not what makes it safe.
-        assert.deepEqual(
-            parsed.actions.map((a) => a.action),
-            ["merge", "rewrite", "archive", "archive"],
-        );
-        assert.equal((parsed.actions[0] as { id: string }).id, "ab-merged");
-        assert.equal((parsed.actions[3] as { reason: string }).reason.length > 0, true);
-
-        const bare = parseDreamActions(
-            JSON.stringify([{ action: "rewrite", id: "c", content: "x" }]),
-        );
-        assert.equal(bare?.actions.length, 1);
-        assert.equal(parseDreamActions("no json here"), null);
-
-        // A reply that names no action is a valid empty plan; one whose items
-        // all fail to parse is not — the caller must tell them apart.
-        assert.deepEqual(parseDreamActions('{"actions":[]}'), {
-            actions: [],
-            empty: true,
-            recovered: false,
-            oversized: 0,
-            overCap: 0,
-        });
-        assert.equal(parseDreamActions("[]")?.empty, true);
-        const malformed = parseDreamActions(
-            JSON.stringify({ actions: [{ action: "delete", id: "f" }] }),
-        );
-        assert.equal(malformed?.actions.length, 0);
-        assert.equal(malformed?.empty, false);
-
-        // A reply cut off mid-JSON keeps the actions it finished writing.
-        const truncated =
-            '{"actions":[{"action":"rewrite","id":"c","content":"x"},{"action":"rewrite","id":"d","content":"unfin';
-        const salvaged = parseDreamActions(truncated);
-        assert.equal(salvaged?.recovered, true);
-        assert.equal(salvaged?.actions.length, 1);
-        assert.equal(salvaged?.actions[0]?.action, "rewrite");
-        // Nothing but prose is still nothing.
-        assert.equal(parseDreamActions('{"actions":[{"action":"rewr'), null);
+    it("accepts only the declared action envelope and known fields", () => {
+        assert.deepEqual(submit([]), []);
+        assert.throws(() => readMemorySubmission(dreamResponse({ merges: [] }), dreamResultTool));
+        assert.throws(() => submit([{ kind: "rewrite", id: "a", content: "fact" }]));
+        assert.throws(() => submit([{ action: "rewrite", id: "a", content: "fact", sources: [] }]));
     });
 
     it("marks topics stale by the latest of write and read time, per type horizon", () => {
@@ -525,28 +408,16 @@ describe("dream plan", () => {
         assert.equal(toMerge.ok, true, "a merge target counts as a survivor");
     });
 
-    it("parses structured archive categories and evidence", () => {
-        const parsed = parseDreamActions(
-            JSON.stringify({
-                actions: [
-                    {
-                        action: "archive",
-                        id: "a",
-                        category: "invalidated",
-                        evidence: "The old fact is obsolete.",
-                    },
-                ],
-            }),
-        );
-        assert.equal(parsed?.actions[0]?.action, "archive");
-        assert.equal(
-            parsed?.actions[0]?.action === "archive" && parsed.actions[0].category,
-            "invalidated",
-        );
-        assert.equal(
-            parsed?.actions[0]?.action === "archive" && parsed.actions[0].evidence,
-            "The old fact is obsolete.",
-        );
+    it("accepts structured archive categories and evidence", () => {
+        const action = {
+            action: "archive",
+            id: "a",
+            reason: "obsolete",
+            category: "invalidated",
+            evidence: "The old fact is obsolete.",
+        };
+        assert.deepEqual(submit([action]), [action]);
+        assert.throws(() => submit([{ ...action, category: "invented" }]));
     });
 
     it("requires survivors and concrete evidence for archive categories", () => {
@@ -749,6 +620,69 @@ const mergePlan = {
 };
 
 describe("runDream", () => {
+    it("mounts a result tool and accepts a plan without response text", async () => {
+        const store = mkStore();
+        await seed(store, ten());
+        let context: { tools?: Array<{ name: string }>; systemPrompt?: string } = {};
+        const deps = fakeDeps(store, mergePlan);
+        deps.models = {
+            completeSimple: async (_model: unknown, input: typeof context) => {
+                context = input;
+                return {
+                    role: "assistant",
+                    stopReason: "toolUse",
+                    content: [
+                        {
+                            type: "toolCall",
+                            id: "result",
+                            name: "submit_memory_dream_plan",
+                            arguments: mergePlan,
+                        },
+                    ],
+                };
+            },
+        } as unknown as Models;
+        const result = await runDream(deps, { force: true, now: fixedNow });
+        assert.equal(result.status, "previewed");
+        assert.deepEqual(
+            context.tools?.map((tool) => tool.name),
+            ["submit_memory_dream_plan"],
+        );
+        assert.match(context.systemPrompt ?? "", /submit_memory_dream_plan/);
+        assert.equal(store.getTopic("a")?.content, "content of a");
+    });
+
+    it("rejects text-only JSON and incomplete tool results without stamping success", async () => {
+        for (const stopReason of ["stop", "length", "error", "aborted"]) {
+            const store = mkStoreAt(`/ws/submission-${stopReason}`);
+            await seed(store, ten());
+            const deps = fakeDeps(store, mergePlan);
+            deps.models = {
+                completeSimple: async () => ({
+                    role: "assistant",
+                    stopReason,
+                    content:
+                        stopReason === "stop"
+                            ? [{ type: "text", text: JSON.stringify(mergePlan) }]
+                            : [
+                                  {
+                                      type: "toolCall",
+                                      id: "result",
+                                      name: "submit_memory_dream_plan",
+                                      arguments: mergePlan,
+                                  },
+                              ],
+                }),
+            } as unknown as Models;
+            const result = await runDream(deps, { force: true, now: fixedNow });
+            assert.equal(result.status, "failed", stopReason);
+            assert.equal(readPendingDream(store), undefined);
+            assert.equal(readLastDreamAt(store.topicDir), 0);
+            assert.equal(isDreamLocked(store.topicDir), false);
+            assert.equal(store.listTopics().length, 10);
+        }
+    });
+
     it("first run only previews; nothing on disk changes", async () => {
         const store = mkStore();
         await seed(store, ten());
@@ -782,15 +716,16 @@ describe("runDream", () => {
         assert.equal(readPendingDream(store)?.actions.length, 3);
     });
 
-    it("previews the complete actions of a reply that stopped mid-JSON", async () => {
+    it("rejects a truncated reply without salvaging complete actions", async () => {
         const store = mkStore();
         await seed(store, ten());
         const truncated =
-            '{"actions":[{"action":"rewrite","id":"c","content":"c, tightened"},{"action":"rewrite","id":"d","content":"unfin';
+            '{"actions":[{"action":"rewrite","id":"c","content":"tightened"},{"action":"rewrite"';
         const outcome = await runDream(fakeDeps(store, truncated), { now: fixedNow });
-        assert.equal(outcome.status, "previewed");
-        assert.match(summarizeOutcome(outcome), /rewrote 1/);
-        assert.equal(readPendingDream(store)?.actions.length, 1);
+        assert.equal(outcome.status, "failed");
+        assert.equal(readPendingDream(store), undefined);
+        assert.equal(readLastDreamAt(store.topicDir), 0);
+        assert.equal(store.getTopic("c")?.content, "content of c");
     });
 
     it("a reply that never names the actions array is not salvaged", async () => {
@@ -889,7 +824,7 @@ describe("runDream", () => {
         assert.equal(store.listTopics().length, 10);
     });
 
-    it("a reply whose actions all fail to parse fails instead of no-op", async () => {
+    it("a structurally invalid action fails instead of no-op", async () => {
         const store = mkStore();
         await seed(store, ten());
         const outcome = await runDream(
@@ -897,11 +832,11 @@ describe("runDream", () => {
             { now: fixedNow },
         );
         assert.equal(outcome.status, "failed");
-        if (outcome.status === "failed") assert.match(outcome.reason, /no usable actions/);
+        if (outcome.status === "failed") assert.match(outcome.reason, /invalid .* arguments/);
         assert.equal(readLastDreamAt(store.topicDir), 0, "the time gate reopens for a retry");
     });
 
-    it("a response with no text at all is reported as such, not as an empty plan", async () => {
+    it("thinking-only output at the token ceiling fails instead of an empty plan", async () => {
         const store = mkStore();
         await seed(store, ten());
         // A thinking model that spends the whole budget on reasoning answers
@@ -919,7 +854,7 @@ describe("runDream", () => {
         );
         assert.equal(outcome.status, "failed");
         if (outcome.status === "failed") {
-            assert.match(outcome.reason, /output limit/);
+            assert.match(outcome.reason, /incomplete .* length/);
         }
         assert.equal(store.listTopics().length, 10);
     });
@@ -935,10 +870,7 @@ describe("runDream", () => {
                 options: { reasoning?: unknown; maxTokens?: unknown },
             ) => {
                 seen = options;
-                return {
-                    role: "assistant",
-                    content: [{ type: "text", text: JSON.stringify({ actions: [] }) }],
-                };
+                return dreamResponse({ actions: [] });
             },
         } as unknown as Models;
         await runDream(
@@ -963,7 +895,7 @@ describe("runDream", () => {
         assert.ok(readLastDreamAt(store.topicDir) > 0);
     });
 
-    it("scheduled runs wait for both the time gate and enough churn", async () => {
+    it("scheduled runs wait for the time gate, then evaluate unchanged topics", async () => {
         // The gate reads real file mtimes, so this test runs on the real clock.
         const store = mkStore();
         const monthAgo = new Date(Date.now() - 30 * DAY).toISOString();
@@ -987,15 +919,16 @@ describe("runDream", () => {
         const dayAgo = new Date(Date.now() - 25 * 60 * 60 * 1000);
         utimesSync(lock, dayAgo, dayAgo);
         const quiet = await runDream(deps, {});
-        assert.equal(quiet.status, "skipped", "seeded topics predate the last run");
-        if (quiet.status === "skipped") assert.match(quiet.reason, /changed since/);
-        assert.equal(deps.calls, 0);
+        assert.equal(quiet.status, "skipped", "the model returned an empty plan");
+        if (quiet.status === "skipped") assert.match(quiet.reason, /needs no changes/);
+        assert.equal(deps.calls, 1);
 
         for (const id of ["n1", "n2", "n3", "n4", "n5"]) {
             await store.appendEntry(topic(id, { createdAt: new Date().toISOString() }));
         }
+        utimesSync(lock, dayAgo, dayAgo);
         const busy = await runDream(deps, {});
-        assert.equal(deps.calls, 1, `expected a model call, got ${JSON.stringify(busy)}`);
+        assert.equal(deps.calls, 2, `expected a model call, got ${JSON.stringify(busy)}`);
     });
 
     it("too few topics is never worth a model call, even when forced", async () => {
@@ -1021,28 +954,23 @@ describe("runDream", () => {
 // ─── id resolution ───────────────────────────────────────────────────────────
 
 describe("dream plan id resolution", () => {
-    it("points a plan at the topics it names, even with legacy underscores", () => {
+    it("preserves exact legacy references and resolves uniquely normalized ids", () => {
         const entries = [
             topic("user_role_zh", { type: "user" }),
             topic("user_role_en", { type: "user" }),
             topic("keep_me"),
         ];
         const views = buildTopicViews(entries, {}, DEFAULT_DREAM_OPTIONS, NOW.getTime());
-        const parsed = parseDreamActions(
-            JSON.stringify({
-                actions: [
-                    { action: "rewrite", id: "user_role_zh", content: "tightened" },
-                    {
-                        action: "archive",
-                        id: "user_role_en",
-                        reason: "duplicate",
-                        supersededBy: "user_role_zh",
-                    },
-                ],
-            }),
-        );
-        assert.ok(parsed);
-        const resolved = resolveActionIds(parsed.actions, views);
+        const actions = submit([
+            { action: "rewrite", id: "user_role_zh", content: "tightened" },
+            {
+                action: "archive",
+                id: "userroleen",
+                reason: "duplicate",
+                supersededBy: "user_role_zh",
+            },
+        ]);
+        const resolved = resolveActionIds(actions, views);
         assert.deepEqual(
             resolved.map((action) => action.id),
             ["user_role_zh", "user_role_en"],
@@ -1050,31 +978,26 @@ describe("dream plan id resolution", () => {
         assert.equal(validateDreamPlan(resolved, views).ok, true);
     });
 
-    it("keeps a merge target on its own id, so it never lands on an existing topic", () => {
-        const entries = [topic("user_role_zh"), topic("user_role_en"), topic("keep_me")];
-        const views = buildTopicViews(entries, {}, DEFAULT_DREAM_OPTIONS, NOW.getTime());
-        const parsed = parseDreamActions(
-            JSON.stringify({
-                actions: [
-                    {
-                        action: "merge",
-                        sourceIds: ["user_role_zh", "user_role_en"],
-                        id: "user_role_zh",
-                        name: "merged",
-                        type: "user",
-                        content: "merged",
-                    },
-                ],
-            }),
+    it("never remaps a new merge target to an existing legacy topic", () => {
+        const views = buildTopicViews(
+            [topic("user_role_zh"), topic("user_role_en"), topic("keep_me")],
+            {},
+            DEFAULT_DREAM_OPTIONS,
+            NOW.getTime(),
         );
-        assert.ok(parsed);
-        const resolved = resolveActionIds(parsed.actions, views);
-        const merge = resolved[0];
-        assert.equal(merge?.action, "merge");
-        if (merge?.action === "merge") {
-            assert.deepEqual(merge.sourceIds, ["user_role_zh", "user_role_en"]);
-            assert.equal(merge.id, "userrolezh", "the target keeps its own id");
-        }
+        const actions = submit([
+            {
+                action: "merge",
+                sourceIds: ["user_role_zh", "user_role_en"],
+                id: "userrolezh",
+                name: "merged",
+                description: "merged facts",
+                type: "user",
+                content: "merged",
+            },
+        ]);
+        const resolved = resolveActionIds(actions, views);
+        assert.equal(resolved[0]?.id, "userrolezh");
         assert.equal(validateDreamPlan(resolved, views).ok, true);
     });
 });
@@ -1187,6 +1110,31 @@ describe("undoDreamReport", () => {
         await assert.rejects(() => undoDreamReport(store, "nope"), /unknown/);
         await assert.rejects(() => undoDreamReport(store, "../../etc"), /unknown/);
     });
+
+    it("only allows undoing the most recent applied report", async () => {
+        const store = mkStore();
+        await seed(store, ten());
+        await runDream(fakeDeps(store, mergePlan), { now: fixedNow });
+        const first = await applyPendingDream(store, fixedNow);
+        await store.updateTopic("c", "new input");
+        await runDream(
+            fakeDeps(store, {
+                actions: [{ action: "rewrite", id: "c", content: "new rewrite" }],
+            }),
+            {
+                force: true,
+                previewOnly: true,
+                now: () => new Date(NOW.getTime() + 1_000),
+            },
+        );
+        const second = await applyPendingDream(store, () => new Date(NOW.getTime() + 1_000));
+        assert.notEqual(first.id, second.id);
+        await assert.rejects(
+            () => undoDreamReport(store, first.id),
+            /only the most recent consolidation can be undone/,
+        );
+        assert.deepEqual(await undoDreamReport(store, second.id), []);
+    });
 });
 
 // ─── usage tracking ───────────────────────────────────────────────────────────
@@ -1257,15 +1205,7 @@ describe("runDreamJob", () => {
         const models = {
             completeSimple: async () => {
                 calls++;
-                return {
-                    role: "assistant",
-                    content: [
-                        {
-                            type: "text",
-                            text: typeof plan === "string" ? plan : JSON.stringify(plan),
-                        } satisfies TextContent,
-                    ],
-                };
+                return dreamResponse(plan);
             },
         } as unknown as Models;
         return {
@@ -1296,17 +1236,6 @@ describe("runDreamJob", () => {
         });
         assert.equal(result.summary, NO_MODEL_SUMMARY);
         assert.deepEqual(result.outcomes, []);
-    });
-
-    it("fails visibly when the job names a model that does not resolve", async () => {
-        await assert.rejects(
-            () =>
-                runDreamJob(
-                    { memoryEnabled: () => true, resolveModel: () => undefined },
-                    { model: "gone/model" },
-                ),
-            /model not found: gone\/model/,
-        );
     });
 
     it("a workspace backing off waits behind the others", async () => {
@@ -1392,81 +1321,64 @@ describe("runDreamJob", () => {
                     memoryEnabled: () => true,
                     resolveModel: modelReturning("not json").resolve,
                 }),
-            /1 failed: the model returned no parseable plan/,
+            /1 failed: expected exactly one submit_memory_dream_plan tool call/,
         );
     });
 
-    it("reports a quiet night when nothing passes its gate", async () => {
+    it("reports when no workspace exists", async () => {
         const result = await runDreamJob({
             memoryEnabled: () => true,
             resolveModel: modelReturning(mergePlan).resolve,
             listDirKeys: () => [],
         });
-        assert.equal(result.summary, "no workspace needed consolidation");
+        assert.equal(result.summary, "skipped: no memory workspaces found");
+    });
+
+    it("reports the reason when every workspace is skipped", async () => {
+        const store = storeFor("too-small");
+        await seed(store, [topic("only")]);
+        const result = await runDreamJob({
+            memoryEnabled: () => true,
+            resolveModel: modelReturning(mergePlan).resolve,
+            listDirKeys: () => [store.dirKey],
+        });
+        assert.equal(result.summary, "skipped: only 1 topics");
     });
 });
 
 // ─── review fixes ─────────────────────────────────────────────────────────────
 
 describe("dream review fixes", () => {
-    it("drops an over-limit merge or rewrite instead of cutting it", () => {
-        const long = "x".repeat(MEMORY_CONTENT_MAX_CHARS + 1);
-        const parsed = parseDreamActions(
-            JSON.stringify({
-                actions: [
-                    {
-                        action: "merge",
-                        sourceIds: ["a", "b"],
-                        id: "ab",
-                        name: "AB",
-                        type: "project",
-                        content: long,
-                    },
-                    { action: "rewrite", id: "c", content: long },
-                    { action: "rewrite", id: "d", content: "short" },
-                ],
-            }),
+    it("rejects oversized content and action arrays without cutting or dropping items", () => {
+        const rewrite = { action: "rewrite", id: "a", content: "short" };
+        assert.throws(() =>
+            submit([{ ...rewrite, content: "x".repeat(MEMORY_CONTENT_MAX_CHARS + 1) }]),
         );
-        assert.ok(parsed);
-        assert.deepEqual(
-            parsed.actions.map((a) => a.id),
-            ["d"],
+        assert.throws(() => submit(Array.from({ length: 41 }, () => rewrite)));
+        assert.equal(
+            submit(Array.from({ length: 40 }, (_, index) => ({ ...rewrite, id: `r${index}` })))
+                .length,
+            40,
         );
-        assert.equal(parsed.oversized, 2);
     });
 
-    it("normalizes every id in a plan by one rule and caps the action count", () => {
-        const parsed = parseDreamActions(
-            JSON.stringify({
+    it("rejects an oversized Unicode action before any mixed plan can apply", async () => {
+        const store = mkStore();
+        await seed(store, ten());
+        markDreamConfirmed(store.topicDir);
+        const outcome = await runDream(
+            fakeDeps(store, {
                 actions: [
-                    {
-                        action: "merge",
-                        sourceIds: ["Topic A", "topic-b"],
-                        id: "Merged AB",
-                        name: "AB",
-                        type: "project",
-                        content: "ab",
-                    },
-                    { action: "archive", id: "Old One", supersededBy: "Merged AB" },
-                    ...Array.from({ length: 45 }, (_, i) => ({
-                        action: "rewrite",
-                        id: `r${i}`,
-                        content: "c",
-                    })),
+                    { action: "rewrite", id: "a", content: "valid replacement" },
+                    { action: "rewrite", id: "b", content: "😀".repeat(1001) },
                 ],
             }),
+            { force: true, now: fixedNow },
         );
-        assert.ok(parsed);
-        const merge = parsed.actions[0];
-        assert.equal(merge?.action, "merge");
-        if (merge?.action === "merge") {
-            assert.deepEqual(merge.sourceIds, ["topic-a", "topic-b"]);
-            assert.equal(merge.id, "merged-ab");
-        }
-        const archive = parsed.actions[1];
-        if (archive?.action === "archive") assert.equal(archive.supersededBy, "merged-ab");
-        assert.equal(parsed.actions.length, 40);
-        assert.equal(parsed.overCap, 7);
+        assert.equal(outcome.status, "failed");
+        assert.equal(store.getTopic("a")?.content, "content of a");
+        assert.equal(readPendingDream(store), undefined);
+        assert.equal(readLastDreamAt(store.topicDir), 0);
     });
 
     it("an archive waiting on a skipped merge is skipped too", async () => {
@@ -1480,6 +1392,7 @@ describe("dream review fixes", () => {
                     sourceIds: ["a", "b"],
                     id: "ab",
                     name: "AB",
+                    description: "Merged facts",
                     type: "project",
                     content: "a and b",
                 },
@@ -1531,10 +1444,10 @@ describe("dream review fixes", () => {
         const gate = dreamGateReason(
             store.topicDir,
             store.listTopics(),
-            { ...DEFAULT_DREAM_OPTIONS, minHours: 0, minChanges: 1 },
+            { ...DEFAULT_DREAM_OPTIONS, minHours: 0 },
             Date.now() + 2000,
         );
-        assert.match(gate ?? "", /0 topics changed/);
+        assert.equal(gate, undefined);
     });
 
     it("a scheduled failure backs off; a manual one does not", async () => {
@@ -1718,29 +1631,17 @@ describe("dream maintenance quality", () => {
         );
     }
 
-    it("parses optional rewrite titles and descriptions with merge metadata limits", () => {
-        const parsed = parseDreamActions(
-            JSON.stringify({
-                actions: [
-                    {
-                        action: "rewrite",
-                        id: "a",
-                        content: "## Theme\n- Fact",
-                        name: "n".repeat(70),
-                        description: "d".repeat(130),
-                    },
-                ],
-            }),
-        );
-        assert.deepEqual(parsed?.actions, [
-            {
-                action: "rewrite",
-                id: "a",
-                content: "## Theme\n- Fact",
-                name: "n".repeat(60),
-                description: "d".repeat(120),
-            },
-        ]);
+    it("validates optional rewrite metadata without truncating it", () => {
+        const rewrite = {
+            action: "rewrite",
+            id: "a",
+            content: "## Theme\n- Fact",
+            name: "n".repeat(60),
+            description: "d".repeat(120),
+        };
+        assert.deepEqual(submit([rewrite]), [rewrite]);
+        assert.throws(() => submit([{ ...rewrite, name: "n".repeat(61) }]));
+        assert.throws(() => submit([{ ...rewrite, description: "d".repeat(121) }]));
     });
 
     it("prompts for focused Markdown themes within the shared 2000 character cap", async () => {
@@ -1751,7 +1652,7 @@ describe("dream maintenance quality", () => {
         const models = {
             completeSimple: async (_model: unknown, context: { systemPrompt: string }) => {
                 prompt = context.systemPrompt;
-                return { content: [{ type: "text", text: '{"actions":[]}' }] };
+                return dreamResponse({ actions: [] });
             },
         } as unknown as Models;
         await runDream({ ...deps, models }, { force: true, now: fixedNow });
@@ -1759,6 +1660,23 @@ describe("dream maintenance quality", () => {
         assert.match(prompt, /theme/);
         assert.match(prompt, /2000 characters/);
         assert.match(prompt, /"name".*optional/);
+    });
+
+    it("rejects model-invented provenance before planning writes", async () => {
+        const store = mkStore();
+        await seed(store, [topic("a", { sources: [sourceA] }), ...ten().slice(1)]);
+        const outcome = await runDream(
+            fakeDeps(store, {
+                actions: [
+                    { action: "rewrite", id: "a", content: "replacement", sources: [sourceB] },
+                ],
+            }),
+            { force: true, now: fixedNow },
+        );
+        assert.equal(outcome.status, "failed");
+        assert.equal(readPendingDream(store), undefined);
+        assert.equal(store.getTopic("a")?.content, "content of a");
+        assert.deepEqual(store.getTopic("a")?.sources, [sourceA]);
     });
 
     it("rewrites metadata and undo restores it alongside the original body and sources", async () => {
@@ -1775,7 +1693,6 @@ describe("dream maintenance quality", () => {
                         content: "## Theme\n- Durable detail",
                         name: "Theme",
                         description: "Find durable detail here",
-                        sources: [sourceB],
                     },
                 ],
             }),
@@ -1805,9 +1722,6 @@ describe("dream maintenance quality", () => {
                     {
                         ...mergePlan.actions[0],
                         sourceIds: ["b", "a"],
-                        sources: [
-                            { sessionId: "invented", recordedAt: NOW.toISOString(), via: "tool" },
-                        ],
                     },
                 ],
             }),
@@ -1889,11 +1803,6 @@ describe("dream maintenance quality", () => {
             undefined,
         );
         assert.match(
-            dreamGateReason(store.topicDir, store.listTopics(), DEFAULT_DREAM_OPTIONS, now - 1) ??
-                "",
-            /0 topics changed/,
-        );
-        assert.match(
             dreamGateReason(
                 store.topicDir,
                 store.listTopics(),
@@ -1915,6 +1824,18 @@ describe("dream maintenance quality", () => {
         assert.match(
             dreamGateReason(store.topicDir, store.listTopics(), DEFAULT_DREAM_OPTIONS, now) ?? "",
             /backing off/,
+        );
+    });
+
+    it("allows a scheduled run after the time interval even with zero topic changes", async () => {
+        const store = mkStore();
+        await seed(store, ten());
+        const now = Date.now();
+        tryAcquireDreamLock(store.topicDir);
+        releaseDreamLock(store.topicDir, new Date(now - 25 * 60 * 60 * 1000));
+        assert.equal(
+            dreamGateReason(store.topicDir, store.listTopics(), DEFAULT_DREAM_OPTIONS, now),
+            undefined,
         );
     });
 

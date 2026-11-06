@@ -405,8 +405,8 @@ export function registerMemoryHandlers(): void {
 
 /**
  * Model and options for a manual run, resolved as the scheduled job resolves
- * them — the job's `args.model`, else the global default model — so the
- * preview shows the plan the nightly run would make.
+ * them — the global default model — so the preview shows the plan the nightly
+ * run would make.
  *
  * With no global default configured, the workspace's own default stands in:
  * the scheduled job has nothing to run with then (it skips), but the user who
@@ -422,17 +422,11 @@ async function resolveManualDreamModel(
 }> {
     const job = server.jobs ? await server.jobs.get(MEMORY_DREAM_JOB_ID) : null;
     const parsed = job ? parseMemoryDreamArgs(job.args) : undefined;
-    const { model: override, ...options }: MemoryDreamArgs = parsed?.ok ? parsed.args : {};
+    const options: MemoryDreamArgs = parsed?.ok ? parsed.args : {};
     const resolved = server.providerKeyStore
-        ? resolveDreamModel(server.providerKeyStore, override)
+        ? resolveDreamModel(server.providerKeyStore)
         : undefined;
     if (resolved) return { ...resolved, options };
-    if (override) {
-        throw new RpcHandlerError(
-            ErrorCodes.InvalidParams,
-            `memory consolidation model not found: ${override}`,
-        );
-    }
     if (!workspace.defaultModel) {
         throw new RpcHandlerError(
             ErrorCodes.InvalidParams,

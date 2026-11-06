@@ -14,7 +14,7 @@ import type {
     MemoryDreamState,
     MemoryTopicEntry,
 } from "@taco-ai/protocol";
-import { Settings2, X } from "lucide-react";
+import { LoaderCircle, Settings2, Sparkles, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { DreamBusy, MemoryDreamConfig } from "../../hooks/useMemoryPane";
 import { useNow } from "../../hooks/useNow";
@@ -23,6 +23,7 @@ import { formatRelativeTime } from "../../lib/relativeTime";
 import { AssistantMarkdown } from "../AssistantMarkdown";
 import { Button } from "../ui/Button";
 import { IconButton } from "../ui/IconButton";
+import { Select } from "../ui/Select";
 import { Switch } from "../ui/Switch";
 
 /** Dream actions; a `false` result means it failed and was already notified. */
@@ -35,7 +36,7 @@ export interface MemoryDreamActions {
     onRestoreTopic: (id: string) => boolean | Promise<boolean>;
     onScheduleToggle: (enabled: boolean) => unknown;
     dreamConfig: MemoryDreamConfig | null;
-    onSaveConfig: (config: MemoryDreamConfig) => unknown;
+    onSaveConfig: (config: MemoryDreamConfig) => boolean | Promise<boolean>;
 }
 
 interface MemoryDreamPanelProps extends Omit<MemoryDreamActions, "onRestoreTopic"> {
@@ -145,17 +146,37 @@ function ActionGroup({
 function DreamSettings({
     config,
     onSave,
+    open,
+    onSaved,
 }: {
     config: MemoryDreamConfig;
-    onSave: (config: MemoryDreamConfig) => unknown;
+    onSave: MemoryDreamActions["onSaveConfig"];
+    open: boolean;
+    onSaved: () => void;
 }) {
     const { t } = useT();
     const [draft, setDraft] = useState(config);
+    const [saving, setSaving] = useState(false);
+    const [saveFailed, setSaveFailed] = useState(false);
     useEffect(() => setDraft(config), [config]);
+
+    const save = async () => {
+        if (saving) return;
+        setSaving(true);
+        setSaveFailed(false);
+        try {
+            if (await onSave(draft)) onSaved();
+            else setSaveFailed(true);
+        } catch {
+            setSaveFailed(true);
+        } finally {
+            setSaving(false);
+        }
+    };
     return (
-        <div className="memory-dream-settings" hidden>
+        <div className="memory-dream-settings" hidden={!open} aria-busy={saving}>
             <label>
-                {t("memory.dream.minHours", "Minimum hours between evaluations")}
+                {t("memory.dream.minHours")}
                 <input
                     type="number"
                     min={1}
@@ -165,17 +186,7 @@ function DreamSettings({
                 />
             </label>
             <label>
-                {t("memory.dream.minChanges", "Minimum changed memories")}
-                <input
-                    type="number"
-                    min={0}
-                    max={1000}
-                    value={draft.minChanges}
-                    onChange={(e) => setDraft({ ...draft, minChanges: Number(e.target.value) })}
-                />
-            </label>
-            <label>
-                {t("memory.dream.staleDays", "Project/reference candidate age")}
+                {t("memory.dream.staleDays")}
                 <input
                     type="number"
                     min={7}
@@ -185,7 +196,7 @@ function DreamSettings({
                 />
             </label>
             <label>
-                {t("memory.dream.staleDaysDurable", "User/feedback candidate age")}
+                {t("memory.dream.staleDaysDurable")}
                 <input
                     type="number"
                     min={7}
@@ -204,28 +215,31 @@ function DreamSettings({
                         setDraft({ ...draft, archiveCleanupEnabled: e.target.checked })
                     }
                 />
-                {t("memory.dream.archiveCleanup", "Delete expired archived memories")}
+                {t("memory.dream.archiveCleanup")}
             </label>
-            <label>
-                {t("memory.dream.archiveRetention", "Archive retention")}
-                <select
-                    value={draft.archiveRetentionDays}
+            <div className="memory-dream-settings-field">
+                {t("memory.dream.archiveRetention")}
+                <Select
+                    label={t("memory.dream.archiveRetention")}
+                    value={String(draft.archiveRetentionDays)}
                     disabled={!draft.archiveCleanupEnabled}
-                    onChange={(e) =>
+                    onValueChange={(value) =>
                         setDraft({
                             ...draft,
-                            archiveRetentionDays: Number(e.target.value) as 7 | 30 | 90,
+                            archiveRetentionDays: Number(value) as 7 | 30 | 90,
                         })
                     }
-                >
-                    <option value={7}>{t("memory.dream.archiveRetention7", "7 days")}</option>
-                    <option value={30}>{t("memory.dream.archiveRetention30", "30 days")}</option>
-                    <option value={90}>{t("memory.dream.archiveRetention90", "90 days")}</option>
-                </select>
-            </label>
+                    options={[
+                        { value: "7", label: t("memory.dream.archiveRetention7") },
+                        { value: "30", label: t("memory.dream.archiveRetention30") },
+                        { value: "90", label: t("memory.dream.archiveRetention90") },
+                    ]}
+                />
+            </div>
             <div className="memory-dream-settings-actions">
-                <Button size="sm" variant="primary" onClick={() => onSave(draft)}>
-                    {t("memory.dream.saveSettings", "Save")}
+                {saveFailed ? <span role="alert">{t("memory.dream.error.settings")}</span> : null}
+                <Button size="sm" variant="primary" disabled={saving} onClick={save}>
+                    {saving ? t("app.saving") : t("memory.dream.saveSettings")}
                 </Button>
             </div>
         </div>
@@ -325,14 +339,15 @@ function ReportHistory({
                             ) : undoExpiry(report) !== undefined &&
                               Date.parse(undoExpiry(report) as string) <= nowMs ? (
                                 <small>
-                                    {t("memory.dream.undoExpired", "Undo expired")}
+                                    {t("memory.dream.undoExpired")}
                                     {" · "}
                                     {formatRelativeTime(undoExpiry(report) as string, lng, nowMs)}
                                 </small>
-                            ) : (
+                            ) : report.id === reports[0]?.id ? (
                                 <Button
                                     size="sm"
                                     variant="ghost"
+                                    className="memory-dream-undo"
                                     disabled={busy !== null}
                                     onClick={() => onUndo(report.id)}
                                 >
@@ -340,14 +355,6 @@ function ReportHistory({
                                         ? t("memory.dream.undoing")
                                         : t("memory.dream.undo")}
                                 </Button>
-                            )}
-                            {!report.undoneAt &&
-                            undoExpiry(report) !== undefined &&
-                            Date.parse(undoExpiry(report) as string) > nowMs ? (
-                                <small>
-                                    {t("memory.dream.undoExpires", "Undo available until")}{" "}
-                                    {formatRelativeTime(undoExpiry(report) as string, lng, nowMs)}
-                                </small>
                             ) : null}
                         </div>
                     </li>
@@ -376,6 +383,7 @@ export function MemoryDreamPanel({
     const lng = useUiLanguage();
     const nowMs = useNow();
     const names = buildTopicNames(topics);
+    const [settingsOpen, setSettingsOpen] = useState(false);
 
     return (
         <section className="memory-dream-view" aria-label={t("memory.dream.title")}>
@@ -407,21 +415,40 @@ export function MemoryDreamPanel({
                     />
                     <span>{t("memory.dream.schedule")}</span>
                 </div>
-                <Button size="sm" variant="default" disabled={busy !== null} onClick={onRun}>
-                    {busy === "run" ? t("memory.dream.running") : t("memory.dream.run")}
-                </Button>
-                <IconButton
-                    aria-label={t("memory.dream.settings", "Memory consolidation settings")}
-                    title={t("memory.dream.settings", "Memory consolidation settings")}
-                    onClick={() => {
-                        const element = document.querySelector(".memory-dream-settings");
-                        element?.toggleAttribute("hidden");
-                    }}
-                >
-                    <Settings2 size={14} aria-hidden="true" />
-                </IconButton>
+                <div className="memory-dream-toolbar-actions">
+                    <IconButton
+                        aria-label={t("memory.dream.settings")}
+                        title={t("memory.dream.settings")}
+                        aria-expanded={settingsOpen}
+                        onClick={() => setSettingsOpen((open) => !open)}
+                    >
+                        <Settings2 size={14} aria-hidden="true" />
+                    </IconButton>
+                    <IconButton
+                        aria-label={
+                            busy === "run" ? t("memory.dream.running") : t("memory.dream.run")
+                        }
+                        title={busy === "run" ? t("memory.dream.running") : t("memory.dream.run")}
+                        aria-busy={busy === "run"}
+                        disabled={busy !== null}
+                        onClick={onRun}
+                    >
+                        {busy === "run" ? (
+                            <LoaderCircle size={14} className="spin" aria-hidden="true" />
+                        ) : (
+                            <Sparkles size={14} aria-hidden="true" />
+                        )}
+                    </IconButton>
+                </div>
             </div>
-            {dreamConfig ? <DreamSettings config={dreamConfig} onSave={onSaveConfig} /> : null}
+            {dreamConfig ? (
+                <DreamSettings
+                    config={dreamConfig}
+                    onSave={onSaveConfig}
+                    open={settingsOpen}
+                    onSaved={() => setSettingsOpen(false)}
+                />
+            ) : null}
             {pausedReason ? (
                 // Turned off by the failure breaker, not by the user: the
                 // switch alone would look like a choice they made.

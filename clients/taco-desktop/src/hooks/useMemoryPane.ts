@@ -37,7 +37,6 @@ export interface UseMemoryPaneResult {
 
 export interface MemoryDreamConfig {
     minHours: number;
-    minChanges: number;
     staleDays: number;
     staleDaysDurable: number;
     archiveCleanupEnabled: boolean;
@@ -129,7 +128,6 @@ export function useMemoryPane(
                 const args = job.args as Record<string, unknown>;
                 setDreamConfig({
                     minHours: typeof args.minHours === "number" ? args.minHours : 24,
-                    minChanges: typeof args.minChanges === "number" ? args.minChanges : 5,
                     staleDays: typeof args.staleDays === "number" ? args.staleDays : 90,
                     staleDaysDurable:
                         typeof args.staleDaysDurable === "number" ? args.staleDaysDurable : 180,

@@ -17,7 +17,7 @@ import {
     unlinkSync,
     writeFileSync,
 } from "node:fs";
-import { dirname, join, resolve as resolveTacoHome } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve as resolveTacoHome } from "node:path";
 import { MEMORY_CONTENT_MAX_CHARS } from "@taco-ai/protocol";
 import { tacoHome } from "../../config/config.ts";
 import {
@@ -78,21 +78,6 @@ function assertBodyLimit(content: string): void {
     }
 }
 
-function retiredFingerprint(content: string): string {
-    return createHash("sha256").update(content.trim().replace(/\r\n/g, "\n")).digest("hex");
-}
-
-function readRetiredHashes(path: string): string[] {
-    try {
-        const value: unknown = JSON.parse(readFileSync(path, "utf8"));
-        return Array.isArray(value)
-            ? value.filter((item): item is string => /^[a-f0-9]{64}$/.test(item))
-            : [];
-    } catch {
-        return [];
-    }
-}
-
 function archiveFiles(workspaceDir: string): string[] {
     const root = join(workspaceDir, ARCHIVE_DIR);
     const result: string[] = [];
@@ -144,7 +129,10 @@ function readArchiveFile(path: string, workspaceId: string | undefined): MemoryE
 
 function isSafeArchivePath(path: string, workspaceDir: string): boolean {
     const root = resolveTacoHome(join(workspaceDir, ARCHIVE_DIR));
-    return resolveTacoHome(path).startsWith(`${root}/`);
+    // `relative` normalises separators per platform; comparing against a
+    // literal "/" would silently reject every path on Windows.
+    const inside = relative(root, resolveTacoHome(path));
+    return inside !== "" && !inside.startsWith("..") && !isAbsolute(inside);
 }
 
 // ─── helper: hash ───────────────────────────────────────────────────────────────
@@ -255,10 +243,6 @@ export class LocalMemoryStore implements MemoryStore {
     private get workspaceDir(): string {
         if (!this._dirKey) throw new Error("LocalMemoryStore not initialized");
         return join(this.projectsDir, this._dirKey);
-    }
-
-    private get retiredPath(): string {
-        return join(this.workspaceDir, ".dream", "retired.json");
     }
 
     constructor() {
@@ -476,9 +460,6 @@ export class LocalMemoryStore implements MemoryStore {
             const archived: MemoryEntry = { ...existing, archivedAt };
             atomicWrite(archivedPath, buildTopicFile(archived));
             unlinkSync(join(this.workspaceDir, `${id}.md`));
-            if (options?.retirementReason !== undefined) {
-                this.addRetiredContent(existing.content);
-            }
             this.topicsCache = undefined;
             return archived;
         });
@@ -614,12 +595,6 @@ export class LocalMemoryStore implements MemoryStore {
         return next;
     }
 
-    isRetiredContent(content: string): boolean {
-        const fingerprint = retiredFingerprint(content);
-        const hashes = readRetiredHashes(this.retiredPath);
-        return hashes.includes(fingerprint);
-    }
-
     /** Synchronous lookup for a single topic. */
     getTopic(id: string): MemoryEntry | undefined {
         if (!this.initialized) {
@@ -690,14 +665,6 @@ export class LocalMemoryStore implements MemoryStore {
         });
         this.writeChain = next.catch(() => undefined);
         return next;
-    }
-
-    private addRetiredContent(content: string): void {
-        const hashes = readRetiredHashes(this.retiredPath);
-        const fingerprint = retiredFingerprint(content);
-        if (!hashes.includes(fingerprint)) {
-            atomicWrite(this.retiredPath, `${JSON.stringify([...hashes, fingerprint])}\n`);
-        }
     }
 
     // ── private helpers ────────────────────────────────────────────────────────

@@ -68,8 +68,4 @@ export class NoOpMemoryStore implements MemoryStore {
     ): Promise<{ deleted: number; skipped: number }> {
         return { deleted: 0, skipped: 0 };
     }
-
-    isRetiredContent(_content: string): boolean {
-        return false;
-    }
 }

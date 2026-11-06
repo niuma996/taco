@@ -602,7 +602,7 @@ describe("SchedulesTab — built-in jobs", () => {
             name: "Memory consolidation",
             schedule: { kind: "cron", expr: "17 4 * * *" },
             command: "memory.dream",
-            args: { minHours: 24, minChanges: 5, staleDays: 90, staleDaysDurable: 180 },
+            args: { minHours: 24, staleDays: 90, staleDaysDurable: 180 },
             enabled: true,
             run_on_startup: true,
             builtin: true,

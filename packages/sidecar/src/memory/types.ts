@@ -20,20 +20,20 @@ export function unionMemorySources(
     for (const group of groups) {
         for (const source of group ?? []) {
             const key = JSON.stringify([source.sessionId, source.via, source.entryId ?? null]);
-            if (seen.has(key)) continue;
-            seen.add(key);
-            const previous = sources.find(
-                (candidate) =>
-                    JSON.stringify([
-                        candidate.sessionId,
-                        candidate.via,
-                        candidate.entryId ?? null,
-                    ]) === key,
-            );
-            if (previous) {
-                if (source.explicitlyRequested === true) previous.explicitlyRequested = true;
+            if (seen.has(key)) {
+                const previous = sources.find(
+                    (candidate) =>
+                        JSON.stringify([
+                            candidate.sessionId,
+                            candidate.via,
+                            candidate.entryId ?? null,
+                        ]) === key,
+                );
+                if (previous && source.explicitlyRequested === true)
+                    previous.explicitlyRequested = true;
                 continue;
             }
+            seen.add(key);
             sources.push({ ...source });
         }
     }
@@ -112,17 +112,7 @@ export function memoryEntryState(entry: MemoryEntry): string {
     });
 }
 
-export type ArchiveCategory =
-    | "duplicate"
-    | "superseded"
-    | "transient"
-    | "non_durable"
-    | "invalidated"
-    | "stale";
-
-export interface ArchiveTopicOptions extends MemoryUpdateOptions {
-    retirementReason?: ArchiveCategory;
-}
+export type ArchiveTopicOptions = MemoryUpdateOptions;
 
 export interface ArchiveCleanupCandidate {
     key: string;
@@ -204,7 +194,6 @@ export interface MemoryStore {
         protectedIds?: ReadonlySet<string>;
         beforeDelete?: (candidates: readonly ArchiveCleanupCandidate[]) => void;
     }): Promise<ArchiveCleanupResult>;
-    isRetiredContent?(content: string): boolean;
 }
 
 // ─── extractor interface ───────────────────────────────────────────────────────
@@ -227,6 +216,8 @@ export interface MemoryExtractionGateState {
     pendingChars: number;
     lastObservedEntryId?: string;
     lastAttemptAt?: number;
+    /** Consecutive failed evaluations; widens the cooldown before the next attempt. */
+    failures?: number;
 }
 
 // ─── errors ────────────────────────────────────────────────────────────────────

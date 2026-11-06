@@ -126,10 +126,7 @@ type DraftError =
     | { field: "argsJson"; message: string }
     | { field: "maxRuns"; message: string };
 
-function validateDraft(
-    draft: ScheduleDraft,
-    _builtinDream = false,
-): {
+function validateDraft(draft: ScheduleDraft): {
     ok: boolean;
     args?: Record<string, unknown>;
     errors: DraftError[];
@@ -247,7 +244,7 @@ export function ScheduleFormDialog(props: ScheduleFormDialogProps) {
         setDraft((prev) => ({ ...prev, sessionStrategy: next }));
     }, []);
 
-    const validation = useMemo(() => validateDraft(draft, isBuiltinDream), [draft, isBuiltinDream]);
+    const validation = useMemo(() => validateDraft(draft), [draft]);
     const canSubmit = validation.ok;
 
     const handleSubmit = useCallback(() => {

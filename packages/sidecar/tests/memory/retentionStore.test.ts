@@ -129,14 +129,6 @@ describe("memory archive retention", () => {
         assert.equal(existsSync(archivePath), true);
     });
 
-    it("uses a canonical body fingerprint for retired content", async () => {
-        assert.equal(store.isRetiredContent?.("body"), false);
-        await store.appendEntry({ ...entry("retired"), content: " body\n" });
-        await store.archiveTopic("retired", { retirementReason: "transient" });
-        assert.equal(store.isRetiredContent?.("body"), true);
-        assert.equal(store.isRetiredContent?.("different"), false);
-    });
-
     it("promotes explicit requests and never downgrades them", async () => {
         await store.appendEntry({ ...entry("sticky"), explicitlyRequested: false });
         await store.updateTopic("sticky", "changed", { explicitlyRequested: true });

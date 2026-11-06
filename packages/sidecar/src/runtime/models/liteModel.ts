@@ -133,7 +133,7 @@ type SimpleOptions = NonNullable<SimpleArgs[2]>;
 
 /**
  * Run one auxiliary completion on the lite model, falling back to the main
- * model when the lite call fails or produces no text. `getLite` is a thunk so
+ * model when the lite call fails or its response is not accepted. `getLite` is a thunk so
  * the config read happens at call time; `optionsFor` re-derives per-model
  * options (thinking level differs between a reasoning and a non-reasoning
  * model) for whichever model is actually being called.
@@ -152,6 +152,7 @@ export async function completeSimpleWithLiteFallback(
     main: Model<Api>,
     context: ApiContext,
     optionsFor: (model: Model<Api>, thinking?: LiteThinkingOverride) => SimpleOptions,
+    acceptsResponse: (response: AssistantMessage) => boolean = hasTextResponse,
 ): Promise<AssistantMessage | undefined> {
     const lite = getLite();
     if (!lite || !fitsLiteWindow(lite, context)) {
@@ -159,14 +160,20 @@ export async function completeSimpleWithLiteFallback(
             model: `${main.provider}/${main.id}`,
             reason: lite ? "window too small" : "no lite model configured",
         });
-        return await attempt(models, main, context, optionsFor(main));
+        return await attempt(models, main, context, optionsFor(main), acceptsResponse);
     }
 
     const configured = resolveLiteThinkingLevel();
     // Absent override = keep the model's default; present = the user chose.
     const thinking =
         configured === undefined ? undefined : { reasoning: liteThinkingToRequest(configured) };
-    const result = await attempt(models, lite, context, optionsFor(lite, thinking));
+    const result = await attempt(
+        models,
+        lite,
+        context,
+        optionsFor(lite, thinking),
+        acceptsResponse,
+    );
     if (result) {
         log.info("auxiliary call on the lite model", {
             model: `${lite.provider}/${lite.id}`,
@@ -178,7 +185,7 @@ export async function completeSimpleWithLiteFallback(
     log.warn("lite model call failed; retrying on the session model", {
         lite: `${lite.provider}/${lite.id}`,
     });
-    return await attempt(models, main, context, optionsFor(main));
+    return await attempt(models, main, context, optionsFor(main), acceptsResponse);
 }
 
 function fitsLiteWindow(model: Model<Api>, context: ApiContext): boolean {
@@ -187,12 +194,20 @@ function fitsLiteWindow(model: Model<Api>, context: ApiContext): boolean {
     return inputTokens + CONTEXT_SAFETY_TOKENS + outputTokens <= model.contextWindow;
 }
 
+function hasTextResponse(response: AssistantMessage): boolean {
+    return response.content.some(
+        (block) =>
+            block.type === "text" && typeof block.text === "string" && block.text.trim().length > 0,
+    );
+}
+
 /** Failed streams can retain partial text; never treat it as a completed answer. */
 async function attempt(
     models: Models,
     model: Model<Api>,
     context: ApiContext,
     options: SimpleOptions,
+    acceptsResponse: (response: AssistantMessage) => boolean,
 ): Promise<AssistantMessage | undefined> {
     try {
         // Anthropic's simple adapter does not clamp levels. Normalize here
@@ -212,10 +227,7 @@ async function attempt(
             });
             return undefined;
         }
-        const hasText = res.content.some(
-            (b) => b.type === "text" && typeof b.text === "string" && b.text.trim().length > 0,
-        );
-        return hasText ? res : undefined;
+        return acceptsResponse(res) ? res : undefined;
     } catch (err) {
         log.warn("auxiliary completion failed:", {
             model: `${model.provider}/${model.id}`,
