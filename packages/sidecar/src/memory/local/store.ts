@@ -543,21 +543,14 @@ export class LocalMemoryStore implements MemoryStore {
                     ? basename.slice(0, basename.indexOf("."))
                     : basename;
                 const entry = readArchiveFile(file, this._workspaceId);
-                const archivedAt = entry?.archivedAt;
                 if (!entry) {
                     skipped++;
                     continue;
                 }
-                if (!archivedAt) {
-                    // A readable legacy archive gets a first-seen anchor. It
-                    // is intentionally not eligible during this cleanup pass.
-                    atomicWrite(
-                        file,
-                        buildTopicFile({ ...entry, archivedAt: new Date(now).toISOString() }),
-                    );
-                    skipped++;
-                    continue;
-                }
+                // Legacy archives predate archivedAt. Their creation time is
+                // the only durable age signal, so use it instead of resetting
+                // the retention window when cleanup first encounters them.
+                const archivedAt = entry.archivedAt ?? entry.createdAt;
                 if (!Number.isFinite(Date.parse(archivedAt))) {
                     skipped++;
                     continue;

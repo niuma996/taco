@@ -112,7 +112,7 @@ describe("memory archive retention", () => {
         assert.equal(readdirSync(join(archiveDir, "history")).length, 0);
     });
 
-    it("skips legacy archives without an age anchor and rejects traversal candidates", async () => {
+    it("uses createdAt as the age anchor for legacy archives without archivedAt", async () => {
         await store.appendEntry(entry("legacy"));
         await store.archiveTopic("legacy");
         const archivePath = join(store.topicDir, "archive", "legacy.md");
@@ -125,8 +125,8 @@ describe("memory archive retention", () => {
             retentionDays: 7,
             now: new Date("2030-01-01T00:00:00.000Z"),
         });
-        assert.deepEqual(result, { deleted: 0, skipped: 1 });
-        assert.equal(existsSync(archivePath), true);
+        assert.deepEqual(result, { deleted: 1, skipped: 0 });
+        assert.equal(existsSync(archivePath), false);
     });
 
     it("promotes explicit requests and never downgrades them", async () => {
