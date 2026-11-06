@@ -327,4 +327,30 @@ describe("parseMemoryDreamArgs", () => {
         ok(parsed.ok);
         if (parsed.ok) strictEqual(parsed.args.model, undefined);
     });
+
+    test("accepts cleanup settings and defaults scheduled jobs to cleanup off and 7 days", () => {
+        const parsed = parseMemoryDreamArgs({
+            archiveCleanupEnabled: true,
+            archiveRetentionDays: 30,
+        });
+        ok(parsed.ok);
+        if (parsed.ok) {
+            strictEqual(parsed.args.archiveCleanupEnabled, true);
+            strictEqual(parsed.args.archiveRetentionDays, 30);
+        }
+        const seeded = defaultMemoryDreamJob();
+        strictEqual(seeded.args.archiveCleanupEnabled, false);
+        strictEqual(seeded.args.archiveRetentionDays, 7);
+    });
+
+    test("rejects invalid cleanup settings", () => {
+        for (const bad of [
+            { archiveCleanupEnabled: "true" },
+            { archiveCleanupEnabled: 1 },
+            { archiveRetentionDays: 14 },
+            { archiveRetentionDays: "30" },
+        ]) {
+            strictEqual(parseMemoryDreamArgs(bad as Record<string, unknown>).ok, false);
+        }
+    });
 });

@@ -721,6 +721,7 @@
     "grantAccess": "Grant access and open"
   },
   "memory": {
+    "sources": "Source conversations",
     "title": "Memory",
     "globalLabel": "Global",
     "globalName": "MEMORY.md",
@@ -794,9 +795,12 @@
       "skipped": "Skipped",
       "undo": "Undo",
       "undoing": "Undoing…",
+      "undoExpired": "Undo expired",
+      "undoExpires": "Undo available until",
       "undone": "Undone",
       "archivedLabel": "Archived",
       "archivedBadge": "Archived",
+      "archivedAt": "Archived",
       "restore": "Restore",
       "restoring": "Restoring…",
       "nothingToDo": "Nothing needs consolidation",
@@ -900,6 +904,12 @@
     "dreamStaleDaysDurable": "Candidate age for user/feedback memory entries (days)",
     "dreamModel": "Consolidation model (optional)",
     "dreamModelHint": "Leave empty for the default model. Use provider/modelId or modelId.",
+    "dreamArchiveCleanup": "Automatically delete expired archived memories",
+    "dreamArchiveRetention": "Archive retention period",
+    "dreamArchiveRetentionHint": "Archived memories older than this period are physically deleted; undo expires at the same time. This controls retention, not how often the job runs.",
+    "dreamArchiveRetention7": "7 days",
+    "dreamArchiveRetention30": "30 days",
+    "dreamArchiveRetention90": "90 days",
     "actionHistory": "History",
     "history": {
       "title": "Runs of {{name}}",

@@ -302,6 +302,47 @@ describe("attachedSession.rememberCoord", () => {
     const flush = () => new Promise<void>((resolve) => setImmediate(resolve));
 
     describe("memory extraction coordinator — one extraction per completed run", () => {
+        it("preserves explicit-write suppression across compaction with stable entries", async () => {
+            const calls: unknown[] = [];
+            const context = messages(2).map(
+                (message, i) => ({ ...message, memoryEntryId: `u${i}` }) as unknown as AgentMessage,
+            );
+            const handlers = createMemoryExtractionHandlers({
+                buildContext: async () => context,
+                getExtractor: () => ({
+                    onRunEnd: async (_messages, options) => {
+                        calls.push(options);
+                    },
+                }),
+                stableEntries: true,
+            });
+            handlers.onToolEnd("memory", false);
+            await flush();
+            handlers.onCompaction();
+            handlers.onRunEnd("completed");
+            await flush();
+            assert.deepEqual(calls, [{ skipThroughEntryId: "u1" }]);
+        });
+        it("keeps identified history available to checkpoint a successful explicit memory write", async () => {
+            const calls: Array<{ messages: readonly AgentMessage[]; options: unknown }> = [];
+            const identified = messages(3).map(
+                (message, i) => ({ ...message, memoryEntryId: `u${i}` }) as unknown as AgentMessage,
+            );
+            const extractor = {
+                onRunEnd: async (input: readonly AgentMessage[], options?: unknown) => {
+                    calls.push({ messages: input, options });
+                },
+            };
+            const handlers = makeCoordinator(async () => identified, extractor);
+            handlers.onToolEnd("memory", false);
+            await flush();
+            handlers.onRunEnd("completed");
+            await flush();
+            assert.equal(calls.length, 1);
+            assert.equal(calls[0].messages.length, 3);
+            assert.deepEqual(calls[0].options, { skipThroughEntryId: "u2" });
+        });
+
         it("run_end with no prior memory call gets the full conversation", async () => {
             const extractor = new MiniExtractor();
             const handlers = makeCoordinator(async () => messages(4), extractor);

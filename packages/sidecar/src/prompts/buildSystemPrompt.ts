@@ -135,7 +135,7 @@ function buildSessionGuidanceSection(toolNames: readonly string[]): string {
     }
     if (tools.has("memory")) {
         lines.push(
-            "- Use the `memory` tool to record durable facts about the user or project when the user explicitly asks you to remember something.",
+            "- Default to no memory write. Set explicitlyRequested=true only when the user directly asked you to remember something; set it false for proactive writes. Use `memory` for an explicit request to remember, a stable user preference, a general correction, a confirmed decision, or a recurring reference. Avoid one-off chatter, current-task details, and assistant guesses. Write one coherent durable theme in Markdown with a self-contained first-paragraph conclusion; use headings, lists, scope, reasons or exceptions when useful (typically 300-1000 characters, maximum 2000). Memory sources identify sessions; use `sessionRead` to resolve ambiguity.",
         );
     }
     if (tools.has("askUser")) {

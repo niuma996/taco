@@ -18,12 +18,20 @@ import type {
 } from "./schemas/memory.js";
 
 /**
- * Hard ceiling on a topic body. Not a target — one topic holds one fact, and
- * the newest 100 topic bodies are injected into every turn's context, so the
- * limit bounds that budget. Enforced by the memory tool schema, the
- * `memory.upsert` handler, and the extractor's truncation.
+ * Hard ceiling on a topic body, not a target. One topic holds one coherent
+ * durable theme; summaries are injected and full bodies are read on demand.
+ * Enforced by storage, the memory tool schema and the upsert handler.
  */
-export const MEMORY_CONTENT_MAX_CHARS = 1000;
+export const MEMORY_CONTENT_MAX_CHARS = 2000;
+
+/** Conversation evidence for a memory; sessionRead can resolve ambiguity. */
+export interface MemorySource {
+    sessionId: string;
+    recordedAt: string;
+    via: "auto" | "tool";
+    entryId?: string;
+    explicitlyRequested?: boolean;
+}
 
 // memory.list / memory.write / memory.deleteTopic
 
@@ -31,7 +39,7 @@ export const MEMORY_CONTENT_MAX_CHARS = 1000;
 export type MemoryListParams = ParamsOf<typeof memoryListSchema>;
 
 /** One topic entry in `memory.list` (corresponds to `projects/{cwd}/{id}.md`).
- *  Field names align with the sidecar `MemoryEntry`; `createdAt` is the file mtime. */
+ *  Field names align with the sidecar `MemoryEntry`. */
 export interface MemoryTopicEntry {
     /** Filename stem (no `.md` extension), e.g. "user_role". */
     id: string;
@@ -42,10 +50,14 @@ export interface MemoryTopicEntry {
     type: "user" | "feedback" | "project" | "reference";
     /** Memory body content. */
     content: string;
-    /** ISO 8601 timestamp; equals the file mtime. */
+    /** ISO 8601 creation time; legacy files fall back to file mtime. */
     createdAt: string;
-    /** ISO timestamp of the most recent replace; absent when never replaced. */
+    /** ISO time of the last content/metadata change; source-only writes preserve it. */
     updatedAt?: string;
+    /** Accumulated conversation evidence, retained across replacements. */
+    sources?: readonly MemorySource[];
+    explicitlyRequested?: boolean;
+    archivedAt?: string;
 }
 
 // ─── dream (memory consolidation) ─────────────────────────────────────────────
@@ -61,8 +73,21 @@ export type MemoryDreamAction =
           type: MemoryTopicEntry["type"];
           content: string;
       }
-    | { action: "rewrite"; id: string; content: string }
-    | { action: "archive"; id: string; reason: string; supersededBy?: string };
+    | { action: "rewrite"; id: string; content: string; name?: string; description?: string }
+    | {
+          action: "archive";
+          id: string;
+          reason: string;
+          category?:
+              | "duplicate"
+              | "superseded"
+              | "transient"
+              | "non_durable"
+              | "invalidated"
+              | "stale";
+          evidence?: string;
+          supersededBy?: string;
+      };
 
 export interface MemoryDreamCounts {
     /** Source topics folded by merges. */
@@ -92,6 +117,7 @@ export interface MemoryDreamReportSummary {
     /** Actions skipped because their topic changed between planning and apply. */
     skipped: number;
     undoneAt?: string;
+    undoExpiredAt?: string;
 }
 
 /** Dream state for one workspace, carried on `memory.list`. */

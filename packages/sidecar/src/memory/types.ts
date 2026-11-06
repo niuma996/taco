@@ -6,7 +6,51 @@
  * aligns with Claude Code's automemory.
  */
 
+import type { MemoryTopicEntry } from "@taco-ai/protocol";
 import type { AgentMessage } from "../runtime/pi/types.ts";
+
+export type MemorySource = NonNullable<MemoryTopicEntry["sources"]>[number];
+
+/** Stable union by conversation, write path and optional entry identity; first evidence wins. */
+export function unionMemorySources(
+    ...groups: readonly (readonly MemorySource[] | undefined)[]
+): MemorySource[] {
+    const seen = new Set<string>();
+    const sources: MemorySource[] = [];
+    for (const group of groups) {
+        for (const source of group ?? []) {
+            const key = JSON.stringify([source.sessionId, source.via, source.entryId ?? null]);
+            if (seen.has(key)) continue;
+            seen.add(key);
+            const previous = sources.find(
+                (candidate) =>
+                    JSON.stringify([
+                        candidate.sessionId,
+                        candidate.via,
+                        candidate.entryId ?? null,
+                    ]) === key,
+            );
+            if (previous) {
+                if (source.explicitlyRequested === true) previous.explicitlyRequested = true;
+                continue;
+            }
+            sources.push({ ...source });
+        }
+    }
+    return sources;
+}
+
+export interface MemoryUpdateOptions {
+    /** Compare all persisted state inside the serialized store mutation. */
+    expectedEntry?: MemoryEntry;
+    expectedContent?: string;
+    expectedName?: string;
+    expectedDescription?: string;
+    sources?: readonly MemorySource[];
+    name?: string;
+    description?: string;
+    explicitlyRequested?: boolean;
+}
 
 // ─── taxonomy ─────────────────────────────────────────────────────────────────
 
@@ -36,10 +80,60 @@ export interface MemoryEntry {
     /** Memory body content */
     readonly content: string;
     readonly createdAt: string; // ISO 8601
-    /** ISO time of the last replace; undefined when never updated. */
+    /** ISO time of the last content/metadata change; source-only writes preserve it. */
     readonly updatedAt?: string;
+    readonly sources?: readonly MemorySource[];
     /** Optional workspace this entry is associated with */
     readonly workspaceId?: string;
+    readonly explicitlyRequested?: boolean;
+    readonly archivedAt?: string;
+}
+
+/** Persisted topic state for snapshot CAS; workspace identity is not stored in the file. */
+export function memoryEntryState(entry: MemoryEntry): string {
+    return JSON.stringify({
+        name: entry.name,
+        description: entry.description,
+        type: entry.type,
+        content: entry.content,
+        createdAt: entry.createdAt,
+        updatedAt: entry.updatedAt,
+        explicitlyRequested: entry.explicitlyRequested,
+        archivedAt: entry.archivedAt,
+        sources: unionMemorySources(entry.sources).map(
+            ({ sessionId, recordedAt, via, entryId, explicitlyRequested }) => ({
+                sessionId,
+                recordedAt,
+                via,
+                ...(entryId === undefined ? {} : { entryId }),
+                ...(explicitlyRequested === undefined ? {} : { explicitlyRequested }),
+            }),
+        ),
+    });
+}
+
+export type ArchiveCategory =
+    | "duplicate"
+    | "superseded"
+    | "transient"
+    | "non_durable"
+    | "invalidated"
+    | "stale";
+
+export interface ArchiveTopicOptions extends MemoryUpdateOptions {
+    retirementReason?: ArchiveCategory;
+}
+
+export interface ArchiveCleanupCandidate {
+    key: string;
+    id: string;
+    entry: MemoryEntry;
+    archivedAt: string;
+}
+
+export interface ArchiveCleanupResult {
+    deleted: number;
+    skipped: number;
 }
 
 // ─── memory store interface ───────────────────────────────────────────────────
@@ -83,8 +177,8 @@ export interface MemoryStore {
 
     /** Delete a topic. Throws when the id is not in listTopics().
      *  Same writeChain constraint as writeMemory / appendEntry; rejects when
-     *  `expectedContent` is set and the on-disk content differs. */
-    deleteTopic(id: string, options?: { expectedContent?: string }): Promise<void>;
+     *  any supplied snapshot expectation differs from disk. */
+    deleteTopic(id: string, options?: MemoryUpdateOptions): Promise<void>;
 
     /** Synchronous lookup for one topic. Returns undefined when the id is
      *  missing (lets tools list-then-decide without errors). */
@@ -92,17 +186,25 @@ export interface MemoryStore {
 
     /**
      * replace semantics: verify id exists → overwrite topic file body,
-     * preserving createdAt and writing a new updatedAt. Throws if id is not
+     * preserving createdAt/type and merging provenance. Refreshes updatedAt
+     * only when trimmed content or metadata changes. Throws if id is not
      * in listTopics(). Read-validate and write must be inside the same
      * writeChain tick — otherwise an extractor appendEntry / client
-     * deleteTopic can interleave and overwrite. When `expectedContent` is
-     * set, rejects instead of writing if the on-disk content differs.
+     * deleteTopic can interleave and overwrite. Expected content/name/description
+     * reject stale snapshots before writing, including source-only updates.
+     * `expectedEntry` additionally guards type, timestamps and provenance.
      */
-    updateTopic(
-        id: string,
-        content: string,
-        options?: { expectedContent?: string },
-    ): Promise<MemoryEntry>;
+    updateTopic(id: string, content: string, options?: MemoryUpdateOptions): Promise<MemoryEntry>;
+
+    archiveTopic?(id: string, options?: ArchiveTopicOptions): Promise<MemoryEntry>;
+    restoreTopic?(id: string, options?: Pick<MemoryUpdateOptions, "expectedEntry">): Promise<void>;
+    purgeArchivedTopics?(options: {
+        retentionDays: 7 | 30 | 90;
+        now?: Date;
+        protectedIds?: ReadonlySet<string>;
+        beforeDelete?: (candidates: readonly ArchiveCleanupCandidate[]) => void;
+    }): Promise<ArchiveCleanupResult>;
+    isRetiredContent?(content: string): boolean;
 }
 
 // ─── extractor interface ───────────────────────────────────────────────────────
@@ -110,9 +212,21 @@ export interface MemoryStore {
 export interface MemoryExtractor {
     /**
      * Fire-and-forget extraction after each completed run.
-     * Gates on token threshold; truncates to ~8000 chars; calls LLM.
+     * Admits new user evidence with durable value within an ~8000-character
+     * input budget, excluding summaries and tool output. Skips processed
+     * message identities and validates model actions against user evidence.
      */
-    onRunEnd(messages: readonly AgentMessage[]): Promise<void>;
+    onRunEnd(
+        messages: readonly AgentMessage[],
+        options?: { skipThroughEntryId?: string },
+    ): Promise<void>;
+}
+
+export interface MemoryExtractionGateState {
+    pendingRuns: number;
+    pendingChars: number;
+    lastObservedEntryId?: string;
+    lastAttemptAt?: number;
 }
 
 // ─── errors ────────────────────────────────────────────────────────────────────

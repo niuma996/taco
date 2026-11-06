@@ -287,14 +287,6 @@
     line-height: var(--leading-normal);
 }
 
-/* Prose, not a code card: topics are one or two sentences, not documents. */
-.memory-view-content {
-    font-size: var(--text-base);
-    line-height: var(--leading-relaxed);
-    white-space: pre-wrap;
-    word-break: break-word;
-}
-
 /* Markdown typography comes from .md-assistant (chatMarkdown.css); this only
    supplies the reading measure. */
 .memory-view-markdown {
@@ -523,15 +515,8 @@
     padding: var(--space-2);
     background: var(--bg-secondary);
     border-radius: var(--radius-sm);
-    white-space: pre-wrap;
     word-break: break-word;
     font-size: var(--text-xs);
-}
-
-.memory-dream-action-body pre {
-    margin: var(--space-1) 0 0;
-    white-space: pre-wrap;
-    font-family: var(--mono);
 }
 
 .memory-dream-action-archive {
@@ -582,4 +567,40 @@
     align-items: center;
     gap: var(--space-2);
     flex-wrap: wrap;
+}
+
+.memory-view-meta-time time {
+    color: var(--fg-dim);
+}
+
+/* Provenance is selectable text, including IDs needed to recall the source session. */
+.memory-view-sources {
+    padding-top: var(--space-2);
+    border-top: 1px solid var(--divider-section);
+    color: var(--fg-dim);
+    font-size: var(--text-xs);
+}
+
+.memory-view-sources h3 {
+    margin: 0 0 var(--space-2);
+    font-size: inherit;
+    font-weight: 600;
+}
+
+.memory-view-sources ul {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.memory-view-sources li {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: var(--space-2);
+    overflow-wrap: anywhere;
+    user-select: text;
 }

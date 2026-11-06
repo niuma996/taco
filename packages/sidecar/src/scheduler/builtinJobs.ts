@@ -33,7 +33,10 @@ export interface MemoryDreamArgs extends Partial<DreamOptions> {
     model?: string;
 }
 
-const DREAM_ARG_LIMITS: Record<keyof DreamOptions, { min: number; max: number }> = {
+const DREAM_ARG_LIMITS: Record<
+    "minHours" | "minChanges" | "staleDays" | "staleDaysDurable",
+    { min: number; max: number }
+> = {
     minHours: { min: 1, max: 24 * 30 },
     minChanges: { min: 0, max: 1000 },
     staleDays: { min: 7, max: 3650 },
@@ -47,8 +50,8 @@ const DREAM_ARG_LIMITS: Record<keyof DreamOptions, { min: number; max: number }>
 export function parseMemoryDreamArgs(
     args: Record<string, unknown>,
 ): { ok: true; args: MemoryDreamArgs } | { ok: false; error: string } {
-    const out: { -readonly [K in keyof MemoryDreamArgs]: MemoryDreamArgs[K] } = {};
-    for (const key of Object.keys(DREAM_ARG_LIMITS) as Array<keyof DreamOptions>) {
+    const out = {} as { -readonly [K in keyof MemoryDreamArgs]?: MemoryDreamArgs[K] };
+    for (const key of Object.keys(DREAM_ARG_LIMITS) as Array<keyof typeof DREAM_ARG_LIMITS>) {
         const value = args[key];
         if (value === undefined) continue;
         const { min, max } = DREAM_ARG_LIMITS[key];
@@ -56,6 +59,22 @@ export function parseMemoryDreamArgs(
             return { ok: false, error: `args.${key} must be an integer in [${min}, ${max}]` };
         }
         out[key] = value;
+    }
+    if (args.archiveCleanupEnabled !== undefined) {
+        if (typeof args.archiveCleanupEnabled !== "boolean") {
+            return { ok: false, error: "args.archiveCleanupEnabled must be a boolean" };
+        }
+        out.archiveCleanupEnabled = args.archiveCleanupEnabled;
+    }
+    if (args.archiveRetentionDays !== undefined) {
+        if (
+            args.archiveRetentionDays !== 7 &&
+            args.archiveRetentionDays !== 30 &&
+            args.archiveRetentionDays !== 90
+        ) {
+            return { ok: false, error: "args.archiveRetentionDays must be 7, 30, or 90" };
+        }
+        out.archiveRetentionDays = args.archiveRetentionDays;
     }
     if (args.model !== undefined && args.model !== "") {
         if (typeof args.model !== "string" || args.model.length > 200) {
@@ -79,6 +98,8 @@ export function defaultMemoryDreamJob(): Job {
             minChanges: DEFAULT_DREAM_OPTIONS.minChanges,
             staleDays: DEFAULT_DREAM_OPTIONS.staleDays,
             staleDaysDurable: DEFAULT_DREAM_OPTIONS.staleDaysDurable,
+            archiveCleanupEnabled: DEFAULT_DREAM_OPTIONS.archiveCleanupEnabled,
+            archiveRetentionDays: DEFAULT_DREAM_OPTIONS.archiveRetentionDays,
         },
         enabled: true,
         // A laptop asleep at 04:17 still consolidates on its next boot.

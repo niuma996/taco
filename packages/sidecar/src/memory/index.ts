@@ -14,6 +14,7 @@ export {
     sliceForExtraction,
 } from "./local/extractor.ts";
 export {
+    ARCHIVE_DIR,
     hashOf,
     LocalMemoryStore,
     parseTopicFrontmatter,
@@ -23,10 +24,15 @@ export {
 export { buildMemoryContextHook } from "./memoryTag.ts";
 export { NoOpMemoryStore } from "./noopStore.ts";
 export type {
+    ArchiveCategory,
+    ArchiveCleanupCandidate,
+    ArchiveTopicOptions,
     MEMORY_ENTRY_TYPES,
     MemoryEntry,
     MemoryEntryType,
     MemoryExtractor,
+    MemorySource,
     MemoryStore,
+    MemoryUpdateOptions,
 } from "./types.ts";
 export { MemoryConflictError } from "./types.ts";

@@ -1,5 +1,5 @@
 import type { MemoryListResult, MemoryTopicEntry } from "@taco-ai/protocol";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MEMORY_ARCHIVE_PREFIX, MEMORY_ROOT_ID } from "../../src/lib/memoryPaneTypes";
@@ -12,13 +12,14 @@ vi.mock("react-i18next", () => ({
     })),
 }));
 
-const topic = (id: string, name = id): MemoryTopicEntry => ({
+const topic = (id: string, name = id, extras: Record<string, unknown> = {}): MemoryTopicEntry => ({
     id,
     name,
     description: `${name} description`,
     type: "project",
     content: `content of ${id}`,
     createdAt: "2026-10-01T00:00:00.000Z",
+    ...extras,
 });
 
 const preview = {
@@ -136,6 +137,31 @@ describe("MemoryPane dream controls", () => {
         expect(dream.onUndo).toHaveBeenCalledWith("report-1");
     });
 
+    it("shows undo expiry and hides undo after the expiry time", () => {
+        const expired = {
+            id: "expired-report",
+            appliedAt: "2026-10-24T00:00:00.000Z",
+            undoExpiredAt: "2026-11-05T00:00:00.000Z",
+            counts: { merged: 1, mergedInto: 1, rewritten: 0, archived: 0 },
+            skipped: 0,
+        };
+        renderPane(actions(), MEMORY_ROOT_ID, {
+            ...dreamData,
+            dream: {
+                confirmed: false,
+                pending: dreamData.dream?.pending,
+                lastRunAt: dreamData.dream?.lastRunAt,
+                archived: dreamData.dream?.archived ?? [],
+                reports: [expired],
+            },
+        });
+        const history = document.querySelector(".memory-dream-history");
+        fireEvent.click(history?.querySelector("summary") as Element);
+        expect(screen.getByText(/memory\.dream\.undoExpired/)).toBeTruthy();
+        expect(screen.queryByRole("button", { name: "memory.dream.undo" })).toBeNull();
+        expect(screen.queryByText("memory.dream.undoExpires")).toBeNull();
+    });
+
     it("selects an archived topic separately from live topics and restores it", async () => {
         const user = userEvent.setup({ delay: null });
         const { onSelect, dream } = renderPane(actions(), `${MEMORY_ARCHIVE_PREFIX}old`);
@@ -185,5 +211,114 @@ describe("MemoryPane dream controls", () => {
             true,
         );
         expect(screen.getByText("memory.dream.scheduleUnavailable")).toBeTruthy();
+    });
+});
+
+describe("memory Markdown and provenance", () => {
+    it("shows proposed titles and summaries before applying a dream preview", () => {
+        const current = dreamData.dream;
+        if (!current) throw new Error("missing dream fixture");
+        renderPane(actions(), MEMORY_ROOT_ID, {
+            ...dreamData,
+            dream: {
+                ...current,
+                pending: {
+                    ...preview,
+                    actions: [
+                        {
+                            action: "rewrite",
+                            id: "c",
+                            name: "Proposed title",
+                            description: "Proposed relevance",
+                            content: "body",
+                        },
+                        {
+                            ...preview.actions[0],
+                            action: "merge",
+                            sourceIds: ["a", "b"],
+                            id: "ab",
+                            name: "Merged title",
+                            description: "Merged relevance",
+                            type: "project",
+                            content: "merged body",
+                        },
+                    ],
+                },
+            },
+        });
+        expect(screen.getByText("Proposed title")).toBeTruthy();
+        expect(screen.getByText("Proposed relevance")).toBeTruthy();
+        expect(screen.getByText("Merged relevance")).toBeTruthy();
+    });
+    afterEach(cleanup);
+    const source = {
+        sessionId: "original-session-123",
+        recordedAt: "2026-11-01T08:00:00.000Z",
+        via: "auto" as const,
+        entryId: "original-entry-456",
+    };
+    const fact = {
+        ...topic("fact"),
+        content: "## Fact heading\n\nUse **pnpm** and `taco`.\n\n- first\n- second",
+        sources: [source],
+    };
+    for (const archived of [false, true]) {
+        it(`renders ${archived ? "archived" : "active"} memory as Markdown and shows source metadata`, () => {
+            const data: MemoryListResult = {
+                ...dreamData,
+                topics: archived ? [] : [fact],
+                dream: { confirmed: false, reports: [], archived: archived ? [fact] : [] },
+            };
+            renderPane(actions(), archived ? `${MEMORY_ARCHIVE_PREFIX}fact` : "fact", data);
+            const detail = document.querySelector(".memory-detail") as HTMLElement;
+            expect(within(detail).getByRole("heading", { name: "Fact heading" })).toBeTruthy();
+            expect(detail.querySelector("strong")?.textContent).toBe("pnpm");
+            expect(detail.querySelector("code")?.textContent).toBe("taco");
+            expect(detail.querySelectorAll("li")).toHaveLength(3);
+            expect(within(detail).getByText(source.sessionId)).toBeTruthy();
+            expect(within(detail).getByText(source.entryId)).toBeTruthy();
+            expect(detail.querySelector(`time[datetime="${source.recordedAt}"]`)).toBeTruthy();
+            expect(within(detail).getByText("auto")).toBeTruthy();
+        });
+    }
+
+    it("shows an archive timestamp alongside an archived memory", () => {
+        const archived = topic("dated", "Dated archive", {
+            archivedAt: "2026-11-01T00:00:00.000Z",
+        });
+        renderPane(actions(), `${MEMORY_ARCHIVE_PREFIX}dated`, {
+            ...dreamData,
+            topics: [],
+            dream: { confirmed: false, reports: [], archived: [archived] },
+        });
+        expect(screen.getByText("memory.dream.archivedAt")).toBeTruthy();
+        expect(document.querySelector('time[datetime="2026-11-01T00:00:00.000Z"]')).toBeTruthy();
+    });
+    it("renders old memories without an empty provenance section", () => {
+        renderPane(actions(), "live");
+        expect(document.querySelector(".memory-view-sources")).toBeNull();
+    });
+    it("renders merge and rewrite preview bodies as Markdown", () => {
+        const current = dreamData.dream;
+        const merge = preview.actions[0];
+        if (!current || merge?.action !== "merge") throw new Error("fixture missing preview");
+        const data: MemoryListResult = {
+            ...dreamData,
+            dream: {
+                ...current,
+                pending: {
+                    ...preview,
+                    actions: [
+                        { ...merge, content: "**Merged fact**" },
+                        { action: "rewrite", id: "c", content: "## Rewritten fact" },
+                    ],
+                },
+            },
+        };
+        renderPane(actions(), MEMORY_ROOT_ID, data);
+        const bodies = document.querySelectorAll(".memory-dream-action-body");
+        expect(bodies[0]?.querySelector("strong")?.textContent).toBe("AB");
+        expect(bodies[0]?.querySelector(".md-assistant strong")?.textContent).toBe("Merged fact");
+        expect(bodies[1]?.querySelector("h2")?.textContent).toBe("Rewritten fact");
     });
 });

@@ -1136,6 +1136,14 @@
     grid-column: 1 / -1;
 }
 
+.schedules-dream-archive {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+    padding-top: var(--space-2);
+    border-top: 1px solid var(--divider-section);
+}
+
 .schedules-builtin-note {
     margin: 0;
     color: var(--fg-dim);

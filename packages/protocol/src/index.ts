@@ -197,6 +197,7 @@ export type {
     MemoryListResult,
     MemoryRestoreTopicParams,
     MemoryRestoreTopicResult,
+    MemorySource,
     MemoryTopicEntry,
     MemoryUpsertParams,
     MemoryUpsertResult,

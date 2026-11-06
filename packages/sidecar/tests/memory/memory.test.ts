@@ -534,12 +534,12 @@ describe("extractor", () => {
 
         it("strips fences and ignores surrounding prose", () => {
             const fenced = parseExtractionResult(
-                '```json\n[{"action":"add","name":"x","type":"user"}]\n```',
+                '```json\n[{"action":"add","name":"x","type":"user","content":"fact"}]\n```',
                 createdAt,
                 ws,
             );
             const prose = parseExtractionResult(
-                'Result:\n[{"action":"add","name":"x","type":"user"}]\nDone.',
+                'Result:\n[{"action":"add","name":"x","type":"user","content":"fact"}]\nDone.',
                 createdAt,
                 ws,
             );
@@ -554,7 +554,7 @@ describe("extractor", () => {
 
         it("drops actions with missing or invalid required fields", () => {
             const raw = JSON.stringify([
-                { action: "add", name: "ok", type: "user" },
+                { action: "add", name: "ok", type: "user", content: "valid" },
                 { name: "missing-action", type: "user" },
                 { action: "add", name: "no-type" },
                 { action: "add", type: "user" },
@@ -573,7 +573,7 @@ describe("extractor", () => {
 
         it("normalises new ids to the handler's kebab-case rule", () => {
             const raw = JSON.stringify([
-                { action: "add", id: "User Role @#$", name: "n", type: "user" },
+                { action: "add", id: "User Role @#$", name: "n", type: "user", content: "fact" },
             ]);
             const out = parseExtractionResult(raw, createdAt, ws);
             assert.equal(addedEntries(out)[0]?.id, "user-role-");
@@ -583,7 +583,7 @@ describe("extractor", () => {
             const raw = JSON.stringify([
                 { action: "add", id: 42, name: "Numeric id", type: "user", content: "a" },
                 { action: "add", id: { nested: true }, name: "Object id", type: "user" },
-                { action: "add", id: "ok-id", name: "Fine", type: "user", content: 7 },
+                { action: "add", id: "ok-id", name: "Fine", type: "user", content: "valid" },
                 { action: "add", id: "bad-name", name: 5, type: "user" },
                 { action: "update", id: 9, content: "numeric update id" },
                 { action: "update", id: "x", content: ["not", "a", "string"] },
@@ -598,14 +598,14 @@ describe("extractor", () => {
             assert.ok(ids.includes("42"));
             assert.ok(ids.includes("ok-id"));
             assert.ok(!ids.includes("bad-name"));
-            assert.equal(addedEntries(out).find((e) => e.id === "ok-id")?.content, "7");
+            assert.equal(addedEntries(out).find((e) => e.id === "ok-id")?.content, "valid");
             assert.equal(out.filter((action) => action.action === "update").length, 0);
         });
 
         it("synthesises distinct ids when add omits them", () => {
             const raw = JSON.stringify([
-                { action: "add", name: "first", type: "user" },
-                { action: "add", name: "second", type: "user" },
+                { action: "add", name: "first", type: "user", content: "first fact" },
+                { action: "add", name: "second", type: "user", content: "second fact" },
             ]);
             const entries = addedEntries(parseExtractionResult(raw, createdAt, ws));
             assert.ok(entries[0]?.id.startsWith("mem-"));
@@ -613,37 +613,44 @@ describe("extractor", () => {
             assert.notEqual(entries[0]?.id, entries[1]?.id);
         });
 
-        it("truncates fields to declared limits", () => {
+        it("rejects oversized content rather than truncating a fact", () => {
             const raw = JSON.stringify([
                 {
                     action: "add",
                     name: "x".repeat(200),
                     description: "y".repeat(300),
-                    content: "z".repeat(MEMORY_CONTENT_MAX_CHARS * 2),
+                    content: "valid",
                     type: "user",
                 },
-                { action: "update", id: "x", content: "z".repeat(MEMORY_CONTENT_MAX_CHARS * 2) },
+                {
+                    action: "add",
+                    name: "long",
+                    content: "z".repeat(MEMORY_CONTENT_MAX_CHARS + 1),
+                    type: "user",
+                },
+                { action: "update", id: "x", content: "z".repeat(MEMORY_CONTENT_MAX_CHARS + 1) },
             ]);
             const out = parseExtractionResult(raw, createdAt, ws);
-            const entry = addedEntries(out)[0];
-            assert.equal(entry?.name.length, 60);
-            assert.equal(entry?.description.length, 120);
-            assert.equal(entry?.content.length, MEMORY_CONTENT_MAX_CHARS);
-            assert.equal(
-                out[1]?.action === "update" && out[1].content.length,
-                MEMORY_CONTENT_MAX_CHARS,
-            );
+            assert.equal(out.length, 1);
+            assert.equal(addedEntries(out)[0]?.name.length, 60);
+            assert.equal(addedEntries(out)[0]?.description.length, 120);
         });
 
-        it("defaults add description and content to name when missing", () => {
-            const raw = JSON.stringify([
-                { action: "add", id: "x", name: "fallback", type: "user" },
-            ]);
-            const entry = addedEntries(parseExtractionResult(raw, createdAt, ws))[0];
-            assert.equal(entry?.description, "fallback");
-            assert.equal(entry?.content, "fallback");
-            assert.equal(entry?.createdAt, createdAt);
-            assert.equal(entry?.workspaceId, ws);
+        it("requires a real body and defaults only description", () => {
+            const entries = addedEntries(
+                parseExtractionResult(
+                    JSON.stringify([
+                        { action: "add", id: "x", name: "fallback", type: "user", content: "Body" },
+                        { action: "add", id: "empty", name: "Do not fabricate", type: "user" },
+                    ]),
+                    createdAt,
+                    ws,
+                ),
+            );
+            assert.equal(entries.length, 1);
+            assert.equal(entries[0]?.description, "fallback");
+            assert.equal(entries[0]?.content, "Body");
+            assert.equal(entries[0]?.workspaceId, ws);
         });
     });
 
@@ -672,7 +679,18 @@ describe("extractor", () => {
                     return {
                         role: "assistant",
                         content: [
-                            { type: "text", text: JSON.stringify(response) } satisfies TextContent,
+                            {
+                                type: "text",
+                                text: JSON.stringify(
+                                    Array.isArray(response)
+                                        ? response.map((item) => ({
+                                              ...item,
+                                              basis: "durable_preference",
+                                              evidence: "this is a memory-worthy conversation",
+                                          }))
+                                        : response,
+                                ),
+                            } satisfies TextContent,
                         ],
                     };
                 },
@@ -783,7 +801,13 @@ describe("extractor", () => {
                         {
                             type: "text",
                             text: JSON.stringify([
-                                { action: "update", id: "user-language", content: "new" },
+                                {
+                                    action: "update",
+                                    id: "user-language",
+                                    content: "new",
+                                    basis: "correction",
+                                    evidence: "this is a memory-worthy conversation",
+                                },
                             ]),
                         } satisfies TextContent,
                     ],
@@ -796,7 +820,7 @@ describe("extractor", () => {
                     listTopics: () => [existingTopic({ content: "snapshot" })],
                     appendEntry: async () => undefined,
                     updateTopic: async (id, content, options) => {
-                        seen.push(options ?? {});
+                        seen.push({ expectedContent: options?.expectedContent });
                         return { ...existingTopic({ id }), content };
                     },
                 },
@@ -836,7 +860,13 @@ describe("extractor", () => {
                                 {
                                     type: "text",
                                     text: JSON.stringify([
-                                        { action: "update", id: "user-language", content },
+                                        {
+                                            action: "update",
+                                            id: "user-language",
+                                            content,
+                                            basis: "correction",
+                                            evidence: "this is a memory-worthy conversation",
+                                        },
                                     ]),
                                 } satisfies TextContent,
                             ],
@@ -886,6 +916,8 @@ describe("extractor", () => {
                                             action: "update",
                                             id: "user-language",
                                             content: "rewrite of v1",
+                                            basis: "correction",
+                                            evidence: "this is a memory-worthy conversation",
                                         },
                                     ]),
                                 } satisfies TextContent,
@@ -916,7 +948,15 @@ describe("extractor", () => {
                             {
                                 type: "text",
                                 text: JSON.stringify([
-                                    { action: "add", id: "later", name: "Later", type: "user" },
+                                    {
+                                        action: "add",
+                                        id: "later",
+                                        name: "Later",
+                                        type: "user",
+                                        content: "later fact",
+                                        basis: "durable_preference",
+                                        evidence: "this is a memory-worthy conversation",
+                                    },
                                 ]),
                             } satisfies TextContent,
                         ],

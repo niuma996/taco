@@ -345,15 +345,270 @@ describe("snippetAround", () => {
 });
 
 describe("sessionHistoryToolCandidates", () => {
-    it("offers both tools as deferred builtins", () => {
+    it("offers recall tools as deferred builtins", () => {
         const c = sessionHistoryToolCandidates();
         assert.deepEqual(
             c.map((x) => [x.name, x.loading, x.source]),
             [
                 ["sessionSearch", "deferred", "builtin"],
                 ["sessionList", "deferred", "builtin"],
+                ["sessionRead", "deferred", "builtin"],
             ],
         );
         assert.match(c[1]?.summary ?? "", /Last resort/);
     });
+});
+
+describe("sessionRead", () => {
+    const historyEntry = (id: string, role: string, content: unknown, type = "message") => ({
+        id,
+        parentId: null,
+        type,
+        timestamp: new Date(T0).toISOString(),
+        payload: { role, content, apiKey: "payload-secret" },
+    });
+    async function readTool() {
+        const candidate = sessionHistoryToolCandidates().find((c) => c.name === "sessionRead");
+        assert.ok(candidate, "sessionRead must be discoverable as a deferred tool");
+        return candidate.load();
+    }
+    function readContext(
+        entries: unknown[],
+        sessions = [entry("target", "/never/read.jsonl", T0)],
+    ) {
+        const calls: { method: string; params: Record<string, unknown> }[] = [];
+        const ctx = sessionToolContext({
+            workspace: asWorkspaceId("/ws"),
+            call: async <P, R>(method: string, _ws: string, params: P): Promise<R> => {
+                calls.push({ method, params: params as Record<string, unknown> });
+                if (method === "session.list")
+                    return { workspace: "/ws", sessions, total: sessions.length } as R;
+                if (method === "session.history")
+                    return { sessionId: "target", leafEntryId: null, entries } as R;
+                throw new Error("unexpected RPC");
+            },
+        });
+        return { ctx, calls };
+    }
+    const page = (result: Parameters<typeof text>[0]) => JSON.parse(text(result));
+
+    it("reads actual history payloads, exposing only visible user and assistant text", async () => {
+        const { ctx, calls } = readContext([
+            historyEntry("u", "user", "question <reply_language>zh</reply_language>"),
+            historyEntry("a", "assistant", [
+                { type: "thinking", thinking: "thinking-secret" },
+                { type: "text", text: "answer" },
+                { type: "toolCall", arguments: { token: "tool-secret" } },
+            ]),
+            historyEntry("t", "toolResult", "tool-result-secret"),
+            historyEntry("s", "system", "system-secret"),
+            historyEntry("c", "assistant", "summary-secret", "compaction"),
+            historyEntry("i", "user", [{ type: "image", data: "image-secret" }]),
+        ]);
+        const out = await invokeTool(await readTool(), { sessionId: "target" }, ctx);
+        const data = page(out);
+        assert.deepEqual(
+            data.messages.map((m: { role: string; text: string }) => [m.role, m.text]),
+            [
+                ["user", "question "],
+                ["assistant", "answer"],
+            ],
+        );
+        assert.doesNotMatch(text(out), /secret|reply_language|never\/read/);
+        assert.equal(data.nextOffset, null);
+        assert.deepEqual(
+            calls.map((c) => c.method),
+            ["session.list", "session.history"],
+        );
+        assert.equal(calls[0]?.params.query, "target");
+        assert.ok(Number(calls[0]?.params.limit) <= 50);
+        assert.notEqual(calls[0]?.params.full, true);
+        assert.deepEqual(calls[1]?.params, { workspace: "/ws", sessionId: "target" });
+    });
+
+    it("pages losslessly through huge messages and advances to later messages", async () => {
+        const huge = "😀".repeat(30_000) + "THE END";
+        const { ctx } = readContext([
+            historyEntry("big", "assistant", huge),
+            historyEntry("last", "user", "follow up"),
+        ]);
+        const tool = await readTool();
+        let offset = 0;
+        let reconstructed = "";
+        let sawLast = false;
+        for (let n = 0; n < 100; n++) {
+            const out = await invokeTool(tool, { sessionId: "target", offset, limit: 2 }, ctx);
+            assert.ok(text(out).length < 25_000, "each response is bounded");
+            const data = page(out);
+            assert.ok(data.messages.length <= 2);
+            for (const message of data.messages) {
+                if (message.entryId === "big") reconstructed += message.text;
+                if (message.entryId === "last") sawLast = true;
+            }
+            if (data.nextOffset === null) break;
+            assert.ok(data.nextOffset > offset, "pagination must make progress");
+            offset = data.nextOffset;
+        }
+        assert.equal(reconstructed, huge);
+        assert.equal(sawLast, true);
+    });
+
+    it("bounds default output, explicit large limits, and metadata", async () => {
+        const sessions = [entry("target", "/private/path", T0, "title".repeat(30_000))];
+        const { ctx } = readContext(
+            [historyEntry("x".repeat(40_000), "assistant", "a".repeat(100_000))],
+            sessions,
+        );
+        for (const params of [{ sessionId: "target" }, { sessionId: "target", limit: 10 }]) {
+            const out = await invokeTool(await readTool(), params, ctx);
+            assert.ok(text(out).length < 25_000);
+            assert.ok(JSON.stringify(out.details).length < 25_000);
+            assert.ok(page(out).nextOffset > 0);
+        }
+    });
+
+    for (const overrides of [{ isIm: true }, { sessionKind: "subagent" as const }]) {
+        it(`refuses unauthorized caller ${JSON.stringify(overrides)} before RPC`, async () => {
+            const { ctx, calls } = readContext([]);
+            await assert.rejects(
+                invokeTool(await readTool(), { sessionId: "target" }, { ...ctx, ...overrides }),
+                /local main session/,
+            );
+            assert.deepEqual(calls, []);
+        });
+    }
+    for (const sessions of [
+        [],
+        [entry("target-prefix", "/path", T0)],
+        [{ ...entry("target", "/path", T0), cwd: asWorkspaceId("/other") }],
+        [{ ...entry("target", "/path", T0), kind: "subagent" as const }],
+        [{ ...entry("target", "/path", T0), parentSessionId: asSessionId("parent") }],
+    ]) {
+        it(`rejects absent, prefix, foreign, or hidden targets ${JSON.stringify(sessions.map((s) => [s.id, s.cwd, s.kind, s.parentSessionId]))}`, async () => {
+            const { ctx, calls } = readContext([], sessions);
+            await assert.rejects(
+                invokeTool(await readTool(), { sessionId: "target" }, ctx),
+                /not found|unavailable/i,
+            );
+            assert.deepEqual(
+                calls.map((c) => c.method),
+                ["session.list"],
+            );
+        });
+    }
+    it("reports a deleted transcript without leaking the internal RPC error", async () => {
+        const { ctx } = readContext([]);
+        const call = ctx.call;
+        assert.ok(call);
+        ctx.call = async (method, workspace, params) => {
+            if (method === "session.history")
+                throw new Error("ENOENT /private/transcript.jsonl token-secret");
+            return call(method, workspace, params);
+        };
+        await assert.rejects(
+            invokeTool(await readTool(), { sessionId: "target" }, ctx),
+            (error: Error) => {
+                assert.match(error.message, /unavailable|deleted/i);
+                assert.doesNotMatch(error.message, /private|secret/);
+                return true;
+            },
+        );
+    });
+    it("keeps escaped control-character pages bounded and lossless", async () => {
+        const original = '\u0000\\"\n'.repeat(10_000);
+        const { ctx } = readContext([historyEntry("escaped", "assistant", original)]);
+        const tool = await readTool();
+        let offset = 0;
+        let reconstructed = "";
+        for (let n = 0; n < 100; n++) {
+            const out = await invokeTool(tool, { sessionId: "target", offset }, ctx);
+            assert.ok(text(out).length < 20_000);
+            const data = page(out);
+            for (const message of data.messages) reconstructed += message.text;
+            if (data.nextOffset === null) break;
+            assert.ok(data.nextOffset > offset);
+            offset = data.nextOffset;
+        }
+        assert.equal(reconstructed, original);
+    });
+
+    it("finds an exact target on a later bounded metadata page", async () => {
+        const { ctx, calls } = readContext([historyEntry("one", "user", "hi")]);
+        const call = ctx.call;
+        assert.ok(call);
+        let listCalls = 0;
+        ctx.call = async (method, workspace, params) => {
+            if (method === "session.list" && listCalls++ === 0) {
+                return {
+                    workspace,
+                    sessions: [],
+                    total: 1,
+                    nextCursor: {
+                        updatedAt: new Date(T0).toISOString(),
+                        id: asSessionId("cursor"),
+                    },
+                } as never;
+            }
+            return call(method, workspace, params);
+        };
+        const out = page(await invokeTool(await readTool(), { sessionId: "target" }, ctx));
+        assert.equal(out.messages[0].text, "hi");
+        assert.equal(calls[0]?.params.cursor !== undefined, true);
+        assert.equal(calls[0]?.params.full, undefined);
+    });
+
+    it("rejects a repeating metadata cursor without an infinite loop", async () => {
+        const { ctx } = readContext([]);
+        let calls = 0;
+        ctx.call = async (_method, workspace) => {
+            calls++;
+            return {
+                workspace,
+                sessions: [],
+                total: 1,
+                nextCursor: {
+                    updatedAt: new Date(T0).toISOString(),
+                    id: asSessionId("cursor"),
+                },
+            } as never;
+        };
+        await assert.rejects(
+            invokeTool(await readTool(), { sessionId: "target" }, ctx),
+            /pagination did not advance/,
+        );
+        assert.equal(calls, 2);
+    });
+
+    it("reports a missing RPC dispatcher clearly", async () => {
+        const { ctx } = readContext([]);
+        await assert.rejects(
+            invokeTool(await readTool(), { sessionId: "target" }, { ...ctx, call: undefined }),
+            /no self-RPC dispatcher/,
+        );
+    });
+
+    it("returns a completed empty page past the end", async () => {
+        const { ctx } = readContext([historyEntry("one", "user", "hello")]);
+        const out = page(
+            await invokeTool(await readTool(), { sessionId: "target", offset: 999 }, ctx),
+        );
+        assert.deepEqual(out.messages, []);
+        assert.equal(out.nextOffset, null);
+    });
+    for (const params of [
+        { offset: -1 },
+        { offset: 0.5 },
+        { limit: 0 },
+        { limit: 1000 },
+        { sessionId: "" },
+    ]) {
+        it(`rejects invalid input ${JSON.stringify(params)} before RPC`, async () => {
+            const { ctx, calls } = readContext([]);
+            await assert.rejects(
+                invokeTool(await readTool(), { sessionId: "target", ...params }, ctx),
+                /sessionId|offset|limit/,
+            );
+            assert.deepEqual(calls, []);
+        });
+    }
 });

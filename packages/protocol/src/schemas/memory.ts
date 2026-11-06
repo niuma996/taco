@@ -40,6 +40,8 @@ export const memoryTopicIdSchema = Type.String({
 
 /** Short human-readable title for a topic. */
 export const memoryTopicNameSchema = Type.String({
+    minLength: 1,
+    pattern: "\\S",
     maxLength: 60,
     description: "Short human-readable title for this memory. Not a sentence.",
 });
@@ -75,14 +77,20 @@ export const memoryUpsertSchema = Type.Object({
     workspace,
     action: memoryTopicActionSchema,
     id: memoryTopicIdSchema,
-    // Required on add. The handler applies the same length limit as the schema.
+    // Required on add; optional metadata update on replace.
     name: Type.Optional(memoryTopicNameSchema),
-    // Optional on add; one-line relevance hint. Defaults to name in the handler.
+    // Optional on add/replace; defaults to name only on add.
     description: Type.Optional(memoryTopicDescriptionSchema),
     // Required on add/replace; the handler enforces MEMORY_CONTENT_MAX_CHARS.
     content: Type.Optional(Type.String()),
     // Required on add.
     type: Type.Optional(memoryTopicTypeSchema),
+    explicitlyRequested: Type.Optional(
+        Type.Boolean({
+            description:
+                "Set true only when the user directly asked to remember this. Set false for proactive background writes.",
+        }),
+    ),
 });
 
 export const memoryDreamRunSchema = Type.Object({ workspace });

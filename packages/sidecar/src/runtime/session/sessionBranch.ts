@@ -20,6 +20,7 @@
  */
 
 import { harnessContext } from "../../lib/harnessContext.ts";
+import { applyTuiVisibilityToContent } from "../../tags/index.ts";
 import type { AgentMessage, Context, Entry, Session } from "../pi/types.ts";
 import { createBranchSummaryMessage, createCompactionSummaryMessage } from "../pi/values.ts";
 
@@ -133,4 +134,38 @@ export async function buildBranchContext(
         if (entry !== undefined) messages.push(...entryToContextMessages(entry));
     }
     return messages;
+}
+
+/** Original conversational text and identities, excluding generated summaries and hidden notices. */
+export async function buildMemoryExtractionMessages(session: Session): Promise<AgentMessage[]> {
+    const entries = await findBranchEntries(session);
+    return entries.flatMap((entry) => {
+        if (
+            entry.type !== "message" ||
+            !isContextMessage(entry.message) ||
+            (entry.message.role !== "user" && entry.message.role !== "assistant")
+        )
+            return [];
+        const raw =
+            typeof entry.message.content === "string"
+                ? entry.message.content
+                : entry.message.content.filter((block) => block.type === "text");
+        const content = applyTuiVisibilityToContent(raw);
+        const text =
+            typeof content === "string"
+                ? content
+                : content
+                      .filter((block) => block.type === "text")
+                      .map((block) => (block.type === "text" ? block.text : ""))
+                      .join("\n");
+        return text.trim()
+            ? [
+                  {
+                      ...entry.message,
+                      content: text,
+                      memoryEntryId: entry.id,
+                  } as unknown as AgentMessage,
+              ]
+            : [];
+    });
 }

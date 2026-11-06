@@ -757,7 +757,7 @@ describe("memory", () => {
             await store.appendEntry(sampleTopic);
             const handler = getRegisteredMethod("memory.upsert");
             assert.ok(handler);
-            for (const content of ["", "   ", "x".repeat(1001), 42]) {
+            for (const content of ["", "   ", "x".repeat(MEMORY_CONTENT_MAX_CHARS + 1), 42]) {
                 await assert.rejects(
                     Promise.resolve().then(() =>
                         handler.handler(

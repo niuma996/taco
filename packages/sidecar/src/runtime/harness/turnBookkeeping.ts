@@ -15,7 +15,7 @@ import type { TopicUsageTracker } from "../../memory/dream/usageTracker.ts";
 import { type MemoryExtractor, sliceForExtraction } from "../../memory/index.ts";
 import type { TacoToolContext } from "../../tools/context.ts";
 import type { AgentHarness, AgentMessage, HarnessEvent, Session } from "../pi/types.ts";
-import { buildBranchContext } from "../session/sessionBranch.ts";
+import { buildBranchContext, buildMemoryExtractionMessages } from "../session/sessionBranch.ts";
 import type { TitleSummarizer } from "../session/titleSummarizer.ts";
 
 const log = createLogger("turnBookkeeping");
@@ -70,6 +70,7 @@ export interface TurnBookkeepingArgs {
 }
 
 interface MemoryExtractionHandlerArgs {
+    readonly stableEntries?: boolean;
     readonly buildContext: () => Promise<AgentMessage[]>;
     readonly getExtractor: () => MemoryExtractor | undefined;
 }
@@ -83,14 +84,10 @@ export function createMemoryExtractionHandlers(args: MemoryExtractionHandlerArgs
     const { buildContext, getExtractor } = args;
     let pendingRememberCounts: Promise<number>[] = [];
 
-    // An offset is a message count in the context at the time of the memory
-    // call. Compaction rewrites the context, so a count from before it can be
-    // past the new end and skip the whole run: drop the offsets and extract
-    // over the compacted context instead. The extractor sees the existing
-    // topics, so facts the model already saved come back as updates, not
-    // duplicates.
+    // Stable persisted entries survive compaction. Context-based callers must
+    // discard offsets when summaries replace earlier messages.
     const onCompaction = (): void => {
-        pendingRememberCounts = [];
+        if (!args.stableEntries) pendingRememberCounts = [];
     };
 
     const onToolEnd = (toolName: string, isError: boolean): void => {
@@ -125,8 +122,19 @@ export function createMemoryExtractionHandlers(args: MemoryExtractionHandlerArgs
                     const counts = await Promise.all(promises);
                     sinceCount = Math.min(...counts);
                 }
-                const messages = sliceForExtraction(contextMessages, sinceCount);
-                if (messages.length > 0) await extractor.onRunEnd(messages);
+                const lastHandled =
+                    sinceCount === undefined
+                        ? undefined
+                        : contextMessages[Math.min(sinceCount, contextMessages.length) - 1];
+                const skipThroughEntryId = (
+                    lastHandled as (AgentMessage & { memoryEntryId?: string }) | undefined
+                )?.memoryEntryId;
+                if (skipThroughEntryId && Number.isFinite(sinceCount)) {
+                    await extractor.onRunEnd(contextMessages, { skipThroughEntryId });
+                } else {
+                    const messages = sliceForExtraction(contextMessages, sinceCount);
+                    if (messages.length > 0) await extractor.onRunEnd(messages);
+                }
             })
             .catch((error) => {
                 // Extraction is fire-and-forget and must not fail the run.
@@ -173,8 +181,9 @@ export function wireTurnBookkeeping(args: TurnBookkeepingArgs): Array<() => void
     );
 
     const memoryHandlers = createMemoryExtractionHandlers({
-        buildContext: () => buildBranchContext(session),
+        buildContext: () => buildMemoryExtractionMessages(session),
         getExtractor,
+        stableEntries: true,
     });
     // `read` args arrive on tool_start; only a successful tool_end counts as use.
     const pendingReads = new Map<string, unknown>();

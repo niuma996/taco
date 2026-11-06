@@ -31,6 +31,8 @@ export interface DreamArgsDraft {
     staleDays: string;
     staleDaysDurable: string;
     model: string;
+    archiveCleanupEnabled: boolean;
+    archiveRetentionDays: "7" | "30" | "90";
 }
 
 export interface ScheduleDraft {
@@ -92,6 +94,8 @@ const EMPTY_DRAFT: ScheduleDraft = {
         staleDays: "90",
         staleDaysDurable: "180",
         model: "",
+        archiveCleanupEnabled: false,
+        archiveRetentionDays: "7",
     },
 };
 
@@ -106,6 +110,12 @@ const SESSION_STRATEGY_OPTIONS = [
     { value: "reuse", label: "reuse — continue an existing session" },
 ] as const;
 
+const ARCHIVE_RETENTION_OPTIONS = [
+    { value: "7", label: "7 days" },
+    { value: "30", label: "30 days" },
+    { value: "90", label: "90 days" },
+] as const;
+
 const ARGS_PLACEHOLDER = '{\n  "workspace": "/path/to/repo",\n  "prompt": "…"\n}';
 
 function dreamArgsFromJob(args: Record<string, unknown>): DreamArgsDraft {
@@ -117,6 +127,9 @@ function dreamArgsFromJob(args: Record<string, unknown>): DreamArgsDraft {
         staleDays: numberText("staleDays", "90"),
         staleDaysDurable: numberText("staleDaysDurable", "180"),
         model: typeof args.model === "string" ? args.model : "",
+        archiveCleanupEnabled: args.archiveCleanupEnabled === true,
+        archiveRetentionDays:
+            args.archiveRetentionDays === 30 ? "30" : args.archiveRetentionDays === 90 ? "90" : "7",
     };
 }
 
@@ -192,7 +205,16 @@ function validateDraft(
     }
     if (builtinDream) {
         const args: Record<string, unknown> = {};
-        const fields: Array<[keyof Omit<DreamArgsDraft, "model">, number, number]> = [
+        const fields: Array<
+            [
+                keyof Omit<
+                    DreamArgsDraft,
+                    "model" | "archiveCleanupEnabled" | "archiveRetentionDays"
+                >,
+                number,
+                number,
+            ]
+        > = [
             ["minHours", 1, 720],
             ["minChanges", 0, 1000],
             ["staleDays", 7, 3650],
@@ -215,6 +237,8 @@ function validateDraft(
         } else if (draft.dreamArgs.model.trim()) {
             args.model = draft.dreamArgs.model.trim();
         }
+        args.archiveCleanupEnabled = draft.dreamArgs.archiveCleanupEnabled;
+        args.archiveRetentionDays = Number(draft.dreamArgs.archiveRetentionDays);
         return { ok: nameOk && errors.length === 0, args, errors };
     }
 
@@ -243,6 +267,7 @@ export function ScheduleFormDialog(props: ScheduleFormDialogProps) {
 
     const enabledId = useId();
     const runOnStartupId = useId();
+    const archiveCleanupId = useId();
 
     const [draft, setDraft] = useState<ScheduleDraft>(EMPTY_DRAFT);
 
@@ -525,6 +550,63 @@ export function ScheduleFormDialog(props: ScheduleFormDialogProps) {
                             }
                         />
                     </FormField>
+                    <div className="schedules-dream-archive">
+                        <label className="schedules-modal-toggle" htmlFor={archiveCleanupId}>
+                            <Switch
+                                id={archiveCleanupId}
+                                checked={draft.dreamArgs.archiveCleanupEnabled}
+                                onChange={(next) =>
+                                    setDraft({
+                                        ...draft,
+                                        dreamArgs: {
+                                            ...draft.dreamArgs,
+                                            archiveCleanupEnabled: next,
+                                        },
+                                    })
+                                }
+                                label={t(
+                                    "schedules.dreamArchiveCleanup",
+                                    "Automatically delete expired archived memories",
+                                )}
+                            />
+                            <span>
+                                {t(
+                                    "schedules.dreamArchiveCleanup",
+                                    "Automatically delete expired archived memories",
+                                )}
+                            </span>
+                        </label>
+                        <FormField
+                            label={t("schedules.dreamArchiveRetention", "Archive retention period")}
+                            hint={t(
+                                "schedules.dreamArchiveRetentionHint",
+                                "Archived memories older than this period are physically deleted; undo expires at the same time. This controls retention, not how often the job runs.",
+                            )}
+                        >
+                            <Select
+                                value={draft.dreamArgs.archiveRetentionDays}
+                                onValueChange={(value) =>
+                                    setDraft({
+                                        ...draft,
+                                        dreamArgs: {
+                                            ...draft.dreamArgs,
+                                            archiveRetentionDays:
+                                                value as DreamArgsDraft["archiveRetentionDays"],
+                                        },
+                                    })
+                                }
+                                options={ARCHIVE_RETENTION_OPTIONS.map(({ value, label }) => ({
+                                    value,
+                                    label: t(`schedules.dreamArchiveRetention${value}`, label),
+                                }))}
+                                disabled={!draft.dreamArgs.archiveCleanupEnabled}
+                                label={t(
+                                    "schedules.dreamArchiveRetention",
+                                    "Archive retention period",
+                                )}
+                            />
+                        </FormField>
+                    </div>
                     {errorFor("dreamArgs") ? (
                         <p className="schedules-error" role="alert">
                             {errorFor("dreamArgs")}

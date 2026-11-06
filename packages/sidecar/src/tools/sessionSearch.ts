@@ -1,8 +1,8 @@
 /**
- * sessionSearch / sessionList — let the model answer questions about the
+ * sessionSearch / sessionList / sessionRead — let the model answer questions about the
  * user's past conversations in this workspace ("have I asked about X lately?").
  *
- * Both are deferred candidates: cross-session recall is rare, and their
+ * All are deferred candidates: cross-session recall is rare, and their
  * schemas would otherwise cost tokens on every request. `sessionSearch` is the
  * intended entry point; `sessionList` exists for the few questions that cannot
  * be phrased as keywords, and its wording steers the model away from paging
@@ -22,6 +22,7 @@ import type { ToolCandidate } from "../runtime/harness/deferredToolRegistry.ts";
 import { type UserQuestion, UserQuestionCache } from "../runtime/session/sessionQuestions.ts";
 import type { TacoToolContext } from "./context.ts";
 import type { TacoTool } from "./index.ts";
+import { createSessionReadTool } from "./sessionRead.ts";
 
 const SEARCH_DEFAULT_RESULTS = 20;
 const SEARCH_MAX_RESULTS = 50;
@@ -373,7 +374,7 @@ export function createSessionListTool(cache: UserQuestionCache): TacoTool {
 }
 
 /**
- * Deferred candidates for the two tools. The question cache is shared by both
+ * Deferred candidates for recall tools. The question cache is shared by search/list
  * and lives as long as the workspace's registry.
  */
 export function sessionHistoryToolCandidates(): ToolCandidate[] {
@@ -396,6 +397,14 @@ export function sessionHistoryToolCandidates(): ToolCandidate[] {
             loading: "deferred",
             source: "builtin",
             load: async () => createSessionListTool(cache),
+        },
+        {
+            name: "sessionRead",
+            summary:
+                "Recall the original user/assistant conversation from a memory source session ID or a sessionSearch/sessionList result, in bounded pages.",
+            loading: "deferred",
+            source: "builtin",
+            load: async () => createSessionReadTool(),
         },
     ];
 }

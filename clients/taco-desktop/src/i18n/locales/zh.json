@@ -721,6 +721,7 @@
     "grantAccess": "授权并打开"
   },
   "memory": {
+    "sources": "来源会话",
     "title": "记忆",
     "globalLabel": "全局",
     "globalName": "MEMORY.md",
@@ -794,9 +795,12 @@
       "skipped": "跳过",
       "undo": "撤销",
       "undoing": "撤销中…",
+      "undoExpired": "撤销已过期",
+      "undoExpires": "撤销截止时间",
       "undone": "已撤销",
       "archivedLabel": "已归档",
       "archivedBadge": "归档",
+      "archivedAt": "归档于",
       "restore": "恢复",
       "restoring": "恢复中…",
       "nothingToDo": "本次没有需要整理的内容",
@@ -900,6 +904,12 @@
     "dreamStaleDaysDurable": "用户/反馈记忆条目的候选淘汰天数",
     "dreamModel": "整理模型（可选）",
     "dreamModelHint": "留空使用当前默认模型；格式为 provider/modelId 或 modelId。",
+    "dreamArchiveCleanup": "自动删除已过期的归档记忆",
+    "dreamArchiveRetention": "归档保留期限",
+    "dreamArchiveRetentionHint": "超过此期限的归档记忆会被物理删除，撤销也会同时过期。此设置控制保留期限，不控制任务执行频率。",
+    "dreamArchiveRetention7": "7 天",
+    "dreamArchiveRetention30": "30 天",
+    "dreamArchiveRetention90": "90 天",
     "actionHistory": "历史",
     "history": {
       "title": "{{name}} 的运行记录",

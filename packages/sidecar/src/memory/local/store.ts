@@ -18,13 +18,20 @@ import {
     writeFileSync,
 } from "node:fs";
 import { dirname, join, resolve as resolveTacoHome } from "node:path";
+import { MEMORY_CONTENT_MAX_CHARS } from "@taco-ai/protocol";
 import { tacoHome } from "../../config/config.ts";
 import {
+    type ArchiveCleanupCandidate,
+    type ArchiveCleanupResult,
+    type ArchiveTopicOptions,
     MEMORY_ENTRY_TYPES,
     MemoryConflictError,
     type MemoryEntry,
     type MemoryEntryType,
     type MemoryStore,
+    type MemoryUpdateOptions,
+    memoryEntryState,
+    unionMemorySources,
 } from "../types.ts";
 
 // ─── constants ────────────────────────────────────────────────────────────────
@@ -44,6 +51,7 @@ function frontmatterValue(value: string): string {
 }
 
 function buildTopicFile(entry: MemoryEntry): string {
+    if (!entry.name.trim()) throw new Error("memory topic name must not be blank");
     const fm = [
         `name: ${frontmatterValue(entry.name)}`,
         `description: ${frontmatterValue(entry.description)}`,
@@ -51,10 +59,92 @@ function buildTopicFile(entry: MemoryEntry): string {
     ];
     fm.push(`createdAt: ${entry.createdAt}`);
     if (entry.updatedAt) fm.push(`updatedAt: ${entry.updatedAt}`);
+    if (entry.archivedAt) fm.push(`archivedAt: ${entry.archivedAt}`);
+    if (entry.explicitlyRequested !== undefined) {
+        fm.push(`explicitlyRequested: ${entry.explicitlyRequested}`);
+    }
+    if (entry.sources?.length) {
+        fm.push(`sources: ${JSON.stringify(unionMemorySources(entry.sources))}`);
+    }
     // Trimmed because readTopicDir trims the body: what a write returns must
     // equal what the next read sees, or a compare-and-swap against the
     // returned content fails on whitespace alone.
     return `---\n${fm.join("\n")}\n---\n\n${entry.content.trim()}`;
+}
+
+function assertBodyLimit(content: string): void {
+    if (content.length > MEMORY_CONTENT_MAX_CHARS) {
+        throw new Error(`memory topic content must be ≤${MEMORY_CONTENT_MAX_CHARS} characters`);
+    }
+}
+
+function retiredFingerprint(content: string): string {
+    return createHash("sha256").update(content.trim().replace(/\r\n/g, "\n")).digest("hex");
+}
+
+function readRetiredHashes(path: string): string[] {
+    try {
+        const value: unknown = JSON.parse(readFileSync(path, "utf8"));
+        return Array.isArray(value)
+            ? value.filter((item): item is string => /^[a-f0-9]{64}$/.test(item))
+            : [];
+    } catch {
+        return [];
+    }
+}
+
+function archiveFiles(workspaceDir: string): string[] {
+    const root = join(workspaceDir, ARCHIVE_DIR);
+    const result: string[] = [];
+    const visit = (dir: string): void => {
+        let entries: Array<{ name: string; isDirectory(): boolean; isFile(): boolean }>;
+        try {
+            entries = readdirSync(dir, { withFileTypes: true }) as unknown as Array<{
+                name: string;
+                isDirectory(): boolean;
+                isFile(): boolean;
+            }>;
+        } catch {
+            return;
+        }
+        for (const entry of entries) {
+            const path = join(dir, entry.name);
+            if (entry.isDirectory()) visit(path);
+            else if (entry.isFile() && entry.name.endsWith(".md")) result.push(path);
+        }
+    };
+    visit(root);
+    return result;
+}
+
+function readArchiveFile(path: string, workspaceId: string | undefined): MemoryEntry | undefined {
+    try {
+        const raw = readFileSync(path, "utf8");
+        const frontmatter = parseTopicFrontmatter(raw);
+        if (!frontmatter) return undefined;
+        const basename = path.split(/[\\/]/).pop()?.replace(/\.md$/, "") ?? "";
+        const id = basename.includes(".") ? basename.slice(0, basename.indexOf(".")) : basename;
+        return {
+            id,
+            name: frontmatter.name,
+            description: frontmatter.description,
+            type: frontmatter.type,
+            content: raw.replace(/^---\r?\n[\s\S]+?\r?\n---\r?\n/, "").trim(),
+            createdAt: frontmatter.createdAt ?? statSync(path).mtime.toISOString(),
+            ...(frontmatter.updatedAt ? { updatedAt: frontmatter.updatedAt } : {}),
+            ...(frontmatter.archivedAt ? { archivedAt: frontmatter.archivedAt } : {}),
+            ...(frontmatter.explicitlyRequested ? { explicitlyRequested: true } : {}),
+            ...(frontmatter.sources ? { sources: frontmatter.sources } : {}),
+            workspaceId,
+        };
+    } catch {
+        return undefined;
+    }
+}
+
+function isSafeArchivePath(path: string, workspaceDir: string): boolean {
+    const root = resolveTacoHome(join(workspaceDir, ARCHIVE_DIR));
+    return resolveTacoHome(path).startsWith(`${root}/`);
 }
 
 // ─── helper: hash ───────────────────────────────────────────────────────────────
@@ -92,9 +182,25 @@ function atomicWrite(path: string, content: string): void {
 /** Reject a write derived from a snapshot that no longer matches disk. */
 function assertExpectedContent(
     existing: MemoryEntry,
-    options: { expectedContent?: string } | undefined,
+    options: MemoryUpdateOptions | undefined,
+    ignoreArchivedAt = false,
 ): void {
-    if (options?.expectedContent !== undefined && existing.content !== options.expectedContent) {
+    const expectedState =
+        options?.expectedEntry === undefined
+            ? undefined
+            : ignoreArchivedAt
+              ? memoryEntryState({ ...options.expectedEntry, archivedAt: undefined })
+              : memoryEntryState(options.expectedEntry);
+    const existingState = ignoreArchivedAt
+        ? memoryEntryState({ ...existing, archivedAt: undefined })
+        : memoryEntryState(existing);
+    if (
+        (expectedState !== undefined && existingState !== expectedState) ||
+        (options?.expectedContent !== undefined && existing.content !== options.expectedContent) ||
+        (options?.expectedName !== undefined && existing.name !== options.expectedName) ||
+        (options?.expectedDescription !== undefined &&
+            existing.description !== options.expectedDescription)
+    ) {
         throw new Error(`memory topic changed since it was read: ${existing.id}`);
     }
 }
@@ -149,6 +255,10 @@ export class LocalMemoryStore implements MemoryStore {
     private get workspaceDir(): string {
         if (!this._dirKey) throw new Error("LocalMemoryStore not initialized");
         return join(this.projectsDir, this._dirKey);
+    }
+
+    private get retiredPath(): string {
+        return join(this.workspaceDir, ".dream", "retired.json");
     }
 
     constructor() {
@@ -210,6 +320,7 @@ export class LocalMemoryStore implements MemoryStore {
         // Chain to serialize the read-modify-write. Each call extends the
         // chain; work runs in submission order even if callers don't await.
         const next = this.writeChain.then(() => {
+            assertBodyLimit(entry.content);
             // Fresh read: a topic the model's write tool just created must
             // block this add rather than be overwritten by it.
             if (this.readTopicsFresh().some((e) => e.id === entry.id)) {
@@ -313,7 +424,7 @@ export class LocalMemoryStore implements MemoryStore {
      * unlink are inside the chain so an appendEntry / writeMemory cannot
      * interleave between them. `expectedContent` makes it a compare-and-delete.
      */
-    async deleteTopic(id: string, options?: { expectedContent?: string }): Promise<void> {
+    async deleteTopic(id: string, options?: MemoryUpdateOptions): Promise<void> {
         if (!this.initialized) {
             return Promise.reject(new Error("LocalMemoryStore not initialized"));
         }
@@ -337,9 +448,10 @@ export class LocalMemoryStore implements MemoryStore {
      * Move a topic into `archive/`, out of injection and `listTopics`. An
      * older archived copy with the same id is kept under `archive/history/`
      * rather than overwritten: an undo may still need to bring it back, and
-     * the newest copy is the one a restore takes.
+     * the newest copy is the one a restore takes. Returns the validated snapshot
+     * captured in this write tick so callers need not reread mutable archives.
      */
-    async archiveTopic(id: string, options?: { expectedContent?: string }): Promise<void> {
+    async archiveTopic(id: string, options?: ArchiveTopicOptions): Promise<MemoryEntry> {
         if (!this.initialized) {
             return Promise.reject(new Error("LocalMemoryStore not initialized"));
         }
@@ -355,17 +467,30 @@ export class LocalMemoryStore implements MemoryStore {
                 const historyDir = join(this.workspaceDir, ARCHIVE_DIR, ARCHIVE_HISTORY_DIR);
                 ensureDir(historyDir);
                 const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-                renameSync(archivedPath, join(historyDir, `${id}.${stamp}.md`));
+                renameSync(
+                    archivedPath,
+                    join(historyDir, `${id}.${stamp}-${randomUUID().slice(0, 8)}.md`),
+                );
             }
-            renameSync(join(this.workspaceDir, `${id}.md`), archivedPath);
+            const archivedAt = new Date().toISOString();
+            const archived: MemoryEntry = { ...existing, archivedAt };
+            atomicWrite(archivedPath, buildTopicFile(archived));
+            unlinkSync(join(this.workspaceDir, `${id}.md`));
+            if (options?.retirementReason !== undefined) {
+                this.addRetiredContent(existing.content);
+            }
             this.topicsCache = undefined;
+            return archived;
         });
         this.writeChain = next.catch(() => undefined);
         return next;
     }
 
-    /** Move an archived topic back. Refuses when a live topic took the id. */
-    async restoreTopic(id: string): Promise<void> {
+    /** Restore inside the write queue, checking archived state before rename. */
+    async restoreTopic(
+        id: string,
+        options?: Pick<MemoryUpdateOptions, "expectedEntry">,
+    ): Promise<void> {
         if (!this.initialized) {
             return Promise.reject(new Error("LocalMemoryStore not initialized"));
         }
@@ -386,7 +511,24 @@ export class LocalMemoryStore implements MemoryStore {
             if (this.readTopicsFresh().some((e) => e.id === id)) {
                 throw new Error(`memory topic already exists: ${id}`);
             }
-            renameSync(from, join(this.workspaceDir, `${id}.md`));
+            if (options?.expectedEntry !== undefined) {
+                const archived = readTopicDir(
+                    join(this.workspaceDir, ARCHIVE_DIR),
+                    this._workspaceId,
+                ).find((entry) => entry.id === id);
+                if (!archived) throw new Error(`unknown archived memory topic: ${id}`);
+                assertExpectedContent(archived, options, true);
+            }
+            const archived = readTopicDir(
+                join(this.workspaceDir, ARCHIVE_DIR),
+                this._workspaceId,
+            ).find((entry) => entry.id === id);
+            if (!archived) throw new Error(`unknown archived memory topic: ${id}`);
+            atomicWrite(
+                join(this.workspaceDir, `${id}.md`),
+                buildTopicFile({ ...archived, archivedAt: undefined }),
+            );
+            unlinkSync(from);
             this.topicsCache = undefined;
         });
         this.writeChain = next.catch(() => undefined);
@@ -399,6 +541,85 @@ export class LocalMemoryStore implements MemoryStore {
         return readTopicDir(join(this.workspaceDir, ARCHIVE_DIR), this._workspaceId);
     }
 
+    async purgeArchivedTopics(options: {
+        retentionDays: 7 | 30 | 90;
+        now?: Date;
+        protectedIds?: ReadonlySet<string>;
+        beforeDelete?: (candidates: readonly ArchiveCleanupCandidate[]) => void;
+    }): Promise<ArchiveCleanupResult> {
+        if (!this.initialized) return Promise.reject(new Error("LocalMemoryStore not initialized"));
+        const next = this.writeChain.then(() => {
+            const now = (options.now ?? new Date()).getTime();
+            const cutoff = now - options.retentionDays * 24 * 60 * 60 * 1000;
+            const candidates: ArchiveCleanupCandidate[] = [];
+            let skipped = 0;
+            for (const file of archiveFiles(this.workspaceDir)) {
+                const key = file
+                    .slice(join(this.workspaceDir, ARCHIVE_DIR).length + 1)
+                    .replaceAll("\\", "/");
+                const basename = file.split(/[\\/]/).pop()?.replace(/\.md$/, "") ?? "";
+                const id = basename.includes(".")
+                    ? basename.slice(0, basename.indexOf("."))
+                    : basename;
+                const entry = readArchiveFile(file, this._workspaceId);
+                const archivedAt = entry?.archivedAt;
+                if (!entry) {
+                    skipped++;
+                    continue;
+                }
+                if (!archivedAt) {
+                    // A readable legacy archive gets a first-seen anchor. It
+                    // is intentionally not eligible during this cleanup pass.
+                    atomicWrite(
+                        file,
+                        buildTopicFile({ ...entry, archivedAt: new Date(now).toISOString() }),
+                    );
+                    skipped++;
+                    continue;
+                }
+                if (!Number.isFinite(Date.parse(archivedAt))) {
+                    skipped++;
+                    continue;
+                }
+                if (options.protectedIds?.has(id) || Date.parse(archivedAt) > cutoff) {
+                    skipped++;
+                    continue;
+                }
+                candidates.push({ key, id, entry, archivedAt });
+            }
+            options.beforeDelete?.(candidates);
+            let deleted = 0;
+            const failures: string[] = [];
+            for (const candidate of candidates) {
+                const path = join(this.workspaceDir, ARCHIVE_DIR, candidate.key);
+                if (!isSafeArchivePath(path, this.workspaceDir)) {
+                    skipped++;
+                    continue;
+                }
+                try {
+                    unlinkSync(path);
+                    deleted++;
+                } catch (error) {
+                    failures.push(`${candidate.key}: ${String(error)}`);
+                }
+            }
+            if (failures.length > 0) {
+                throw new Error(
+                    `archive cleanup deleted ${deleted}; failed ${failures.length}: ${failures.join("; ")}`,
+                );
+            }
+            return { deleted, skipped };
+        });
+        this.writeChain = next.catch(() => undefined);
+        return next;
+    }
+
+    isRetiredContent(content: string): boolean {
+        const fingerprint = retiredFingerprint(content);
+        const hashes = readRetiredHashes(this.retiredPath);
+        return hashes.includes(fingerprint);
+    }
+
     /** Synchronous lookup for a single topic. */
     getTopic(id: string): MemoryEntry | undefined {
         if (!this.initialized) {
@@ -409,7 +630,8 @@ export class LocalMemoryStore implements MemoryStore {
 
     /**
      * replace semantics: verify id exists → overwrite topic file body,
-     * preserving createdAt and writing a new updatedAt. Read-validate and
+     * preserving createdAt/type and merging sources. Only substantive edits
+     * refresh updatedAt. Read-validate and
      * write are inside the same writeChain tick with no await between them,
      * closing the TOCTOU window. `expectedContent` turns the write into a
      * compare-and-swap for callers that derived `content` from a snapshot.
@@ -417,7 +639,7 @@ export class LocalMemoryStore implements MemoryStore {
     async updateTopic(
         id: string,
         content: string,
-        options?: { expectedContent?: string },
+        options?: MemoryUpdateOptions,
     ): Promise<MemoryEntry> {
         if (!this.initialized) {
             return Promise.reject(new Error("LocalMemoryStore not initialized"));
@@ -429,8 +651,38 @@ export class LocalMemoryStore implements MemoryStore {
                 throw new Error(`unknown memory topic: ${id}`);
             }
             assertExpectedContent(existing, options);
-            const updatedAt = new Date().toISOString();
-            const newEntry: MemoryEntry = { ...existing, content: content.trim(), updatedAt };
+            assertBodyLimit(content);
+            const name =
+                options?.name === undefined ? existing.name : frontmatterValue(options.name);
+            if (!name.trim()) throw new Error("memory topic name must not be blank");
+            const description =
+                options?.description === undefined
+                    ? existing.description
+                    : frontmatterValue(options.description);
+            const changed =
+                content.trim() !== existing.content.trim() ||
+                name !== existing.name ||
+                description !== existing.description;
+            const sources = unionMemorySources(existing.sources, options?.sources);
+            const explicitlyRequested =
+                existing.explicitlyRequested === true
+                    ? true
+                    : (options?.explicitlyRequested ?? existing.explicitlyRequested);
+            if (
+                !changed &&
+                sources.length === (existing.sources?.length ?? 0) &&
+                explicitlyRequested === existing.explicitlyRequested
+            )
+                return existing;
+            const newEntry: MemoryEntry = {
+                ...existing,
+                name,
+                description,
+                content: content.trim(),
+                ...(changed ? { updatedAt: new Date().toISOString() } : {}),
+                ...(sources.length ? { sources } : {}),
+                ...(explicitlyRequested === undefined ? {} : { explicitlyRequested }),
+            };
             const path = join(this.workspaceDir, `${id}.md`);
             atomicWrite(path, buildTopicFile(newEntry));
             this.topicsCache = undefined;
@@ -438,6 +690,14 @@ export class LocalMemoryStore implements MemoryStore {
         });
         this.writeChain = next.catch(() => undefined);
         return next;
+    }
+
+    private addRetiredContent(content: string): void {
+        const hashes = readRetiredHashes(this.retiredPath);
+        const fingerprint = retiredFingerprint(content);
+        if (!hashes.includes(fingerprint)) {
+            atomicWrite(this.retiredPath, `${JSON.stringify([...hashes, fingerprint])}\n`);
+        }
     }
 
     // ── private helpers ────────────────────────────────────────────────────────
@@ -491,6 +751,9 @@ export function parseTopicFrontmatter(raw: string): {
     type: MemoryEntryType;
     createdAt?: string;
     updatedAt?: string;
+    archivedAt?: string;
+    explicitlyRequested?: boolean;
+    sources?: MemoryEntry["sources"];
 } | null {
     const match = raw.match(/^---\r?\n([\s\S]+?)\r?\n---\r?\n([\s\S]*)$/);
     if (!match) return null;
@@ -498,7 +761,7 @@ export function parseTopicFrontmatter(raw: string): {
     const yaml = match[1];
     if (!yaml) return null;
     const get = (key: string): string => {
-        const m = yaml.match(new RegExp(`^${key}:\\s*(.+)$`, "m"));
+        const m = yaml.match(new RegExp(`^${key}:[\\t ]*([^\\r\\n]*)$`, "m"));
         return m ? m[1]?.trim() : "";
     };
 
@@ -511,7 +774,58 @@ export function parseTopicFrontmatter(raw: string): {
 
     const createdAt = get("createdAt") || undefined;
     const updatedAt = get("updatedAt") || undefined;
-    return { name, description, type: typeRaw as MemoryEntryType, createdAt, updatedAt };
+    const archivedAt = get("archivedAt") || undefined;
+    const explicitlyRequestedRaw = get("explicitlyRequested");
+    const explicitlyRequested =
+        explicitlyRequestedRaw === "true"
+            ? true
+            : explicitlyRequestedRaw === "false"
+              ? false
+              : undefined;
+    const sources = parseSources(get("sources"));
+    return {
+        name,
+        description,
+        type: typeRaw as MemoryEntryType,
+        ...(createdAt ? { createdAt } : {}),
+        updatedAt,
+        ...(archivedAt ? { archivedAt } : {}),
+        ...(explicitlyRequested === undefined ? {} : { explicitlyRequested }),
+        ...(sources.length ? { sources } : {}),
+    };
+}
+
+/** Corrupt provenance must not hide an otherwise readable legacy memory. */
+function parseSources(raw: string): NonNullable<MemoryEntry["sources"]> {
+    try {
+        const values: unknown = JSON.parse(raw);
+        if (!Array.isArray(values)) return [];
+        const sources: NonNullable<MemoryEntry["sources"]>[number][] = [];
+        for (const value of values) {
+            if (value === null || typeof value !== "object") continue;
+            const { sessionId, recordedAt, via, entryId, explicitlyRequested } = value;
+            if (
+                typeof sessionId !== "string" ||
+                !sessionId.trim() ||
+                typeof recordedAt !== "string" ||
+                !Number.isFinite(Date.parse(recordedAt)) ||
+                (via !== "auto" && via !== "tool") ||
+                (entryId !== undefined && (typeof entryId !== "string" || !entryId.trim())) ||
+                (explicitlyRequested !== undefined && typeof explicitlyRequested !== "boolean")
+            )
+                continue;
+            sources.push({
+                sessionId,
+                recordedAt,
+                via,
+                ...(entryId === undefined ? {} : { entryId }),
+                ...(explicitlyRequested === undefined ? {} : { explicitlyRequested }),
+            });
+        }
+        return unionMemorySources(sources);
+    } catch {
+        return [];
+    }
 }
 
 /** Read all topic files from a project directory. */
@@ -582,6 +896,11 @@ function readTopicDir(root: string, workspaceId?: string): MemoryEntry[] {
                 content: body.trim(),
                 createdAt: fileCreatedAt,
                 updatedAt: frontmatter.updatedAt,
+                ...(frontmatter.archivedAt ? { archivedAt: frontmatter.archivedAt } : {}),
+                ...(frontmatter.explicitlyRequested === undefined
+                    ? {}
+                    : { explicitlyRequested: frontmatter.explicitlyRequested }),
+                ...(frontmatter.sources ? { sources: frontmatter.sources } : {}),
                 workspaceId,
             });
         } catch {

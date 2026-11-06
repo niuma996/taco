@@ -19,6 +19,7 @@ import type { DreamBusy } from "../../hooks/useMemoryPane";
 import { useNow } from "../../hooks/useNow";
 import { useT, useUiLanguage } from "../../i18n/useI18n";
 import { formatRelativeTime } from "../../lib/relativeTime";
+import { AssistantMarkdown } from "../AssistantMarkdown";
 import { Button } from "../ui/Button";
 import { IconButton } from "../ui/IconButton";
 import { Switch } from "../ui/Switch";
@@ -80,7 +81,8 @@ function ActionDetails({
                 </summary>
                 <div className="memory-dream-action-body">
                     <strong>{action.name}</strong>
-                    <pre>{action.content}</pre>
+                    <p>{action.description}</p>
+                    <AssistantMarkdown className="md-assistant" text={action.content} />
                 </div>
             </details>
         );
@@ -89,7 +91,11 @@ function ActionDetails({
         return (
             <details className="memory-dream-action">
                 <summary>{topicLabel(action.id, names)}</summary>
-                <pre className="memory-dream-action-body">{action.content}</pre>
+                <div className="memory-dream-action-body">
+                    {action.name ? <strong>{action.name}</strong> : null}
+                    {action.description !== undefined ? <p>{action.description}</p> : null}
+                    <AssistantMarkdown className="md-assistant" text={action.content} />
+                </div>
             </details>
         );
     }
@@ -199,6 +205,10 @@ function ReportHistory({
     const { t } = useT();
     const lng = useUiLanguage();
     const nowMs = useNow();
+    const undoExpiry = (report: MemoryDreamReportSummary): string | undefined =>
+        "undoExpiredAt" in report && typeof report.undoExpiredAt === "string"
+            ? report.undoExpiredAt
+            : undefined;
     return (
         <details className="memory-dream-history">
             <summary>
@@ -219,6 +229,13 @@ function ReportHistory({
                             ) : null}
                             {report.undoneAt ? (
                                 <small>{t("memory.dream.undone")}</small>
+                            ) : undoExpiry(report) !== undefined &&
+                              Date.parse(undoExpiry(report) as string) <= nowMs ? (
+                                <small>
+                                    {t("memory.dream.undoExpired", "Undo expired")}
+                                    {" · "}
+                                    {formatRelativeTime(undoExpiry(report) as string, lng, nowMs)}
+                                </small>
                             ) : (
                                 <Button
                                     size="sm"
@@ -231,6 +248,14 @@ function ReportHistory({
                                         : t("memory.dream.undo")}
                                 </Button>
                             )}
+                            {!report.undoneAt &&
+                            undoExpiry(report) !== undefined &&
+                            Date.parse(undoExpiry(report) as string) > nowMs ? (
+                                <small>
+                                    {t("memory.dream.undoExpires", "Undo available until")}{" "}
+                                    {formatRelativeTime(undoExpiry(report) as string, lng, nowMs)}
+                                </small>
+                            ) : null}
                         </div>
                     </li>
                 ))}

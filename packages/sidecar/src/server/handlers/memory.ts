@@ -46,6 +46,7 @@ import {
 import { hashOf, LocalMemoryStore } from "../../memory/local/store.ts";
 import type { MemoryStore } from "../../memory/types.ts";
 import { MemoryConflictError, normalizeMemoryTopicId } from "../../memory/types.ts";
+import { currentMemoryWriteOrigin } from "../../memory/writeOrigin.ts";
 import type { Api, Model, Models } from "../../runtime/pi/types.ts";
 import type { WorkspaceRuntime } from "../../runtime/workspace.ts";
 import {
@@ -64,6 +65,9 @@ function toWireTopic(entry: {
     content: string;
     createdAt: string;
     updatedAt?: string;
+    archivedAt?: string;
+    explicitlyRequested?: boolean;
+    sources?: MemoryTopicEntry["sources"];
 }): MemoryTopicEntry {
     return {
         id: entry.id,
@@ -73,6 +77,11 @@ function toWireTopic(entry: {
         content: entry.content,
         createdAt: entry.createdAt,
         updatedAt: entry.updatedAt,
+        ...(entry.archivedAt ? { archivedAt: entry.archivedAt } : {}),
+        ...(entry.explicitlyRequested === undefined
+            ? {}
+            : { explicitlyRequested: entry.explicitlyRequested }),
+        ...(entry.sources ? { sources: entry.sources } : {}),
     };
 }
 
@@ -100,6 +109,7 @@ function toReportSummary(report: DreamReport): MemoryDreamReportSummary {
         counts: report.counts,
         skipped: report.skipped.length,
         ...(report.undoneAt ? { undoneAt: report.undoneAt } : {}),
+        ...(report.undoExpiredAt ? { undoExpiredAt: report.undoExpiredAt } : {}),
     };
 }
 
@@ -302,9 +312,28 @@ export function registerMemoryHandlers(): void {
                 );
             }
             const store = workspace.memoryStore;
+            const sourceSessionId = currentMemoryWriteOrigin();
+            const sources =
+                sourceSessionId === undefined
+                    ? undefined
+                    : [
+                          {
+                              sessionId: sourceSessionId,
+                              recordedAt: new Date().toISOString(),
+                              via: "tool" as const,
+                              ...(params.explicitlyRequested === undefined
+                                  ? {}
+                                  : { explicitlyRequested: params.explicitlyRequested }),
+                          },
+                      ];
             switch (params.action) {
                 case "add": {
-                    if (!params.name || !params.content || !params.type) {
+                    if (
+                        !params.name?.trim() ||
+                        typeof params.content !== "string" ||
+                        !params.content.trim() ||
+                        !params.type
+                    ) {
                         throw new RpcHandlerError(
                             ErrorCodes.InvalidParams,
                             "memory.upsert add: name/content/type required",
@@ -329,6 +358,10 @@ export function registerMemoryHandlers(): void {
                         type: params.type,
                         content: params.content,
                         createdAt: new Date().toISOString(),
+                        ...(sources ? { sources } : {}),
+                        ...(params.explicitlyRequested === undefined
+                            ? {}
+                            : { explicitlyRequested: params.explicitlyRequested }),
                     });
                     return { ok: true, outcome: "created" };
                 }
@@ -345,7 +378,14 @@ export function registerMemoryHandlers(): void {
                             `memory.upsert replace: content required, ≤${MEMORY_CONTENT_MAX_CHARS}`,
                         );
                     }
-                    await store.updateTopic(validatedId, params.content);
+                    await store.updateTopic(validatedId, params.content, {
+                        name: params.name,
+                        description: params.description,
+                        sources,
+                        ...(params.explicitlyRequested === undefined
+                            ? {}
+                            : { explicitlyRequested: params.explicitlyRequested }),
+                    });
                     return { ok: true, outcome: "updated" };
                 }
                 case "remove": {

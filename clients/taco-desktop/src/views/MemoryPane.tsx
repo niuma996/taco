@@ -73,6 +73,33 @@ function topicMatches(topic: MemoryTopicEntry, terms: readonly string[]): boolea
     return terms.every((term) => haystack.includes(term));
 }
 
+/** Session IDs stay selectable for recall; this pane has no session-navigation contract. */
+function MemorySources({ topic }: { topic: MemoryTopicEntry }) {
+    const { t } = useT();
+    const lng = useUiLanguage();
+    const nowMs = useNow();
+    if (!topic.sources?.length) return null;
+    return (
+        <section className="memory-view-sources">
+            <h3>{t("memory.sources")}</h3>
+            <ul>
+                {topic.sources.map((source, index) => (
+                    <li
+                        key={`${source.sessionId}-${source.recordedAt}-${source.entryId ?? ""}-${index}`}
+                    >
+                        <code>{source.sessionId}</code>
+                        {source.entryId ? <code>{source.entryId}</code> : null}
+                        <time dateTime={source.recordedAt} title={source.recordedAt}>
+                            {formatRelativeTime(source.recordedAt, lng, nowMs)}
+                        </time>
+                        <span>{source.via}</span>
+                    </li>
+                ))}
+            </ul>
+        </section>
+    );
+}
+
 export function MemoryPane(props: MemoryPaneProps) {
     const {
         data,
@@ -340,14 +367,20 @@ export function MemoryPane(props: MemoryPaneProps) {
                 type="button"
                 data-memory-row={rowId}
                 aria-current={selectedId === rowId && view === "detail" ? "true" : undefined}
-                className={`memory-list-item${selectedId === rowId ? " active" : ""}${
+                className={`memory-topic-card${selectedId === rowId ? " active" : ""}${
                     archived ? " archived" : ""
                 }`}
                 onClick={() => handleSelect(rowId)}
             >
-                <span className="memory-list-item-name">{topic.name}</span>
-                <span className="memory-list-item-desc">
+                <span className="memory-card-title">{topic.name}</span>
+                <span className="memory-card-description">
                     {topic.description || t("memory.noDescription")}
+                </span>
+                <span className="memory-card-meta">
+                    <span className="memory-card-type">{typeLabel(topic.type)}</span>
+                    <span>
+                        {formatRelativeTime(topic.updatedAt ?? topic.createdAt, lng, nowMs)}
+                    </span>
                 </span>
             </button>
         );
@@ -424,13 +457,23 @@ export function MemoryPane(props: MemoryPaneProps) {
                     <button
                         type="button"
                         data-memory-row={MEMORY_ROOT_ID}
+                        aria-label={t("memory.globalName")}
                         aria-current={isMemorySelected && view === "detail" ? "true" : undefined}
-                        className={`memory-list-item${
+                        className={`memory-global-card${
                             isMemorySelected && view === "detail" ? " active" : ""
                         }`}
                         onClick={() => handleSelect(MEMORY_ROOT_ID)}
                     >
-                        <span className="memory-list-item-name">{t("memory.globalName")}</span>
+                        <span className="memory-global-card-heading">
+                            <span className="memory-card-title">{t("memory.globalName")}</span>
+                            <span className="memory-global-card-mark">md</span>
+                        </span>
+                        {data.memoryContent.trim() ? (
+                            <span className="memory-card-description">
+                                {data.memoryContent.trim()}
+                            </span>
+                        ) : null}
+                        <span className="memory-global-card-footer">{t("memory.globalLabel")}</span>
                     </button>
 
                     {visibleTopics.length === 0 ? (
@@ -448,7 +491,9 @@ export function MemoryPane(props: MemoryPaneProps) {
                                     <div className="memory-list-section-label">
                                         {t("memory.group.recent")}
                                     </div>
-                                    {groups.recent.map((topic) => renderTopicRow(topic, false))}
+                                    <div className="memory-card-grid">
+                                        {groups.recent.map((topic) => renderTopicRow(topic, false))}
+                                    </div>
                                 </>
                             ) : null}
                             {groups.earlier.length > 0 ? (
@@ -456,7 +501,11 @@ export function MemoryPane(props: MemoryPaneProps) {
                                     <div className="memory-list-section-label">
                                         {t("memory.group.earlier")}
                                     </div>
-                                    {groups.earlier.map((topic) => renderTopicRow(topic, false))}
+                                    <div className="memory-card-grid">
+                                        {groups.earlier.map((topic) =>
+                                            renderTopicRow(topic, false),
+                                        )}
+                                    </div>
                                 </>
                             ) : null}
                         </>
@@ -482,9 +531,11 @@ export function MemoryPane(props: MemoryPaneProps) {
                                     {visibleArchived.length}
                                 </span>
                             </button>
-                            {showArchived
-                                ? visibleArchived.map((topic) => renderTopicRow(topic, true))
-                                : null}
+                            {showArchived ? (
+                                <div className="memory-card-grid memory-card-grid-archived">
+                                    {visibleArchived.map((topic) => renderTopicRow(topic, true))}
+                                </div>
+                            ) : null}
                         </div>
                     ) : null}
                 </div>
@@ -567,7 +618,11 @@ export function MemoryPane(props: MemoryPaneProps) {
                         {selectedArchivedTopic.description ? (
                             <p className="memory-view-desc">{selectedArchivedTopic.description}</p>
                         ) : null}
-                        <div className="memory-view-content">{selectedArchivedTopic.content}</div>
+                        <AssistantMarkdown
+                            className="md-assistant memory-view-markdown"
+                            text={selectedArchivedTopic.content}
+                        />
+                        <MemorySources topic={selectedArchivedTopic} />
                         <div className="memory-view-meta">
                             <code>{selectedArchivedTopic.id}</code>
                             <span className="memory-view-meta-time">
@@ -584,6 +639,21 @@ export function MemoryPane(props: MemoryPaneProps) {
                                     )}
                                 </span>
                             </span>
+                            {"archivedAt" in selectedArchivedTopic &&
+                            typeof selectedArchivedTopic.archivedAt === "string" ? (
+                                <span className="memory-view-meta-time">
+                                    <span className="memory-view-meta-label">
+                                        {t("memory.dream.archivedAt", "Archived")}
+                                    </span>
+                                    <time dateTime={selectedArchivedTopic.archivedAt}>
+                                        {formatRelativeTime(
+                                            selectedArchivedTopic.archivedAt,
+                                            lng,
+                                            nowMs,
+                                        )}
+                                    </time>
+                                </span>
+                            ) : null}
                             <span className="memory-view-meta-spacer" />
                             <Button
                                 size="sm"
@@ -610,7 +680,11 @@ export function MemoryPane(props: MemoryPaneProps) {
                         {selectedTopic.description ? (
                             <p className="memory-view-desc">{selectedTopic.description}</p>
                         ) : null}
-                        <div className="memory-view-content">{selectedTopic.content}</div>
+                        <AssistantMarkdown
+                            className="md-assistant memory-view-markdown"
+                            text={selectedTopic.content}
+                        />
+                        <MemorySources topic={selectedTopic} />
                         <div className="memory-view-meta">
                             <code>{selectedTopic.id}</code>
                             <span className="memory-view-meta-time">

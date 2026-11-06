@@ -69,7 +69,7 @@ import type {
     Session,
     ThinkingLevel,
 } from "../pi/types.ts";
-import { AgentHarness, laneConfig, NoActiveOperation } from "../pi/values.ts";
+import { AgentHarness, laneConfig, NoActiveOperation, value } from "../pi/values.ts";
 import { findBranchEntries, MAIN_BRANCH } from "../session/sessionBranch.ts";
 import { type RecoveryOutcome, resumeOpenOperations } from "../session/sessionRecovery.ts";
 import { TitleSummarizer } from "../session/titleSummarizer.ts";
@@ -97,6 +97,11 @@ import {
     pruneLoadRefusedTools,
 } from "./toolsetRefresh.ts";
 import { wireTurnBookkeeping } from "./turnBookkeeping.ts";
+
+const MEMORY_EXTRACTION_CURSOR = value<string>("taco.memory.extractionCursor");
+const MEMORY_EXTRACTION_GATE = value<import("../../memory/types.ts").MemoryExtractionGateState>(
+    "taco.memory.extractionGate",
+);
 
 const log = createLogger("attachedSession");
 
@@ -837,6 +842,32 @@ export class AttachedSession extends EventEmitter {
                       args.memoryStore,
                       args.session.metadata.id,
                       () => args.getLiteModel?.("memory"),
+                      {
+                          read: async () =>
+                              (
+                                  await args.session.getValue(
+                                      MEMORY_EXTRACTION_CURSOR,
+                                      harnessContext,
+                                  )
+                              )?.value,
+                          write: async (entryId) => {
+                              await args.session.setValue(
+                                  MEMORY_EXTRACTION_CURSOR,
+                                  entryId,
+                                  harnessContext,
+                              );
+                          },
+                          readGate: async () =>
+                              (await args.session.getValue(MEMORY_EXTRACTION_GATE, harnessContext))
+                                  ?.value,
+                          writeGate: async (state) => {
+                              await args.session.setValue(
+                                  MEMORY_EXTRACTION_GATE,
+                                  state,
+                                  harnessContext,
+                              );
+                          },
+                      },
                   )
                 : undefined;
 

@@ -219,6 +219,8 @@ export function rollbackDreamLock(topicDir: string): void {
 interface DreamWorkspaceState {
     /** Set once the user applied a preview; scheduled runs then apply directly. */
     confirmedAt?: string;
+    /** Advances only after a successful model plan, including a no-op. */
+    selectionRound?: number;
     /** Scheduled runs that failed in a row since the last success. */
     failures?: number;
     /** Last failed scheduled run (ISO). */
@@ -244,6 +246,18 @@ export function readDreamConfirmed(topicDir: string): boolean {
 
 export function markDreamConfirmed(topicDir: string, now = new Date()): void {
     writeState(topicDir, { ...readState(topicDir), confirmedAt: now.toISOString() });
+}
+
+/** Persistent prompt rotation, independent of wall-clock time or report retention. */
+export function readDreamSelectionRound(topicDir: string): number {
+    return readState(topicDir).selectionRound ?? 0;
+}
+
+export function advanceDreamSelectionRound(topicDir: string): void {
+    writeState(topicDir, {
+        ...readState(topicDir),
+        selectionRound: readDreamSelectionRound(topicDir) + 1,
+    });
 }
 
 /** Record a failed scheduled run, so the next ones back off. */

@@ -5,7 +5,12 @@
  * `updateTopic` resolve immediately so callers can `await` them uniformly.
  */
 
-import type { MemoryEntry, MemoryStore } from "./types.ts";
+import type {
+    ArchiveTopicOptions,
+    MemoryEntry,
+    MemoryStore,
+    MemoryUpdateOptions,
+} from "./types.ts";
 
 export class NoOpMemoryStore implements MemoryStore {
     readonly enabled = false;
@@ -28,7 +33,7 @@ export class NoOpMemoryStore implements MemoryStore {
         return [];
     }
 
-    async deleteTopic(_id: string, _options?: { expectedContent?: string }): Promise<void> {}
+    async deleteTopic(_id: string, _options?: MemoryUpdateOptions): Promise<void> {}
 
     getTopic(_id: string): MemoryEntry | undefined {
         return undefined;
@@ -37,7 +42,7 @@ export class NoOpMemoryStore implements MemoryStore {
     async updateTopic(
         _id: string,
         _content: string,
-        _options?: { expectedContent?: string },
+        _options?: MemoryUpdateOptions,
     ): Promise<MemoryEntry> {
         return {
             id: _id,
@@ -47,5 +52,24 @@ export class NoOpMemoryStore implements MemoryStore {
             content: _content,
             createdAt: new Date(0).toISOString(),
         };
+    }
+
+    async archiveTopic(_id: string, _options?: ArchiveTopicOptions): Promise<MemoryEntry> {
+        throw new Error("memory is disabled");
+    }
+
+    async restoreTopic(
+        _id: string,
+        _options?: Pick<MemoryUpdateOptions, "expectedEntry">,
+    ): Promise<void> {}
+
+    async purgeArchivedTopics(
+        _options: Parameters<NonNullable<MemoryStore["purgeArchivedTopics"]>>[0],
+    ): Promise<{ deleted: number; skipped: number }> {
+        return { deleted: 0, skipped: 0 };
+    }
+
+    isRetiredContent(_content: string): boolean {
+        return false;
     }
 }

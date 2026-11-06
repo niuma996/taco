@@ -20,6 +20,7 @@ import {
 } from "@taco-ai/protocol";
 import type { Static } from "typebox";
 import { Type } from "typebox";
+import { withMemoryWriteOrigin } from "../memory/writeOrigin.ts";
 import type { AgentHarnessTool } from "../runtime/pi/types.ts";
 import type { TacoToolContext } from "./context.ts";
 
@@ -45,16 +46,17 @@ const memoryToolSchema = Type.Object({
         Type.String({
             maxLength: MEMORY_CONTENT_MAX_CHARS,
             description:
-                "The fact itself, stated as briefly as it can be stated — typically 1-3 sentences, " +
-                `well under the ${MEMORY_CONTENT_MAX_CHARS}-char ceiling. One memory holds ONE fact. ` +
-                "If the body needs headings, bullet lists, or covers several independent facts, " +
-                "that is two or more memories: split it into separate ids and cross-reference them " +
-                "with [[other-id]]. Do not paste code, file trees, command output, or architecture " +
-                "overviews — those are derivable from the repo; save the non-obvious conclusion instead. " +
-                "For feedback/project types, follow the fact with a short `Why:` clause.",
+                "One coherent durable theme in Markdown. Start with a first-paragraph conclusion " +
+                "that stands on its own; add headings, lists, scope, reasons or exceptions when useful. " +
+                `Typically 300-1000 characters; maximum ${MEMORY_CONTENT_MAX_CHARS}. ` +
+                "Split independent themes into separate ids and cross-reference with [[other-id]]. " +
+                "Save non-obvious conclusions, not code, file trees or command output derivable from the repo.",
         }),
     ),
     type: Type.Optional(memoryTopicTypeSchema),
+    explicitlyRequested: Type.Optional(
+        Type.Boolean({ description: "True only for a direct user request to remember this." }),
+    ),
 });
 
 export type MemoryToolInput = Static<typeof memoryToolSchema>;
@@ -70,23 +72,20 @@ export function createMemoryTool(): AgentHarnessTool<TacoToolContext> {
             "Storage: one topic file per memory under $TACO_HOME/memory/projects/<workspace-key>/. " +
             "Newest 100 topic summaries are injected into the LLM context as <memory> notes; " +
             "use the read tool on the shown file path to fetch a note's full content. " +
-            "WHEN TO CALL (proactively, don't wait to be asked): " +
-            "User reveals persona/preferences/role/tech stack → type=user; " +
-            "User explicitly corrects or confirms your behavior → type=feedback; " +
-            "Project-level fact NOT derivable from current code → type=project; " +
-            "External system reference (URL/file path/tool) → type=reference. " +
-            "DO NOT CALL for: task progress (use todoWrite), code patterns (derivable), " +
-            "info already in CLAUDE.md / <instructions>. " +
-            "ONE MEMORY = ONE FACT, stated in 1-3 sentences. Only each summary is injected " +
-            "into later sessions, so the first line carries the load; length is a shared " +
-            "budget, not private space. " +
-            `The ${MEMORY_CONTENT_MAX_CHARS}-char cap is a hard ceiling, not a target — a body that ` +
-            "approaches it is almost always several facts that belong in separate ids. " +
+            "Default to no write. Write only for an explicit request to remember, a stable user preference, " +
+            "a general correction, a confirmed decision, or a recurring reference useful across sessions. " +
+            "Types: user (stable preference), feedback (general correction), project (confirmed decision), " +
+            "reference (recurring external resource). Avoid one-off chatter, current-task details or progress, " +
+            "assistant guesses, code-derived facts, and information already in CLAUDE.md / <instructions>. " +
+            "One memory holds one coherent durable theme in Markdown, with a self-contained conclusion " +
+            "in the first paragraph. Headings, lists, scope, reasons and exceptions are welcome when useful. " +
+            `Typically 300-1000 characters; ${MEMORY_CONTENT_MAX_CHARS} is the hard maximum. ` +
+            "Existing sources identify sessions; use sessionRead to resolve ambiguity before rewriting. " +
             "Never store architecture overviews, directory layouts, code snippets, or command output: " +
             "write those to a doc in the repo and save a `reference` memory pointing at it. " +
             "ACTIONS: add (new entry; REQUIRES name, content and type; fails if id exists; optional description field for relevance matching, defaults to name), " +
-            "replace (overwrite existing by id; preserves createdAt, sets updatedAt; only updates content — " +
-            "to change name/type/description, remove+add), " +
+            "replace (update content and optional name/description; preserves createdAt, type and sources; " +
+            "refreshes updatedAt only when content or metadata changes), " +
             "remove (delete by id; permanent). " +
             "ID NAMING: kebab-case — lowercase letters, digits, and single hyphens only, ≤64 chars. " +
             "Examples: 'user-role', 'feedback-auth'. Underscores, uppercase, dots, or spaces will be rejected.",
@@ -107,15 +106,20 @@ export function createMemoryTool(): AgentHarnessTool<TacoToolContext> {
             if (!call) {
                 throw new Error("memory.upsert: no self-RPC dispatcher in this workspace");
             }
-            const result = await call(RPC.memoryUpsert, workspace, {
-                workspace,
-                action: params.action,
-                id: params.id,
-                name: params.name,
-                description: params.description,
-                content: params.content,
-                type: params.type,
-            });
+            const result = await withMemoryWriteOrigin(ctx.sessionId, () =>
+                call(RPC.memoryUpsert, workspace, {
+                    workspace,
+                    action: params.action,
+                    id: params.id,
+                    name: params.name,
+                    description: params.description,
+                    content: params.content,
+                    type: params.type,
+                    ...(params.explicitlyRequested === undefined
+                        ? {}
+                        : { explicitlyRequested: params.explicitlyRequested }),
+                }),
+            );
             const text = `memory.upsert ${result.outcome}: ${params.id}`;
             return {
                 content: [{ type: "text", text }],

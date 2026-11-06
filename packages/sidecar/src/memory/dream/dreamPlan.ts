@@ -39,6 +39,8 @@ export interface DreamRewriteAction {
     readonly action: "rewrite";
     readonly id: string;
     readonly content: string;
+    readonly name?: string;
+    readonly description?: string;
 }
 
 export interface DreamArchiveAction {
@@ -47,7 +49,19 @@ export interface DreamArchiveAction {
     readonly reason: string;
     /** A kept topic that now holds this fact; lets a non-stale topic be retired. */
     readonly supersededBy?: string;
+    readonly category?: DreamArchiveCategory;
+    readonly evidence?: string;
 }
+
+export const DREAM_ARCHIVE_CATEGORIES = [
+    "duplicate",
+    "superseded",
+    "transient",
+    "non_durable",
+    "invalidated",
+    "stale",
+] as const;
+export type DreamArchiveCategory = (typeof DREAM_ARCHIVE_CATEGORIES)[number];
 
 export type DreamAction = DreamMergeAction | DreamRewriteAction | DreamArchiveAction;
 
@@ -61,6 +75,8 @@ export interface DreamOptions {
     readonly staleDays: number;
     /** Longer horizon for user / feedback topics, which age more slowly. */
     readonly staleDaysDurable: number;
+    readonly archiveCleanupEnabled?: boolean;
+    readonly archiveRetentionDays?: 7 | 30 | 90;
 }
 
 export const DEFAULT_DREAM_OPTIONS: DreamOptions = {
@@ -68,6 +84,8 @@ export const DEFAULT_DREAM_OPTIONS: DreamOptions = {
     minChanges: 5,
     staleDays: 90,
     staleDaysDurable: 180,
+    archiveCleanupEnabled: false,
+    archiveRetentionDays: 7,
 };
 
 /** Upper bound on the share of topics one plan may archive (merge sources included). */
@@ -92,6 +110,8 @@ export interface DreamTopicView {
     readonly idleDays: number;
     /** True when idleDays passed the staleness horizon for its type. */
     readonly stale: boolean;
+    readonly explicitlyRequested?: boolean;
+    readonly sources?: MemoryEntry["sources"];
 }
 
 // ─── topic views ──────────────────────────────────────────────────────────────
@@ -134,6 +154,15 @@ export function buildTopicViews(
             lastReadAt,
             idleDays,
             stale: idleDays >= horizon,
+            ...((topic as MemoryEntry & { explicitlyRequested?: boolean }).explicitlyRequested ===
+            undefined
+                ? {}
+                : {
+                      explicitlyRequested: (
+                          topic as MemoryEntry & { explicitlyRequested?: boolean }
+                      ).explicitlyRequested,
+                  }),
+            ...(topic.sources?.length ? { sources: topic.sources } : {}),
         };
     });
 }
@@ -352,19 +381,37 @@ function parseRewrite(raw: Record<string, unknown>): DreamAction | null {
     if (!id || !content) return null;
     // Same rule as a merge: a cut rewrite would replace the fact with a fragment.
     if (content.length > MEMORY_CONTENT_MAX_CHARS) return null;
-    return { action: "rewrite", id: normalizePlanId(id), content };
+    const name = asText(raw.name);
+    const description = asText(raw.description);
+    return {
+        action: "rewrite",
+        id: normalizePlanId(id),
+        content,
+        ...(name ? { name: name.slice(0, 60) } : {}),
+        ...(description ? { description: description.slice(0, 120) } : {}),
+    };
 }
 
 function parseArchive(raw: Record<string, unknown>): DreamAction | null {
     const id = asText(raw.id);
     if (!id) return null;
     const supersededBy = asText(raw.supersededBy ?? raw.superseded_by ?? raw.replacedBy);
+    const category = asText(raw.category);
+    const evidence = asText(raw.evidence);
+    if (
+        category !== undefined &&
+        !DREAM_ARCHIVE_CATEGORIES.includes(category as DreamArchiveCategory)
+    ) {
+        return null;
+    }
     return {
         action: "archive",
         id: normalizePlanId(id),
         // A missing reason is not worth dropping the action over.
         reason: (asText(raw.reason) ?? "retired by consolidation").slice(0, 200),
         ...(supersededBy ? { supersededBy: normalizePlanId(supersededBy) } : {}),
+        ...(category ? { category: category as DreamArchiveCategory } : {}),
+        ...(evidence ? { evidence: evidence.slice(0, 500) } : {}),
     };
 }
 
@@ -386,6 +433,113 @@ function firstArray(raw: Record<string, unknown>, keys: readonly string[]): stri
         if (ids.length > 0) return ids;
     }
     return [];
+}
+
+/**
+ * Point a plan's ids at the topics they name.
+ *
+ * The model is shown the ids as they sit on disk, and older topics keep the
+ * underscores they were written with (`user_role_zh`). Parsing normalized
+ * those away, so an echoed id named a topic that does not exist and the
+ * whole plan was rejected. Resolve each id against the topics the model was
+ * shown: an exact match first, then a normalized one.
+ */
+export function resolveActionIds(
+    actions: readonly DreamAction[],
+    views: readonly DreamTopicView[],
+): DreamAction[] {
+    const exact = new Set(views.map((view) => view.id));
+    const normalized = new Map<string, string[]>();
+    for (const view of views) {
+        const key = normalizeMemoryTopicId(view.id);
+        const bucket = normalized.get(key);
+        if (bucket) bucket.push(view.id);
+        else normalized.set(key, [view.id]);
+    }
+    const resolve = (id: string): string => {
+        if (exact.has(id)) return id;
+        const bucket = normalized.get(normalizeMemoryTopicId(id));
+        // An ambiguous key names two topics: leave the id alone and let the
+        // validator reject it rather than guess which one was meant.
+        return bucket && bucket.length === 1 ? bucket[0] : id;
+    };
+    // A merge target names the topic to create, so it keeps its own id: mapping
+    // it onto an existing topic would turn a runnable plan into a rejected one.
+    const mergeTargets = new Set(
+        actions.filter((action) => action.action === "merge").map((action) => action.id),
+    );
+    return actions.map((action) => {
+        if (action.action === "merge") {
+            return { ...action, sourceIds: action.sourceIds.map(resolve) };
+        }
+        if (action.action === "rewrite") {
+            return { ...action, id: resolve(action.id) };
+        }
+        const supersededBy = action.supersededBy;
+        return {
+            ...action,
+            id: resolve(action.id),
+            ...(supersededBy === undefined || mergeTargets.has(supersededBy)
+                ? {}
+                : { supersededBy: resolve(supersededBy) }),
+        };
+    });
+}
+
+/**
+ * The topics an action touches: the ones it consumes, rewrites or archives.
+ */
+function touchedTopics(action: DreamAction): readonly string[] {
+    if (action.action === "merge") return action.sourceIds;
+    return [action.id];
+}
+
+/**
+ * Drop actions that touch a topic an earlier action already claimed.
+ *
+ * One topic in two actions is a model slip, and the rest of the plan still
+ * removes real duplication — rejecting the whole plan for it throws that
+ * away, the same way the retirement cap used to. Keep the earlier action:
+ * the prompt asks for the most valuable actions first.
+ */
+export function trimConflictingActions(actions: readonly DreamAction[]): {
+    actions: DreamAction[];
+    dropped: number;
+} {
+    const claimed = new Set<string>();
+    const kept: DreamAction[] = [];
+    let dropped = 0;
+    for (const action of actions) {
+        if (touchedTopics(action).some((id) => claimed.has(id))) {
+            dropped++;
+            continue;
+        }
+        for (const id of touchedTopics(action)) claimed.add(id);
+        kept.push(action);
+    }
+
+    // An archive may appear before the merge it references. Once the conflict
+    // pass has decided which merges survived, remove every archive whose
+    // supersededBy points at a merge target that was dropped.
+    const allMergeTargets = new Set(
+        actions.filter((action) => action.action === "merge").map((action) => action.id),
+    );
+    const keptMergeTargets = new Set(
+        kept.filter((action) => action.action === "merge").map((action) => action.id),
+    );
+    const dependencyFree = kept.filter((action) => {
+        if (
+            action.action === "archive" &&
+            action.supersededBy !== undefined &&
+            allMergeTargets.has(action.supersededBy) &&
+            !keptMergeTargets.has(action.supersededBy)
+        ) {
+            dropped++;
+            return false;
+        }
+        return true;
+    });
+    return { actions: dependencyFree, dropped };
 }
 
 // ─── validation ───────────────────────────────────────────────────────────────
@@ -450,19 +604,60 @@ export function validateDreamPlan(
             const check = claim(action.id);
             if (!check.ok) return check;
             archived++;
+            const entry = view;
+            const category = action.category;
+            const survivor = action.supersededBy;
+            const requiresSurvivor = category === "duplicate" || category === "superseded";
+            if (requiresSurvivor && !survivor) {
+                return { ok: false, reason: `archive category ${category} needs supersededBy` };
+            }
+            if (category === "invalidated") {
+                if (!action.evidence)
+                    return { ok: false, reason: "invalidated archive needs evidence" };
+                const survivorText = survivor ? byId.get(survivor)?.content : undefined;
+                if (action.evidence !== view.content && action.evidence !== survivorText) {
+                    return { ok: false, reason: "invalidated evidence must quote an input memory" };
+                }
+            }
+            const knownAutomatic =
+                entry.sources?.some(
+                    (source) =>
+                        (source.via === "auto" && source.explicitlyRequested !== true) ||
+                        (source.via === "tool" && source.explicitlyRequested === false),
+                ) ?? false;
+            const lowUsefulness =
+                category === "transient" || category === "non_durable" || category === "stale";
+            if (
+                lowUsefulness &&
+                (entry.explicitlyRequested === true ||
+                    entry.sources?.some((source) => source.explicitlyRequested === true) === true)
+            ) {
+                return {
+                    ok: false,
+                    reason: "explicitly requested topic is protected from low-usefulness retirement",
+                };
+            }
+            if ((category === "transient" || category === "non_durable") && !knownAutomatic) {
+                return {
+                    ok: false,
+                    reason: `${category} retirement needs a known automatic origin`,
+                };
+            }
+            const knownLowUsefulnessOrigin =
+                (category === "transient" || category === "non_durable") && knownAutomatic;
             // Only stale topics may be retired on the model's judgement alone;
             // a recently active one needs a surviving topic that holds its fact.
-            if (!view.stale) {
+            if (!view.stale && !knownLowUsefulnessOrigin) {
                 if (!action.supersededBy) {
                     return {
                         ok: false,
                         reason: `archive of active topic ${action.id} needs supersededBy`,
                     };
                 }
-                const survivor = action.supersededBy;
                 const survives =
-                    allMergeTargets.has(survivor) ||
-                    (byId.has(survivor) && !isRetired(survivor, actions));
+                    survivor !== undefined &&
+                    (allMergeTargets.has(survivor) ||
+                        (byId.has(survivor) && !isRetired(survivor, actions)));
                 if (!survives) {
                     return {
                         ok: false,

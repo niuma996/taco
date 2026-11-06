@@ -17,6 +17,7 @@ import type { Api, Model, Models } from "../../runtime/pi/types.ts";
 import { parseMemoryDreamArgs } from "../../scheduler/builtinJobs.ts";
 import type { BuiltinJobHandler } from "../../scheduler/dispatcher.ts";
 import { LocalMemoryStore } from "../local/store.ts";
+import { cleanupArchivedTopics } from "./cleanup.ts";
 import { type DreamOutcome, runDream } from "./consolidator.ts";
 import { resolveDreamModel } from "./dreamModel.ts";
 import type { DreamOptions } from "./dreamPlan.ts";
@@ -70,12 +71,24 @@ export async function runDreamJob(
     run: DreamJobRun = {},
 ): Promise<DreamJobResult> {
     if (!deps.memoryEnabled()) return { summary: "skipped: memory is disabled", outcomes: [] };
+    const cleanup = run.options?.archiveCleanupEnabled
+        ? await runWorkspaceCleanup(
+              deps.listDirKeys ?? LocalMemoryStore.listDirKeys,
+              run.options.archiveRetentionDays ?? 7,
+          )
+        : { deleted: 0, skipped: 0 };
     const resolved = deps.resolveModel(run.model);
     // No model is a setup gap, not a broken run: throwing would count toward
     // the failure breaker and disable the job before the user adds a key.
     if (!resolved) {
         if (run.model) throw new Error(`memory consolidation model not found: ${run.model}`);
-        return { summary: NO_MODEL_SUMMARY, outcomes: [] };
+        return {
+            summary:
+                cleanup.deleted > 0
+                    ? `cleanup: deleted ${cleanup.deleted}; ${NO_MODEL_SUMMARY}`
+                    : NO_MODEL_SUMMARY,
+            outcomes: [],
+        };
     }
     const signal = run.signal ?? AbortSignal.timeout(DREAM_FIRE_BUDGET_MS);
 
@@ -99,14 +112,24 @@ export async function runDreamJob(
         if (acted >= MAX_WORKSPACES_PER_RUN || signal.aborted) break;
         const outcome = await runDream(
             { store, models: resolved.models, model: resolved.model },
-            { force: run.force, options: run.options, signal },
+            {
+                force: run.force,
+                options: run.options,
+                signal,
+                cleanupDone: Boolean(run.options?.archiveCleanupEnabled),
+            },
         );
         outcomes.push({ dirKey, outcome });
         // Gate skips are free; only runs that reached the model count toward the cap.
         if (outcome.status !== "skipped") acted++;
         if (outcome.status === "failed") log.warn(`dream ${dirKey}: ${outcome.reason}`);
     }
-    const summary = summarize(outcomes);
+    const summary = [
+        cleanup.deleted > 0 ? `cleanup: deleted ${cleanup.deleted}` : "",
+        summarize(outcomes),
+    ]
+        .filter(Boolean)
+        .join("; ");
     // Every model call failing is a broken run (no key, provider down), not a
     // quiet night: throw so history shows an error and the breaker can trip.
     const failures = outcomes.filter((o) => o.outcome.status === "failed");
@@ -115,6 +138,21 @@ export async function runDreamJob(
         throw new Error(`${summary}: ${first?.status === "failed" ? first.reason : "unknown"}`);
     }
     return { summary, outcomes };
+}
+
+async function runWorkspaceCleanup(
+    listDirKeys: () => string[],
+    retentionDays: 7 | 30 | 90,
+): Promise<{ deleted: number; skipped: number }> {
+    let deleted = 0;
+    let skipped = 0;
+    for (const dirKey of listDirKeys()) {
+        const store = LocalMemoryStore.openByKey(dirKey);
+        const result = await cleanupArchivedTopics(store, retentionDays);
+        deleted += result.deleted;
+        skipped += result.skipped;
+    }
+    return { deleted, skipped };
 }
 
 function summarize(outcomes: ReadonlyArray<{ outcome: DreamOutcome }>): string {
