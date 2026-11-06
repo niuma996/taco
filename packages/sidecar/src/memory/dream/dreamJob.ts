@@ -50,6 +50,8 @@ export interface DreamJobDeps {
     readonly resolveModel: () => { models: Models; model: Model<Api> } | undefined;
     /** Directory keys to consider; defaults to every dir under `projects/`. */
     readonly listDirKeys?: () => string[];
+    /** Announces a workspace whose memory view changed during this fire. */
+    readonly onWorkspaceChanged?: (dirKey: string) => void;
 }
 
 export interface DreamJobRun {
@@ -75,11 +77,13 @@ export async function runDreamJob(
               deps.listDirKeys ?? LocalMemoryStore.listDirKeys,
               run.options.archiveRetentionDays ?? 7,
           )
-        : { deleted: 0, skipped: 0 };
+        : { deleted: 0, skipped: 0, changed: [] };
+    const changed = new Set(cleanup.changed);
     const resolved = deps.resolveModel();
     // No model is a setup gap, not a broken run: throwing would count toward
     // the failure breaker and disable the job before the user adds a key.
     if (!resolved) {
+        for (const dirKey of changed) deps.onWorkspaceChanged?.(dirKey);
         return {
             summary:
                 cleanup.deleted > 0
@@ -118,6 +122,7 @@ export async function runDreamJob(
             },
         );
         outcomes.push({ dirKey, outcome });
+        if (outcome.status === "applied" || outcome.status === "previewed") changed.add(dirKey);
         // Gate skips are free; only runs that reached the model count toward the cap.
         if (outcome.status !== "skipped") acted++;
         if (outcome.status === "failed") log.warn(`dream ${dirKey}: ${outcome.reason}`);
@@ -132,25 +137,29 @@ export async function runDreamJob(
     // quiet night: throw so history shows an error and the breaker can trip.
     const failures = outcomes.filter((o) => o.outcome.status === "failed");
     if (acted > 0 && failures.length === acted) {
+        for (const dirKey of changed) deps.onWorkspaceChanged?.(dirKey);
         const first = failures[0]?.outcome;
         throw new Error(`${summary}: ${first?.status === "failed" ? first.reason : "unknown"}`);
     }
+    for (const dirKey of changed) deps.onWorkspaceChanged?.(dirKey);
     return { summary, outcomes };
 }
 
 async function runWorkspaceCleanup(
     listDirKeys: () => string[],
     retentionDays: 7 | 30 | 90,
-): Promise<{ deleted: number; skipped: number }> {
+): Promise<{ deleted: number; skipped: number; changed: string[] }> {
     let deleted = 0;
     let skipped = 0;
+    const changed: string[] = [];
     for (const dirKey of listDirKeys()) {
         const store = LocalMemoryStore.openByKey(dirKey);
         const result = await cleanupArchivedTopics(store, retentionDays);
         deleted += result.deleted;
         skipped += result.skipped;
+        if (result.deleted > 0 || result.reportsScrubbed > 0) changed.push(dirKey);
     }
-    return { deleted, skipped };
+    return { deleted, skipped, changed };
 }
 
 function summarize(outcomes: ReadonlyArray<{ outcome: DreamOutcome }>): string {
@@ -200,7 +209,10 @@ function summarize(outcomes: ReadonlyArray<{ outcome: DreamOutcome }>): string {
  * global config each fire, so turning memory off or changing the default
  * model in Settings takes effect on the next run.
  */
-export function createMemoryDreamHandler(keys: ProviderKeyStore): BuiltinJobHandler {
+export function createMemoryDreamHandler(
+    keys: ProviderKeyStore,
+    onWorkspaceChanged?: (dirKey: string) => void,
+): BuiltinJobHandler {
     return async (job) => {
         const parsed = parseMemoryDreamArgs(job.args);
         if (!parsed.ok) throw new Error(parsed.error);
@@ -208,6 +220,7 @@ export function createMemoryDreamHandler(keys: ProviderKeyStore): BuiltinJobHand
             {
                 memoryEnabled: () => readGlobalConfig().memoryEnabled !== false,
                 resolveModel: () => resolveDreamModel(keys),
+                onWorkspaceChanged,
             },
             { options: parsed.args },
         );

@@ -392,7 +392,12 @@ async function runDaemon(
                         await pinSession(jobStore, jobId, sessionId, generation);
                     },
                     builtinHandlers: new Map([
-                        [MEMORY_DREAM_COMMAND, createMemoryDreamHandler(deps.providerKeyStore)],
+                        [
+                            MEMORY_DREAM_COMMAND,
+                            createMemoryDreamHandler(deps.providerKeyStore, (dirKey) =>
+                                runtime.broadcastMemoryChanged(dirKey),
+                            ),
+                        ],
                     ]),
                     work: runtime.work,
                 },

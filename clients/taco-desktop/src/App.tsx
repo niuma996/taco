@@ -414,6 +414,7 @@ export default function App() {
     // module-scoped emitter (src/lib/imPolicyEvents.ts) rather than a ref —
     // dialogs are mounted deep in ChannelsPane and the ref indirection would
     // still need lifecycle plumbing to wire/unwire the listener.
+    const loadMemoryRef = useRef<(() => void) | null>(null);
 
     const { clearCursors } = useSidecarStream(client, {
         onAction: dispatch,
@@ -436,6 +437,9 @@ export default function App() {
                 // indicator must re-pull, not just the picker.
                 void contextInfo.refresh();
             }
+        },
+        onMemoryChanged: (cwd) => {
+            if (cwd === activeCwd) loadMemoryRef.current?.();
         },
         // Indirected through a ref: useChannelsPane is declared further down,
         // so naming applyChannelStatus here would read it before init.
@@ -723,6 +727,7 @@ export default function App() {
         dreamConfig,
         handleDreamConfigSave,
     } = useMemoryPane(client, mainView === "memory", activeCwd, t, pushNotification);
+    loadMemoryRef.current = loadMemory;
 
     const checkpoints = useCheckpointsPane(
         client,

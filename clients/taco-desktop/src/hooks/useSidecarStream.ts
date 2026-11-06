@@ -118,6 +118,8 @@ export interface UseSidecarStreamOpts {
      * `providers.list` / `session.listModels` for the given workspace.
      */
     onModelsChanged?: (cwd: string) => void;
+    /** Invalidate: a scheduled consolidation changed this workspace's memory. */
+    onMemoryChanged?: (cwd: string) => void;
     /** Fired on every IM channel binding transition (QR shown, connected, ...). */
     onChannelStatusChanged?: (channel: ChannelStatusEntry) => void;
     /** Invalidate: a new IM conversation was routed by the sidecar. */
@@ -339,6 +341,7 @@ export function useSidecarStream(
     const onWarningLineRef = useStableCallback((line: string) => opts.onWarningLine?.(line));
     const onLlmDumpLineRef = useStableCallback((line: string) => opts.onLlmDumpLine?.(line));
     const onModelsChangedRef = useStableCallback((cwd: string) => opts.onModelsChanged?.(cwd));
+    const onMemoryChangedRef = useStableCallback((cwd: string) => opts.onMemoryChanged?.(cwd));
     const onChannelStatusChangedRef = useStableCallback((channel: ChannelStatusEntry) =>
         opts.onChannelStatusChanged?.(channel),
     );
@@ -394,6 +397,10 @@ export function useSidecarStream(
             // per-session processor and deliver directly.
             if (push.method === PushMethods.ModelsChanged) {
                 if (push.workspace) onModelsChangedRef(push.workspace);
+                return;
+            }
+            if (push.method === PushMethods.MemoryChanged) {
+                if (push.workspace) onMemoryChangedRef(push.workspace);
                 return;
             }
             if (push.method === PushMethods.ChannelStatusChanged) {
@@ -501,6 +508,7 @@ export function useSidecarStream(
         onLlmDumpLineRef,
         onLogLineRef,
         onModelsChangedRef,
+        onMemoryChangedRef,
         onWarningLineRef,
     ]);
 

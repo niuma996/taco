@@ -91,6 +91,8 @@ export const PushMethods = {
      * section without a restart. Workspace-dimensioned (no session).
      */
     ModelsChanged: "models.changed",
+    /** Memory topics, archive state, or a consolidation preview changed. */
+    MemoryChanged: "memory.changed",
     /**
      * Emitted when a session is deleted via `session.delete`. Desktop
      * removes the session from its local list. Without this push, a
@@ -402,6 +404,9 @@ export interface ErrorParams {
  *  `providers.list` / `session.listModels` to refresh the menu. */
 export type ModelsChangedParams = Record<string, never>;
 
+/** `memory.changed` is an invalidate signal; desktop re-pulls `memory.list`. */
+export type MemoryChangedParams = Record<string, never>;
+
 /** `session.deleted` params — emitted by `session.delete` and as the
  *  terminal sequenced event in the event-log stream. Empty; the push
  *  frame already carries workspace + sessionId. */
@@ -476,6 +481,7 @@ export interface PushParamsByMethod {
     [PushMethods.TasksUpdated]: TasksUpdatedParams;
     [PushMethods.PlanStateUpdated]: PlanStateUpdatedParams;
     [PushMethods.ModelsChanged]: ModelsChangedParams;
+    [PushMethods.MemoryChanged]: MemoryChangedParams;
     [PushMethods.SessionDeleted]: SessionDeletedParams;
     [PushMethods.SessionRenamed]: SessionRenamedParams;
     [PushMethods.ChannelStatusChanged]: ChannelStatusChangedParams;

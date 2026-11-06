@@ -85,6 +85,7 @@ import type { ExtensionRegistry, WorkspaceExtensionSet } from "../extensions/ind
 import { harnessContext } from "../lib/harnessContext.ts";
 import { createLogger } from "../lib/logger.ts";
 import { createPrivateMcpLease, McpScope } from "../mcp/mcpScope.ts";
+import { workspaceKey } from "../memory/local/store.ts";
 import { PlanPushAdapter } from "../plan/planPushAdapter.ts";
 import { DefaultDeferredToolRegistry } from "../runtime/harness/deferredToolRegistry.ts";
 import { createQueuedWatch, type QueuedWatch } from "../runtime/harness/queuedWatch.ts";
@@ -572,6 +573,14 @@ export class SidecarServer implements ServerRpcSurface {
     /** For method handlers / tests — list cwd of currently active workspaces */
     workspaceIds(): WorkspaceId[] {
         return this.workspaces.keys();
+    }
+
+    /** Invalidate the memory pane for a scheduled consolidation workspace. */
+    broadcastMemoryChanged(dirKey: string): void {
+        for (const cwd of this.workspaces.keys()) {
+            if (workspaceKey(cwd) !== dirKey) continue;
+            this.emitPush(PushMethods.MemoryChanged, cwd, undefined, {});
+        }
     }
 
     getSessionEvents(

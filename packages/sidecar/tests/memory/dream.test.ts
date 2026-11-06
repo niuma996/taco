@@ -1238,6 +1238,34 @@ describe("runDreamJob", () => {
         assert.deepEqual(result.outcomes, []);
     });
 
+    it("announces an archive cleanup even when no default model is configured", async () => {
+        const store = storeFor("cleanup-only");
+        await seed(store, [topic("a"), topic("b"), topic("c")]);
+        await store.archiveTopic("a");
+        const archived = join(store.topicDir, "archive", "a.md");
+        writeFileSync(
+            archived,
+            readFileSync(archived, "utf8").replace(
+                /^archivedAt: .*$/m,
+                "archivedAt: 2020-01-01T00:00:00.000Z",
+            ),
+        );
+        const changed: string[] = [];
+
+        await runDreamJob(
+            {
+                memoryEnabled: () => true,
+                resolveModel: () => undefined,
+                listDirKeys: () => [store.dirKey],
+                onWorkspaceChanged: (dirKey) => changed.push(dirKey),
+            },
+            { options: { archiveCleanupEnabled: true, archiveRetentionDays: 7 } },
+        );
+
+        assert.deepEqual(changed, [store.dirKey]);
+        assert.equal(existsSync(archived), false);
+    });
+
     it("a workspace backing off waits behind the others", async () => {
         const failing = storeFor("failing");
         const healthy = storeFor("healthy");
@@ -1281,12 +1309,15 @@ describe("runDreamJob", () => {
         const a = storeFor("a");
         await seed(a, ten());
         markDreamConfirmed(a.topicDir);
+        const changed: string[] = [];
         const result = await runDreamJob({
             memoryEnabled: () => true,
             resolveModel: modelReturning(mergePlan).resolve,
+            onWorkspaceChanged: (dirKey) => changed.push(dirKey),
         });
         assert.match(result.summary, /^1 consolidated \(merged 2→1, archived 0, rewrote 1\)$/);
         assert.equal(a.getTopic("ab")?.content, "a and b");
+        assert.deepEqual(changed, [a.dirKey]);
     });
 
     it("caps model calls per fire and serves the least recently consolidated first", async () => {
