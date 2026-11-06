@@ -194,7 +194,7 @@ function ChatSkeleton({ turns, label }: { turns: number; label: string }) {
 export function ChatPane(props: ChatPaneProps) {
     const {
         ws,
-        checkpoints,
+        checkpoints = [],
         onRestoreCheckpoint,
         sidebarCollapsed,
         onToggleSidebar,

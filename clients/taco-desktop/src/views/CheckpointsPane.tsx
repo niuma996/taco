@@ -16,9 +16,9 @@ import { useState } from "react";
 import { ConfirmModal } from "../components/ConfirmModal";
 import { IconButton } from "../components/ui/IconButton";
 import type { UseCheckpointsPaneResult } from "../hooks/useCheckpointsPane";
-import type { SessionMeta } from "../lib/chat/workspaceReducer";
 import { useNow } from "../hooks/useNow";
 import { useT, useUiLanguage } from "../i18n/useI18n";
+import type { SessionMeta } from "../lib/chat/workspaceReducer";
 import { formatRelativeTime } from "../lib/relativeTime";
 import { lastSegment } from "../lib/workspaceStorage";
 
@@ -61,7 +61,9 @@ export function CheckpointsPane(props: CheckpointsPaneProps) {
         return <div className="pane-empty">{t("checkpoints.disabled")}</div>;
     }
 
-    const sessionName = new Map(sessions.map((session) => [session.id, session.name ?? session.id]));
+    const sessionName = new Map(
+        sessions.map((session) => [session.id, session.name ?? session.id]),
+    );
     const groups = new Map<string, CheckpointEntry[]>();
     for (const checkpoint of data.checkpoints) {
         const group = groups.get(checkpoint.sessionId) ?? [];
@@ -108,59 +110,53 @@ export function CheckpointsPane(props: CheckpointsPaneProps) {
                                 )}
                             </div>
                             <ul className="checkpoints-list">
-                    {checkpoints.map((c) => {
-                        const isRestoring = restoringId === c.id;
-                        const canRestore = hasActiveSession && sessionId === activeSessionId;
-                        const disabled = isRestoring || !canRestore;
-                        return (
-                            <li key={c.id} className="checkpoint-item">
-                                <div className="checkpoint-meta">
-                                    <span className="checkpoint-time">
-                                        {formatRelativeTime(c.createdAt, lng, nowMs) ||
-                                            t("checkpoints.unknownTime")}
-                                    </span>
-                                    <span className="checkpoint-label">{c.label}</span>
-                                </div>
-                                <div
-                                    className="checkpoint-files"
-                                    title={c.files.map((f) => f.path).join("\n")}
-                                >
-                                    {c.files
-                                        .slice(0, 3)
-                                        .map((f) => lastSegment(f.path))
-                                        .join(", ")}
-                                    {c.files.length > 3 ? ` +${c.files.length - 3}` : ""}
-                                </div>
-                                <button
-                                    type="button"
-                                    className="checkpoint-restore"
-                                    onClick={() => setPendingRestore(c)}
-                                    disabled={disabled}
-                                    aria-disabled={disabled || undefined}
-                                    aria-describedby={
-                                        !canRestore ? `cp-hint-${c.id}` : undefined
-                                    }
-                                    title={
-                                        canRestore
-                                            ? t("checkpoints.restore")
-                                            : t("checkpoints.restoreNeedsCurrentSession")
-                                    }
-                                >
-                                    {isRestoring
-                                        ? t("checkpoints.restoring")
-                                        : t("checkpoints.restore")}
-                                </button>
-                                {!canRestore && (
-                                    <span
-                                        id={`cp-hint-${c.id}`}
-                                        className="checkpoint-restore-hint"
-                                    >
-                                        {t("checkpoints.restoreNeedsCurrentSession")}
-                                    </span>
-                                )}
-                            </li>
-                        );
-                    })}
+                                {checkpoints.map((c) => {
+                                    const isRestoring = restoringId === c.id;
+                                    const canRestore =
+                                        hasActiveSession && sessionId === activeSessionId;
+                                    const disabled = isRestoring || !canRestore;
+                                    return (
+                                        <li key={c.id} className="checkpoint-item">
+                                            <div className="checkpoint-meta">
+                                                <span className="checkpoint-time">
+                                                    {formatRelativeTime(c.createdAt, lng, nowMs) ||
+                                                        t("checkpoints.unknownTime")}
+                                                </span>
+                                                <span className="checkpoint-label">{c.label}</span>
+                                            </div>
+                                            <div
+                                                className="checkpoint-files"
+                                                title={c.files.map((f) => f.path).join("\n")}
+                                            >
+                                                {c.files
+                                                    .slice(0, 3)
+                                                    .map((f) => lastSegment(f.path))
+                                                    .join(", ")}
+                                                {c.files.length > 3
+                                                    ? ` +${c.files.length - 3}`
+                                                    : ""}
+                                            </div>
+                                            <button
+                                                type="button"
+                                                className="checkpoint-restore"
+                                                onClick={() => setPendingRestore(c)}
+                                                disabled={disabled}
+                                                aria-disabled={disabled || undefined}
+                                                title={
+                                                    canRestore
+                                                        ? t("checkpoints.restore")
+                                                        : t(
+                                                              "checkpoints.restoreNeedsCurrentSession",
+                                                          )
+                                                }
+                                            >
+                                                {isRestoring
+                                                    ? t("checkpoints.restoring")
+                                                    : t("checkpoints.restore")}
+                                            </button>
+                                        </li>
+                                    );
+                                })}
                             </ul>
                         </section>
                     ))}

@@ -136,14 +136,6 @@
     cursor: not-allowed;
 }
 
-.checkpoint-restore-hint {
-    grid-column: 1 / 2;
-    grid-row: 2;
-    display: block;
-    font-size: 11px;
-    color: var(--warning);
-}
-
 .checkpoints-empty {
     padding: 1.5rem 1rem;
     color: var(--fg-dim);

@@ -59,6 +59,7 @@ export default defineConfig({
             "tests/components/CommandPermissionActions.test.tsx",
             "tests/components/CommandPermissionModeSelector.test.tsx",
             "tests/components/ThinkingBlock.test.tsx",
+            "tests/components/CheckpointsPane.test.tsx",
             "tests/components/LlmDumpPanel.test.tsx",
             "tests/components/toolViews/ReadToolCard.test.tsx",
             "tests/components/toolViews/ToolCardShell.test.tsx",
