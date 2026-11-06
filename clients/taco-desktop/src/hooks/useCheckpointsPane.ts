@@ -52,7 +52,6 @@ export function useCheckpointsPane(
         void client
             .checkpointsList({
                 workspace: asWorkspaceId(activeCwd),
-                sessionId: activeSessionId === undefined ? undefined : asSessionId(activeSessionId),
             })
             .then((result) => {
                 if (seq !== refreshSeq.current) return;
@@ -67,7 +66,7 @@ export function useCheckpointsPane(
                 if (seq !== refreshSeq.current) return;
                 setLoading(false);
             });
-    }, [activeCwd, activeSessionId, client]);
+    }, [activeCwd, client]);
 
     useEffect(() => {
         if (!active || !activeCwd) return;
@@ -93,6 +92,12 @@ export function useCheckpointsPane(
                     const more = paths.length > 3 ? ` (+${paths.length - 3})` : "";
                     notify(
                         `Restore incomplete: ${paths.length} file(s) not restored — ${shown}${more}`,
+                    );
+                }
+                if (result.conflicts.length > 0) {
+                    const paths = result.conflicts.map((conflict) => conflict.path);
+                    notify(
+                        `Restore skipped ${paths.length} changed file(s): ${paths.slice(0, 3).join(", ")}${paths.length > 3 ? ` (+${paths.length - 3})` : ""}`,
                     );
                 }
                 // No toast on a clean restore: the pane refreshes below, and the

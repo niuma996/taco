@@ -23,6 +23,8 @@ import { tacoHome } from "../config/tacoHome.ts";
 export interface CheckpointFile {
     readonly path: string;
     readonly blob: string | null;
+    /** Hash of the file after the edit turn completed. Older records omit it. */
+    readonly afterHash?: string | null;
 }
 
 export interface CheckpointMeta {
@@ -31,6 +33,10 @@ export interface CheckpointMeta {
     readonly createdAt: string;
     /** Human-facing origin, e.g. `turn 3` or `pre-restore`. */
     readonly label: string;
+    /** Harness turn identity; stable across a session replay. */
+    readonly turnId?: string;
+    /** Session entry that closes the edit turn, when available. */
+    readonly anchorEntryId?: string;
     readonly files: readonly CheckpointFile[];
 }
 
@@ -39,6 +45,8 @@ export interface RestoreOutcome {
     readonly deleted: string[];
     /** Paths that could not be written back, with the reason. */
     readonly failed: Array<{ path: string; reason: string }>;
+    /** Files changed after this checkpoint was created. */
+    readonly conflicts: Array<{ path: string; reason: string }>;
 }
 
 const INDEX_CAP = 200;
@@ -178,6 +186,7 @@ export class CheckpointStore {
     async create(args: {
         sessionId: string;
         label: string;
+        turnId?: string;
         paths: readonly string[];
     }): Promise<CheckpointMeta | undefined> {
         if (args.paths.length === 0) return undefined;
@@ -221,6 +230,7 @@ export class CheckpointStore {
             sessionId: args.sessionId,
             createdAt: new Date().toISOString(),
             label: args.label,
+            ...(args.turnId ? { turnId: args.turnId } : {}),
             files,
         };
 
@@ -255,6 +265,138 @@ export class CheckpointStore {
         return meta;
     }
 
+    /**
+     * Capture additional paths into an existing checkpoint. The caller uses
+     * this when one turn discovers another file after its first write.
+     * Existing paths are left untouched so their original pre-turn content is
+     * preserved.
+     */
+    async addFiles(id: string, paths: readonly string[]): Promise<CheckpointMeta> {
+        if (paths.length === 0) {
+            const existing = await this.get(id);
+            if (!existing) throw new Error(`checkpoint not found: ${id}`);
+            return existing;
+        }
+
+        let updated: CheckpointMeta | undefined;
+        const next = this.chain.then(async () => {
+            const index = await this.readIndex();
+            const current = index.find((checkpoint) => checkpoint.id === id);
+            if (!current) throw new Error(`checkpoint not found: ${id}`);
+            const known = new Set(current.files.map((file) => file.path));
+            const additions = paths.filter((path) => !known.has(path));
+            if (additions.length === 0) {
+                updated = current;
+                return;
+            }
+            const captured = await this.captureFiles(additions);
+            updated = {
+                ...current,
+                files: [...current.files, ...captured],
+            };
+            const nextIndex = index.map((checkpoint) =>
+                checkpoint.id === id ? updated : checkpoint,
+            );
+            await atomicWrite(
+                this.indexPath,
+                JSON.stringify(
+                    { schemaVersion: CHECKPOINT_INDEX_SCHEMA_VERSION, checkpoints: nextIndex },
+                    null,
+                    2,
+                ),
+                { syncParent: true },
+            );
+        });
+        this.chain = next.catch(() => undefined);
+        await next;
+        if (!updated) throw new Error(`checkpoint not found: ${id}`);
+        return updated;
+    }
+
+    /** Record the state after the edit turn, used for optimistic restore safety. */
+    async finalize(
+        id: string,
+        metadata?: { turnId?: string; anchorEntryId?: string },
+    ): Promise<CheckpointMeta> {
+        const existing = await this.get(id);
+        if (!existing) throw new Error(`checkpoint not found: ${id}`);
+        const files = await Promise.all(
+            existing.files.map(async (file) => ({
+                ...file,
+                afterHash: await this.currentHash(file.path),
+            })),
+        );
+        let updated: CheckpointMeta | undefined;
+        const next = this.chain.then(async () => {
+            const index = await this.readIndex();
+            const current = index.find((checkpoint) => checkpoint.id === id);
+            if (!current) throw new Error(`checkpoint not found: ${id}`);
+            updated = {
+                ...current,
+                files,
+                ...(metadata?.turnId ? { turnId: metadata.turnId } : {}),
+                ...(metadata?.anchorEntryId ? { anchorEntryId: metadata.anchorEntryId } : {}),
+            };
+            const nextIndex = index.map((checkpoint) =>
+                checkpoint.id === id ? updated : checkpoint,
+            );
+            await atomicWrite(
+                this.indexPath,
+                JSON.stringify(
+                    { schemaVersion: CHECKPOINT_INDEX_SCHEMA_VERSION, checkpoints: nextIndex },
+                    null,
+                    2,
+                ),
+                { syncParent: true },
+            );
+        });
+        this.chain = next.catch(() => undefined);
+        await next;
+        return updated ?? { ...existing, files };
+    }
+
+    async conflicts(id: string): Promise<Array<{ path: string; reason: string }>> {
+        const meta = await this.get(id);
+        if (!meta) throw new Error(`checkpoint not found: ${id}`);
+        const conflicts: Array<{ path: string; reason: string }> = [];
+        for (const file of meta.files) {
+            if (file.afterHash === undefined) continue;
+            const current = await this.currentHash(file.path);
+            if (current !== file.afterHash) {
+                conflicts.push({
+                    path: file.path,
+                    reason: "file changed after the assistant edit",
+                });
+            }
+        }
+        return conflicts;
+    }
+
+    private async captureFiles(paths: readonly string[]): Promise<CheckpointFile[]> {
+        const files: CheckpointFile[] = [];
+        for (const path of new Set(paths)) {
+            let blob: string | null = null;
+            try {
+                const buf = await readFile(path);
+                blob = sha256(buf);
+                await atomicWrite(join(this.blobsDir, blob), buf, { syncParent: false });
+            } catch (e) {
+                if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e;
+            }
+            files.push({ path, blob });
+        }
+        return files;
+    }
+
+    private async currentHash(path: string): Promise<string | null> {
+        try {
+            return sha256(await readFile(path));
+        } catch (e) {
+            if ((e as NodeJS.ErrnoException).code === "ENOENT") return null;
+            throw e;
+        }
+    }
+
     /** Newest first. */
     async list(sessionId?: string): Promise<CheckpointMeta[]> {
         await this.chain;
@@ -273,12 +415,15 @@ export class CheckpointStore {
      * is more useful than an aborted one. Callers should snapshot first — see
      * `CheckpointManager.restore`.
      */
-    async restore(id: string): Promise<RestoreOutcome> {
+    async restore(id: string, options?: { allowConflicts?: boolean }): Promise<RestoreOutcome> {
         const meta = await this.get(id);
         if (!meta) throw new Error(`checkpoint not found: ${id}`);
 
-        const outcome: RestoreOutcome = { restored: [], deleted: [], failed: [] };
+        const conflicts = options?.allowConflicts === false ? await this.conflicts(id) : [];
+        const conflictPaths = new Set(conflicts.map((conflict) => conflict.path));
+        const outcome: RestoreOutcome = { restored: [], deleted: [], failed: [], conflicts };
         for (const file of meta.files) {
+            if (conflictPaths.has(file.path)) continue;
             try {
                 if (file.blob === null) {
                     await rm(file.path, { force: true });

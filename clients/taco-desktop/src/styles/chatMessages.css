@@ -127,6 +127,30 @@
     color: var(--danger);
 }
 
+.message-meta__checkpoint {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin-left: 8px;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: var(--fg-dim);
+    font: inherit;
+    font-size: 11px;
+    cursor: pointer;
+}
+
+.message-meta__checkpoint:hover:not(:disabled),
+.message-meta__checkpoint:focus-visible {
+    color: var(--warning);
+}
+
+.message-meta__checkpoint:disabled {
+    opacity: 0.5;
+    cursor: wait;
+}
+
 /* assistant thinking block + markdown rendering (originally L1455-1722) */
 /* ── thinking collapse block inside the assistant bubble ── */
 .thinking-block {

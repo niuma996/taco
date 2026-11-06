@@ -731,11 +731,15 @@ export default function App() {
 
     const checkpoints = useCheckpointsPane(
         client,
-        mainView === "checkpoints",
+        mainView === "checkpoints" || Boolean(activeSid),
         activeCwd,
         activeSid,
         pushNotification,
     );
+
+    useEffect(() => {
+        if (activeSid && !runInFlight) checkpoints.refresh();
+    }, [activeSid, runInFlight, checkpoints.refresh]);
 
     // Chat auto-scroll lives in ChatPane: observer + scroll listener lifecycles
     // follow ChatPane mount/unmount. App never unmounts and <main> is swapped by
@@ -927,6 +931,12 @@ export default function App() {
                                         <ChatPane
                                             client={client}
                                             ws={ws}
+                                            checkpoints={(
+                                                checkpoints.data?.checkpoints ?? []
+                                            ).filter(
+                                                (checkpoint) => checkpoint.sessionId === activeSid,
+                                            )}
+                                            onRestoreCheckpoint={checkpoints.restore}
                                             sidebarCollapsed={sidebarCollapsed}
                                             onToggleSidebar={() =>
                                                 setSidebarCollapsed((v) => {
@@ -1153,7 +1163,9 @@ export default function App() {
                         <WorkPane
                             client={client}
                             overview={workOverview}
-                            onOpenSession={openWorkSession}
+                            onOpenSession={(sessionId) => {
+                                if (activeCwd) openWorkSession(activeCwd, sessionId);
+                            }}
                         />
                     ) : mainView === "memory" ? (
                         <MemoryPane
@@ -1187,6 +1199,11 @@ export default function App() {
                             refresh={checkpoints.refresh}
                             restore={checkpoints.restore}
                             hasActiveSession={Boolean(activeSid)}
+                            activeSessionId={activeSid}
+                            sessions={ws?.sessions ?? []}
+                            onOpenSession={(sessionId) => {
+                                if (activeCwd) openWorkSession(activeCwd, sessionId);
+                            }}
                         />
                     ) : mainView === "schedules" ? (
                         <div className="settings-pane">

@@ -9,7 +9,12 @@
  * to AgentHarness event formats. Notify server / shared when changing.
  */
 
-import type { AgentMessage, ImageInput, MessageAttachment } from "@taco-ai/protocol";
+import type {
+    AgentMessage,
+    CheckpointEntry,
+    ImageInput,
+    MessageAttachment,
+} from "@taco-ai/protocol";
 
 export interface ContentPart {
     type?: string;
@@ -28,6 +33,13 @@ export interface MessageLike {
     args?: unknown;
     stopReason?: string;
     errorMessage?: string;
+}
+
+export function checkpointForMessage(
+    checkpoints: readonly CheckpointEntry[],
+    messageId: string,
+): CheckpointEntry | undefined {
+    return checkpoints.find((checkpoint) => checkpoint.anchorEntryId === messageId);
 }
 
 /** Sub-event shape inside message_update — protocol doesn't expose this field,

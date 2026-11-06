@@ -7,6 +7,7 @@
  */
 
 import type {
+    CheckpointEntry,
     CommandPermissionScope,
     SessionContextInfoResult,
     ThinkingLevel,
@@ -35,13 +36,17 @@ import type { WorkspaceState } from "../hooks/useWorkspaces";
 import { useT } from "../i18n/useI18n";
 import { ATTACHMENT_MAX_COUNT, type StagedAttachment, type StageFn } from "../lib/attachments";
 import type { QueuedUiItem, UiMessage } from "../lib/chat/chatUtils";
-import { isLastInTurn, isTurnInProgress } from "../lib/chat/chatUtils";
+import { checkpointForMessage, isLastInTurn, isTurnInProgress } from "../lib/chat/chatUtils";
 import type { TacoClient } from "../lib/clients/tacoClient";
 import { defaultThinkingLevelForNewSession, getGlobalConfig } from "../lib/globalConfig";
 
 export interface ChatPaneProps {
     client: TacoClient;
     ws: WorkspaceState | undefined;
+    checkpoints: CheckpointEntry[];
+    onRestoreCheckpoint: (
+        checkpointId: string,
+    ) => Promise<{ ok: true; protectionId?: string } | { ok: false; reason: string }>;
     input: string;
     attachments: StagedAttachment[];
     /** Stage a file against the active workspace; resolves with the id a prompt sends back. */
@@ -189,6 +194,8 @@ function ChatSkeleton({ turns, label }: { turns: number; label: string }) {
 export function ChatPane(props: ChatPaneProps) {
     const {
         ws,
+        checkpoints,
+        onRestoreCheckpoint,
         sidebarCollapsed,
         onToggleSidebar,
         input,
@@ -367,6 +374,12 @@ export function ChatPane(props: ChatPaneProps) {
                                     highlighted={highlightedId === m.id}
                                     onCommandPermission={onCommandPermission}
                                     pendingPermissionRequests={ws?.pendingCommandPermissions}
+                                    checkpoint={
+                                        m.kind === "assistant"
+                                            ? checkpointForMessage(checkpoints, m.id)
+                                            : undefined
+                                    }
+                                    onRestoreCheckpoint={onRestoreCheckpoint}
                                 />
                             );
                         })}

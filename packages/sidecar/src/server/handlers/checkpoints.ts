@@ -22,6 +22,8 @@ function toWire(meta: CheckpointMeta): CheckpointEntry {
         sessionId: meta.sessionId,
         createdAt: meta.createdAt,
         label: meta.label,
+        turnId: meta.turnId,
+        anchorEntryId: meta.anchorEntryId,
         // The blob hash is an internal storage detail; clients only need to know
         // whether restoring recreates or removes each path.
         files: meta.files.map((f) => ({ path: f.path, existed: f.blob !== null })),
@@ -64,6 +66,7 @@ export function registerCheckpointsHandlers(): void {
                     restored: outcome.restored,
                     deleted: outcome.deleted,
                     failed: outcome.failed,
+                    conflicts: outcome.conflicts,
                     protectionId,
                 };
             } catch (e) {

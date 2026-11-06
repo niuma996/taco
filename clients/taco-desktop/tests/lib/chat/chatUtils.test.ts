@@ -10,8 +10,9 @@
 
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
-
+import type { CheckpointEntry } from "@taco-ai/protocol";
 import {
+    checkpointForMessage,
     extractAssistantTextAndThinking,
     findPendingAskUserIds,
     foldContent,
@@ -30,6 +31,24 @@ import {
     type UiThinkingBlock,
     type UiToolCall,
 } from "../../../src/lib/chat/chatUtils";
+
+describe("checkpointForMessage", () => {
+    it("only attaches a checkpoint to its persisted assistant entry anchor", async () => {
+        const checkpoints: CheckpointEntry[] = [
+            {
+                id: "cp-1",
+                sessionId: "s1",
+                createdAt: "2026-01-01T00:00:00Z",
+                label: "turn 1",
+                anchorEntryId: "assistant-entry-1",
+                files: [{ path: "/tmp/a.ts", existed: true }],
+            },
+        ];
+
+        assert.equal(checkpointForMessage(checkpoints, "assistant-entry-1")?.id, "cp-1");
+        assert.equal(checkpointForMessage(checkpoints, "assistant-entry-2"), undefined);
+    });
+});
 
 describe("historyToUiMessages — id join", () => {
     it("把 AssistantMessage 的 text 与 toolCall 拆开", () => {

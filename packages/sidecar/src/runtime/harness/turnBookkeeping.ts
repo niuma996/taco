@@ -15,7 +15,11 @@ import type { TopicUsageTracker } from "../../memory/dream/usageTracker.ts";
 import { type MemoryExtractor, sliceForExtraction } from "../../memory/index.ts";
 import type { TacoToolContext } from "../../tools/context.ts";
 import type { AgentHarness, AgentMessage, HarnessEvent, Session } from "../pi/types.ts";
-import { buildBranchContext, buildMemoryExtractionMessages } from "../session/sessionBranch.ts";
+import {
+    buildBranchContext,
+    buildMemoryExtractionMessages,
+    findBranchEntries,
+} from "../session/sessionBranch.ts";
 import type { TitleSummarizer } from "../session/titleSummarizer.ts";
 
 const log = createLogger("turnBookkeeping");
@@ -173,10 +177,19 @@ export function wireTurnBookkeeping(args: TurnBookkeepingArgs): Array<() => void
     }
 
     disposers.push(
-        harness.events.on("turn_end", () => {
+        harness.events.on("turn_start", (event) => {
+            getCheckpoints()?.beginTurn(event.turnId);
+        }),
+        harness.events.on("turn_end", async (event) => {
             // Memory extraction runs at run_end; checkpoint windows still close
             // after every model turn so the next write opens a fresh restore point.
-            getCheckpoints()?.endTurn();
+            const entries = await findBranchEntries(session).catch(() => []);
+            const anchorEntryId = [...entries]
+                .reverse()
+                .find(
+                    (entry) => entry.type === "message" && entry.message.role === "assistant",
+                )?.id;
+            await getCheckpoints()?.endTurn(event.turnId, anchorEntryId);
         }),
     );
 

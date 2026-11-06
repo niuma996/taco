@@ -292,12 +292,71 @@ describe("CheckpointManager", () => {
         assert.equal(readFileSync(f, "utf8"), "v1");
     });
 
+    it("groups multiple files changed in one turn into one checkpoint", async () => {
+        const a = ctx.file("a.ts");
+        const b = ctx.file("b.ts");
+        writeFileSync(a, "a1");
+        writeFileSync(b, "b1");
+
+        await manager.captureBeforeWrite(a);
+        writeFileSync(a, "a2");
+        await manager.captureBeforeWrite(b);
+        writeFileSync(b, "b2");
+
+        const list = await realStore.list();
+        assert.equal(list.length, 1, "one turn must produce one checkpoint");
+        assert.deepEqual(list[0]?.files.map((file) => file.path).sort(), [a, b].sort());
+
+        await realStore.restore(list[0]?.id ?? "");
+        assert.equal(readFileSync(a, "utf8"), "a1");
+        assert.equal(readFileSync(b, "utf8"), "b1");
+    });
+
+    it("records the post-write state and reports later file changes as conflicts", async () => {
+        const f = ctx.file("conflict.ts");
+        writeFileSync(f, "before");
+        await manager.captureBeforeWrite(f);
+        writeFileSync(f, "agent result");
+        await manager.endTurn();
+
+        const [checkpoint] = await realStore.list();
+        assert.ok(checkpoint?.files[0]?.afterHash, "completed checkpoint needs a post-write hash");
+
+        writeFileSync(f, "user edit after the agent");
+        const conflicts = await realStore.conflicts(checkpoint?.id ?? "");
+        assert.deepEqual(
+            conflicts.map((conflict) => conflict.path),
+            [f],
+        );
+
+        const outcome = await realStore.restore(checkpoint?.id ?? "", { allowConflicts: false });
+        assert.deepEqual(outcome.restored, []);
+        assert.deepEqual(
+            outcome.conflicts.map((conflict) => conflict.path),
+            [f],
+        );
+        assert.equal(readFileSync(f, "utf8"), "user edit after the agent");
+    });
+
+    it("persists the harness turn and assistant entry anchors", async () => {
+        const f = ctx.file("anchored.ts");
+        writeFileSync(f, "before");
+        manager.beginTurn("turn-abc");
+        await manager.captureBeforeWrite(f);
+        writeFileSync(f, "after");
+        await manager.endTurn("turn-abc", "entry-assistant-1");
+
+        const [checkpoint] = await realStore.list();
+        assert.equal(checkpoint?.turnId, "turn-abc");
+        assert.equal(checkpoint?.anchorEntryId, "entry-assistant-1");
+    });
+
     it("opens a fresh checkpoint on the next turn", async () => {
         const f = ctx.file("a.ts");
         writeFileSync(f, "t1");
         await manager.captureBeforeWrite(f);
 
-        manager.endTurn();
+        await manager.endTurn();
 
         writeFileSync(f, "t2");
         await manager.captureBeforeWrite(f);
@@ -320,7 +379,11 @@ describe("CheckpointManager", () => {
             },
             list: () => Promise.resolve([]),
             get: () => Promise.resolve(undefined),
-            restore: () => Promise.resolve({ restored: [], deleted: [], failed: [] }),
+            restore: () =>
+                Promise.resolve({ restored: [], deleted: [], failed: [], conflicts: [] }),
+            finalize: () => Promise.reject(new Error("not used")),
+            conflicts: () => Promise.resolve([]),
+            addFiles: () => Promise.reject(new Error("not used")),
         } as unknown as CheckpointStore;
 
         const local = new CheckpointManager({ store: failingStore, sessionId: "s" });

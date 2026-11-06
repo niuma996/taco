@@ -40,6 +40,8 @@ export class CheckpointManager {
      */
     private readonly failedThisTurn = new Set<string>();
     private turnStarted = false;
+    private activeCheckpointId: string | undefined;
+    private activeTurnId: string | undefined;
 
     constructor(options: CheckpointManagerOptions) {
         this.store = options.store;
@@ -61,10 +63,25 @@ export class CheckpointManager {
      * Reset per-turn state. Called on `turn_end`, so the next mutating call
      * opens a fresh checkpoint rather than folding into the previous turn.
      */
-    endTurn(): void {
-        if (this.turnStarted) this.turnIndex++;
-        this.turnStarted = false;
-        this.resetTurnState();
+    async endTurn(turnId?: string, anchorEntryId?: string): Promise<void> {
+        try {
+            if (this.activeCheckpointId) {
+                await this.store.finalize(this.activeCheckpointId, {
+                    turnId: turnId ?? this.activeTurnId,
+                    anchorEntryId,
+                });
+            }
+        } finally {
+            if (this.turnStarted) this.turnIndex++;
+            this.turnStarted = false;
+            this.resetTurnState();
+            this.activeCheckpointId = undefined;
+            this.activeTurnId = undefined;
+        }
+    }
+
+    beginTurn(turnId: string): void {
+        this.activeTurnId = turnId;
     }
 
     /**
@@ -85,11 +102,17 @@ export class CheckpointManager {
         let lastReason: string | undefined;
         for (let attempt = 0; attempt < MAX_CAPTURE_ATTEMPTS; attempt++) {
             try {
-                await this.store.create({
-                    sessionId: this.sessionId,
-                    label: `turn ${this.turnIndex + 1}`,
-                    paths: [path],
-                });
+                if (this.activeCheckpointId) {
+                    await this.store.addFiles(this.activeCheckpointId, [path]);
+                } else {
+                    const checkpoint = await this.store.create({
+                        sessionId: this.sessionId,
+                        label: `turn ${this.turnIndex + 1}`,
+                        turnId: this.activeTurnId,
+                        paths: [path],
+                    });
+                    if (checkpoint) this.activeCheckpointId = checkpoint.id;
+                }
                 this.capturedThisTurn.add(path);
                 return { ok: true };
             } catch (e) {
@@ -119,13 +142,14 @@ export class CheckpointManager {
             paths: target.files.map((f) => f.path),
         });
 
-        const outcome = await this.store.restore(id);
+        const outcome = await this.store.restore(id, { allowConflicts: false });
         // The restored tree no longer matches what this turn captured, so drop
         // the bookkeeping: a later write to any of these paths must re-snapshot
         // rather than reuse a stale capture or hit the parking set. `turnIndex`
         // stays put — a restore is a user action that can land mid-turn, and
         // advancing it here would label the rest of this turn as the next one.
         this.resetTurnState();
+        this.activeCheckpointId = undefined;
         return { outcome, protection };
     }
 }

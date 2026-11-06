@@ -848,7 +848,16 @@
     "guideFilesOnly_one": "{{count}} file",
     "guideFilesOnly_other": "{{count}} files",
     "guideFileCount_one": "{{count}} file attached",
-    "guideFileCount_other": "{{count}} files attached"
+    "guideFileCount_other": "{{count}} files attached",
+    "filesChanged_one": "{{count}} file changed",
+    "filesChanged_other": "{{count}} files changed",
+    "undoEdits": "Undo this edit",
+    "undoEditsTitle": "Undo this edit?",
+    "undoEditsMessage": "Restore {{count}} file(s) to their state before this response. Files changed afterward will be skipped.",
+    "confirmUndoEdits": "Undo edits",
+    "cancelUndoEdits": "Cancel",
+    "openSession": "Open chat",
+    "restoreNeedsCurrentSession": "Open this chat to restore"
   },
   "plan": {
     "modeTooltip": "Plan mode: only the plan document and shell inspection (read-only commands) are writable. Tools contributed by extensions are not gated — review their output before relying on it."

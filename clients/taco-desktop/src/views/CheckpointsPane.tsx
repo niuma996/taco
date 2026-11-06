@@ -16,6 +16,7 @@ import { useState } from "react";
 import { ConfirmModal } from "../components/ConfirmModal";
 import { IconButton } from "../components/ui/IconButton";
 import type { UseCheckpointsPaneResult } from "../hooks/useCheckpointsPane";
+import type { SessionMeta } from "../lib/chat/workspaceReducer";
 import { useNow } from "../hooks/useNow";
 import { useT, useUiLanguage } from "../i18n/useI18n";
 import { formatRelativeTime } from "../lib/relativeTime";
@@ -23,10 +24,24 @@ import { lastSegment } from "../lib/workspaceStorage";
 
 export interface CheckpointsPaneProps extends UseCheckpointsPaneResult {
     hasActiveSession: boolean;
+    activeSessionId?: string;
+    sessions: SessionMeta[];
+    onOpenSession: (sessionId: string) => void;
 }
 
 export function CheckpointsPane(props: CheckpointsPaneProps) {
-    const { data, loading, error, restoringId, refresh, restore, hasActiveSession } = props;
+    const {
+        data,
+        loading,
+        error,
+        restoringId,
+        refresh,
+        restore,
+        hasActiveSession,
+        activeSessionId,
+        sessions,
+        onOpenSession,
+    } = props;
     const { t } = useT();
     const lng = useUiLanguage();
     const nowMs = useNow();
@@ -44,6 +59,14 @@ export function CheckpointsPane(props: CheckpointsPaneProps) {
 
     if (!data.enabled) {
         return <div className="pane-empty">{t("checkpoints.disabled")}</div>;
+    }
+
+    const sessionName = new Map(sessions.map((session) => [session.id, session.name ?? session.id]));
+    const groups = new Map<string, CheckpointEntry[]>();
+    for (const checkpoint of data.checkpoints) {
+        const group = groups.get(checkpoint.sessionId) ?? [];
+        group.push(checkpoint);
+        groups.set(checkpoint.sessionId, group);
     }
 
     return (
@@ -69,10 +92,26 @@ export function CheckpointsPane(props: CheckpointsPaneProps) {
                     <p className="hint">{t("checkpoints.emptyHint")}</p>
                 </div>
             ) : (
-                <ul className="checkpoints-list" aria-busy={loading}>
-                    {data.checkpoints.map((c) => {
+                <div className="checkpoints-groups" aria-busy={loading}>
+                    {[...groups.entries()].map(([sessionId, checkpoints]) => (
+                        <section className="checkpoint-group" key={sessionId}>
+                            <div className="checkpoint-group-title">
+                                <span>{sessionName.get(sessionId) ?? sessionId}</span>
+                                {sessionId !== activeSessionId && (
+                                    <button
+                                        type="button"
+                                        className="checkpoint-open-session"
+                                        onClick={() => onOpenSession(sessionId)}
+                                    >
+                                        {t("checkpoints.openSession")}
+                                    </button>
+                                )}
+                            </div>
+                            <ul className="checkpoints-list">
+                    {checkpoints.map((c) => {
                         const isRestoring = restoringId === c.id;
-                        const disabled = isRestoring || !hasActiveSession;
+                        const canRestore = hasActiveSession && sessionId === activeSessionId;
+                        const disabled = isRestoring || !canRestore;
                         return (
                             <li key={c.id} className="checkpoint-item">
                                 <div className="checkpoint-meta">
@@ -99,30 +138,33 @@ export function CheckpointsPane(props: CheckpointsPaneProps) {
                                     disabled={disabled}
                                     aria-disabled={disabled || undefined}
                                     aria-describedby={
-                                        !hasActiveSession ? `cp-hint-${c.id}` : undefined
+                                        !canRestore ? `cp-hint-${c.id}` : undefined
                                     }
                                     title={
-                                        hasActiveSession
+                                        canRestore
                                             ? t("checkpoints.restore")
-                                            : t("checkpoints.restoreNeedsSession")
+                                            : t("checkpoints.restoreNeedsCurrentSession")
                                     }
                                 >
                                     {isRestoring
                                         ? t("checkpoints.restoring")
                                         : t("checkpoints.restore")}
                                 </button>
-                                {!hasActiveSession && (
+                                {!canRestore && (
                                     <span
                                         id={`cp-hint-${c.id}`}
                                         className="checkpoint-restore-hint"
                                     >
-                                        {t("checkpoints.restoreNeedsSession")}
+                                        {t("checkpoints.restoreNeedsCurrentSession")}
                                     </span>
                                 )}
                             </li>
                         );
                     })}
-                </ul>
+                            </ul>
+                        </section>
+                    ))}
+                </div>
             )}
 
             <ConfirmModal

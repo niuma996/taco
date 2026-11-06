@@ -848,7 +848,16 @@
     "guideFileCount_other": "附带 {{count}} 个文件",
     "showEarlier_one": "显示更早的 {{count}} 条消息",
     "guideFilesOnly_one": "{{count}} 个文件",
-    "guideFileCount_one": "附带 {{count}} 个文件"
+    "guideFileCount_one": "附带 {{count}} 个文件",
+    "filesChanged_one": "已修改 {{count}} 个文件",
+    "filesChanged_other": "已修改 {{count}} 个文件",
+    "undoEdits": "撤销本次编辑",
+    "undoEditsTitle": "撤销本次编辑？",
+    "undoEditsMessage": "将把 {{count}} 个文件恢复到本次回复前的状态。之后被修改过的文件会跳过。",
+    "confirmUndoEdits": "撤销编辑",
+    "cancelUndoEdits": "取消",
+    "openSession": "打开聊天",
+    "restoreNeedsCurrentSession": "打开所属聊天后恢复"
   },
   "plan": {
     "modeTooltip": "Plan 模式:仅 plan 文档与只读 shell 命令可写;扩展贡献的工具不在约束范围内,使用前请人工核查其输出。"

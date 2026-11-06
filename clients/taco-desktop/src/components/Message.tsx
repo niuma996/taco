@@ -8,7 +8,11 @@
  * cutting visual noise.
  */
 
-import type { CommandPermissionRequest, CommandPermissionScope } from "@taco-ai/protocol";
+import type {
+    CheckpointEntry,
+    CommandPermissionRequest,
+    CommandPermissionScope,
+} from "@taco-ai/protocol";
 import { ChevronRight } from "lucide-react";
 import { memo, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useStickToBottom } from "../hooks/primitives/useStickToBottom";
@@ -44,6 +48,8 @@ export const Message = memo(function Message({
     highlighted,
     onCommandPermission,
     pendingPermissionRequests,
+    checkpoint,
+    onRestoreCheckpoint,
 }: {
     m: UiMessage;
     /**
@@ -77,6 +83,10 @@ export const Message = memo(function Message({
     /** requestId → request, for approvals still awaiting a decision. Passed as a
      *  live reference rather than a lookup fn so `memo` stays effective. */
     pendingPermissionRequests?: Readonly<Record<string, CommandPermissionRequest>>;
+    checkpoint?: CheckpointEntry;
+    onRestoreCheckpoint?: (
+        checkpointId: string,
+    ) => Promise<{ ok: true; protectionId?: string } | { ok: false; reason: string }>;
 }) {
     const showMeta = isLastInTurn && !isTurnInProgress;
     if (m.kind === "user") {
@@ -153,7 +163,14 @@ export const Message = memo(function Message({
                     />
                 </ToolCardShell>
             ))}
-            {showMeta && <MessageMeta ts={m.ts} text={m.text} />}
+            {showMeta && (
+                <MessageMeta
+                    ts={m.ts}
+                    text={m.text}
+                    checkpoint={checkpoint}
+                    onRestoreCheckpoint={onRestoreCheckpoint}
+                />
+            )}
         </div>
     );
 });

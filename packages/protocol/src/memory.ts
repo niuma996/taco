@@ -215,6 +215,8 @@ export interface CheckpointFileEntry {
     path: string;
     /** False means the file did not exist; restoring deletes it. */
     existed: boolean;
+    /** True when the file changed after the assistant edit completed. */
+    conflict?: boolean;
 }
 
 export interface CheckpointEntry {
@@ -225,6 +227,10 @@ export interface CheckpointEntry {
     createdAt: string;
     /** Human-facing origin, e.g. `turn 3` or `pre-restore of <id>`. */
     label: string;
+    /** Stable harness turn id, when produced by a newer sidecar. */
+    turnId?: string;
+    /** Session entry that closes the edit turn, when available. */
+    anchorEntryId?: string;
     files: CheckpointFileEntry[];
 }
 
@@ -251,6 +257,8 @@ export interface CheckpointsRestoreResult {
      * result is reported rather than hidden behind an all-or-nothing error.
      */
     failed: Array<{ path: string; reason: string }>;
+    /** Files skipped because their current content changed after the edit. */
+    conflicts: Array<{ path: string; reason: string }>;
     /**
      * Checkpoint taken of the pre-restore state, so an unwanted restore can
      * itself be undone. Absent when the target captured no files.

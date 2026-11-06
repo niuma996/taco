@@ -28,6 +28,42 @@
     gap: 6px;
 }
 
+.checkpoints-groups {
+    overflow-y: auto;
+    flex: 1;
+    padding-bottom: 1rem;
+}
+
+.checkpoint-group {
+    margin-bottom: 14px;
+}
+
+.checkpoint-group-title {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 12px 12px 4px;
+    color: var(--fg);
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.checkpoint-open-session {
+    border: 0;
+    padding: 0;
+    background: transparent;
+    color: var(--fg-dim);
+    font: inherit;
+    font-size: 11px;
+    cursor: pointer;
+}
+
+.checkpoint-open-session:hover,
+.checkpoint-open-session:focus-visible {
+    color: var(--fg);
+}
+
 .checkpoint-item {
     display: grid;
     grid-template-columns: 1fr auto;
