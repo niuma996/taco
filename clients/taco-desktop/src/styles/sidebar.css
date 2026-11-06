@@ -192,7 +192,14 @@ aside.sidebar .session-item.active {
 .session-item-main {
     flex: 1;
     min-width: 0;
-    padding: 0;
+    /* Stretch + negative margins reclaim the row's own padding, so the whole
+       row box stays clickable (the button's content box would otherwise be
+       the only hit area). Left padding restores the original text inset. */
+    align-self: stretch;
+    margin: -0.5rem 0 -0.5rem -0.5rem;
+    padding-left: 0.5rem;
+    display: flex;
+    align-items: center;
     border: none;
     background: none;
     color: inherit;

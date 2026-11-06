@@ -47,6 +47,10 @@ export function Sidebar(props: SidebarProps) {
     // between rows; Enter/Space activate the focused row natively.
     const handleListKeyDown = (event: KeyboardEvent<HTMLUListElement>): void => {
         if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
+        // Only steer focus when a row itself is focused; otherwise the action
+        // buttons inside a row would lose Home/End/arrow interactions.
+        if (!(event.target instanceof HTMLElement) || !event.target.closest("[data-session-row]"))
+            return;
         const rows = Array.from(
             listRef.current?.querySelectorAll<HTMLButtonElement>("[data-session-row]") ?? [],
         );
@@ -130,20 +134,22 @@ export function Sidebar(props: SidebarProps) {
                             data-session-row={s.id}
                             onClick={() => onAttach(s.id)}
                         >
-                            <div className="session-meta">
-                                <div className="session-main">
+                            {/* Only phrasing content inside <button>: spans,
+                                styled as the original flex boxes. */}
+                            <span className="session-meta">
+                                <span className="session-main">
                                     <span
                                         className={`session-status-dot ${ws?.pendingBySessionId[s.id] ? "running" : "idle"}`}
                                         aria-hidden="true"
                                     />
-                                    <div className="session-id" title={s.name || undefined}>
+                                    <span className="session-id" title={s.name || undefined}>
                                         {s.name || s.id.slice(0, 8)}
-                                    </div>
-                                </div>
-                                <div className="session-time">
+                                    </span>
+                                </span>
+                                <span className="session-time">
                                     {formatRelativeTime(s.updatedAt ?? s.createdAt, lng, nowMs)}
-                                </div>
-                            </div>
+                                </span>
+                            </span>
                         </button>
                         <div className="session-actions">
                             <IconButton
