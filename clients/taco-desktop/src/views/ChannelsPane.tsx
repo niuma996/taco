@@ -17,7 +17,14 @@ import type {
     ImConversationEntry,
 } from "@taco-ai/protocol";
 import { makeImCwd } from "@taco-ai/protocol";
-import { type ReactElement, type ReactNode, useEffect, useRef, useState } from "react";
+import {
+    type KeyboardEvent,
+    type ReactElement,
+    type ReactNode,
+    useEffect,
+    useRef,
+    useState,
+} from "react";
 import { ImPolicyDialog } from "../components/ImPolicyDialog.tsx";
 import { Button } from "../components/ui/Button.tsx";
 import { CHANNEL_NAME_WECOM } from "../hooks/useChannelsPane.ts";
@@ -114,6 +121,24 @@ export function ChannelsPane(props: ChannelsPaneProps): ReactElement {
     } = props;
     const { t } = useT();
     const [tab, setTab] = useState<Tab>("bindings");
+    // WAI-ARIA tabs: arrows/Home/End move between tabs and activate on focus;
+    // the active tab keeps tabIndex 0, the other -1 (roving tabindex).
+    const TAB_ORDER: readonly Tab[] = ["bindings", "conversations"];
+    const handleTabsKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
+        if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+        event.preventDefault();
+        const current = TAB_ORDER.indexOf(tab);
+        const nextIndex =
+            event.key === "Home"
+                ? 0
+                : event.key === "End"
+                  ? TAB_ORDER.length - 1
+                  : (current + (event.key === "ArrowRight" ? 1 : -1) + TAB_ORDER.length) %
+                    TAB_ORDER.length;
+        const next = TAB_ORDER[nextIndex];
+        setTab(next);
+        document.getElementById(`channels-tab-${next}`)?.focus();
+    };
     /** Scope for the policy dialog. `peerId`+`chatId` selects chat-override
      *  mode; channelId-only selects channel-default mode. */
     const [policyScope, setPolicyScope] = useState<{
@@ -147,11 +172,14 @@ export function ChannelsPane(props: ChannelsPaneProps): ReactElement {
                 <span className="pane-subtitle">{t("channels.subtitle")}</span>
             </div>
 
-            <div className="channels-tabs" role="tablist">
+            <div className="channels-tabs" role="tablist" onKeyDown={handleTabsKeyDown}>
                 <button
                     type="button"
                     role="tab"
+                    id="channels-tab-bindings"
                     aria-selected={tab === "bindings"}
+                    aria-controls="channels-panel-bindings"
+                    tabIndex={tab === "bindings" ? 0 : -1}
                     className={`channels-tab ${tab === "bindings" ? "channels-tab--active" : ""}`}
                     onClick={() => setTab("bindings")}
                 >
@@ -160,7 +188,10 @@ export function ChannelsPane(props: ChannelsPaneProps): ReactElement {
                 <button
                     type="button"
                     role="tab"
+                    id="channels-tab-conversations"
                     aria-selected={tab === "conversations"}
+                    aria-controls="channels-panel-conversations"
+                    tabIndex={tab === "conversations" ? 0 : -1}
                     className={`channels-tab ${tab === "conversations" ? "channels-tab--active" : ""}`}
                     onClick={() => setTab("conversations")}
                 >
@@ -177,41 +208,53 @@ export function ChannelsPane(props: ChannelsPaneProps): ReactElement {
             </div>
 
             {tab === "bindings" ? (
-                <BindingsTab
-                    status={status}
-                    loading={loading}
-                    error={error}
-                    savingId={savingId}
-                    installingId={installingId}
-                    pendingRestart={pendingRestart}
-                    restarting={restarting}
-                    onCreate={onCreate}
-                    onRestart={onRestart}
-                    onBind={onBind}
-                    onRebind={onRebind}
-                    onRetry={onRetry}
-                    onInstallSdk={onInstallSdk}
-                    onUnbind={onUnbind}
-                    configuredNames={configuredNames}
-                    onOpenPolicy={(channelId) => setPolicyScope({ channelId })}
-                    t={t}
-                />
+                <div
+                    role="tabpanel"
+                    id="channels-panel-bindings"
+                    aria-labelledby="channels-tab-bindings"
+                >
+                    <BindingsTab
+                        status={status}
+                        loading={loading}
+                        error={error}
+                        savingId={savingId}
+                        installingId={installingId}
+                        pendingRestart={pendingRestart}
+                        restarting={restarting}
+                        onCreate={onCreate}
+                        onRestart={onRestart}
+                        onBind={onBind}
+                        onRebind={onRebind}
+                        onRetry={onRetry}
+                        onInstallSdk={onInstallSdk}
+                        onUnbind={onUnbind}
+                        configuredNames={configuredNames}
+                        onOpenPolicy={(channelId) => setPolicyScope({ channelId })}
+                        t={t}
+                    />
+                </div>
             ) : (
-                <ConversationsTab
-                    conversations={conversations}
-                    loading={conversationsLoading}
-                    error={conversationsError}
-                    onOpenConversation={onOpenConversation}
-                    activeCwd={activeCwd}
-                    onOpenPolicy={(entry) =>
-                        setPolicyScope({
-                            channelId: entry.channelId,
-                            peerId: entry.peerId,
-                            chatId: entry.chatId,
-                        })
-                    }
-                    t={t}
-                />
+                <div
+                    role="tabpanel"
+                    id="channels-panel-conversations"
+                    aria-labelledby="channels-tab-conversations"
+                >
+                    <ConversationsTab
+                        conversations={conversations}
+                        loading={conversationsLoading}
+                        error={conversationsError}
+                        onOpenConversation={onOpenConversation}
+                        activeCwd={activeCwd}
+                        onOpenPolicy={(entry) =>
+                            setPolicyScope({
+                                channelId: entry.channelId,
+                                peerId: entry.peerId,
+                                chatId: entry.chatId,
+                            })
+                        }
+                        t={t}
+                    />
+                </div>
             )}
 
             <ImPolicyDialog

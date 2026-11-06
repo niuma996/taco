@@ -80,6 +80,16 @@ footer.input {
     border-radius: var(--radius-lg);
     display: flex;
     flex-direction: column;
+    transition:
+        border-color var(--motion-duration-fast) var(--motion-ease-standard),
+        box-shadow var(--motion-duration-fast) var(--motion-ease-standard);
+}
+
+/* Focus lands on the borderless textarea inside, so the ring goes on the
+   card — same border-color + --focus-ring treatment as .ui-input. */
+.input-card:focus-within {
+    border-color: var(--accent);
+    box-shadow: var(--focus-ring);
 }
 
 footer.input textarea {
@@ -103,7 +113,8 @@ footer.input textarea {
     line-height: 1.4;
 }
 
-/* No default blue focus ring on the textarea — the card border already expresses the input area. */
+/* No default blue focus ring on the textarea itself — the ring moves to
+   .input-card:focus-within above, so the whole card lights up. */
 footer.input textarea:focus {
     outline: none;
 }

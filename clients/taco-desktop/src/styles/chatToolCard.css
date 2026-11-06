@@ -155,12 +155,28 @@
     cursor: pointer;
     padding: 0.25rem 0.65rem;
     white-space: nowrap;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+}
+/* Keyboard focus: the pill's overflow:hidden would clip an outer ring on
+   the end buttons, so the outline draws inside the button instead. */
+.permission-prompt-buttons button:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
 }
 .permission-prompt-buttons button + button {
     box-shadow: inset 1px 0 0 var(--border);
 }
 .permission-prompt-buttons button.permission-allow {
     color: var(--success);
+}
+/* "Always allow" writes a persistent global rule — the widest blast radius
+   on the pill — so it carries warning color and weight instead of blending
+   in with the one-shot allows. */
+.permission-prompt-buttons button.permission-allow--global {
+    color: var(--warning);
+    font-weight: 600;
 }
 .permission-prompt-buttons button.permission-deny {
     color: var(--error);

@@ -9,6 +9,7 @@ import type {
     CommandPermissionScope,
     PermissionRequestKind,
 } from "@taco-ai/protocol";
+import { Check, Clock, ShieldAlert, X } from "lucide-react";
 import type { ReactNode } from "react";
 import { useState } from "react";
 import { useT } from "../i18n/useI18n";
@@ -106,12 +107,15 @@ export function CommandPermissionPrompt({
             {children}
             <div className="permission-prompt-actions">
                 <div className="permission-prompt-buttons">
+                    {/* Icons back up the color-only allow/deny coding; scope
+                        icons mark how far the approval reaches. */}
                     <button
                         type="button"
                         className="permission-allow"
                         disabled={submitting}
                         onClick={() => void handle(true, "once")}
                     >
+                        <Check size={13} aria-hidden="true" />
                         {submitting
                             ? t("settings.permissionsSubmitting")
                             : t("settings.permissionsAllowOnce")}
@@ -132,13 +136,14 @@ export function CommandPermissionPrompt({
                                 }
                                 onClick={() => void handle(true, "session")}
                             >
+                                <Clock size={13} aria-hidden="true" />
                                 {submitting
                                     ? t("settings.permissionsSubmitting")
                                     : t("settings.permissionsAllowSession")}
                             </button>
                             <button
                                 type="button"
-                                className="permission-allow"
+                                className="permission-allow permission-allow--global"
                                 disabled={submitting || persistentDisabled}
                                 title={
                                     persistentDisabled
@@ -147,6 +152,7 @@ export function CommandPermissionPrompt({
                                 }
                                 onClick={() => void handle(true, "global")}
                             >
+                                <ShieldAlert size={13} aria-hidden="true" />
                                 {submitting
                                     ? t("settings.permissionsSubmitting")
                                     : t("settings.permissionsAlwaysAllow")}
@@ -159,6 +165,7 @@ export function CommandPermissionPrompt({
                         disabled={submitting}
                         onClick={() => void handle(false, "once")}
                     >
+                        <X size={13} aria-hidden="true" />
                         {t("settings.permissionsDeny")}
                     </button>
                 </div>
