@@ -9,6 +9,7 @@
     "dev:sidecar": "tsx watch packages/sidecar/src/index.ts",
     "dev:console": "pnpm --filter @taco-ai/debug-console dev",
     "dev:desktop": "pnpm --filter @taco-ai/desktop tauri:dev",
+    "dev:design": "node scripts/design-bridge.mjs --dev",
     "lint": "biome check .",
     "lint:comments": "node scripts/check-comments.mjs",
     "typecheck": "pnpm run typecheck:desktop && pnpm run typecheck:cli && pnpm run typecheck:sidecar && pnpm run typecheck:protocol && pnpm run typecheck:shared && pnpm run typecheck:debug-console && pnpm run test:typecheck",
