@@ -280,10 +280,9 @@
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    /* Tight gap so the logo and the rotating slogan read as one block —
-       `justify-content: center` on the column keeps the whole unit
-       vertically centered in <main>. */
-    gap: 0.35rem;
+    /* A little air between the logo and the rotating slogan keeps them as
+       one centered unit without the slogan crowding the wordmark. */
+    gap: var(--space-2);
 }
 
 .empty-chat-state__logo {
