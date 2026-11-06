@@ -1273,6 +1273,7 @@ export default function App() {
                 message={t("session.deleteSessionBody")}
                 confirmLabel={t("session.deleteSession")}
                 cancelLabel={t("session.cancel")}
+                tone="danger"
                 onConfirm={() => {
                     const target = pendingDeleteSession;
                     setPendingDeleteSession(null);

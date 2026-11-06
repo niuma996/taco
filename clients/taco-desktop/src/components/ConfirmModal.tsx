@@ -16,6 +16,10 @@ export interface ConfirmModalProps {
     cancelLabel?: string;
     error?: string | null;
     busy?: boolean;
+    /** "danger" marks the action destructive: the confirm button takes the
+     *  danger style and the open-time default focus moves to Cancel, so a
+     *  reflexive Enter can never instantly confirm. */
+    tone?: "default" | "danger";
     onConfirm: () => void;
     onCancel: () => void;
 }
@@ -23,7 +27,9 @@ export interface ConfirmModalProps {
 export function ConfirmModal(props: ConfirmModalProps) {
     const { open, title, message, confirmLabel, cancelLabel, error, busy, onConfirm, onCancel } =
         props;
+    const tone = props.tone ?? "default";
     const confirmRef = useRef<HTMLButtonElement>(null);
+    const cancelRef = useRef<HTMLButtonElement>(null);
 
     return (
         <Modal
@@ -32,19 +38,24 @@ export function ConfirmModal(props: ConfirmModalProps) {
             dismissible={!busy}
             title={title}
             description={message}
-            // Keep the prior default-focus-on-confirm convention. We use onOpenAutoFocus
-            // rather than JSX autoFocus — the latter is rejected by biome's
-            // noAutoFocus rule.
+            // Default focus on open: confirm for routine actions, cancel for
+            // destructive ones. We use onOpenAutoFocus rather than JSX
+            // autoFocus — the latter is rejected by biome's noAutoFocus rule.
             onOpenAutoFocus={(e) => {
                 e.preventDefault();
-                confirmRef.current?.focus();
+                (tone === "danger" ? cancelRef : confirmRef).current?.focus();
             }}
             actions={
                 <>
-                    <Button variant="ghost" onClick={onCancel} disabled={busy}>
+                    <Button ref={cancelRef} variant="ghost" onClick={onCancel} disabled={busy}>
                         {cancelLabel ?? "Cancel"}
                     </Button>
-                    <Button ref={confirmRef} variant="primary" onClick={onConfirm} disabled={busy}>
+                    <Button
+                        ref={confirmRef}
+                        variant={tone === "danger" ? "danger" : "primary"}
+                        onClick={onConfirm}
+                        disabled={busy}
+                    >
                         {confirmLabel ?? "Confirm"}
                     </Button>
                 </>
