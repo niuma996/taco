@@ -378,7 +378,7 @@
     "mcpServersApplyAndRestart": "Force restart",
     "mcpServersApplyAndRestartHint": "Restart the background service to re-read the latest config. Affects every open workspace — any in-flight turn will be aborted.",
     "mcpServersRestarting": "Restarting…",
-    "mcpServersRestarted": "Sidecar restarted — MCP tools are now live.",
+    "mcpServersRestarted": "Background service restarted — MCP tools are now live.",
     "mcpServersProbeError": "Could not probe servers: {{error}}",
     "mcpServerAddBtn": "+ Add server",
     "mcpServerAdd": "Add MCP server",
