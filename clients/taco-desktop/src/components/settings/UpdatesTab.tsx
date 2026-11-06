@@ -13,9 +13,9 @@
  * Settings tab switches; this tab only triggers the check + hands
  * the dialog open-state back via `onOpenDialog`.
  *
- * A secondary "Advanced" section exposes a manual `Restart sidecar` button
- * — the lifecycle entry point for users who changed a setting that takes
- * effect only after a restart (channels, plugins, MCP servers) and want
+ * A secondary "Advanced" section exposes a manual restart-background-service
+ * button — the lifecycle entry point for users who changed a setting that
+ * takes effect only after a restart (channels, plugins, MCP servers) and want
  * to confirm the change without waiting for the per-pane flash banner.
  */
 

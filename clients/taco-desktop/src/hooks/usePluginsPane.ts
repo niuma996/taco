@@ -77,7 +77,7 @@ export function usePluginsPane(
         }
     };
 
-    // Restart sidecar and refresh extension status after enabling/disabling.
+    // Restart the background service and refresh extension status after enabling/disabling.
     const restartForPlugins = async (): Promise<void> => {
         setExtensionRestarting(true);
         try {
