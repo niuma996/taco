@@ -11,6 +11,7 @@
  * gave up; execution is cancelled from the session, as before.
  */
 
+import type { SessionTarget } from "@taco-ai/protocol";
 import {
     WORK_RETRYABLE_DELIVERY_STATUSES,
     type WorkDeliverySummary,
@@ -24,7 +25,6 @@ import { Tag } from "../components/ui/Tag";
 import { useNow } from "../hooks/useNow";
 import type { UseWorkOverviewResult } from "../hooks/useWorkOverview";
 import { useT, useUiLanguage } from "../i18n/useI18n";
-import type { SessionTarget } from "../lib/chat/conversationIdentity";
 import type { TacoClient } from "../lib/clients/tacoClient.ts";
 import { formatRelativeTime } from "../lib/relativeTime";
 import type { WorkGroupId } from "../lib/workOverview";

@@ -3,9 +3,8 @@
  * both single (string) and multi-select (string[]) are supported.
  */
 
-import type { AskUserQuestion } from "@taco-ai/protocol";
+import type { AskUserQuestion, SessionTarget } from "@taco-ai/protocol";
 import { createContext, type ReactNode, useContext, useMemo } from "react";
-import type { SessionTarget } from "../lib/chat/conversationIdentity";
 import type { SidecarAction } from "./useSidecarStream";
 
 export type AskUserAnswers = Record<string, string | string[]>;

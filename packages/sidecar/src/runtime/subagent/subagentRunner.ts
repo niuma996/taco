@@ -171,10 +171,18 @@ export async function runAttachedSubagent(
     args.signal?.addEventListener("abort", onAbortSignal, { once: true });
 
     let promptStarted = false;
+    let baselineText = "";
     try {
         // Setup can outlive the parent turn. An abort event that already fired
-        // will not reach the listener above; do not admit a new child run.
+        // will not reach the listener below; do not read or admit a new child run.
         args.signal?.throwIfAborted();
+        if (args.signal) {
+            try {
+                baselineText = (await readLastAssistantText(subSessionId)).text;
+            } catch {
+                // A missing baseline only limits partial extraction; it must not block the run.
+            }
+        }
         promptStarted = true;
         const reply = await attached.prompt(args.prompt, undefined, undefined, args.signal);
         const waiting = resolveWaitingInteraction(reply, subSessionId);
@@ -202,10 +210,11 @@ export async function runAttachedSubagent(
                 ? subagentTimeoutText({ timeoutMinutes: reason.timeoutMinutes, turnsUsed })
                 : SUBAGENT_STOPPED_TEXT;
             let rawText = lastTurnText ?? "";
-            if (promptStarted) {
+            if (!rawText && promptStarted) {
                 try {
                     const stored = await readLastAssistantText(subSessionId);
-                    if (stored.text.trim() !== "") rawText = stored.text;
+                    if (stored.text.trim() !== "" && stored.text !== baselineText)
+                        rawText = stored.text;
                 } catch {
                     // The stop still succeeds if transcript extraction fails.
                 }

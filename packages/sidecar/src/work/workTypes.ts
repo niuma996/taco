@@ -115,7 +115,7 @@ export interface WorkRecord {
      * it stays so records already on disk keep reading.
      */
     readonly parentSessionId: string;
-    /** Persisted invalidation of the overview target; older records omit it. */
+    /** Persisted invalidation from an explicit session.delete; startup does not scan every workspace. */
     readonly sessionState?: WorkSessionState;
     readonly waiting?: WorkWaiting;
     /** The subagent's own session. Absent for a scheduled fire. */

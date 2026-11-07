@@ -118,6 +118,8 @@ export function backgroundTimeoutMs(maxTurns: number | undefined): number {
 
 export interface AgentSpawnerOptions {
     readonly cwd: WorkspaceId;
+    /** Stable routing key; unlike cwd this remains im://... for channel workspaces. */
+    readonly workspaceKey?: WorkspaceId;
     /**
      * Same root `JsonlSessionRepo` writes to. Background subagent results are
      * written under it (`subagentResultsDir`), so a relative value would scatter
@@ -293,6 +295,7 @@ export interface SubagentSessionArgs {
 
 export class AgentSpawner extends EventEmitter {
     readonly sessionCwd: WorkspaceId;
+    readonly workspaceKey: WorkspaceId;
 
     /** Root for sidecar-owned session-adjacent state; see `AgentSpawnerOptions`. */
     private readonly sessionsRoot: string;
@@ -311,6 +314,7 @@ export class AgentSpawner extends EventEmitter {
     constructor(options: AgentSpawnerOptions) {
         super();
         this.sessionCwd = options.cwd;
+        this.workspaceKey = options.workspaceKey ?? options.cwd;
         this.sessionsRoot = options.sessionsRoot;
         this.env = options.env;
         this.models = options.models;
@@ -1149,7 +1153,7 @@ export class AgentSpawner extends EventEmitter {
         // its run, or a crash mid-flight leaves nothing for the next start to
         // mark interrupted. Never throws; a failed record means no tracking.
         const workId = await this.workHooks?.onLaunch({
-            workspace: this.sessionCwd,
+            workspace: this.workspaceKey ?? this.sessionCwd,
             parentSessionId,
             parentToolCallId,
             childSessionId,

@@ -10,6 +10,7 @@ import type {
     ChannelStatusEntry,
     CommandPermissionScope,
     ImConversationEntry,
+    SessionTarget,
 } from "@taco-ai/protocol";
 import {
     asSessionId,
@@ -18,7 +19,6 @@ import {
     IM_CWD_PREFIX,
     makeImCwd,
 } from "@taco-ai/protocol";
-
 import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityRail } from "./components/ActivityRail";
 import { ChannelBindDialog } from "./components/ChannelBindDialog";
@@ -66,7 +66,6 @@ import { useWorkOverview } from "./hooks/useWorkOverview";
 import { useWorkspaceModels } from "./hooks/useWorkspaceModels";
 import { useWorkspaces } from "./hooks/useWorkspaces";
 import { useT } from "./i18n/useI18n";
-import type { SessionTarget } from "./lib/chat/conversationIdentity";
 import { deriveSubagents, subagentDotState } from "./lib/chat/subagentList";
 import {
     readPersistedSidebarCollapsed,

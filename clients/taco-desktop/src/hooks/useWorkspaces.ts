@@ -10,6 +10,7 @@
 import type {
     AttachmentStageResult,
     ImageInput,
+    SessionTarget,
     SupportedLocale,
     ThinkingLevel,
 } from "@taco-ai/protocol";
@@ -26,7 +27,6 @@ import { useT } from "../i18n/useI18n";
 import type { StagedAttachment, StageInput } from "../lib/attachments";
 import { toMessageAttachments } from "../lib/attachments";
 import { historyToUiMessages, type QueuedUiItem, type UiMessage } from "../lib/chat/chatUtils";
-import type { SessionTarget } from "../lib/chat/conversationIdentity";
 import {
     type WorkspaceAction,
     type WorkspaceState,

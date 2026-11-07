@@ -721,6 +721,7 @@ export class WorkspaceRuntime extends EventEmitter {
 
         this.agentSpawner = new AgentSpawner({
             cwd: this.sessionCwd,
+            workspaceKey: this.workspaceKey,
             sessionsRoot: this.sessionsRoot,
             env: this.env,
             models: this.models,
