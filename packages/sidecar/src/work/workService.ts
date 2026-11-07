@@ -6,10 +6,13 @@
  * routing lives here so the controller stays testable with plain fakes.
  */
 
-import type { AgentMessage, CommandPermissionRequest, SessionTarget } from "@taco-ai/protocol";
 import {
+    type AgentMessage,
+    type CommandPermissionRequest,
     type ImRoute,
+    makeImCwd,
     type SessionId,
+    type SessionTarget,
     WORK_REASON_MERGED,
     WORK_RESULT_TEXT_LIMIT,
     type WorkGetResult,
@@ -46,6 +49,10 @@ export interface WorkServiceOptions {
     readonly clock?: DeliveryClock;
     readonly onChange?: (workId: string) => void;
     readonly onProjectionChange?: () => void;
+    readonly resolveTargetState?: (
+        workspace: string,
+        sessionId: string,
+    ) => Promise<"available" | "missing" | "unknown">;
 }
 
 /** What the `work.*` handlers need from the Work layer; nothing about stores or timers. */
@@ -93,15 +100,37 @@ export class WorkService implements BackgroundWorkHooks, ScheduledWorkHooks, Wor
 
     /** Startup: close out Works whose process died, prune, then re-send what is still owed. */
     async start(): Promise<void> {
+        await this.migrateLegacyWorkspaceKeys();
         try {
             const { interrupted, pruned } = await this.controller.reconcile();
             if (interrupted > 0 || pruned > 0) log.info("work reconciled", { interrupted, pruned });
+            if (this.options.resolveTargetState) {
+                const marked = await this.controller.reconcileTargets(
+                    this.options.resolveTargetState,
+                );
+                if (marked > 0) log.info("work targets reconciled", { marked });
+            }
         } catch (e) {
             log.error("work reconcile failed", { error: String(e) });
         }
         await this.controller.resumeDeliveries().catch((e: unknown) => {
             log.error("work delivery resume failed", { error: String(e) });
         });
+    }
+
+    /** Rewrite pre-2.11 IM Work snapshots that stored the physical scratch cwd. */
+    private async migrateLegacyWorkspaceKeys(): Promise<void> {
+        for (const record of await this.store.list()) {
+            if (record.workspace?.startsWith("im://")) continue;
+            const route = this.options.resolveRoute(record.parentSessionId);
+            if (!route) continue;
+            const key = makeImCwd(route.channelId, route.peerId, route.chatId);
+            await this.store.mutate(record.workId, (current) =>
+                current.workspace === key
+                    ? undefined
+                    : { ...current, workspace: key, updatedAt: Date.now() },
+            );
+        }
     }
 
     /** A channel finished connecting: anything held back for it can go now. */

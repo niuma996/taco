@@ -271,3 +271,68 @@ it("wires real broker requested/resolved events to the projection without granti
     assert.equal((await service.get(w.workId)).work?.waiting, undefined);
     assert.equal(frames.length, 2);
 });
+
+it("rewrites a legacy physical IM workspace key to the route key at startup", async (t) => {
+    const root = await mkdtemp(join(tmpdir(), "taco-work-legacy-im-"));
+    const route = { channelId: "wechat-1", peerId: "peer", chatId: "chat" };
+    const service = new WorkService({
+        root,
+        instanceId: "i",
+        channels: {
+            sendText: async () => ({ kind: "confirmed" as const }),
+            maxMessageLength: () => 2000,
+        },
+        resolveRoute: () => route,
+    });
+    t.after(async () => {
+        service.stop();
+        await rm(root, { recursive: true, force: true });
+    });
+    const work = await service.controller.start({
+        sourceEventId: "legacy-im",
+        workspace: "/tmp/old-scratch",
+        parentSessionId: "s",
+        childSessionId: "c",
+        agentType: "e",
+        title: "legacy",
+    });
+    await service.start();
+    assert.equal((await service.store.get(work.workId))?.workspace, "im://wechat-1/peer/chat");
+});
+
+it("marks a missing target during startup reconciliation but preserves unknown targets", async (t) => {
+    const root = await mkdtemp(join(tmpdir(), "taco-work-targets-"));
+    const service = new WorkService({
+        root,
+        instanceId: "i",
+        channels: {
+            sendText: async () => ({ kind: "confirmed" as const }),
+            maxMessageLength: () => 2000,
+        },
+        resolveRoute: () => undefined,
+        resolveTargetState: async (workspace) => (workspace === "/gone" ? "missing" : "unknown"),
+    });
+    t.after(async () => {
+        service.stop();
+        await rm(root, { recursive: true, force: true });
+    });
+    const gone = await service.controller.start({
+        sourceEventId: "gone",
+        workspace: "/gone",
+        parentSessionId: "s",
+        childSessionId: "c1",
+        agentType: "e",
+        title: "gone",
+    });
+    const unknown = await service.controller.start({
+        sourceEventId: "unknown",
+        workspace: "/unknown",
+        parentSessionId: "s",
+        childSessionId: "c2",
+        agentType: "e",
+        title: "unknown",
+    });
+    await service.start();
+    assert.equal((await service.store.get(gone.workId))?.sessionState, "deleted");
+    assert.equal((await service.store.get(unknown.workId))?.sessionState, undefined);
+});

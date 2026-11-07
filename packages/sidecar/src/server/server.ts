@@ -549,6 +549,17 @@ export class SidecarServer implements ServerRpcSurface {
             resolveRoute: (sessionId) => this.conversationRouter?.findRouteBySessionId(sessionId),
             onChange: () => this.workPush.changed(),
             onProjectionChange: () => this.workPush.changed(),
+            resolveTargetState: async (workspace, sessionId) => {
+                const runtime = await this.ensureWorkspace(asWorkspaceId(workspace)).catch(
+                    () => undefined,
+                );
+                if (!runtime) return "unknown";
+                const sessions = await runtime.listSessions().catch(() => undefined);
+                if (!sessions) return "unknown";
+                return sessions.some((session) => session.id === sessionId)
+                    ? "available"
+                    : "missing";
+            },
         });
         this.channelFactory = new ChannelFactory({
             broker: this.channelBindBroker,

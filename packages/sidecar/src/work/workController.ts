@@ -522,6 +522,32 @@ export class WorkController {
         return { interrupted, pruned };
     }
 
+    async reconcileTargets(
+        resolve: (
+            workspace: string,
+            sessionId: string,
+        ) => Promise<"available" | "missing" | "unknown">,
+    ): Promise<number> {
+        let marked = 0;
+        for (const work of await this.store.list()) {
+            if (!work.workspace || work.sessionState === "deleted") continue;
+            const state = await resolve(work.workspace, work.parentSessionId).catch(
+                () => "unknown" as const,
+            );
+            if (state !== "missing") continue;
+            const changed = await this.store.mutate(work.workId, (current) =>
+                current.sessionState === "deleted"
+                    ? undefined
+                    : { ...current, sessionState: "deleted", updatedAt: this.now() },
+            );
+            if (changed?.changed) {
+                marked++;
+                this.onChange(work.workId);
+            }
+        }
+        return marked;
+    }
+
     private async prune(all: readonly WorkRecord[]): Promise<number> {
         const doomed = pruneTargets(all, this.now());
         for (const workId of doomed) await this.store.delete(workId);
