@@ -20,6 +20,8 @@ import type {
     WorkCompleteness,
     WorkDeliveryStatus,
     WorkSessionState,
+    WorkWaitingSummary,
+    WorkWaitingTool,
 } from "@taco-ai/protocol";
 
 export const WORK_SCHEMA_VERSION = 1;
@@ -34,6 +36,8 @@ export type ResultCompleteness = WorkCompleteness;
 export type DeliveryStatus = WorkDeliveryStatus;
 
 export type WorkKind = WireWorkKind;
+export type WorkWaiting = WorkWaitingSummary;
+export type WaitingTool = WorkWaitingTool;
 
 /** Where the user is told. Frozen when the Work settles. */
 export interface DeliveryTarget {
@@ -113,6 +117,7 @@ export interface WorkRecord {
     readonly parentSessionId: string;
     /** Persisted invalidation of the overview target; older records omit it. */
     readonly sessionState?: WorkSessionState;
+    readonly waiting?: WorkWaiting;
     /** The subagent's own session. Absent for a scheduled fire. */
     readonly childSessionId?: string;
     /** The subagent profile. Absent for a scheduled fire. */
@@ -141,7 +146,12 @@ export interface WorkRecord {
 }
 
 export function isTerminal(status: WorkStatus): boolean {
-    return status !== "running";
+    return (
+        status === "completed" ||
+        status === "failed" ||
+        status === "cancelled" ||
+        status === "interrupted"
+    );
 }
 
 /** Delivery states that will never send anything more without a manual retry. */

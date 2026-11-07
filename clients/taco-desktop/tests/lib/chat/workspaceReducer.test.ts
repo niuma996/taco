@@ -658,7 +658,7 @@ describe("workspacesReducer — guards", () => {
         assert.equal(next, state);
     });
 
-    it("APPLY_EVENT ignored when sid mismatches activeSession (background session stream)", () => {
+    it("APPLY_EVENT caches background messages without changing the active transcript", () => {
         // Regression: stream events from background session a must not bleed into
         // the shared messages of the actively displayed session b.
         const state = {
@@ -675,7 +675,8 @@ describe("workspacesReducer — guards", () => {
             now: 2,
             ev: { type: "message_start", message: { role: "assistant", timestamp: 2 } },
         });
-        assert.equal(next, state);
+        assert.equal(next["/ws"]?.messages, state["/ws"]?.messages);
+        assert.equal(next["/ws"]?.sessionInteractions?.a?.messages.length, 1);
         assert.equal(next["/ws"]?.messages.length, 1);
     });
 

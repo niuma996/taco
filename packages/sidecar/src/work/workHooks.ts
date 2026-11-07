@@ -27,6 +27,14 @@ export interface WorkSettle {
     readonly partial: boolean;
     /** Where the answer was also written for the parent model, if the write worked. */
     readonly path?: string;
+    readonly waiting?: import("../runtime/session/waitingInteraction.ts").WaitingInteraction;
+}
+
+export interface WorkWaiting {
+    readonly toolCallId: string;
+    readonly toolName: "askUser" | "planExit";
+    readonly sessionId: string;
+    readonly description?: string;
 }
 
 export interface BackgroundWorkHooks {
@@ -40,6 +48,8 @@ export interface BackgroundWorkHooks {
      * the record already being on disk.
      */
     onSettle(workId: string, parentSessionId: SessionId, settle: WorkSettle): Promise<void>;
+    /** Park a background Work until its child session receives an answer. */
+    onWaiting?(workId: string, waiting: WorkWaiting): Promise<void>;
     /**
      * Whether a notice run's reply should be captured for this Work: only while
      * its delivery still waits for one. Once a message is frozen, a later run
@@ -92,6 +102,10 @@ export interface ScheduledFire {
 }
 
 export type ScheduledFireSettle =
+    | {
+          readonly outcome: "waiting";
+          readonly waiting: import("../runtime/session/waitingInteraction.ts").WaitingInteraction;
+      }
     | { readonly outcome: "completed"; readonly replyText: string }
     /**
      * Queued behind a turn already running, which then answered it. The reply

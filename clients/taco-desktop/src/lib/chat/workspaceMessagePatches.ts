@@ -52,7 +52,7 @@ function mergeToolDetails(tool: AssistantTool, extra: Record<string, unknown>): 
 }
 
 /**
- * Expire shell tools left "running" when the sidecar process was replaced.
+ * Retire ephemeral permission details and expire running shell tools on replacement.
  * Only shell is expired: askUser / planExit recover from history, agent
  * subagents recover via snapshot, and other tools are out of scope.
  */
@@ -62,13 +62,20 @@ export function markRunningShellToolsFailed(messages: UiMessage[]): UiMessage[] 
         if (message.kind !== "assistant") return message;
         let toolChanged = false;
         const tools = message.tools.map((tool) => {
-            if (tool.name !== "shell" || tool.status !== "running") return tool;
+            const details = { ...((tool.details ?? {}) as Record<string, unknown>) };
+            const hadPermission = "commandPermission" in details;
+            delete details.commandPermission;
+            if (tool.name !== "shell" || tool.status !== "running") {
+                if (!hadPermission) return tool;
+                toolChanged = true;
+                return { ...tool, details };
+            }
             toolChanged = true;
             return {
                 ...tool,
                 status: "error" as const,
                 details: {
-                    ...((tool.details ?? {}) as object),
+                    ...details,
                     reason: "sidecar_restarted",
                     exitCode: -1,
                     interrupted: false,

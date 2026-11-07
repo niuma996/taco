@@ -7,7 +7,13 @@
  * that already ended some other way.
  */
 
-import type { ResultCompleteness, WorkRecord, WorkResultRef, WorkStatus } from "./workTypes.ts";
+import type {
+    ResultCompleteness,
+    WaitingTool,
+    WorkRecord,
+    WorkResultRef,
+    WorkStatus,
+} from "./workTypes.ts";
 import { isTerminal } from "./workTypes.ts";
 
 export type SettleOutcome = "completed" | "error" | "aborted";
@@ -36,6 +42,47 @@ export function completenessFor(args: {
     return args.outcome === "completed" ? "full" : "partial";
 }
 
+export function waitForInput(
+    record: WorkRecord,
+    args: {
+        toolCallId: string;
+        toolName: WaitingTool;
+        sessionId: string;
+        description?: string;
+        now: number;
+    },
+): WorkRecord | undefined {
+    if (record.status !== "running") return undefined;
+    return {
+        ...record,
+        status: "waiting",
+        waiting: {
+            toolCallId: args.toolCallId,
+            toolName: args.toolName,
+            sessionId: args.sessionId,
+            ...(args.description ? { description: args.description } : {}),
+        },
+        updatedAt: args.now,
+        attempt: { ...record.attempt, endedAt: args.now },
+    };
+}
+
+export function resumeAttempt(
+    record: WorkRecord,
+    args: { attemptId: string; now: number },
+): WorkRecord | undefined {
+    if (record.status !== "waiting" && record.status !== "interrupted") return undefined;
+    return {
+        ...record,
+        status: "running",
+        waiting: undefined,
+        updatedAt: args.now,
+        endedAt: undefined,
+        reason: undefined,
+        attempt: { attemptId: args.attemptId, startedAt: args.now },
+    };
+}
+
 /**
  * Close a running Work. Returns `undefined` when the Work already ended: the
  * first terminal state wins, so a late duplicate settle cannot rewrite it.
@@ -49,9 +96,10 @@ export function settle(
         now: number;
     },
 ): WorkRecord | undefined {
-    if (isTerminal(record.status)) return undefined;
+    if (record.status !== "running") return undefined;
     return {
         ...record,
+        waiting: undefined,
         status: statusForOutcome(args.outcome),
         endedAt: args.now,
         updatedAt: args.now,

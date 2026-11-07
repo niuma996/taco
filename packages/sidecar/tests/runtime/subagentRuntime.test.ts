@@ -402,6 +402,32 @@ describe("subagentRunner", () => {
             assert.equal(result.isError, true);
         });
 
+        it("returns a waiting outcome for a terminating askUser tool result", async () => {
+            const attached = new FakeAttached();
+            attached.prompt = async () =>
+                ({
+                    role: "toolResult",
+                    toolCallId: "ask-1",
+                    toolName: "askUser",
+                    content: [{ type: "text", text: "Please choose" }],
+                    details: { questions: [{ question: "Continue?" }], waiting: true },
+                }) as never;
+            const result = await runAttachedSubagent({
+                subSessionId: asSessionId("waiting-child"),
+                attached: attached.asSession(),
+                prompt: "ask",
+                agentType: "reviewer",
+                readLastAssistantText: async () => ({ text: "", isEmpty: true }),
+            });
+            assert.equal(result.isError, false);
+            assert.deepEqual(result.waiting, {
+                toolCallId: "ask-1",
+                toolName: "askUser",
+                sessionId: "waiting-child",
+                description: "Continue?",
+            });
+        });
+
         it("says a timeout was a time limit, not a user stop", async () => {
             const attached = new FakeAttached();
             const controller = new AbortController();

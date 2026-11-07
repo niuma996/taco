@@ -409,3 +409,52 @@ describe("runner records the fire's Work in history", () => {
         });
     });
 });
+
+it("parks a scheduled fire for user input instead of marking its question completed", async () => {
+    const hooks = new RecordingHooks();
+    const question = {
+        role: "toolResult",
+        toolCallId: "q",
+        toolName: "planExit",
+        isError: false,
+        details: { waiting: true, questions: [{ question: "Approve?" }] },
+    };
+    const fake = server((req) => ok(req, { sessionId: req.id, assistantMessage: question }));
+    await createJobDispatcher(() => fake, { work: hooks })(job(), {
+        fireId: "ask",
+        onWork: () => {},
+    });
+    const sessionId = hooks.fires[0]?.sessionId;
+    assert.deepEqual(hooks.settles[0]?.settle, {
+        outcome: "waiting",
+        waiting: {
+            toolCallId: "q",
+            toolName: "planExit",
+            sessionId,
+            description: "Approve?",
+        },
+    });
+});
+
+it("parks a queued fire on its terminating question rather than reporting a merged completion", async () => {
+    const hooks = new RecordingHooks();
+    const watch = new ManualWatch();
+    await createJobDispatcher(() => busyServer(watch, []), { work: hooks })(imJob(), {
+        fireId: "ask",
+        onWork: () => {},
+    });
+    watch.settle({
+        kind: "answered",
+        message: {
+            role: "toolResult",
+            toolCallId: "q",
+            toolName: "askUser",
+            isError: false,
+            details: { waiting: true },
+            content: [],
+            timestamp: 1,
+        },
+    });
+    await tick();
+    assert.equal(hooks.settles[0]?.settle.outcome, "waiting");
+});

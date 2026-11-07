@@ -20,3 +20,8 @@ describe("memory consolidation history reasons", () => {
         ).toContain("invalidOutput");
     });
 });
+
+it("keeps waiting Work visible as waiting in scheduled history", async () => {
+    const { runState } = await import("../../../src/components/settings/ScheduleHistoryDialog");
+    expect(runState({ status: "ok" } as never, { status: "waiting" } as never)).toBe("waiting");
+});

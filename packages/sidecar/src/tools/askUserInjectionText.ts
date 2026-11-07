@@ -47,9 +47,17 @@ export async function resolveAskUserQuestions(
         const entry = entries[i];
         if (entry?.type !== "message") continue;
         const msg = entry.message as ToolResultMsgLike;
+        // A later user input has already resumed the terminated run.
+        if (msg.role === "user") return null;
         if (msg.role !== "toolResult") continue;
-        if (msg.toolCallId !== toolCallId) continue;
-        if (msg.toolName !== expectedToolName) continue;
+        const waitingTool = msg.toolName === "askUser" || msg.toolName === "planExit";
+        if (
+            waitingTool &&
+            (msg.details as AskUserToolDetails | undefined)?.waiting === true &&
+            (msg.toolCallId !== toolCallId || msg.toolName !== expectedToolName)
+        )
+            return null;
+        if (msg.toolCallId !== toolCallId || msg.toolName !== expectedToolName) continue;
         const details = msg.details as AskUserToolDetails | undefined;
         if (details?.waiting !== true) continue;
         if (!details.questions) continue;

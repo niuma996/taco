@@ -18,8 +18,6 @@ import {
     asWorkspaceId,
     type ChannelStatusEntry,
     type ClientCapabilities,
-    type CommandPermissionDecision,
-    type CommandPermissionRequest,
     type CustomModelEntry,
     type CustomProviderApi,
     type CustomProviderConfig,
@@ -133,10 +131,10 @@ import type { DurablePushLog } from "./durablePushLog.ts";
 import { resolveImExecutionCwd } from "./imExecutionCwd.ts";
 import { getRegisteredMethod, listRegisteredMethods, type MethodCtx } from "./methodRegistry.ts";
 import { registerBuiltinMethods } from "./methods.ts";
+import { wirePermissionPush } from "./permissionPushAdapter.ts";
 import {
     makePushFrame,
     normalizeMessageUpdate,
-    redactCommandPermissionRequest,
     SIDECAR_INSTANCE_ID,
     toToolCallPush,
 } from "./push.ts";
@@ -542,6 +540,7 @@ export class SidecarServer implements ServerRpcSurface {
             channels: this.channelRegistry,
             resolveRoute: (sessionId) => this.conversationRouter?.findRouteBySessionId(sessionId),
             onChange: () => this.workPush.changed(),
+            onProjectionChange: () => this.workPush.changed(),
         });
         this.channelFactory = new ChannelFactory({
             broker: this.channelBindBroker,
@@ -1271,43 +1270,15 @@ export class SidecarServer implements ServerRpcSurface {
                 event: normalizeMessageUpdate(e.event),
             });
         });
-        ws.permissionBroker.on("requested", (request) => {
-            const [redacted] = redactCommandPermissionRequest(request);
-            const routingSession = request.displaySessionId ?? request.sessionId;
-            this.emitPush(PushMethods.CommandPermissionRequested, workspaceKey, routingSession, {
-                ...redacted,
-                text: `${imPermissionNotice("requested", this.requestUiLocale)}${routingSession}`,
-            });
+        wirePermissionPush({
+            broker: ws.permissionBroker,
+            workspace: workspaceKey,
+            work: this.work,
+            push: (method, sessionId, params) =>
+                this.emitPush(method, workspaceKey, sessionId, params),
+            notice: (kind, sessionId) =>
+                `${imPermissionNotice(kind, this.requestUiLocale)}${kind === "requested" ? sessionId : ""}`,
         });
-        ws.permissionBroker.on(
-            "resolved",
-            ({
-                request,
-                decision,
-            }: {
-                request: CommandPermissionRequest;
-                decision: CommandPermissionDecision;
-            }) => {
-                this.emitPush(
-                    PushMethods.CommandPermissionResolved,
-                    workspaceKey,
-                    request.displaySessionId ?? request.sessionId,
-                    {
-                        requestId: request.requestId,
-                        approved: decision.approved,
-                        ...(decision.denialReason ? { denialReason: decision.denialReason } : {}),
-                        text: imPermissionNotice(
-                            decision.approved
-                                ? "approved"
-                                : decision.denialReason === "timeout"
-                                  ? "timeout"
-                                  : "denied",
-                            this.requestUiLocale,
-                        ),
-                    },
-                );
-            },
-        );
         ws.on("session.attached", (e: RuntimePushEvent) => {
             this.emitPush(PushMethods.Attached, workspaceKey, e.sessionId, {});
             // Proactively push current task/plan store snapshots — covers

@@ -144,7 +144,7 @@ describe("initialize", () => {
             assert.equal(result.serverCapabilities.pushes.includes("sidecar.hello"), false);
             assert.deepEqual(result.protocolVersion, SIDECAR_PROTOCOL_VERSION);
             // Pinned separately: a bump must be a deliberate edit here too.
-            assert.deepEqual(SIDECAR_PROTOCOL_VERSION, { major: 2, minor: 11 });
+            assert.deepEqual(SIDECAR_PROTOCOL_VERSION, { major: 2, minor: 12 });
             assert.equal(typeof result.instanceId, "string");
             assert.equal(typeof result.pid, "number");
         });
@@ -193,7 +193,7 @@ describe("initialize", () => {
             if (!resp.ok) assert.equal(resp.error.code, "incompatible_protocol");
         });
 
-        it("a 2.11 client refuses a 2.10 daemon (it cannot report deleted Work targets)", () => {
+        it("a 2.12 client refuses a 2.11 daemon (it cannot report waiting Work)", () => {
             // The overview must not advertise deleted targets as openable.
             assert.equal(isCompatibleSidecarProtocol({ major: 2, minor: 5 }), false);
             assert.equal(isCompatibleSidecarProtocol({ major: 2, minor: 6 }), false);
@@ -201,8 +201,9 @@ describe("initialize", () => {
             assert.equal(isCompatibleSidecarProtocol({ major: 2, minor: 8 }), false);
             assert.equal(isCompatibleSidecarProtocol({ major: 2, minor: 9 }), false);
             assert.equal(isCompatibleSidecarProtocol({ major: 2, minor: 10 }), false);
+            assert.equal(isCompatibleSidecarProtocol({ major: 2, minor: 12 }), true);
             // A newer sidecar is additive; the client ignores methods it lacks.
-            assert.equal(isCompatibleSidecarProtocol({ major: 2, minor: 11 }), true);
+            assert.equal(isCompatibleSidecarProtocol({ major: 2, minor: 11 }), false);
         });
 
         it("accepts an older compatible client minor", async () => {

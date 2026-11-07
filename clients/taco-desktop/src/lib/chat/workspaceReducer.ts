@@ -60,6 +60,11 @@ export interface WorkspaceState {
     sessions: SessionMeta[];
     activeSession?: string;
     messages: UiMessage[];
+    /** Inactive sessions only; the active projection above owns its messages and pending. */
+    sessionInteractions?: Record<
+        string,
+        { messages: UiMessage[]; askUserPending: Record<string, true> }
+    >;
     /**
      * sessionId → whether that session has an in-flight turn.
      * Per-session slot: switching sessions doesn't cross-contaminate; switching
@@ -348,6 +353,7 @@ export type WorkspaceAction =
     | {
           type: "ASKUSER_ANSWERED";
           cwd: string;
+          sid?: string;
           toolCallId: string;
           /** Selected answers: question text → option label (single) or label array (multi). */
           answers: Record<string, string | string[]>;
@@ -473,6 +479,69 @@ function sameBackgroundStates(
     return aKeys.length === Object.keys(b).length && aKeys.every((k) => a[k] === b[k]);
 }
 
+/** History owns the transcript; cached interactive tool details cover pushes after its read. */
+function restoreInteractionMessages(
+    history: UiMessage[],
+    cached: UiMessage[] | undefined,
+): UiMessage[] {
+    if (!cached?.length) return history;
+    const historyIds = new Set(
+        history.flatMap((message) =>
+            message.kind === "assistant" ? message.tools.map((tool) => tool.id) : [],
+        ),
+    );
+    const details = new Map(
+        cached.flatMap((message) =>
+            message.kind === "assistant"
+                ? message.tools
+                      .filter((tool) => isAskUserStyleTool(tool.name) && !historyIds.has(tool.id))
+                      .map((tool) => [tool.id, tool.details] as const)
+                : [],
+        ),
+    );
+    const merged = history.map((message) =>
+        message.kind !== "assistant"
+            ? message
+            : {
+                  ...message,
+                  tools: message.tools.map((tool) =>
+                      details.has(tool.id)
+                          ? {
+                                ...tool,
+                                details: {
+                                    ...(tool.details as object),
+                                    ...(details.get(tool.id) as object),
+                                },
+                            }
+                          : tool,
+                  ),
+              },
+    );
+    const cachedOnly = cached.filter(
+        (message) =>
+            message.kind === "assistant" &&
+            message.tools.some((tool) => details.has(tool.id)) &&
+            !history.some((current) => current.id === message.id),
+    );
+    return cachedOnly.length > 0 ? [...merged, ...cachedOnly] : merged;
+}
+
+function pendingInteractionsForHistory(
+    history: UiMessage[],
+    cached: { messages: UiMessage[]; askUserPending: Record<string, true> } | undefined,
+): Record<string, true> {
+    const historyIds = new Set(
+        history.flatMap((message) =>
+            message.kind === "assistant" ? message.tools.map((tool) => tool.id) : [],
+        ),
+    );
+    return cached
+        ? Object.fromEntries(
+              Object.entries(cached.askUserPending).filter(([id]) => !historyIds.has(id)),
+          )
+        : {};
+}
+
 /**
  * Guard + merge for the "patch exactly one workspace" shape nearly every action
  * shares. `patch` returning undefined means "no-op": the original `state`
@@ -488,6 +557,17 @@ function updateWs(
     if (!existing) return state;
     const next = patch(existing);
     if (!next) return state;
+    // Moving away parks just interaction state; the shown session has no cache copy.
+    if ("activeSession" in next && next.activeSession !== existing.activeSession) {
+        const cache = { ...existing.sessionInteractions, ...next.sessionInteractions };
+        if (existing.activeSession && next.sessionInteractions === undefined)
+            cache[existing.activeSession] = {
+                messages: existing.messages,
+                askUserPending: existing.askUserPending,
+            };
+        if (next.activeSession) delete cache[next.activeSession];
+        next.sessionInteractions = cache;
+    }
     return { ...state, [cwd]: { ...existing, ...next } };
 }
 
@@ -518,6 +598,23 @@ export function workspacesReducer(
                 return {
                     messages: markRunningShellToolsFailed(existing.messages),
                     childMessagesBySubSessionId,
+                    childHistoryLoaded: Object.fromEntries(
+                        Object.entries(existing.childHistoryLoaded).map(([sid, messages]) => [
+                            sid,
+                            markRunningShellToolsFailed(messages),
+                        ]),
+                    ),
+                    sessionInteractions: Object.fromEntries(
+                        Object.entries(existing.sessionInteractions ?? {}).map(
+                            ([sid, interaction]) => [
+                                sid,
+                                {
+                                    ...interaction,
+                                    messages: markRunningShellToolsFailed(interaction.messages),
+                                },
+                            ],
+                        ),
+                    ),
                     // The dead daemon's broker took its pending requests with it,
                     // and no resolved push will ever arrive for them.
                     pendingCommandPermissions: {},
@@ -608,19 +705,26 @@ export function workspacesReducer(
                 // Superseded: the user opened another session (or started a new
                 // chat, or deleted this one) while this history was loading.
                 if (existing.loadingSessionId !== action.sid) return undefined;
-                // Restore pending for askUser toolCallIds still waiting in history so card
-                // selection can resume the turn. The injection trigger is the pending
-                // "true → false" transition; without restore, historical askUser clicks are dead.
+                // Restore history, retaining interactions received while this session was hidden.
                 const restoredPending: Record<string, true> = {};
                 for (const id of action.pendingAskUserIds ?? []) restoredPending[id] = true;
                 return {
                     activeSession: action.sid,
                     loadingSessionId: undefined,
-                    messages: action.messages,
+                    messages: restoreInteractionMessages(
+                        action.messages,
+                        existing.sessionInteractions?.[action.sid]?.messages,
+                    ),
                     subagentSpawned: {},
                     childMessagesBySubSessionId: {},
                     childHistoryLoaded: {},
-                    askUserPending: restoredPending,
+                    askUserPending: {
+                        ...pendingInteractionsForHistory(
+                            action.messages,
+                            existing.sessionInteractions?.[action.sid],
+                        ),
+                        ...restoredPending,
+                    },
                     agentToolPending: {},
                     backgroundSubagents: rebuildBackgroundSubagents(
                         action.messages,
@@ -687,6 +791,8 @@ export function workspacesReducer(
                     ...(existing.loadingSessionId === action.sid
                         ? { loadingSessionId: undefined }
                         : {}),
+                    sessionInteractions: omitKey(existing.sessionInteractions ?? {}, action.sid),
+                    ...(wasActive ? { askUserPending: {} } : {}),
                     pendingBySessionId: omitKey(existing.pendingBySessionId, action.sid),
                     queuedBySessionId: omitKey(existing.queuedBySessionId, action.sid),
                     // The broker aborts these server-side, but the resolved push is
@@ -819,19 +925,14 @@ export function workspacesReducer(
                 } else if (action.ev.type === "operation_abort") {
                     queuedBySessionId = omitKey(existing.queuedBySessionId, action.sid);
                 }
-                // The shared messages array renders activeSession; background-session stream
-                // events must be dropped, otherwise they bleed into the currently displayed
-                // session (rebuilt from sessionEventLog / snapshot on switch-back).
-                if (existing.activeSession !== action.sid) {
-                    if (
-                        pendingBySessionId === existing.pendingBySessionId &&
-                        queuedBySessionId === existing.queuedBySessionId
-                    ) {
-                        return undefined;
-                    }
-                    return { pendingBySessionId, queuedBySessionId };
-                }
-                const result = applyEventToMessages(existing.messages, action.ev, {
+                const interaction =
+                    action.sid === existing.activeSession
+                        ? existing
+                        : (existing.sessionInteractions?.[action.sid] ?? {
+                              messages: [],
+                              askUserPending: {},
+                          });
+                const result = applyEventToMessages(interaction.messages, action.ev, {
                     suppressedThinking: action.suppressedThinking,
                     now: action.now,
                 });
@@ -840,7 +941,7 @@ export function workspacesReducer(
                 // narrows correctly.
                 const endedToolCallId =
                     action.ev.type === "tool_end" ? (action.ev.toolCallId ?? "") : null;
-                let askUserPending = existing.askUserPending;
+                let askUserPending = interaction.askUserPending;
                 // askUser / planExit share the same trigger: terminate + questions + a
                 // two-state waiting flag. Both tool_end frames write the same
                 // tool card, so the second one carries no questions — clearing pending
@@ -856,6 +957,25 @@ export function workspacesReducer(
                         details?.waiting === true
                             ? { ...askUserPending, [toolCallId]: true }
                             : omitKey(askUserPending, toolCallId);
+                }
+                if (existing.activeSession !== action.sid) {
+                    if (
+                        result.messages === interaction.messages &&
+                        askUserPending === interaction.askUserPending
+                    ) {
+                        return pendingBySessionId === existing.pendingBySessionId &&
+                            queuedBySessionId === existing.queuedBySessionId
+                            ? undefined
+                            : { pendingBySessionId, queuedBySessionId };
+                    }
+                    return {
+                        pendingBySessionId,
+                        queuedBySessionId,
+                        sessionInteractions: {
+                            ...existing.sessionInteractions,
+                            [action.sid]: { messages: result.messages, askUserPending },
+                        },
+                    };
                 }
                 // Clear agentToolPending on any agent / skill end, keyed directly by
                 // toolCallId. The previous subagentSpawned reverse-lookup leaked whenever
@@ -957,9 +1077,15 @@ export function workspacesReducer(
                         },
                     };
                 }
-                if (existing.activeSession !== action.sid) return undefined;
                 const askUserPending: Record<string, true> = {};
                 for (const id of action.pendingAskUserIds ?? []) askUserPending[id] = true;
+                if (existing.activeSession !== action.sid)
+                    return {
+                        sessionInteractions: {
+                            ...existing.sessionInteractions,
+                            [action.sid]: { messages: action.messages, askUserPending },
+                        },
+                    };
                 return {
                     messages: action.messages,
                     askUserPending,
@@ -977,14 +1103,26 @@ export function workspacesReducer(
                 };
             });
         case "ASKUSER_ANSWERED":
-            return updateWs(state, action.cwd, (existing) => ({
-                askUserPending: omitKey(existing.askUserPending, action.toolCallId),
-                messages: attachAskUserAnswers(
-                    existing.messages,
-                    action.toolCallId,
-                    action.answers,
-                ),
-            }));
+            return updateWs(state, action.cwd, (existing) => {
+                const sid = action.sid ?? existing.activeSession;
+                if (!sid) return undefined;
+                const interaction =
+                    sid === existing.activeSession ? existing : existing.sessionInteractions?.[sid];
+                if (!interaction) return undefined;
+                const next = {
+                    askUserPending: omitKey(interaction.askUserPending, action.toolCallId),
+                    messages: attachAskUserAnswers(
+                        interaction.messages,
+                        action.toolCallId,
+                        action.answers,
+                    ),
+                };
+                return sid === existing.activeSession
+                    ? next
+                    : {
+                          sessionInteractions: { ...existing.sessionInteractions, [sid]: next },
+                      };
+            });
         case "TASKS_UPDATED":
             return updateWs(state, action.cwd, (existing) => ({
                 taskSnapshotsBySessionId: {

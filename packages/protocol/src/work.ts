@@ -16,12 +16,25 @@ import type { workGetSchema, workListSchema, workRetryDeliverySchema } from "./s
 
 export const WORK_STATUSES = [
     "running",
+    "waiting",
     "completed",
     "failed",
     "cancelled",
     "interrupted",
 ] as const;
 export type WorkStatus = (typeof WORK_STATUSES)[number];
+
+export type WorkWaitingTool = "askUser" | "planExit" | "permission";
+
+export interface WorkWaitingSummary {
+    toolCallId: string;
+    toolName: WorkWaitingTool;
+    sessionId: string;
+    description?: string;
+    /** Present only for a live, process-local permission projection. */
+    requestId?: string;
+    instanceId?: string;
+}
 
 export const WORK_KINDS = ["subagent", "scheduled"] as const;
 export type WorkKind = (typeof WORK_KINDS)[number];
@@ -124,6 +137,7 @@ export interface WorkSummary {
     sessionId: string;
     /** Absent on older daemons. Deleted targets keep their Work results. */
     sessionState?: WorkSessionState;
+    waiting?: WorkWaitingSummary;
     /**
      * Deprecated alias of `sessionId`, kept so a 2.9 desktop can still open a
      * Work's session against a 2.10 daemon. New clients read `sessionId`.

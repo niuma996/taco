@@ -44,6 +44,7 @@ export interface ScheduleHistoryDialogProps {
 
 /** What a row shows, after joining the history entry with its Work. */
 export type RunState =
+    | "waiting"
     | "running"
     | "completed"
     | "merged"
@@ -58,6 +59,7 @@ const HISTORY_POLL_MS = 10_000;
 
 const RUN_TONE: Record<RunState, string> = {
     running: "work-status--muted",
+    waiting: "work-status--warn",
     completed: "work-status--ok",
     merged: "work-status--muted",
     failed: "work-status--bad",
@@ -226,7 +228,7 @@ export function ScheduleHistoryDialog({
                           t,
                       );
         const sessionWorkspace = work?.workspace;
-        const sessionId = work?.sessionId;
+        const sessionId = work?.waiting?.sessionId ?? work?.sessionId;
         return (
             <li key={entry.started_at} className="work-item schedule-history-item">
                 <div className="work-item-head">
@@ -299,7 +301,7 @@ export function ScheduleHistoryDialog({
                             </>
                         ) : (
                             <p className="work-item-summary">
-                                {work.status === "running"
+                                {work.status === "running" || work.status === "waiting"
                                     ? t("work.resultPending")
                                     : work.reason === WORK_REASON_MERGED
                                       ? t("schedules.history.mergedHint")

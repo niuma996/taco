@@ -3,9 +3,8 @@
  *
  * Data flow: `tool.details.questions` (from `tool_end.details`) holds the
  * question list. Single-choice clicks dispatch directly; multi-select accumulates
- * locally and the Submit button dispatches. `ASKUSER_ANSWERED` clears pending; the
- * useWorkspaces effect then calls `session.submitAnswers` to hand structured answers
- * to the sidecar. On history entry, `rehydrateAskUserDetails` back-fills
+ * locally and the Submit button dispatches to the rendered session. The submit
+ * RPC must succeed before pending is cleared and the card echoes the answer. On history entry, `rehydrateAskUserDetails` back-fills
  * `toolResult.details` so the component renders answered state.
  */
 
@@ -68,7 +67,7 @@ export function AskUserToolView({ tool }: ToolViewProps) {
         setAskUserAnswers(tool.id, { answers: next, questions, toolName: tool.name });
     }
 
-    /** User clicks Submit: dispatch ASKUSER_ANSWERED, clear pending, fire submitAnswers. */
+    /** Submit to the captured session; failures leave the question available to retry. */
     function submitAnswers() {
         answerAskUser(tool.id, localAnswers);
     }

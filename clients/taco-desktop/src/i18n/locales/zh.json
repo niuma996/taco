@@ -17,6 +17,7 @@
     "notificationsUnread_one": "{{count}} 条未读"
   },
   "session": {
+    "submitAnswersFailed": "提交回答失败：{{error}}",
     "newInWorkspace": "新建此工作区的聊天",
     "newChat": "新聊天",
     "searching": "搜索中…",
@@ -521,6 +522,7 @@
       "finished": "已结束"
     },
     "status": {
+      "waiting": "等待你的回应",
       "running": "运行中",
       "completed": "已完成",
       "failed": "失败",
@@ -934,6 +936,7 @@
       "timedOutRunning": "调度器已不再等待，但这次运行仍在进行，结果出来后会显示在这里。",
       "mergedHint": "聊天正忙，这次的提示会并入正在进行的回合，并由该回合的回复一并回答。",
       "state": {
+        "waiting": "等待你的回应",
         "running": "运行中",
         "completed": "已完成",
         "merged": "已并入",

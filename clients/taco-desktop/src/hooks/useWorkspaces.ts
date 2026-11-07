@@ -26,6 +26,7 @@ import { useT } from "../i18n/useI18n";
 import type { StagedAttachment, StageInput } from "../lib/attachments";
 import { toMessageAttachments } from "../lib/attachments";
 import { historyToUiMessages, type QueuedUiItem, type UiMessage } from "../lib/chat/chatUtils";
+import type { SessionTarget } from "../lib/chat/conversationIdentity";
 import {
     type WorkspaceAction,
     type WorkspaceState,
@@ -181,8 +182,12 @@ export interface UseWorkspacesApi {
      */
     abortSubagent: (subSessionId: string) => Promise<void>;
 
-    /** Write askUser user-selected answers + questions, read by sendPrompt at injection time. */
-    setAskUserAnswers: (toolCallId: string, payload: AskUserPayload) => void;
+    /** Stage askUser answers and metadata for an explicit target-captured submission. */
+    setAskUserAnswers: (
+        toolCallId: string,
+        payload: AskUserPayload,
+        target?: SessionTarget,
+    ) => void;
 }
 
 /**
@@ -313,48 +318,25 @@ export function useWorkspaces(client: TacoClient): UseWorkspacesApi {
     });
     const { refreshSessionList, attachSessionRef } = lifecycle;
 
-    // askUserAnswersRef — holds user-selected answers + questions per pending toolCallId,
-    // read by the askUserPending → session.submitAnswers useEffect below.
-    const askUserAnswersRef = useRef<Record<string, AskUserPayload>>({});
-    const prevAskUserPendingRef = useRef<Record<string, true>>({});
+    // Payloads and in-flight submissions share the rendered workspace/session/tool identity.
+    const askUserAnswersRef = useRef(new Map<string, AskUserPayload>());
+    const submittingAnswersRef = useRef(new Set<string>());
+    const answerKey = useCallback(
+        (cwd: string, sid: string, toolCallId: string) => JSON.stringify([cwd, sid, toolCallId]),
+        [],
+    );
 
-    // Watch askUserPending: when pending disappears (= user selected), submit the structured
-    // answers to sidecar via session.submitAnswers RPC. Sidecar constructs the
-    // <ask_user_context> and injects it into the user message; the client stays agnostic
-    // of the wire format (JSON / tag names) — sidecar owns that.
-    useEffect(() => {
-        const ws = workspaces[activeCwd];
-        if (!ws?.activeSession) return;
-        const pending = ws.askUserPending ?? {};
-        for (const toolCallId of Object.keys(prevAskUserPendingRef.current)) {
-            if (!(toolCallId in pending)) {
-                // Left pending state: user selected, submit the answers.
-                const payload = askUserAnswersRef.current[toolCallId];
-                if (payload && Object.keys(payload.answers).length > 0) {
-                    const toolName = payload.toolName ?? "askUser";
-                    client
-                        .sessionSubmitAnswers({
-                            workspace: asWorkspaceId(activeCwd),
-                            sessionId: asSessionId(ws.activeSession),
-                            toolCallId: asToolCallId(toolCallId),
-                            answers: payload.answers,
-                            toolName,
-                        })
-                        .catch((err) => {
-                            // The answers are gone once we leave pending state, so a
-                            // silent failure loses the user's input with no signal at
-                            // all. Surface it — they can retype into the composer.
-                            console.error("[taco] submitAnswers failed", err);
-                            pushNotification(
-                                `Submitting your answer failed: ${(err as Error).message}`,
-                            );
-                        });
-                }
-                delete askUserAnswersRef.current[toolCallId];
-            }
+    const permissionRequestsRef = useRef(
+        new Map<string, { seen: Set<string>; retired: Set<string> }>(),
+    );
+    const permissionRequests = useCallback((cwd: string) => {
+        let entry = permissionRequestsRef.current.get(cwd);
+        if (!entry) {
+            entry = { seen: new Set(), retired: new Set() };
+            permissionRequestsRef.current.set(cwd, entry);
         }
-        prevAskUserPendingRef.current = pending;
-    }, [workspaces, activeCwd, client, pushNotification]);
+        return entry;
+    }, []);
 
     const activeWs = workspaces[activeCwd];
 
@@ -400,6 +382,9 @@ export function useWorkspaces(client: TacoClient): UseWorkspacesApi {
             } else if (action.type === "ATTACHED") {
                 dispatchWs({ type: "ATTACHED_PUSH", cwd: action.cwd, sid: action.sid });
             } else if (action.type === "COMMAND_PERMISSION_REQUESTED") {
+                const requests = permissionRequests(action.cwd);
+                if (requests.retired.has(action.request.requestId)) return;
+                requests.seen.add(action.request.requestId);
                 if (
                     action.cwd.startsWith(IM_CWD_PREFIX) &&
                     !workspacesRef.current[action.cwd]?.pendingCommandPermissions[
@@ -432,6 +417,15 @@ export function useWorkspaces(client: TacoClient): UseWorkspacesApi {
                     requestId: action.requestId,
                 });
             } else if (action.type === "SIDECAR_RESTARTED") {
+                const requests = permissionRequests(action.cwd);
+                for (const id of requests.seen) requests.retired.add(id);
+                for (const id of Object.keys(
+                    workspacesRef.current[action.cwd]?.pendingCommandPermissions ?? {},
+                )) {
+                    requests.retired.add(id);
+                }
+                requests.seen.clear();
+                setNotifications((prev) => prev.filter((n) => n.approval?.cwd !== action.cwd));
                 dispatchWs({ type: "SIDECAR_RESTARTED", cwd: action.cwd });
                 // The replacement daemon starts with no attached sessions —
                 // re-attach the active one so per-session RPCs (setModel,
@@ -468,13 +462,31 @@ export function useWorkspaces(client: TacoClient): UseWorkspacesApi {
                     });
                 }
             } else if (action.type === "ASKUSER_ANSWERED") {
-                // After askUserView user selection, dispatch ASKUSER_ANSWERED to clear pending.
-                dispatchWs({
-                    type: "ASKUSER_ANSWERED",
-                    cwd: action.cwd,
-                    toolCallId: action.toolCallId,
-                    answers: action.answers,
-                });
+                const { cwd, sid, toolCallId, answers } = action;
+                const key = answerKey(cwd, sid, toolCallId);
+                if (submittingAnswersRef.current.has(key)) return;
+                const payload = askUserAnswersRef.current.get(key);
+                submittingAnswersRef.current.add(key);
+                void client
+                    .sessionSubmitAnswers({
+                        workspace: asWorkspaceId(cwd),
+                        sessionId: asSessionId(sid),
+                        toolCallId: asToolCallId(toolCallId),
+                        answers,
+                        toolName: payload?.toolName ?? "askUser",
+                    })
+                    .then(() => {
+                        dispatchWs({ type: "ASKUSER_ANSWERED", cwd, sid, toolCallId, answers });
+                        askUserAnswersRef.current.delete(key);
+                    })
+                    .catch((err: unknown) => {
+                        pushNotification(
+                            t("session.submitAnswersFailed", { error: (err as Error).message }),
+                        );
+                    })
+                    .finally(() => {
+                        submittingAnswersRef.current.delete(key);
+                    });
             } else if (action.type === "TASKS_UPDATED") {
                 // Sidecar pushes the latest list snapshot on every successful task-tool path
                 // (tasks.updated push). Drives TaskPanel realtime refresh.
@@ -501,11 +513,10 @@ export function useWorkspaces(client: TacoClient): UseWorkspacesApi {
                     name: action.name,
                 });
             }
-            // Note: answers only land in the ref, read by the useEffect.
         },
         // attachSessionRef is a stable ref object; its .current is read at call
         // time on purpose, so it must not be a dependency.
-        [settings, attachSessionRef, pushNotification, t],
+        [client, settings, attachSessionRef, pushNotification, t, answerKey, permissionRequests],
     );
 
     const beginPendingNewSession = useCallback((cwd: string): void => {
@@ -905,8 +916,10 @@ export function useWorkspaces(client: TacoClient): UseWorkspacesApi {
         activeLevel: settings.activeLevel,
         loadSubagentHistory,
         abortSubagent,
-        setAskUserAnswers: (toolCallId: string, payload: AskUserPayload) => {
-            askUserAnswersRef.current[toolCallId] = payload;
+        setAskUserAnswers: (toolCallId, payload, target) => {
+            const cwd = target?.workspace ?? activeCwd;
+            const sid = target?.sessionId ?? workspacesRef.current[cwd]?.activeSession;
+            if (sid) askUserAnswersRef.current.set(answerKey(cwd, sid, toolCallId), payload);
         },
     };
 }

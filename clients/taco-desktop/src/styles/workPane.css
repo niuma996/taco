@@ -240,3 +240,10 @@
     justify-content: center;
     padding: 4px 0;
 }
+
+.work-item-waiting {
+    margin: var(--space-2) 0;
+    color: var(--fg-dim);
+    overflow-wrap: anywhere;
+    white-space: pre-wrap;
+}

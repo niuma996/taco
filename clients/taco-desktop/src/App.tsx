@@ -930,6 +930,7 @@ export default function App() {
                                 >
                                     <AskUserProvider
                                         cwd={activeCwd}
+                                        sid={activeSid}
                                         dispatchAskUser={dispatch}
                                         setAskUserAnswers={wsApi.setAskUserAnswers}
                                     >

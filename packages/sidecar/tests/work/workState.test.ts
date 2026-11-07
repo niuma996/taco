@@ -5,8 +5,14 @@
 
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
-import { completenessFor, interrupt, settle } from "../../src/work/workState.ts";
-import { WORK_SCHEMA_VERSION, type WorkRecord } from "../../src/work/workTypes.ts";
+import {
+    completenessFor,
+    interrupt,
+    resumeAttempt,
+    settle,
+    waitForInput,
+} from "../../src/work/workState.ts";
+import { isTerminal, WORK_SCHEMA_VERSION, type WorkRecord } from "../../src/work/workTypes.ts";
 
 function running(overrides: Partial<WorkRecord> = {}): WorkRecord {
     return {
@@ -99,5 +105,56 @@ describe("work.state", () => {
             assert.equal(completenessFor({ outcome: "error", hasText: true }), "partial");
             assert.equal(completenessFor({ outcome: "aborted", hasText: true }), "partial");
         });
+    });
+});
+
+describe("waiting", () => {
+    it("is active and records the interaction target", () => {
+        const current = running({ status: "running" });
+        const next = waitForInput(current, {
+            toolCallId: "tool-1",
+            toolName: "askUser",
+            sessionId: "child-1",
+            now: 5,
+        });
+        assert.equal(next?.status, "waiting");
+        assert.ok(next);
+        assert.equal(isTerminal(next.status), false);
+        assert.deepEqual(next?.waiting, {
+            toolCallId: "tool-1",
+            toolName: "askUser",
+            sessionId: "child-1",
+        });
+    });
+
+    it("reopens a waiting Work with a fresh attempt", () => {
+        const waiting = waitForInput(running({ status: "running" }), {
+            toolCallId: "tool-1",
+            toolName: "planExit",
+            sessionId: "child-1",
+            now: 5,
+        });
+        assert.ok(waiting);
+        const resumed = resumeAttempt(waiting, { attemptId: "attempt-2", now: 9 });
+        assert.equal(resumed?.status, "running");
+        assert.equal(resumed?.attempt.attemptId, "attempt-2");
+        assert.equal(resumed?.attempt.startedAt, 9);
+        assert.equal(resumed?.waiting, undefined);
+        assert.equal(resumed?.attempt.endedAt, undefined);
+    });
+
+    it("does not overwrite a terminal Work or resume a running Work", () => {
+        const done = { ...running({ status: "running" }), status: "completed" as const };
+        assert.equal(
+            waitForInput(done, {
+                toolCallId: "tool-1",
+                toolName: "askUser",
+                sessionId: "child-1",
+                now: 5,
+            }),
+            undefined,
+        );
+        const active = running({ status: "running" });
+        assert.equal(resumeAttempt(active, { attemptId: "attempt-2", now: 9 }), undefined);
     });
 });

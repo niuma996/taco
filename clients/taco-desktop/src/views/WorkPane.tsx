@@ -38,6 +38,7 @@ export interface WorkPaneProps {
 
 const STATUS_TONE: Record<WorkSummary["status"], { tone?: "strong"; className?: string }> = {
     running: {},
+    waiting: { className: "work-status--warn", tone: "strong" },
     completed: { className: "work-status--ok" },
     failed: { className: "work-status--bad" },
     cancelled: { className: "work-status--muted" },
@@ -135,7 +136,10 @@ export function WorkPane({ client, overview, onOpenSession }: WorkPaneProps) {
     const renderRow = (work: WorkSummary) => {
         const target: SessionTarget | undefined =
             work.workspace && (work.sessionState === undefined || work.sessionState === "available")
-                ? { workspace: work.workspace, sessionId: work.sessionId }
+                ? {
+                      workspace: work.workspace,
+                      sessionId: work.waiting?.sessionId ?? work.sessionId,
+                  }
                 : undefined;
         const isOpen = expanded === work.workId;
         const status = STATUS_TONE[work.status];
@@ -190,6 +194,14 @@ export function WorkPane({ client, overview, onOpenSession }: WorkPaneProps) {
                     {work.reason && <span className="work-item-reason">{work.reason}</span>}
                 </div>
 
+                {work.waiting?.description && (
+                    <p className="work-item-waiting">
+                        {work.waiting.description.length > 240
+                            ? `${work.waiting.description.slice(0, 239)}…`
+                            : work.waiting.description}
+                    </p>
+                )}
+
                 <div className="work-item-actions">
                     <button
                         type="button"
@@ -229,7 +241,7 @@ export function WorkPane({ client, overview, onOpenSession }: WorkPaneProps) {
                             <p className="work-detail-hint">
                                 {detail === undefined
                                     ? t("work.resultLoading")
-                                    : work.status === "running"
+                                    : work.status === "running" || work.status === "waiting"
                                       ? t("work.resultPending")
                                       : t("work.resultGone")}
                             </p>

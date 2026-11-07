@@ -913,3 +913,143 @@ describe("useWorkspacesDefaultCwdSettled.test.tsx", () => {
         });
     });
 });
+
+describe("targeted interaction submissions", () => {
+    it("waits for success, deduplicates and preserves questions after failure across navigation", async () => {
+        const { bootstrapI18n } = await import("../../src/i18n/index");
+        bootstrapI18n();
+        const { createEmptyWorkspace } = await import("../../src/lib/chat/workspaceReducer");
+        let reject!: (error: Error) => void;
+        const sessionSubmitAnswers = vi.fn(
+            () =>
+                new Promise<void>((_, fail) => {
+                    reject = fail;
+                }),
+        );
+        const client = {
+            sessionSubmitAnswers,
+            onWorkspaceEpochChanged: () => () => {},
+        } as unknown as TacoClient;
+        const { result } = renderHook(() => useWorkspaces(client));
+        act(() =>
+            result.current.dispatchWs({
+                type: "INIT",
+                workspaces: {
+                    "/a": {
+                        ...createEmptyWorkspace("/a"),
+                        activeSession: "a",
+                        askUserPending: { same: true },
+                    },
+                    "/b": {
+                        ...createEmptyWorkspace("/b"),
+                        activeSession: "b",
+                        askUserPending: { same: true },
+                    },
+                },
+            }),
+        );
+        act(() => {
+            result.current.setAskUserAnswers(
+                "same",
+                { answers: { q: "yes" }, questions: [], toolName: "planExit" },
+                { workspace: "/a", sessionId: "a" },
+            );
+            result.current.dispatch({
+                type: "ASKUSER_ANSWERED",
+                cwd: "/a",
+                sid: "a",
+                toolCallId: "same",
+                answers: { q: "yes" },
+            });
+            result.current.dispatch({
+                type: "ASKUSER_ANSWERED",
+                cwd: "/a",
+                sid: "a",
+                toolCallId: "same",
+                answers: { q: "yes" },
+            });
+        });
+        assert.equal(sessionSubmitAnswers.mock.calls.length, 1);
+        assert.deepEqual(result.current.workspaces["/a"]?.askUserPending, { same: true });
+        await act(async () => reject(new Error("offline")));
+        assert.deepEqual(result.current.workspaces["/a"]?.askUserPending, { same: true });
+        assert.ok(result.current.notifications[0]?.text.includes("offline"));
+        sessionSubmitAnswers.mockImplementation(async () => {});
+        await act(async () => {
+            result.current.dispatch({
+                type: "ASKUSER_ANSWERED",
+                cwd: "/a",
+                sid: "a",
+                toolCallId: "same",
+                answers: { q: "yes" },
+            });
+        });
+        assert.deepEqual(result.current.workspaces["/a"]?.askUserPending, {});
+        assert.deepEqual(result.current.workspaces["/b"]?.askUserPending, { same: true });
+        assert.deepEqual(sessionSubmitAnswers.mock.calls[1], [
+            {
+                workspace: "/a",
+                sessionId: "a",
+                toolCallId: "same",
+                toolName: "planExit",
+                answers: { q: "yes" },
+            },
+        ]);
+    });
+
+    it("restart removes only the affected workspace's approval notifications", () => {
+        const { result } = renderHook(() =>
+            useWorkspaces({ onWorkspaceEpochChanged: () => () => {} } as unknown as TacoClient),
+        );
+        act(() => {
+            for (const cwd of ["/a", "/b"])
+                result.current.pushNotification("approval", {
+                    approval: { cwd, sessionId: "s", requestId: cwd },
+                });
+            result.current.pushNotification("keep this error");
+        });
+        act(() => result.current.dispatch({ type: "SIDECAR_RESTARTED", cwd: "/a" }));
+        assert.equal(result.current.notifications.length, 2);
+        assert.equal(
+            result.current.notifications.some((n) => n.approval?.cwd === "/a"),
+            false,
+        );
+        assert.equal(
+            result.current.notifications.some((n) => n.approval?.cwd === "/b"),
+            true,
+        );
+    });
+});
+
+it("drops retired permission replay after replacement but accepts current requests", async () => {
+    const { createEmptyWorkspace } = await import("../../src/lib/chat/workspaceReducer");
+    const { result } = renderHook(() =>
+        useWorkspaces({ onWorkspaceEpochChanged: () => () => {} } as unknown as TacoClient),
+    );
+    act(() =>
+        result.current.dispatchWs({
+            type: "INIT",
+            workspaces: { "/w": createEmptyWorkspace("/w") },
+        }),
+    );
+    const requested = (requestId: string) =>
+        result.current.dispatch({
+            type: "COMMAND_PERMISSION_REQUESTED",
+            cwd: "/w",
+            sid: "s",
+            request: { requestId, sessionId: "s", toolCallId: "t" } as never,
+        });
+    act(() => requested("old"));
+    // Replayed requests from the same daemon remain available.
+    act(() => requested("old"));
+    assert.ok(result.current.workspaces["/w"]?.pendingCommandPermissions.old);
+    act(() => result.current.dispatch({ type: "SIDECAR_RESTARTED", cwd: "/w" }));
+    act(() => {
+        requested("old");
+        requested("new");
+    });
+    assert.deepEqual(
+        Object.keys(result.current.workspaces["/w"]?.pendingCommandPermissions ?? {}),
+        ["new"],
+    );
+});

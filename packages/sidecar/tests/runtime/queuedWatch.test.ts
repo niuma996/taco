@@ -99,3 +99,21 @@ describe("queued watch", () => {
         assert.deepEqual(await pending, { kind: "dropped" });
     });
 });
+
+it("keeps a terminating question as the queued run's outcome instead of an older assistant", async () => {
+    const { watch, emit } = rig();
+    const pending = watch.wait("e-q");
+    emit(queued(["e-q"]));
+    emit({ type: "message_end", entryId: "e-q", message: { role: "user", content: "go" } });
+    emit({ type: "message_end", message: assistant("I need a decision") });
+    const question = {
+        role: "toolResult",
+        toolName: "askUser",
+        toolCallId: "q",
+        details: { waiting: true },
+    };
+    emit({ type: "message_end", message: question });
+    emit({ type: "run_end", status: "completed" });
+    assert.deepEqual(await pending, { kind: "answered", message: question });
+    watch.stop();
+});

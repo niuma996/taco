@@ -1,3 +1,4 @@
+import { resolveWaitingInteraction } from "../runtime/session/waitingInteraction.ts";
 /**
  * dispatcher.ts — routes scheduled job fires to the SidecarServer RPC layer.
  *
@@ -273,7 +274,7 @@ async function trackTurn(
                 void watch.wait(outcome.entryId).then(
                     (result) => {
                         watch.stop();
-                        return work.onFireSettle(workId, settleForQueued(result));
+                        return work.onFireSettle(workId, settleForQueued(result, sessionId));
                     },
                     () => work.onFireSettle(workId, { outcome: "cancelled", reason: "queue lost" }),
                 );
@@ -283,22 +284,31 @@ async function trackTurn(
             return { workId };
         }
         watch?.stop();
-        await work.onFireSettle(workId, {
-            outcome: "completed",
-            replyText: outcome.message ? textFromAgentMessage(outcome.message) : "",
-        });
+        const waiting = resolveWaitingInteraction(outcome.message, sessionId);
+        await work.onFireSettle(
+            workId,
+            waiting
+                ? { outcome: "waiting", waiting }
+                : {
+                      outcome: "completed",
+                      replyText: outcome.message ? textFromAgentMessage(outcome.message) : "",
+                  },
+        );
     }
     return workId !== undefined ? { workId } : {};
 }
 
 /** Translate the lane's verdict on a queued entry into what the Work records. */
-function settleForQueued(outcome: QueuedOutcome): ScheduledFireSettle {
+function settleForQueued(outcome: QueuedOutcome, sessionId: string): ScheduledFireSettle {
     switch (outcome.kind) {
-        case "answered":
+        case "answered": {
+            const waiting = resolveWaitingInteraction(outcome.message, sessionId);
+            if (waiting) return { outcome: "waiting", waiting };
             return {
                 outcome: "merged",
                 replyText: outcome.message ? textFromAgentMessage(outcome.message) : "",
             };
+        }
         case "aborted":
             return { outcome: "cancelled", reason: "stopped with the run it joined" };
         case "failed":

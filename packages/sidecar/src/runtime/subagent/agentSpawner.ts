@@ -60,7 +60,7 @@ import {
 } from "./subagentPending.ts";
 import type { SubagentResumability } from "./subagentProgress.ts";
 import { subagentResultPath } from "./subagentResultsDir.ts";
-import { runAttachedSubagent } from "./subagentRunner.ts";
+import { runAttachedSubagent, type SubagentRunResult } from "./subagentRunner.ts";
 
 const log = createLogger("sidecar.agentSpawner");
 
@@ -611,13 +611,7 @@ export class AgentSpawner extends EventEmitter {
      * a launch failure still reaches the parent as an error notification
      * instead of dying in `.catch` as a log line.
      */
-    async executeSubagentSession(args: SubagentSessionArgs): Promise<{
-        subSessionId: SessionId;
-        resultText: string;
-        isError: boolean;
-        aborted?: boolean;
-        partial?: boolean;
-    }> {
+    async executeSubagentSession(args: SubagentSessionArgs): Promise<SubagentRunResult> {
         return this.trackInFlight(args.parentSessionId, args.parentToolCallId, async () => {
             try {
                 return await this.runSubagentSession(args);
@@ -637,13 +631,7 @@ export class AgentSpawner extends EventEmitter {
     }
 
     /** `executeSubagentSession` body, wrapped by it for in-flight tracking. */
-    private async runSubagentSession(args: SubagentSessionArgs): Promise<{
-        subSessionId: SessionId;
-        resultText: string;
-        isError: boolean;
-        aborted?: boolean;
-        partial?: boolean;
-    }> {
+    private async runSubagentSession(args: SubagentSessionArgs): Promise<SubagentRunResult> {
         // Caller must supply `childDepth` — used by tool filtering to gate Skill/agent
         // recursion, and computing it here would require a second openSession() call.
         const childDepth =
@@ -1181,6 +1169,11 @@ export class AgentSpawner extends EventEmitter {
             abortController: controller,
         })
             .then(async (result) => {
+                if (result.waiting) {
+                    if (workId !== undefined)
+                        await this.workHooks?.onWaiting?.(workId, result.waiting);
+                    return;
+                }
                 // The timeout and `abortSubagentRun` fire the same controller,
                 // so an aborted run reads as "aborted" here regardless of
                 // which one stopped it — a deliberate stop, not a failure.
@@ -1874,7 +1867,7 @@ export class AgentSpawner extends EventEmitter {
     /** Close the reopened Work with the resumed run's outcome. Never throws. */
     private async reportResumeSettle(
         subSessionId: SessionId,
-        result: { resultText: string; isError: boolean; aborted?: boolean; partial?: boolean },
+        result: SubagentRunResult,
     ): Promise<void> {
         if (!this.workHooks) return;
         try {
@@ -1882,6 +1875,7 @@ export class AgentSpawner extends EventEmitter {
                 outcome: result.isError ? (result.aborted ? "aborted" : "error") : "completed",
                 resultText: result.resultText,
                 partial: result.partial === true,
+                ...(result.waiting ? { waiting: result.waiting } : {}),
             });
         } catch (e) {
             log.warn("work resume settle record failed", {

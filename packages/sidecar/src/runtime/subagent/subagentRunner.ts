@@ -17,6 +17,10 @@ import type { SubagentBudgetState } from "../../tags/subagentBudget.ts";
 import type { AttachedSession } from "../harness/attachedSession.ts";
 import type { AgentToolResult, HarnessEvent } from "../pi/types.ts";
 import {
+    resolveWaitingInteraction,
+    type WaitingInteraction,
+} from "../session/waitingInteraction.ts";
+import {
     assistantText,
     failedResult,
     isSubagentTimeoutReason,
@@ -75,14 +79,18 @@ export interface RunAttachedSubagentArgs {
  * Never throws — every failure is reported as `{ isError: true }`, and a run
  * that hit the turn cap degrades to a partial answer rather than an error.
  */
-export async function runAttachedSubagent(args: RunAttachedSubagentArgs): Promise<{
+export interface SubagentRunResult {
     subSessionId: SessionId;
     resultText: string;
     isError: boolean;
     aborted?: boolean;
-    /** The run was interrupted; `resultText` includes unfinished findings. */
     partial?: boolean;
-}> {
+    waiting?: WaitingInteraction;
+}
+
+export async function runAttachedSubagent(
+    args: RunAttachedSubagentArgs,
+): Promise<SubagentRunResult> {
     const { subSessionId, attached, agentType, readLastAssistantText } = args;
     const onUpdate = args.onUpdate;
     // Single point where this runner asserts its payload shape onto the sink:
@@ -168,7 +176,11 @@ export async function runAttachedSubagent(args: RunAttachedSubagentArgs): Promis
         // will not reach the listener above; do not admit a new child run.
         args.signal?.throwIfAborted();
         promptStarted = true;
-        await attached.prompt(args.prompt, undefined, undefined, args.signal);
+        const reply = await attached.prompt(args.prompt, undefined, undefined, args.signal);
+        const waiting = resolveWaitingInteraction(reply, subSessionId);
+        if (waiting) {
+            return { subSessionId, resultText: "", isError: false, waiting };
+        }
     } catch (e) {
         // hitCap before signal.aborted: keep partial answer instead of discarding it.
         if (hitCap) {

@@ -425,6 +425,8 @@ export type {
     WorkSessionState,
     WorkStatus,
     WorkSummary,
+    WorkWaitingSummary,
+    WorkWaitingTool,
 } from "./work.js";
 export {
     WORK_ATTENTION_DELIVERY_STATUSES,

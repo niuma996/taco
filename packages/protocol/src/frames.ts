@@ -95,8 +95,9 @@ export type CompactionFailureReason =
  *  daemon drops it, so a saved timeout would not take effect.
  *  2.10 tracks scheduled fires as Work; a 2.9 daemon sends no `workId` in job
  *  history and still names the summary's session `parentSessionId`.
- *  2.11 reports whether a Work's target session has been deleted. */
-export const SIDECAR_PROTOCOL_VERSION = { major: 2, minor: 11 } as const;
+ *  2.11 reports whether a Work's target session has been deleted.
+ *  2.12 adds managed Work waiting interactions and live permission projections. */
+export const SIDECAR_PROTOCOL_VERSION = { major: 2, minor: 12 } as const;
 
 /**
  * Client-side gate for a sidecar's advertised protocol version. Semver-ish but

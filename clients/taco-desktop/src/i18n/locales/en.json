@@ -17,6 +17,7 @@
     "reset": "Reset"
   },
   "session": {
+    "submitAnswersFailed": "Submitting your answer failed: {{error}}",
     "newInWorkspace": "New chat in this workspace",
     "newChat": "New chat",
     "searching": "Searching…",
@@ -521,6 +522,7 @@
       "finished": "Finished"
     },
     "status": {
+      "waiting": "Waiting for you",
       "running": "Running",
       "completed": "Completed",
       "failed": "Failed",
@@ -934,6 +936,7 @@
       "timedOutRunning": "The schedule stopped waiting, but the run is still going. Its answer will appear here.",
       "mergedHint": "The chat was busy, so this prompt joined the turn already running. That turn's reply answers it.",
       "state": {
+        "waiting": "Waiting for you",
         "running": "Running",
         "completed": "Completed",
         "merged": "Merged",

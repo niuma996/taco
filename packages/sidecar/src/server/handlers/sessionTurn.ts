@@ -227,7 +227,15 @@ export function registerSessionTurnHandlers(): void {
 
             const body = formatAskUserContextBody(toolName, questions, params.answers);
             const text = wrapAskUserContext(body);
-            await attached.prompt(text).catch(rethrowBusyAsSessionBusy);
+            const run = () => attached.prompt(text);
+            await (server.work
+                ? server.work.answerWaiting(
+                      { workspace: params.workspace, sessionId: params.sessionId },
+                      params.toolCallId,
+                      run,
+                  )
+                : run()
+            ).catch(rethrowBusyAsSessionBusy);
             workspace.invalidateListCache();
             return null;
         },

@@ -158,3 +158,40 @@ describe("WorkPane result states", () => {
         assert.equal(workGet.mock.calls.length, 2);
     });
 });
+
+it("shows waiting attention, bounds its description and opens the actual waiting session", async () => {
+    const work: WorkSummary = {
+        ...runningWork,
+        status: "waiting",
+        needsAttention: true,
+        waiting: {
+            toolCallId: "ask",
+            toolName: "permission",
+            sessionId: "child",
+            description: "x".repeat(1000),
+        },
+    };
+    const onOpenSession = vi.fn();
+    render(
+        <WorkPane
+            client={{ workGet: async () => ({ work }) } as never}
+            overview={{
+                ...overview(work),
+                state: {
+                    ...overview(work).state,
+                    groups: { running: [], attention: [work], finished: [] },
+                },
+            }}
+            onOpenSession={onOpenSession}
+        />,
+    );
+    assert.ok(screen.getByText("work.group.attention"));
+    assert.ok(screen.getByText("work.status.waiting").className.includes("work-status--warn"));
+    const description = document.querySelector(".work-item-waiting");
+    assert.ok(description);
+    assert.ok((description.textContent?.length ?? 0) <= 240);
+    fireEvent.click(screen.getByRole("button", { name: "work.openSession" }));
+    assert.deepEqual(onOpenSession.mock.calls, [[{ workspace: "/w", sessionId: "child" }]]);
+    fireEvent.click(screen.getByRole("button", { name: /Review changes/ }));
+    await waitFor(() => assert.ok(screen.getByText("work.resultPending")));
+});

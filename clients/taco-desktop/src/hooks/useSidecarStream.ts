@@ -71,6 +71,7 @@ export type SidecarAction =
     | {
           type: "ASKUSER_ANSWERED";
           cwd: string;
+          sid: string;
           toolCallId: string;
           answers: Record<string, string | string[]>;
       }

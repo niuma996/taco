@@ -20,7 +20,14 @@ import { chunkText } from "../channels/builtin/channelReply.ts";
 import { createLogger } from "../lib/logger.ts";
 import { uuidv7 } from "../runtime/pi/values.ts";
 import { PARENT_REPLY_GRACE_MS, type WorkDeliverer } from "./workDelivery.ts";
-import { completenessFor, interrupt, type SettleOutcome, settle } from "./workState.ts";
+import {
+    completenessFor,
+    interrupt,
+    resumeAttempt as resumeWorkAttempt,
+    type SettleOutcome,
+    settle,
+    waitForInput as waitWorkForInput,
+} from "./workState.ts";
 import { type WorkStore, workIdForSource } from "./workStore.ts";
 import {
     isTerminal,
@@ -74,6 +81,7 @@ export interface StartScheduledWorkArgs {
 
 export interface SettleWorkArgs {
     readonly workId: string;
+    readonly attemptId?: string;
     readonly outcome: SettleOutcome;
     readonly resultText: string;
     readonly partial?: boolean;
@@ -209,7 +217,11 @@ export class WorkController {
     async settle(args: SettleWorkArgs): Promise<WorkRecord | undefined> {
         const now = this.now();
         const current = await this.store.get(args.workId);
-        if (!current || isTerminal(current.status)) return current;
+        if (
+            current?.status !== "running" ||
+            (args.attemptId !== undefined && args.attemptId !== current.attempt.attemptId)
+        )
+            return current;
 
         const hasText = args.resultText.trim().length > 0;
         const completeness = completenessFor({
@@ -263,6 +275,7 @@ export class WorkController {
             : undefined;
 
         const res = await this.store.mutate(args.workId, (work) => {
+            if (work.attempt.attemptId !== current.attempt.attemptId) return undefined;
             const next = settle(work, { outcome: args.outcome, result, reason: args.reason, now });
             if (!next) return undefined;
             return delivery ? { ...next, delivery } : next;
@@ -277,39 +290,62 @@ export class WorkController {
         return res.record;
     }
 
-    /**
-     * Reopen an interrupted Work for a resumed run. Only `interrupted` may be
-     * reopened: a completed Work stays completed, and a failed one did not fail
-     * for a reason a resume changes.
-     */
-    async resumeAttempt(workId: string): Promise<WorkRecord | undefined> {
+    async waitForInput(
+        workId: string,
+        waiting: import("../runtime/session/waitingInteraction.ts").WaitingInteraction,
+        attemptId?: string,
+    ): Promise<WorkRecord | undefined> {
+        const res = await this.store.mutate(workId, (current) => {
+            if (attemptId !== undefined && current.attempt.attemptId !== attemptId)
+                return undefined;
+            return waitWorkForInput(current, { ...waiting, now: this.now() });
+        });
+        if (res?.changed) this.onChange(workId);
+        return res?.record;
+    }
+
+    /** Resume only the specified waiting interaction, or an interrupted child. */
+    async resumeAttempt(workId: string, toolCallId?: string): Promise<WorkRecord | undefined> {
         const now = this.now();
         const res = await this.store.mutate(workId, (current) => {
-            if (current.status !== "interrupted") return undefined;
-            // The resume is happening because the user is in the conversation.
-            // An interruption notice still waiting to go out is now stale and
-            // would land after the result they are about to see.
-            const delivery =
-                current.delivery?.status === "pending"
-                    ? {
-                          ...current.delivery,
-                          status: "cancelled" as const,
-                          nextAttemptAt: undefined,
-                      }
-                    : current.delivery;
+            if (
+                toolCallId !== undefined &&
+                (current.status !== "waiting" || current.waiting?.toolCallId !== toolCallId)
+            )
+                return undefined;
+            const next = resumeWorkAttempt(current, { attemptId: uuidv7(), now });
+            if (!next) return undefined;
             return {
-                ...current,
-                status: "running" as const,
-                updatedAt: now,
-                endedAt: undefined,
-                reason: undefined,
-                ...(delivery ? { delivery } : {}),
-                attempt: { attemptId: uuidv7(), startedAt: now },
+                ...next,
+                ownerInstanceId: this.instanceId,
+                ...(current.delivery?.status === "pending"
+                    ? {
+                          delivery: {
+                              ...current.delivery,
+                              status: "cancelled" as const,
+                              nextAttemptAt: undefined,
+                          },
+                      }
+                    : {}),
             };
         });
-        if (!res?.changed) return res?.record;
-        this.onChange(workId);
-        return res.record;
+        if (res?.changed) this.onChange(workId);
+        return toolCallId !== undefined && !res?.changed ? undefined : res?.record;
+    }
+
+    async restoreWaiting(snapshot: WorkRecord, attemptId: string): Promise<void> {
+        const res = await this.store.mutate(snapshot.workId, (current) =>
+            current.status === "running" && current.attempt.attemptId === attemptId
+                ? {
+                      ...current,
+                      status: "waiting",
+                      waiting: snapshot.waiting,
+                      attempt: snapshot.attempt,
+                      updatedAt: this.now(),
+                  }
+                : undefined,
+        );
+        if (res?.changed) this.onChange(snapshot.workId);
     }
 
     /** Whether this Work's outcome already reached the user another way. */

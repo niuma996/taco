@@ -18,6 +18,7 @@
  */
 
 import type { AgentMessage } from "../pi/types.ts";
+import { resolveWaitingInteraction } from "../session/waitingInteraction.ts";
 import type { AttachedSession } from "./attachedSession.ts";
 
 export type QueuedOutcome =
@@ -95,7 +96,12 @@ export function createQueuedWatch(
         const event = raw as LaneEvent;
         switch (event.type) {
             case "message_end":
-                if (event.message?.role === "assistant") lastAssistant = event.message;
+                if (
+                    event.message?.role === "assistant" ||
+                    resolveWaitingInteraction(event.message, sessionId)
+                ) {
+                    lastAssistant = event.message ?? null;
+                }
                 if (event.entryId !== undefined) {
                     placed.add(event.entryId);
                     inFlight.add(event.entryId);

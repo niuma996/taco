@@ -25,7 +25,7 @@ const ATTENTION_DELIVERY: ReadonlySet<string> = new Set(WORK_ATTENTION_DELIVERY_
  * failed is a finished result, not a to-do: the notice already said so.
  */
 export function needsAttention(work: WorkRecord): boolean {
-    if (work.status === "interrupted") return true;
+    if (work.status === "interrupted" || work.status === "waiting") return true;
     const status = work.delivery?.status;
     return status !== undefined && ATTENTION_DELIVERY.has(status);
 }
@@ -59,6 +59,7 @@ export function toSummary(work: WorkRecord): WorkSummary {
         ...(work.workspace !== undefined ? { workspace: work.workspace } : {}),
         sessionId: work.parentSessionId,
         sessionState: work.sessionState ?? (work.workspace ? "available" : "unavailable"),
+        ...(work.waiting ? { waiting: work.waiting } : {}),
         parentSessionId: work.parentSessionId,
         ...(work.childSessionId !== undefined ? { childSessionId: work.childSessionId } : {}),
         ...(work.result ? { completeness: work.result.completeness } : {}),
