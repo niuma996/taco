@@ -203,23 +203,16 @@ export class JobStore {
                     log.warn(`failed to persist strategy migration for ${path}: ${String(err)}`),
                 );
             }
-            // Older jobs also carried their intent in `command` (e.g.
-            // `command: "mmx search query"`) instead of in `args.prompt`.
-            // The dispatcher only routes `agent.invoke` — translate the
-            // legacy shape so the next fire boots an agent session with a
-            // useful initial prompt. Empty/non-string commands are left
-            // alone; the dispatcher's unknown-command error will surface
-            // them on the next fire rather than letting us silently drop
-            // a job the user actually cared about.
-            //
-            // We also persist the migrated form back to disk so the file
-            // picks up the canonical shape on first read. Without this,
-            // the UI keeps showing the legacy `command` until something
-            // else triggers a `save` — and a job nobody edits never gets
-            // that opportunity. A write failure is logged but doesn't
-            // break the read; the next read will retry the migration.
-            // Built-in jobs carry a native command on purpose; rewriting one
-            // into an agent prompt would turn a system task into a model turn.
+            // Jobs written before `args.prompt` existed carried their intent
+            // in `command` (e.g. `command: "mmx search query"`). The dispatcher
+            // only routes `agent.invoke`, so translate the old shape into an
+            // agent prompt. Built-in jobs are excluded — their native command
+            // is deliberate, and rewriting it would turn a system task into a
+            // model turn. Empty or non-string commands are left alone, so the
+            // dispatcher's unknown-command error surfaces them on the next fire
+            // instead of silently dropping a job. The migrated form is written
+            // back so the file picks up the canonical shape on first read; a
+            // write failure is logged and retried on the next read.
             if (
                 typeof withStrategy.command === "string" &&
                 withStrategy.command !== "agent.invoke" &&

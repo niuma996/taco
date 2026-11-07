@@ -1,26 +1,14 @@
 /**
  * Undelivered background subagent results, persisted on the parent session.
  *
- * `deliverSubagentResult` is best-effort by construction: it needs the parent's
- * live `AttachedSession`, and there are normal states where that route is
- * closed — the parent is mid-compaction (compaction occupies the lane without
- * consuming either queue, so `followUp` reports idle and the retry `prompt()`
- * hits busy again), the workspace was disposed, or the process restarted
- * between the child settling and the notice landing.
+ * `deliverSubagentResult` is best-effort — it needs the parent's live
+ * `AttachedSession` — and a lost notice leaves the parent believing the child
+ * is still running. So the notice is recorded *before* delivery and cleared
+ * only once it lands; leftovers are flushed on the next attach.
  *
- * In all of those the result itself is safe on disk; only the *notice* was
- * lost, which is worse than it sounds — the parent goes on believing the child
- * is still running. So the notice is recorded here before delivery is attempted
- * and cleared once it lands, and whatever is left over is flushed the next time
- * the parent attaches.
- *
- * Stored as one record keyed by `parentToolCallId` rather than a `list`:
- * clearing a single delivered entry has to be possible, and pi's list address
- * only supports append and whole-list delete.
- *
- * Only metadata lives here. The result text is already a file (see
- * `subagentResultsDir.ts`) and re-persisting it would double the cost of a
- * large answer while adding a second thing to keep consistent.
+ * One record per `parentToolCallId`, not a `list`: pi's list address only
+ * supports append and whole-list delete. Only metadata lives here — the text
+ * is already a file (see `subagentResultsDir.ts`).
  */
 
 import type { SessionId } from "@taco-ai/protocol";

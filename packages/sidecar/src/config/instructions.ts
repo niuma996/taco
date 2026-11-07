@@ -1,28 +1,15 @@
 /**
- * Project-context instructions resolution.
+ * Project-context instructions resolution — reads CLAUDE.md / AGENTS.md /
+ * DESIGN.md from a workspace-relative chain into `<instructions>` blocks.
+ * Each file resolves independently; one missing file does not affect others.
  *
- * Reads CLAUDE.md / AGENTS.md / DESIGN.md from a workspace-relative directory
- * chain and returns a list of blocks ready to be wrapped as `<instructions>`
- * tags. Each file is resolved independently — missing one does not affect
- * the others.
+ * Priority chain per file (first non-empty match wins): `<cwd>/.taco/<name>.md`
+ * (project overrides) → `<cwd>/<name>.md` (project root) →
+ * `$TACO_HOME/<name>.md` (user global) → `~/.claude/<name>.md` (CLAUDE.md only).
  *
- * Priority chain (per file, first non-empty match wins):
- *   1. <cwd>/.taco/<name>.md              project taco config dir (project overrides)
- *   2. <cwd>/<name>.md                    project root
- *   3. $TACO_HOME/<name>.md               user taco global (~/.taco)
- *   4. ~/.claude/<name>.md                claude-compatible user dir (CLAUDE.md only)
- *
- * AGENTS.md / DESIGN.md skip step 4 — only Claude Code convention has the
- * `~/.claude/` mirror, and AGENTS.md / DESIGN.md are not part of that.
- *
- * When `filesOverride.<name>` is set, the lookup is skipped entirely and the
- * override path is read directly — useful for projects whose instructions
- * live under e.g. `docs/AGENTS.md`.
- *
- * All filesystem reads are isolated per file: a permission error on one
- * directory must not block reads from the others. Errors are surfaced via
- * `resolveInstructions.errors[]` so the caller can `log.warn` per file
- * without losing the rest of the resolution.
+ * `filesOverride.<name>` skips the lookup and reads that path directly. Reads
+ * are isolated per file — one directory's permission error cannot block the
+ * others — and failures land in `resolveInstructions.errors[]`.
  */
 
 import { readFileSync } from "node:fs";

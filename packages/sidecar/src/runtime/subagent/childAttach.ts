@@ -205,26 +205,14 @@ export async function prepareChildAttach(
 /**
  * Render a child agent's write capability into a prompt block.
  *
- * The general `<session_role>` guidance already says "if your task requires a
- * tool that is not available, explain it in your final response" — but it is
- * one line among many, and a task that names a concrete output path ("write
- * the report to X") reads as doable. A read-only reviewer asked to do exactly
- * that spends its whole budget preparing to write a file it has no tool to
- * write, and never delivers the report.
+ * The statement is derived from the toolset the child actually got — plus the
+ * deferred tools its profile may still load — not from what its profile body
+ * claims, so a read-only reviewer asked to write a file is told it cannot.
  *
- * So the statement is derived from the toolset the child actually got — plus
- * the deferred tools its profile may still load — not from what its profile
- * body claims.
- *
- * Two flavors, because "no `write` tool" and "cannot write a file" are not
- * the same claim. A profile whose shell is also read-only genuinely cannot
- * create a file by any route, so it gets the directive. A profile with a
- * working shell — `verification` runs builds and writes throwaway scripts —
- * or a loadable PDF writer only lacks the `write` / `edit` tools, and telling
- * it it cannot write a file would be false.
- *
- * Returns "" when the child has the direct write tools — there is nothing to
- * say.
+ * Only a child with no writable route (no working shell, no file-producing
+ * tool) is told it cannot write a file; one that merely lacks `write`/`edit`
+ * is told exactly that, because a working shell or a loadable file writer can
+ * still produce the file. Returns "" when the child has direct write tools.
  */
 function formatCapabilities(
     tools: readonly TacoTool[],

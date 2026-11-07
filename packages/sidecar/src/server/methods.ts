@@ -61,9 +61,7 @@ export function registerBuiltinMethods(): void {
     registerCheckpointsHandlers();
     registerProviderModelsHandlers();
     registerProviderTestHandlers();
-    // PR4: jobs.* lives last so any other handler can reference the
-    // scheduler's JobsControl via ServerRpcSurface.jobs without worrying
-    // about init order (jobs is process-scoped, never workspace-scoped).
+    // jobs.* uses the process-scoped JobsControl via ServerRpcSurface.jobs.
     registerJobsHandlers();
     registerMcpHandlers();
     registerWorkHandlers();

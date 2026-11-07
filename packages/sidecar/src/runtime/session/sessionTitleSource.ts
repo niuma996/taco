@@ -1,27 +1,17 @@
 /**
  * Session title provenance — "who last set this session's title."
  *
- * `pi.session.name` (see sessionMetadataReader.ts) is a bare last-write-wins
- * string with no origin tag, so the auto-title logic in session.prompt /
- * session.create (a 60-char truncation of the latest user message) cannot
- * tell its own writes apart from an explicit `session.rename`. Without this,
- * every subsequent prompt after a user rename clobbers it right back.
+ * `pi.session.name` is a bare last-write-wins string with no origin tag, so
+ * the auto-title logic (a 60-char truncation of the latest user message)
+ * cannot tell its own writes apart from an explicit `session.rename`.
  *
- * Three sources, not two, because two different auto-writers exist and each
- * must be unwritable by the other:
- *   - "placeholder": the 60-char truncation written on every `session.prompt`
- *     until something better exists.
- *   - "summary": the LLM title (TitleSummarizer, re-derived on every completed
- *     run_end). Once set, the placeholder path must stop truncation-overwriting
- *     it on every subsequent message — a real summary is strictly better than a
- *     raw truncation of whatever the user typed most recently. A later summary
- *     may replace an earlier one; only "user" is terminal.
- *   - "user": an explicit `session.rename`. Neither auto-writer may touch it.
- *
- * Kept as its own value record rather than a field on `SessionFacts`
- * (sessionFacts.ts): `writeSessionFacts` replaces the whole record on every
- * write, so folding titleSource in there would make an unrelated facts write
- * silently reset title provenance (or vice versa).
+ * Three sources: "placeholder" (that truncation, written on every prompt and
+ * refused once a summary or rename holds the title), "summary" (the LLM title,
+ * which replaces a placeholder or an earlier summary), and "user" (an explicit
+ * `session.rename` — terminal, untouched by either auto-writer).
+ * Keep this as a separate value record: `writeSessionFacts` replaces the whole
+ * facts record, so folding provenance into it would erase it on an unrelated
+ * facts write.
  */
 
 import { harnessContext } from "../../lib/harnessContext.ts";

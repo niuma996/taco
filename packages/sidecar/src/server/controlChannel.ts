@@ -1,15 +1,9 @@
 /**
  * Control channel — a small JSON-RPC over the control socket for out-of-band
- * daemon management. PR2 wires the basic liveness + shutdown RPCs; PR3/PR4
- * add upgrade notifications and UI focus requests.
+ * daemon management: `control.ping` (liveness) and `control.shutdown`.
  *
- * Wire format: one JSON object per line, no length prefix, no start byte.
- * Request:  {"method": "control.X", "params"?: ..., "id": <number>}
- * Response: {"result": ..., "id": <number>} | {"error": {"code", "message"}, "id": <number>}
- *
- * The NDJSON framing matches the data channel so we don't need a new parser;
- * keeping it on a separate socket (instead of multiplexing with NDJSON) means
- * a stuck / half-closed UI socket can't block liveness pings.
+ * One JSON object per line, no length prefix — the data channel's framing, on
+ * a separate socket so a stuck UI socket can't block liveness pings.
  */
 
 import type { Socket } from "node:net";

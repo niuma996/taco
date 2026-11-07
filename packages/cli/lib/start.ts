@@ -1,26 +1,17 @@
 /**
  * `taco start` — ensure a daemon is running and report its socket path.
  *
- * Idempotent by design: the desktop can reach this through two independent
- * paths (the setup hook's `taco install`, and `workspace_ensure`'s launcher
- * spawn), and macOS launchd `RunAtLoad=true` adds a third. Spawning
- * unconditionally meant two daemons racing to bind the same control socket,
- * where the loser exited non-zero and launchd restarted it forever.
+ * Idempotent: several independent callers reach this, so an already-running
+ * daemon is reused rather than duplicated.
  *
- * Flow:
- *   1. Resolve shared $TACO_HOME and the daemon runtime directory; create both if missing.
- *   2. If a daemon already answers on the NDJSON socket AND runs the code
- *      this launch would spawn (pid-record version match; dev checkouts
- *      never match), print the socket path and return — no spawn. A healthy
- *      but stale daemon is reaped first, via the same kill path as a wedged
- *      one.
- *   3. Otherwise elect a spawner via `start.lock`. The winner spawns and waits
- *      for readiness; losers skip the spawn and wait on the same socket.
- *   4. Print the NDJSON socket path to stdout (single line) so callers
- *      (Tauri UI / scripts) can read it via `Command::output()`.
+ * Flow: resolve $TACO_HOME + runtime dir (create both if missing); reuse a
+ * daemon answering on the NDJSON socket that already runs this launch's code
+ * (pid-record version match; dev checkouts never match — a stale one is
+ * reaped first); else elect a spawner via `start.lock` (winner spawns,
+ * losers wait on the same socket). Print the NDJSON socket path to stdout.
  *
- * Why exit after ready: this CLI is a launcher, not a supervisor. Keeping it
- * alive would tie the daemon's lifetime to whoever ran `taco start`.
+ * Exits once ready: a launcher, not a supervisor — staying alive would tie
+ * the daemon's lifetime to whoever ran `taco start`.
  */
 
 import { readFileSync, unlinkSync } from "node:fs";

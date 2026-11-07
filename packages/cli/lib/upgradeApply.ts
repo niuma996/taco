@@ -1,29 +1,17 @@
 /**
- * `taco upgrade --apply` — atomic swap of the staged bundle into the
- * live install dir, then clear the marker. Triggered by the UI's
- * reconnect loop after the daemon's UpgradeOrchestrator has shut itself
- * down (because the marker pointed at a real staging dir).
+ * `taco upgrade --apply` — atomic swap of the staged bundle into the live
+ * install dir, then clear the marker. Run by the UI's reconnect loop (or by
+ * `taco start`) once the daemon's UpgradeOrchestrator has shut itself down.
  *
- * Swap strategy:
- *   1. Read the marker (missing → throw; the UI should fall back to
- *      plain `taco start` in that case).
- *   2. Verify the staging dir still exists with a manifest.json — the
- *      operator may have wiped $TACO_HOME/staging while the daemon was
- *      still running, in which case we refuse to swap (would leave the
- *      live dir untouched but still clear the marker).
- *   3. Rename `live_dir` → `live_dir.prev` (atomic on the same fs;
- *      leaves a rollback target).
- *   4. Rename `staging_dir` → `live_dir` (atomic if prev rename
- *      succeeded; on EXDEV across filesystems we fall back to
- *      copyFile + unlink so a cross-mount install doesn't wedge).
- *   5. On any failure: rename `live_dir.prev` back to `live_dir`
- *      so the daemon's next start picks up the old binary instead of
- *      a half-swapped tree.
- *   6. Clear the marker.
- *   7. Best-effort: send control.shutdown so the (about-to-restart)
- *      daemon stops cleanly; the service manager (launchd / schtasks)
- *      respawns against the new binary. If no service is installed,
- *      the UI's reconnect loop runs `taco start` itself.
+ * 1. Read the marker (missing → throw) and check staging still holds a
+ *    manifest.json — missing staging clears the marker, malformed staging
+ *    keeps it so a re-run can re-download.
+ * 2. Rename `live_dir` → `live_dir.prev`.
+ * 3. Rename `staging_dir` → `live_dir` (on EXDEV fall back to copyFile +
+ *    unlink).
+ * 4. On failure rename `.prev` back so the next start picks up the old
+ *    binary instead of a half-swapped tree.
+ * 5. Clear the marker, run the optional `stop` hook, drop the rollback target.
  */
 
 import { copyFile, mkdir, rename, rm, stat } from "node:fs/promises";

@@ -1,26 +1,16 @@
 /**
  * Scheduler types — persisted job definitions + their in-flight history.
  *
- * Jobs live as one JSON file per id under $TACO_HOME/jobs/<id>.json. The
- * file is the durable contract between the UI and the daemon. The UI writes
- * through `jobs.*` RPCs, and that path reloads the schedule immediately; the
- * daemon reads the files on startup. There is no filesystem watcher, so a file
- * edited by hand takes effect only after a restart.
+ * Jobs live as one JSON file per id under $TACO_HOME/jobs/<id>.json — the
+ * durable contract between the UI and the daemon. The UI writes through
+ * `jobs.*` RPCs, which reload the schedule immediately; there is no filesystem
+ * watcher, so a hand-edited file takes effect only after a restart.
  *
- * History is a 20-entry ring stored inside the same JSON; it's truncated
- * on every run rather than maintained separately so a single file write
- * carries the whole state machine. The lock file <id>.lock (not modeled
- * in this type — it's purely a runtime concern) prevents overlapping
- * runs of the same job when the schedule fires faster than the command
- * completes (e.g. a 1-minute `agent.invoke` whose model turn takes 90s).
- *
- * `run_on_startup` (deliberately snake_case — the JSON shape is the user-
- * facing contract) governs catch-up behavior on daemon restart: a missed
- * fire during downtime is replayed once if true, dropped if false; a job
- * that has never run also fires once at boot, since arming the flag asks
- * for a run on the next startup. Most recurring jobs want false (a "every
- * morning at 9am" job after a 3-day downtime should not run 3 times in
- * a row).
+ * History is a 20-entry ring in the same JSON. A `<id>.lock` file keeps one
+ * job's fires from overlapping. `run_on_startup` (snake_case — the JSON is the
+ * user-facing contract) governs catch-up on restart. When true, an enabled
+ * job replays one missed fire or runs once at boot if it has never run;
+ * when false, neither startup run is requested.
  */
 
 import type {

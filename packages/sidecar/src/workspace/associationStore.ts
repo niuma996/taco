@@ -1,32 +1,17 @@
 /**
  * Persistent store for workspace directory associations.
  *
- * A workspace's tool permissions are rooted at a set of directories: its own
- * root (the cwd) plus any associated directories the user granted. This
- * store holds the associated sets.
+ * A workspace's tool permissions are rooted at its own cwd plus any associated
+ * directories the user granted. Lives at `$TACO_HOME/workspace-associations.json`
+ * — a sidecar-owned file every client (desktop, CLI, scheduler) reads.
  *
- * Lives at `$TACO_HOME/workspace-associations.json` — a sidecar-owned file,
- * not a desktop one. Every client (desktop, CLI, the scheduler) reads the
- * same sets, and a change made in one is visible to the others.
+ * Two scopes: `workspace` — one workspace (a filesystem cwd, or one IM
+ * conversation `im://<channelId>/<peerId>/<chatId>`); `channel` — every
+ * conversation on one IM channel. Separate namespaces, so a channel id that
+ * looks like a path cannot collide with a workspace entry.
  *
- * TWO STORAGE SCOPES, because the admin picks the granularity:
- *  - `workspace` — one workspace: a filesystem cwd, or one IM conversation
- *    (`im://<channelId>/<peerId>/<chatId>`).
- *  - `channel` — every conversation on one IM channel.
- *
- * The scopes live in separate namespaces, so a channel id that happens to
- * look like a path cannot collide with a workspace entry.
- *
- * Reads are deliberately uncached. In daemon mode one process runs several
- * SidecarServers — `imHost` owns the IM workspaces, `schedulerSidecar` owns
- * the fs ones, and each NDJSON connection gets its own — each with its own
- * WorkspaceRegistry. An in-memory cache would let one of them act on a stale
- * set after another wrote it. Reading the small file on each use costs
- * nothing next to the fs operations it guards.
- *
- * Permissions: the file holds paths, not secrets, but it lives under
- * $TACO_HOME with the rest of the user's state and is written 0600 so a
- * shared machine does not leak the directory layout.
+ * Reads are uncached: several servers share this file, so a cache would serve
+ * a stale set. The file holds paths, not secrets, but it is written 0600.
  */
 
 import { randomUUID } from "node:crypto";

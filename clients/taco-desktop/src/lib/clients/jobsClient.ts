@@ -1,23 +1,13 @@
 /**
- * Typed wrapper around the daemon's `jobs.*` RPC surface. The desktop
- * already has a generic `TacoClient.callProcess` that sends raw NDJSON
- * frames; this module adds the type-level wrapper so the Schedules UI
- * can call `client.jobs.list()` without re-declaring the params/result
- * shape at every call site.
+ * Typed wrapper over the daemon's `jobs.*` RPC surface, so the Schedules UI can
+ * call `client.jobs.list()` without re-declaring the params/result shape. The
+ * wire shapes live in `@taco-ai/protocol` — the same definitions the sidecar
+ * serves — so the two halves cannot drift.
  *
- * Jobs are process-scoped (the scheduler lives in the daemon process),
- * so every call goes through `callProcess`. `call()` would require the
- * sidecar to validate `params.workspace`, which the schedule UI never
- * sends.
- *
- * Every method takes an `Actor` so the daemon can enforce IM-scope vs
- * IDE-scope. The desktop constructs the actor from the active workspace
- * key (an `im://` workspace → IM triple; a real fs cwd → IDE workspace)
- * and closes over it at the call site. Tests / admin tooling can pass
- * `undefined` for legacy un-scoped access.
- *
- * The wire shapes live in `@taco-ai/protocol` — the same definitions the
- * sidecar serves — so the two halves cannot drift.
+ * Jobs are process-scoped, so every call goes through `callProcess` — `call()`
+ * would require the sidecar to validate `params.workspace`, which this UI never
+ * sends. Every method takes an optional `Actor` for IM-scope vs IDE-scope
+ * enforcement; `undefined` means unscoped, so the daemon skips scope filtering.
  */
 
 import type {

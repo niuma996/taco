@@ -84,21 +84,21 @@ export function controlSocketPath(runtimeDir: string = RUNTIME_DIR): string {
     return join(runtimeDir, "sidecar-ctl.sock");
 }
 
-/** Daemon pid file (Unix only; Windows uses service control manager in PR3). */
+/** Daemon pid file (Unix only; Windows uses service control manager). */
 export function runtimePidFile(runtimeDir: string = RUNTIME_DIR): string {
     return join(runtimeDir, "sidecar.pid");
 }
 
-/** Upgrade marker file (PR4). */
+/** Upgrade marker file. */
 export const UPGRADE_MARKER = join(TACO_HOME, "upgrade-marker.json");
 
 /** Logs root — launchd/schtasks redirect the daemon's stdout/stderr here. */
 export const LOG_DIR = join(TACO_HOME, "logs");
 
-/** Upgrade staging area — PR4 downloads the new bundle here before swapping. */
+/** Upgrade staging area — the new bundle is downloaded here before swapping. */
 export const STAGING_DIR = join(TACO_HOME, "staging");
 
-/** Scheduler job definitions root (PR4). */
+/** Scheduler job definitions root. */
 export const JOBS_DIR = join(TACO_HOME, "jobs");
 
 /** Create the directory tree under $TACO_HOME that `taco install` + later PRs rely on.

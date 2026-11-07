@@ -1,28 +1,14 @@
 /**
  * Denial guidance for a refused approval.
  *
- * Shared by every tool that goes through the permission broker (the shell
- * tool, the config tools). The wording is the same in each place, so it
- * lives here: a model that learns "a denial is final" from one tool should
- * not have to relearn it from another.
+ * Shared by every tool that goes through the permission broker, so the wording
+ * is identical everywhere: a model that learns "a denial is final" from one
+ * tool should not have to relearn it from another.
  *
  * The text widens "do not retry" to "do not attempt the same outcome by
- * another route", because models otherwise read a denial as "use a
- * different string" and re-attempt it through a pipe, a sibling tool, or a
- * split-up request. A denial is about the intent, not the exact form.
- *
- * The reason changes what the model should do next:
- *   - `user_denied`  — a person said no. Re-asking the same thing is
- *     nagging; the model should stop and let the user lead.
- *   - `timeout` — nobody answered. Asking is still reasonable.
- *   - `aborted` — the turn was cancelled. Not a judgement on the action.
- *   - `no_approver` — no desktop app is connected, so there is no UI to
- *     ask on.
- *   - `im_channel` — an IM conversation, where approvals are refused
- *     outright. The person on the channel can still be asked in a reply.
- *   - `undefined` — blocked by policy before any UI (a deny rule, a
- *     read-only broker, an IM channel policy). Nobody was asked, so there
- *     is no user to route a question to.
+ * another route" — a denial is about the intent, not the exact form. The
+ * reason decides what happens next: whether re-asking is reasonable
+ * (`timeout`), who to ask, or that nobody was asked at all.
  */
 
 import type { CommandPermissionDenialReason } from "@taco-ai/protocol";

@@ -2,40 +2,18 @@
  * Durable disk tail for sequenced session push frames — one JSONL file per
  * (workspace, session) stream under `<root>/<sessionId>-<workspaceHash>.jsonl`.
  *
- * Why: `SessionEventLog`'s ring is process-local. When the sidecar restarts
- * while a desktop client stays up, the client's cursor sits at a high seq
- * while the new process restarts at 1 — every subsequent frame is discarded
- * as a duplicate and the session view freezes. Hydrating the ring from this
- * tail (`SessionEventLog.hydrate`) restores seq continuity so reconnecting
- * clients replay instead of rebuilding from a full snapshot.
+ * `SessionEventLog`'s ring is process-local: after a restart the client's
+ * cursor sits at a high seq while the new ring restarts at 1, so every later
+ * frame is discarded as a duplicate and the session view freezes. Hydrating
+ * the ring from this tail restores seq continuity.
  *
- * The file key mirrors the ring's key exactly. Keying on `sessionId` alone
- * would let two workspaces that share a session id (clients may supply their
- * own id to `session.create`) collide on one file while their rings stay
- * separate — one stream's seqs would then hydrate the other's.
- *
- * ## One writer per stream
- *
- * Seq numbering lives in the ring, not here, so two `SessionEventLog`s
- * appending to one file interleave two independent seq sequences and hydrate
- * would adopt whichever landed last. Two invariants keep that from happening:
- *
- * The daemon's single runtime owns one ring and one disk-tail instance.
- * Separate sidecars must use separate stream files; sharing a file between
- * independently numbered rings is invalid even if appends are serialized.
- *
- * Best-effort by contract: appends are buffered and flushed on a short
- * timer, and a crash may lose the unflushed window or tear the last line.
- * Both degrade to the pre-existing `resetRequired` snapshot path, never to
- * silent seq reuse — `loadTail` only returns complete, parseable lines.
- * `flush()` drains the buffer on graceful shutdown so the common
- * restart-by-the-user case loses nothing.
- *
- * The file is bounded: the flush path rewrites it with only the most recent
- * `keep` lines (same bound as the in-memory ring) once it holds `2 × keep`
- * lines or outgrows its byte budget. The byte budget doubles to twice the
- * compacted size, so frames larger than `maxFileBytes / keep` cannot make
- * every flush rewrite the whole file; compaction stays amortized O(1) per byte.
+ * Seq numbering lives in the ring. A shared DurablePushLog rejects a second
+ * ring per stream, but ownership is only enforced in memory: independent
+ * sidecars must use separate stream files even if appends are serialized.
+ * Appends are buffered: a crash may lose the unflushed window or tear the
+ * last line; both fall back to a `resetRequired` snapshot, never silent seq
+ * reuse. `loadTail` returns
+ * complete lines only; `flush()` drains the buffer on graceful shutdown.
  */
 
 import { createHash } from "node:crypto";

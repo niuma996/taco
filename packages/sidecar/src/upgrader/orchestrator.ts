@@ -1,34 +1,14 @@
 /**
  * Daemon-side upgrade orchestrator.
  *
- * Flow:
- *   1. CLI's `taco upgrade` fetches a new sidecar release, downloads
- *      it to $TACO_HOME/staging/sidecar-<new>/, and writes
- *      $TACO_HOME/upgrade-marker.json with the staging + live paths.
- *   2. The daemon's `checkForUpgrade` reads the marker on every boot
- *      + every `UPGRADE_CHECK_INTERVAL_MS`. If the marker points at
- *      a staging dir that actually exists, the daemon asks its host
- *      to shut down cleanly.
- *   3. launchd (KeepAlive.SuccessfulExit=false) and schtasks (ONSTART)
- *      will NOT restart us — that's intentional: the UI's reconnect
- *      loop detects the disconnect, runs `taco upgrade --apply` (which
- *      swaps the staging contents into the live dir + relaunches the
- *      daemon), and re-establishes the NDJSON connection against the
- *      new version. The CLI's `--apply` flow owns the restart so the
- *      swap can land atomically with the relaunch.
+ * Contract: `taco upgrade` stages a bundle and writes an upgrade marker; the
+ * daemon sees the marker on boot and every 6h and asks its host to shut down.
+ * The UI's reconnect loop then runs `taco upgrade --apply`, which swaps the
+ * staged bundle into the live dir and relaunches.
  *
- * Why we don't broadcast `control.upgrade_available`:
- *   The plan reserved a server-pushed event for this, but the
- *   ServerPush type requires a `workspace` field and a registered
- *   method name in `@taco-ai/protocol`. Widening the protocol for one
- *   event is out of PR4 scope; the reconnect-loop + marker dance is
- *   functionally equivalent and stays within the daemon + CLI.
- *
- * Why we don't restart ourselves:
- *   launchd restart uses the SAME binary + args (the wrapper script's
- *   hardcoded paths). Without a swap, the restarted daemon points at
- *   the old version. We rely on the UI to run `--apply` instead,
- *   which swaps first then re-launches via `taco start`.
+ * We don't restart ourselves — before the swap lands, a respawn would just
+ * come back on the old version — and don't push a server event (ServerPush
+ * frames are workspace-scoped).
  */
 
 import { stat } from "node:fs/promises";

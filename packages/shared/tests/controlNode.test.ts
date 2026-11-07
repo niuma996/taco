@@ -1,27 +1,8 @@
 /**
- * controlNode — round-trip tests against a real Unix-domain-socket echo
- * server.
- *
- * covers:
- *   1. Happy path: one request, one reply, `result` resolves.
- *   2. Server returns `error`: promise rejects with method-labelled Error.
- *   3. Connection refused (no listener on a fresh path): promise rejects
- *      with method label + underlying error message.
- *   4. Timeout: promise rejects with `<method> timed out after <ms>ms`.
- *      Implemented as a fresh per-test server (separate socket path)
- *      so the test owns its full lifecycle.
- *   5. Malformed JSON reply: promise rejects with `malformed reply`.
- *   6. Socket closes before any reply: promise rejects with
- *      `socket closed before reply`.
- *   7. `params` payload is serialised onto the wire (echo server
- *      round-trips it into `result`).
- *
- * Note: TCP-loopback listening is blocked by the Codex sandbox
- * (`listen EPERM 127.0.0.1`), so we use Unix domain sockets instead. The
- * controlNode helper supports any path-or-host the `net.connect` API
- * accepts, so this is purely a test-time convenience.
- *
- * Run: cd packages/shared && pnpm exec tsx --test tests/controlNode.test.ts
+ * controlNode — round-trip tests against a real echo server. Unix domain
+ * sockets are used because TCP loopback listening may be blocked in a
+ * restricted sandbox; the helper accepts any path-or-host `net.connect`
+ * takes, so this is a test-time convenience only.
  */
 
 import { strict as assert } from "node:assert";

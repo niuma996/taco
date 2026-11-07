@@ -1,34 +1,17 @@
 /**
  * controlNode — minimal JSON-RPC client for the sidecar's control socket.
  *
- * The control socket is a separate NDJSON stream from the data channel.
- * Wire format is one JSON object per line (see
- * `packages/sidecar/src/server/controlChannel.ts`):
+ * A separate NDJSON stream from the data channel (one JSON object per line):
  *
  *   Request:  {"method": "control.X", "params"?: ..., "id": <number>}
  *   Response: {"result": ..., "id": <number>}
  *              | {"error": {"code", "message"}, "id": <number>}
  *
- * Why a separate socket (and a separate client helper):
- *   - Liveness checks (`control.ping`) and shutdown (`control.shutdown`)
- *     must not be blocked by a stuck / half-closed data socket.
- *   - Both `taco status` and `taco stop` were carrying near-identical
- *     ~50-line implementations of this protocol with slightly different
- *     error formatting — extracting it keeps the wire format in one place.
+ * Separate because a stuck / half-closed data socket must not block the
+ * liveness check (`control.ping`) or shutdown (`control.shutdown`).
  *
- * Usage:
- *
- *   import { controlRequest } from "@taco-ai/shared/controlNode";
- *
- *   const result = await controlRequest(socketPath, "control.ping", {
- *     timeoutMs: 2_000,
- *   });
- *
- * The helper rejects (does not throw synchronously) with an `Error`
- * whose `.message` always includes the method name so log lines are
- * unambiguous. Cancellation is best-effort: the timeout closes the
- * underlying socket so a slow / unresponsive daemon does not leak
- * file descriptors.
+ * The timeout closes the socket, so a slow / unresponsive daemon does not
+ * leak file descriptors.
  */
 
 import { connect, type Socket } from "node:net";

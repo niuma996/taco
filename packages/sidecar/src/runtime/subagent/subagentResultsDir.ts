@@ -1,28 +1,18 @@
 /**
  * Where a background subagent's result text lands on disk.
  *
- * A background spawn cannot hand its answer back through the tool result (that
- * already returned a launch receipt), and inlining the full text into the
- * parent's conversation would charge the parent's context for output it may
- * never need. So the text is written to a file and the notification carries
- * only a path.
+ * A background spawn cannot hand its answer back through the tool result, and
+ * inlining the full text into the parent's conversation would charge the
+ * parent's context for output it may never need. So the text is written to a
+ * file and the notification carries only a path.
  *
- * Shape mirrors `tasks/sessionTasksDir.ts` — `<sessionsRoot>/<sid>/<kind>` —
- * because these are the same class of thing: sidecar-owned auxiliary state that
- * must live under `sessionsRoot` rather than inside the JSONL. The JSONL belongs
- * to pi's `JsonlSessionRepo` as an append-only branch log; writing anything
- * else into it would corrupt that structure.
+ * Keyed by the *parent* session, so one recursive delete of the parent's
+ * directory reclaims every result it owns.
  *
- * Note that "under sessionsRoot" is not the same as "beside the JSONL": pi
- * lays sessions out as `<sessionsRoot>/<cwdSlug>/<ts>_<sid>.jsonl`, so this
- * directory is a *sibling of that cwd directory*, not of the transcript. That
- * is why `repo.delete` never reaches it — it removes one file by path — and
- * why `SessionRegistry.deleteSession` has to remove the whole `<sid>/`
- * directory itself.
- *
- * Keyed by the *parent* session, not the child, so one recursive delete of the
- * parent's directory reclaims every result it owns. The child's id is already
- * in the filename, so nothing is lost.
+ * "Under sessionsRoot" is not "beside the JSONL": pi lays sessions out as
+ * `<sessionsRoot>/<cwdSlug>/<ts>_<sid>.jsonl`, so this is a sibling of that
+ * cwd directory — which is why `repo.delete` never reaches it and
+ * `SessionRegistry.deleteSession` removes the whole `<sid>/` directory.
  */
 
 import { readdir } from "node:fs/promises";

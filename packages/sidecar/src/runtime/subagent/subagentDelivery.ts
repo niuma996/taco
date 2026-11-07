@@ -2,27 +2,14 @@
  * Deliver a background subagent's result to its parent session.
  *
  * A `background: true` spawn returns to the caller as soon as the child
- * session exists (see `agentSpawner.ts`). When the child later settles, its
- * result has nowhere to go except back into the parent's conversation — the
- * original tool call already returned its launch receipt, so this is the
- * only channel left.
+ * session exists, and the original tool call already returned its launch
+ * receipt — so the parent's conversation is the only channel left for the
+ * result.
  *
- * The delivery mirrors the prompt→busy→followUp→retry pattern the scheduler
- * already uses for the same problem (`scheduler/dispatcher.ts`
- * `promptWithBusyFallback`), but at a lower layer: the scheduler talks to
- * `SidecarServer.dispatchRpc` (`session.prompt` / `session.followUp` methods,
- * `ErrorCodes.SessionBusy`), while a spawn only has `SessionRegistry` and can
- * reach the parent's `AttachedSession` directly. Same shape, different rung:
- *
- *   prompt() -> busy? -> enqueue("followUp") -> idle? -> retry prompt() once
- *
- * This function itself is in-memory only — if the parent session is not
- * currently attached (process restarted, workspace disposed), there is no
- * `AttachedSession` to prompt and the notice cannot land here. That is not a
- * lost result, though: `deliverSubagentResult` reports it via its boolean
- * return, and `subagentPending.ts` is the durable half of this pair — it
- * records the notice before this function is called and only clears the
- * record once this function reports success, so the next attach can retry.
+ * In-memory only: with no attached parent there is no `AttachedSession` to
+ * prompt, and the notice cannot land here. That is not a lost result —
+ * `subagentPending.ts` records the notice before this call and clears it only
+ * on success, so the next attach can retry.
  */
 
 import { isBusyError } from "../harness/harnessErrors.ts";

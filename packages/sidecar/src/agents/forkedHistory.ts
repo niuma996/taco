@@ -1,32 +1,16 @@
 /**
  * Forked-context rendering — the transcript block a `context: fork` subagent
- * receives so it can see the parent conversation it was spawned from.
+ * receives so it can see the parent conversation it was spawned from. The
+ * block is persisted at spawn time so `agentContinue` resumes byte-identically.
  *
- * Pure functions only: the caller (AgentSpawner) reads the parent branch and
- * passes the entries in. The rendered block is persisted into the child
- * session's metadata at spawn time so `agentContinue` resumes byte-identically
- * without re-reading a parent that may have compacted or evolved since.
+ * Parent text is reproduced verbatim — no redaction runs over it. Deliberate:
+ * fidelity is the point of a fork. The exposure is duplication inside one
+ * trust domain, not egress — the child shares the parent's workspace and
+ * `sessionsRoot`, and `session.list` hides subagent sessions.
  *
- * ## Verbatim by design, and what that means for secrets
- *
- * The block reproduces parent user/assistant text as-is. No redaction pass
- * runs over it, so anything the parent conversation contained in plain text —
- * a pasted token, an email address, a customer name — reaches the child
- * verbatim. This is deliberate: fidelity is the whole point of a fork, and a
- * regex scrubber would both miss unknown secret formats and corrupt legitimate
- * code that merely looks like one.
- *
- * The exposure this creates is duplication inside one trust domain, not egress
- * to a new one. The child session is created in the same workspace and the
- * same `sessionsRoot` as its parent, and `session.list` filters it out via
- * `kind === "subagent"`, so the transcript is not surfaced anywhere the parent
- * was not already visible.
- *
- * TODO(redaction): if fork is ever extended across a trust boundary — a child
- * in another workspace, or a transcript forwarded through an IM channel — a
- * redaction pass becomes mandatory before that lands. Note that
- * `hideWorkspacePath` is NOT such a pass: it only selects a `<path_semantics>`
- * variant in `buildSystemPrompt`, and does not filter free text.
+ * TODO(redaction): a fork that crosses a trust boundary needs a redaction pass;
+ * `hideWorkspacePath` only changes prompt path semantics and does not redact
+ * free text.
  */
 
 import type { Entry } from "../runtime/pi/types.ts";

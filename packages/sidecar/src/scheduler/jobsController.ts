@@ -1,24 +1,14 @@
 /**
- * JobsController — wraps the file-backed `JobStore` and the running
- * `Scheduler` so a single object can satisfy the `JobsControl` interface
- * the `jobs.*` RPC handlers see. Lives in the scheduler module (not in
- * the handler / server module) because the contract is owned by the
- * scheduler: the controller is just the bridge from "RPC params" to
- * "store mutation + timer attach/detach".
+ * JobsController — bridges the `jobs.*` RPC surface to the file-backed
+ * `JobStore` and the running `Scheduler`; the scheduler owns that contract.
  *
- * Concurrency: `reload()` is idempotent (the Scheduler drops any prior
- * timer for the id before attaching a new one), so a UI-driven edit +
- * immediate list-then-fire is safe. `delete()` relies on the underlying
- * `reload(id)` semantics: after the store removes the file, reload reads
- * `null` and leaves the timer detached.
+ * Concurrency: `reload()` is idempotent, so an edit plus an immediate
+ * list-then-fire is safe.
  *
- * Scope: every method takes an optional `actor`. An `im` actor can only
- * see jobs whose channelId+peerId match; an `ide` actor can see jobs
- * whose args.workspace matches the caller's workspace; `undefined`
- * means legacy/admin — all jobs visible. `create`/`update` additionally
- * re-derive `channelId`/`peerId` from `args.workspace` on the server
- * side and refuse any actor mismatch, so a malicious IM tool can't
- * escape its sandbox by editing those fields directly.
+ * Scope: an optional `actor` narrows visibility — `im` matches
+ * channelId+peerId, `ide` matches args.workspace, `undefined` means no
+ * scope: all jobs visible. `create`/`update` re-derive channelId/peerId
+ * server-side and refuse actor mismatches, so an IM tool cannot escape.
  */
 
 import { randomUUID } from "node:crypto";

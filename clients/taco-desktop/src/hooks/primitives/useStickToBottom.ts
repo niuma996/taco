@@ -15,36 +15,20 @@ const DOWNWARD_KEYS = new Set(["ArrowDown", "PageDown", "End", " ", "Spacebar"])
 /**
  * Keep a scroll container pinned to its bottom while content grows, unless the
  * user has scrolled up away from it. Snaps to the bottom on mount and whenever
- * `resetKey` changes, before the browser paints — a newly shown conversation
- * never flashes its top first.
+ * `resetKey` changes, before the browser paints.
  *
  * The observers attach to the element itself, so the caller must keep the ref
- * on a node that unmounts with it — forwarding a ref from a never-unmounting
+ * on a node that unmounts with it — a forwarded ref from a never-unmounting
  * parent leaves the observers on a detached node after a conditional re-render.
  *
- * `resetKey` re-runs the setup — pass whatever changes when the element is
- * swapped in or its content is replaced wholesale (a panel opening, another
- * session selected), so the new content starts pinned again.
+ * The follow re-arms near the bottom (at it, or within 80px) and drops only on
+ * an upward move the user made — within a short window of a wheel, touch,
+ * upward-key or scrollbar input.
  *
- * Only an upward move the user made unpins. Judging by distance-from-bottom
- * alone raced streaming (a scroll event dispatched after content grew read as
- * "scrolled away"), and judging by direction alone let layout unpin: content
- * collapsing above the viewport, or another hook restoring a scroll position,
- * moves scrollTop up with no user involved. So an upward scroll unpins only
- * within a short window after wheel, touch, upward-key or scrollbar input.
- *
- * Growth is caught from both sides: a MutationObserver for DOM changes, and a
- * ResizeObserver on the container and its direct children for height changes
- * no mutation reports (an image finishing loading, a font swap, a reflow).
- *
- * Returns `pin`, which re-sticks and snaps immediately — for callers that know
- * the user wants the bottom regardless of where they were (just sent a message)
- * — and `unpin`, which stops the follow without any user input, for callers
- * that take over the scroll position themselves. An explicit unpin also
- * outranks the near-bottom heuristic: the jump sets scrollTop and the browser
- * dispatches a scroll for it, which must not re-arm the follow and pull the
- * viewport back to the bottom. `pin` clears it again — and so does the user
- * scrolling back to the bottom on their own, which must re-arm the follow.
+ * `pin` re-sticks and snaps immediately, clearing the unpin. `unpin` stops the
+ * follow with no user input and outranks the near-bottom heuristic: the jump
+ * sets scrollTop and the browser dispatches a scroll for it, which must not
+ * re-arm the follow.
  */
 export function useStickToBottom(
     ref: RefObject<HTMLElement | null>,

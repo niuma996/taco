@@ -1,33 +1,14 @@
 /**
  * RPC contract table — the single source of truth for every method the
- * sidecar registers.
+ * sidecar registers. Each domain file owns its wire names, types and params
+ * schema; this module merges them and holds the cross-table assertions.
  *
- * Each row names one wire method and pins four things together:
+ * Handlers are checked against this table at compile time and the client
+ * reads the same table, so a drifted interface fails the build.
  *
- *   - `method`  the wire name (`"session.prompt"`), the value the client sends.
- *   - `params`  the TypeScript type of the `params` object on the wire.
- *   - `result`  the TypeScript type of the value the handler returns.
- *   - `scope`   how the client routes the call: `workspace` (needs a routing
- *               key) or `process` (no workspace dimension).
- *
- * The handler's `params` type and its return type are checked against this
- * table at compile time, so a drifted interface fails the build instead of
- * surfacing as a runtime error. The client side reads the same table, so a
- * method name or result shape cannot differ between the two halves.
- *
- * The table is split by domain (`session.ts`, `workspace.ts`, `settings.ts`,
- * `channels.ts`, `memory.ts`, `jobs.ts`, `tools.ts`). Each domain file owns the
- * wire names, the params/result types, and the params schema for its
- * methods; this module merges them and holds the cross-table assertions.
- *
- * `scope` is the *client routing* dimension. It is deliberately separate from
- * the server's `ensureWorkspace` flag: `workspace.ensure` and
- * `workspace.dispose` are routed by workspace but need no workspace runtime
- * on the server, so the two axes disagree for three methods.
- *
- * Result types that the client never reads as a structured payload are
- * declared as `void` — the wire still carries a value, but no caller depends
- * on its shape, so pinning one would be a false promise.
+ * `scope` is the client routing dimension, separate from the server's
+ * `ensureWorkspace` flag: `workspace.ensure` / `workspace.dispose` are
+ * routed by workspace but need no workspace runtime on the server.
  */
 
 import type { RpcRequest } from "../frames.js";

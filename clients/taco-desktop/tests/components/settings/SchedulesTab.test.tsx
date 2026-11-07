@@ -1,25 +1,6 @@
 /**
- * SchedulesTab — list vs action error separation.
- *
- * The bug being regression-guarded: the tab used a single `error` slot
- * that the refresh path could set or clear. A failed create was
- * captured in `error`, then the next successful refresh cleared it
- * silently — the user lost the breadcrumb that their edit had failed
- * without any explicit close. After the fix we have two slots:
- *   - listError:   refresh failure (transient, auto-clears on success).
- *   - actionError: action failure (sticky, dismissed explicitly).
- *
- * Since the add/edit flow moved into a Radix Dialog, the action-level
- * error is bound to the dialog instance (via `dialog.lastError`) so
- * closing the dialog discards it and opening a new one starts clean.
- * The dialog keeps the message visible while open, so the regression
- * we still want to guard is: an action error message remains on screen
- * even after a *separate* list refresh succeeds (the daemon
- * re-confirming reachability).
- *
- * These tests render the tab with a fake `TacoClient` whose
- * `callProcess` is scripted per-call, then drive the controls and
- * assert which banner is shown in each state.
+ * SchedulesTab — list vs action error separation: a successful list refresh
+ * must not clear a sticky action error, and the two banners stay independent.
  */
 
 import type { Job } from "@taco-ai/protocol";

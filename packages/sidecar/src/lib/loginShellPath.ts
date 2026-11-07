@@ -2,35 +2,17 @@
  * loginShellPath.ts — recover the user's interactive PATH for a daemon
  * launched with a minimal one.
  *
- * launchd (and Tauri-spawned GUI processes on macOS) start with
- * `PATH=/usr/bin:/bin:/usr/sbin:/sbin`. Anything the user installed into a
- * version-manager or package-manager bin dir — nvm (`~/.nvm/versions/node/…`),
- * Homebrew, `~/.local/bin`, etc. — is invisible to the sidecar, so an agent
- * shell call like `mmx …` fails with `command not found` (exit 127) even
- * though the binary exists. That was the root cause of the scheduler's
- * mmx search job looping on `command not found`.
+ * GUI-spawned processes (launchd, Tauri) start with a bare system PATH, so
+ * version-manager and package-manager bin dirs (nvm, Homebrew, `~/.local/bin`)
+ * are invisible to the sidecar and agent shell calls fail with
+ * `command not found`. We re-derive the real PATH by asking the user's login
+ * shell: `-lic` forces login+interactive so both `.zprofile`/`.zshrc` (nvm)
+ * and `/etc/paths` (path_helper) run.
  *
- * We re-derive the real PATH by asking the user's login shell. `-lic`
- * forces login+interactive so both `.zprofile`/`.zshrc` (nvm) and
- * `/etc/paths` (path_helper) run — a non-interactive `-c` skips `.zshrc`,
- * which is where most PATH setup lives.
- *
- * Shell-resolution fallback chain (Linux services were the trigger —
- * systemd user units and dbus-activated daemons don't always export
- * `SHELL`):
- *   1. `$SHELL` when non-empty (the macOS / interactive Linux case).
- *   2. The user's login shell as recorded in `/etc/passwd`
- *      (`getent passwd $UID`) — this is the authoritative place
- *      `chsh(1)` writes to. macOS DirectoryServices has its own
- *      command (`dscl . -read /Users/<user> UserShell`); we don't try
- *      it because macOS always exports `$SHELL`, so the chain never
- *      reaches step 2 there.
- *   3. `/bin/sh` (POSIX-required to exist; last-resort).
- *
- * Failure modes are all swallowed: a missing/hung shell just means we keep
- * the inherited PATH. The probe result is cached under TACO_HOME keyed on
- * (shell, rc-file mtimes) — see resolveLoginShellPathCached — so steady-state
- * starts skip the shell spawn entirely.
+ * Shell resolution order: `$SHELL`, then the user's login shell as recorded in
+ * `/etc/passwd`, then `/bin/sh`. Every failure mode is swallowed — a missing
+ * or hung shell just keeps the inherited PATH. The probe result is cached
+ * under TACO_HOME keyed on (shell, rc-file mtimes).
  */
 
 import { execFileSync } from "node:child_process";

@@ -1,30 +1,17 @@
 /**
  * dispatcher.ts — routes scheduled job fires to the SidecarServer RPC layer.
  *
- * The scheduler fires callbacks without a live workspace context, so the
- * command cannot go through the normal `MethodCtx` / workspace-coupled
- * handler registry. Instead, this module talks directly to
- * `SidecarServer.dispatchRpc`.
+ * The scheduler fires callbacks without a live workspace context, so this
+ * module calls `SidecarServer.dispatchRpc` directly instead of the `MethodCtx`
+ * handler registry.
  *
  * Session strategy governs how a fire maps onto a session id:
- *   - `new` (non-channel explicit): every fire creates a fresh `sched-<uuid>` session
- *     via `session.create({ initialPrompt })` — creating + running in one
- *     wire call avoids any create→prompt race window if the scheduler
- *     dies between them.
- *   - `reuse`: IM only — looks up the existing session bound to the job's
- *     (channelId, peerId, chatId) triple and re-prompts it via
- *     `session.attach + session.prompt`. Lets a scheduled task continue
- *     an ongoing chat conversation; if no route exists the fire errors
- *     (we don't silently fall back to `new` — that would split the user's
- *     conversation across two sessions).
- *   - `pin`: first fire creates `sched-pin-<jobId>` and `onPinnedSessionCreated`
- *     writes the id back to the job; subsequent fires probe that session and
- *     attach it. If the pinned session is gone (manual delete, wiped
- *     sessions dir) the fire re-creates and re-pins instead of erroring:
- *     losing the accumulated conversation context is bad, but the
- *     alternative was worse — attach on a missing session raises an opaque
- *     `[upstream]` error and nothing cleared the dangling id, so the job
- *     stayed wedged on every subsequent tick until edited by hand.
+ *   - `new`: creates a `sched-<uuid>` session and prompts it in one wire call,
+ *     so no create→prompt race.
+ *   - `reuse`: IM only — re-prompts the job's bound session; no route is an
+ *     error, never a fall back to `new`.
+ *   - `pin`: the first fire writes `sched-pin-<jobId>` back to the job; a lost
+ *     id is re-created and re-pinned.
  */
 
 import { randomUUID } from "node:crypto";

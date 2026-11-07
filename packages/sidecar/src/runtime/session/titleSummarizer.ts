@@ -2,23 +2,13 @@
  * Title summarization — re-derives a session's title on every successful
  * `run_end`, so a long conversation's title follows where it actually went.
  *
- * Gate: only "completed" runs. Overwriting is bounded downstream, not here —
- * `setSummaryTitle` refuses to overwrite a user rename, and `writeTitle`
- * skips the append when the derived title is unchanged (see
- * sessionRegistry.ts / sessionTitleSource.ts).
- * Truncate: last ~4000 chars of the branch context, serialized the same way
- * memory extraction serializes a conversation. Tail rather than head is what
- * makes re-derivation worth doing — the newest turns are the ones the old
- * title does not describe.
- * LLM call: completeSimple via completeSimpleWithLiteFallback, so the optional
- * lite model is used when its window fits this bounded input, with the session
- * model as fallback. Temp 0.2, no output cap (thinking shares the ceiling).
- * Output: plain text → trimmed → clamped to MAX_TITLE_LENGTH graphemes → setSummaryTitle.
+ * Gate: only "completed" runs; overwriting is bounded downstream —
+ * `setSummaryTitle` refuses a user rename, `writeTitle` skips an unchanged
+ * title. The tail ~4000 chars are summarized, since the newest turns are what
+ * the old title does not describe.
  *
- * Modeled directly on MemoryExtractorImpl (../../memory/local/extractor.ts):
- * same completeSimple call shape, same tacoRequestHeaders() tagging, same
- * fire-and-forget error handling. Not merged into that class — memory
- * extraction writes topic files; titling writes one session value.
+ * Failure is never fatal: `onRunEnd` swallows and logs it, and a provider
+ * that returns no text leaves the previous title in place.
  */
 
 import type { SessionId } from "@taco-ai/protocol";

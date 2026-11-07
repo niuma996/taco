@@ -7,21 +7,15 @@
  * Resolution order, first match wins:
  *   1. TACO_SIDECAR_NODE / _BUNDLE / _RESOURCES env triple — explicit override.
  *   2. An installed `@taco-ai/sidecar-<platform>` package, located via
- *      `createRequire` and validated against its `manifest.json`. This is the
- *      released path.
+ *      `createRequire` and validated against its `manifest.json`.
  *   3. Dev checkout: `packages/sidecar/dist/runtime/<triple>/`, which
- *      `buildRuntime.mjs` emits with the same layout as the platform package
- *      (`lib/index.mjs`, `bin/taco-sidecar-node`, `agents/`, `skills/`,
- *      `manifest.json`). Needed because the per-platform optionalDependencies
- *      were dropped from the sidecar manifest, so a dev checkout has no
- *      platform package to resolve at (2).
+ *      `buildRuntime.mjs` emits with the platform package's layout.
  *
- * We do NOT copy the resolved tree to $TACO_HOME — launchd / schtasks invoke a
- * wrapper pointing at its existing location. For (2) that means a `pnpm update`
- * propagates without re-running `taco install`; for (3) a `package:runtime`
- * rebuild propagates the same way. The tradeoff is that deleting the resolved
- * tree (`rm -rf node_modules`, wiping `dist/`) leaves the wrapper dangling until
- * `taco install` re-runs.
+ * The resolved tree is used in place — the launchd / schtasks wrapper points
+ * at its existing location, so a `pnpm update` or a runtime rebuild
+ * propagates without re-running `taco install`. Deleting that tree (for
+ * example node_modules or dist) leaves the service wrapper dangling until
+ * `taco install` runs again.
  */
 
 import { spawn } from "node:child_process";

@@ -1,27 +1,15 @@
 /**
  * Modal — shared Radix Dialog shell: portal, scrim, centered content, title,
- * and a right-aligned actions row. Replaces the Root/Portal/Overlay/Content
- * boilerplate every dialog used to copy by hand.
+ * and a right-aligned actions row. Every dismiss path routes through
+ * `onClose`; `dismissible={false}` ignores Escape/scrim while busy.
+ * `description` is only for a real summary line — Radix links it via
+ * aria-describedby.
  *
- * Every dismiss path (Escape, scrim click, Cancel button) routes through
- * `onClose` so callers keep a single callback. Pass `dismissible={false}`
- * to ignore Escape/scrim while busy (e.g. an in-flight download) — the
- * caller keeps control of `open`, so the dialog simply stays mounted.
- *
- * Pass `description` only when the dialog has a real summary line: Radix
- * auto-links it via aria-describedby, and omitting Description entirely is
- * the documented alternative for dialogs whose title suffices.
- *
- * Layout contract: the title, description and `actions` row are pinned —
- * the modal is a flex column capped below the viewport, and `children` sit
- * in a `.ui-modal-body` region that scrolls. A dialog that renders its own
- * `.ui-modal-actions` inside children (e.g. to keep a submit button inside
- * its <form>) opts out of the pinned footer.
- *
- * Pass `bare` for a surface that draws its own header and scroll region
- * (the file preview window, the first-launch wizard): the title is rendered
- * with `.sr-only` so the dialog keeps an accessible name, and `children`
- * land directly on the surface instead of in a scrolling body.
+ * Layout contract: title, description and the `actions` row are pinned;
+ * `children` sit in a scrolling `.ui-modal-body`. A dialog that renders its
+ * own `.ui-modal-actions` inside children opts out of the pinned footer.
+ * `bare` is for a surface that draws its own header — the title stays
+ * (`.sr-only`) so the dialog keeps an accessible name.
  */
 import * as Dialog from "@radix-ui/react-dialog";
 import type { ReactNode } from "react";

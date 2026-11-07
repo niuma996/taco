@@ -1,31 +1,14 @@
 /**
  * Re-export point for cross-domain pi value symbols.
  *
- * Mirrors `types.ts` for runtime values: sidecar code that wants a pi value
- * (factory function, leaf helper, tagged error class) imports it from here
- * instead of from `@earendil-works/pi-*` directly. When pi renames or
- * reshapes a value symbol, the churn stays in this one file plus a tsc sweep.
+ * Sidecar code imports pi values (factories, leaf helpers, tagged errors) from
+ * here instead of `@earendil-works/pi-*`, so a pi rename stays in this one file
+ * plus a tsc sweep. Provider factories, lazy API loaders, faux test providers
+ * and the compat surface keep their direct imports — those paths are part of
+ * the tree-shaking contract with upstream.
  *
- * Scope: every non-lazy, non-provider value we import from
- * `@taco-ai/pi-harness` or `@earendil-works/pi-ai`. Provider
- * factories (`pi-ai/providers/*`), lazy API loaders (`pi-ai/api/*.lazy`),
- * faux test providers (`pi-ai/providers/faux`), and the compat surface
- * (`pi-ai/compat`) are deliberately excluded — those keep their direct
- * imports because their import path itself is part of the tree-shaking
- * contract with upstream.
- *
- * Not every export here is meant for production code. A few exist because
- * tests need the raw pi value while production deliberately goes through a
- * wrapper:
- *
- *   - `BACKGROUND_CONTEXT` — production reads `harnessContext` from
- *     `lib/harnessContext.ts`, which owns the choice of root context.
- *   - `LaneBusy` — production classifies harness failures through
- *     `runtime/harness/harnessErrors.ts` rather than matching the tag directly.
- *
- * If you are writing production code and the symbol you want is one of
- * those, use the wrapper. The re-export is here so tests can construct and
- * assert on the upstream value without punching through the boundary rule.
+ * `BACKGROUND_CONTEXT` and `LaneBusy` are re-exported for tests; production
+ * code goes through the wrapper modules instead.
  */
 
 export {

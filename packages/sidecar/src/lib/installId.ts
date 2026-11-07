@@ -2,28 +2,14 @@ import { createHash } from "node:crypto";
 
 /** Stable identifier for one taco install on one machine.
  *
- *  The desktop sidecar (and the CLI launcher) needs a way to distinguish a
- *  daemon it started from a daemon started by a sibling taco install that
- *  happens to share `$TACO_HOME` (npm global + desktop app pointing at the
- *  same home, dev repo source running alongside a release bundle, etc.).
+ *  Sibling installs can share one `$TACO_HOME`, so the id must separate them.
+ *  Two anchors are hashed: `resourcesRoot` (this installation's bundle dir)
+ *  and `tacoHome` (so a relocatable install stays unique even if its
+ *  resources dir is symlinked).
  *
- *  We hash the two anchors that uniquely identify an install:
- *    - `resourcesRoot` — the bundle directory shipped with this installation.
- *      Two different installs of the same platform always have different
- *      resources roots even when they share `$TACO_HOME`.
- *    - `tacoHome` — included as a second anchor so a relocatable install
- *      (e.g. an admin-packaged taco in `/opt`) still gets a unique id even
- *      if some tooling happens to symlink the resources dir.
- *
- *  The 16-hex prefix is the same width the sidecar uses for the checkpoint
- *  workspace key — short enough to fit comfortably in the pid file, long
- *  enough that collisions in any realistic single-user install setup are
- *  effectively impossible (64 bits of entropy).
- *
- *  Pure function so it's testable without any environment side effects.
- *  The CLI side has a duplicate implementation (see
- *  `packages/cli/lib/installId.ts`) — both sides must agree, otherwise the
- *  desktop reap path would skip a daemon it owns (or kill one it doesn't). */
+ *  The CLI has a duplicate implementation (`packages/cli/lib/installId.ts`) —
+ *  both sides must agree, else the desktop reap path skips a daemon it owns
+ *  or kills one it doesn't. */
 export function computeInstallId(resourcesRoot: string, tacoHome: string): string {
     const h = createHash("sha256");
     h.update(resourcesRoot);

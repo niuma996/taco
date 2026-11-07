@@ -1,11 +1,9 @@
 /**
  * Single re-export point for upstream pi type aliases consumed by the sidecar.
  *
- * Why this exists: every file that needs a pi type used to import it directly
- * from `@taco-ai/pi-harness` or `@earendil-works/pi-ai`. When the
- * upstream package renames a type (e.g. `ContextEvent` → `Entry` in 0.85), the
- * churn scatters across every importer. Routing types through this barrel
- * keeps the rename cost to one edit here plus a tsc sweep.
+ * Upstream renames should land here, so the churn is one edit in this file
+ * plus a tsc sweep — but the barrel is not complete yet: a handful of
+ * importers still reach `@earendil-works/pi-ai` directly.
  *
  * Scope: type aliases only. Runtime values (factories, provider handles,
  * tagged error classes, lazy API loaders) keep their direct imports so the

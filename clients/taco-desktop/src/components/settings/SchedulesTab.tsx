@@ -1,31 +1,14 @@
 /**
- * SchedulesTab — surfaces the daemon's scheduler as a CRUD UI. Each
- * row is one `Job` (id + name + schedule + enable/disable + last-run
- * timestamp); the panel lets the user add new jobs, edit existing
- * ones, run them immediately, and delete them.
+ * SchedulesTab — CRUD UI over the daemon's scheduler; each row is one `Job`.
  *
- * Persistence: jobs live as JSON files under $TACO_HOME/jobs/. The
- * UI is stateless — `useEffect` re-fetches on mount + after every
- * mutation; the daemon is the source of truth.
+ * Jobs live as JSON files under $TACO_HOME/jobs/. The UI is stateless:
+ * `useEffect` re-fetches on mount and after every mutation; the daemon is
+ * the source of truth.
  *
- * Add / edit moved to a Radix Dialog (`ScheduleFormDialog`) so the
- * table view stays scannable. The earlier inline form pushed the
- * table below the fold and squeezed the action buttons; the dialog
- * also gives the form room for hint / error text without breaking
- * the 720px content cap.
- *
- * Each row's History button opens `ScheduleHistoryDialog` with the job's
- * recent runs and, for agent jobs, what each run answered.
- *
- * Row actions are icon buttons with a hover label (ui/Tooltip): four text
- * buttons wrapped onto two lines in the action column and knocked the rows
- * out of alignment. The delete button is rendered on every row — a built-in
- * job gets a disabled one, so the action column has the same shape
- * everywhere and the reason it cannot be deleted stays reachable.
- *
- * Not yet covered: per-job timezone pickers, and a structured command
- * editor. The `args` field is edited as raw JSON; tightening that is a
- * follow-up.
+ * A row's History button opens `ScheduleHistoryDialog` with the job's recent
+ * runs and, for agent jobs, what each run answered. The delete button stays
+ * on every row — a built-in job gets a disabled one, so the action column
+ * keeps the same shape and the reason it cannot be deleted stays reachable.
  */
 
 import type { Job } from "@taco-ai/protocol";

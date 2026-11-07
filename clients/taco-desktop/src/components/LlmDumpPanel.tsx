@@ -3,27 +3,13 @@
  *
  * `LlmDumpFab` is the always-visible entry point: a translucent icon button
  * floating above the input area. `LlmDumpPanel` is the expanded state: one
- * `<details>` per turn, centered on screen. `LlmDumpDock` owns the open
- * state and the drag positions; App.tsx composes it and hands it to ChatPane
- * as an opaque slot.
+ * `<details>` per turn, centered on screen. `LlmDumpDock` owns the open state
+ * and the drag positions; App.tsx composes it and hands it to ChatPane as an
+ * opaque slot.
  *
- * Dragging: the fab and the panel's header bar are both pointer-draggable.
- * Positions are held per-surface (`fabPos` for the fab, `panelPos` for the
- * panel) so dragging one doesn't move the other. Both default to a
- * CSS-defined anchor (fab: above the input footer; panel: centered on the
- * viewport) and switch to inline `position: fixed + left/top` only after the
- * user actually drags them.
- *
- * Drag vs click: `dragMovedRef` is reset on every pointerdown rather than
- * consumed in the click handler. Consuming it in click means a press that
- * never produces a click (pointer released outside the element) leaves the
- * flag stuck true, and the *next* genuine click gets swallowed — the fab
- * appears to stop responding.
- *
- * Buttons in the panel header stop pointerdown propagation so the header's
- * drag handlers don't `setPointerCapture` on the header. Without that the
- * captured pointer steals the subsequent click and the buttons (especially
- * the close ×) never fire.
+ * Drag positions are held per-surface (`fabPos`, `panelPos`) so dragging one
+ * doesn't move the other; both start at a CSS anchor and switch to inline
+ * `position: fixed + left/top` only after the user actually drags them.
  */
 
 import { Bug } from "lucide-react";
@@ -68,8 +54,7 @@ export function LlmDumpFab(props: LlmDumpFabProps) {
         ? t("debug.showLlmRequestDumpWaiting")
         : `${t("debug.showLlmRequestDump")} (${props.count})`;
     const handleClick = () => {
-        // dragMovedRef is reset on pointerdown, so this reads only the press
-        // that just ended.
+        // dragMovedRef is reset on pointerdown, so this reads only the press that just ended.
         if (props.dragHandlers.dragMovedRef.current) return;
         props.onClick();
     };
@@ -177,6 +162,7 @@ export function LlmDumpPanel(props: LlmDumpPanelProps) {
                     {t("debug.llmRequestDump")} ({entries.length})
                 </strong>
                 <div className="llm-dump-actions">
+                    {/* Stop propagation so the header's drag handlers don't capture the pointer and steal the click. */}
                     <Button
                         size="sm"
                         variant="ghost"
@@ -289,9 +275,8 @@ export function LlmDumpDock(props: LlmDumpDockProps) {
 
     const onPointerDown = useCallback((e: ReactPointerEvent<HTMLElement>) => {
         if (e.button !== 0) return;
-        // Reset per press: this press starts as "not a drag" until movement
-        // proves otherwise. Doing it here (not in the click handler) is what
-        // keeps a click-less press from poisoning the next real click.
+        // Reset per press: consuming the flag in the click handler would leave it
+        // stuck true after a press that produced no click, swallowing the next one.
         dragMovedRef.current = false;
         const el = e.currentTarget;
         const rect = el.getBoundingClientRect();

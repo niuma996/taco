@@ -1,25 +1,14 @@
 /**
- * `taco upgrade` — fetch the latest sidecar bundle for the current
- * platform from the npm registry, verify integrity, extract to staging,
- * and write the upgrade marker so the daemon's orchestrator can shut
- * itself down on its next recheck.
+ * `taco upgrade` — fetch the latest sidecar bundle for the current platform
+ * from the npm registry, verify the tarball's `integrity` (sha512-base64)
+ * against the downloaded bytes, extract to staging, and write the upgrade
+ * marker. The daemon's orchestrator sees that marker and shuts itself down;
+ * the UI's reconnect loop then runs `taco upgrade --apply` to swap staging
+ * into live.
  *
- * Why npm registry (not GitHub Releases):
- *   release-sidecar.yml publishes platform pkgs to `@taco-ai/sidecar-<plat>`
- *   on npm; GitHub Releases aren't part of the v0.1.0 pipeline. The npm
- *   registry is the source of truth, supports anonymous GETs, and ships
- *   an `integrity` (sha512-base64) field we verify against the
- *   downloaded bytes.
- *
- * Layout on disk after a successful run:
- *   $TACO_HOME/cache/sidecar/<platform>-<version>.tgz     downloaded tarball
- *   $TACO_HOME/staging/sidecar-<platform>-<version>/      extracted bundle
- *   $TACO_HOME/upgrade-marker.json                        the marker
- *
- * The daemon's UpgradeOrchestrator reads the marker on its 6h recheck,
- * sees the staging dir exists, and asks the host to shut down. The UI's
- * reconnect loop then runs `taco upgrade --apply` (commit 6's companion)
- * which swaps staging into live and restarts.
+ * Layout: $TACO_HOME/cache/sidecar/<platform>-<version>.tgz (tarball),
+ * $TACO_HOME/staging/sidecar-<platform>-<version>/ (bundle),
+ * $TACO_HOME/upgrade-marker.json (marker).
  */
 
 import { createHash } from "node:crypto";

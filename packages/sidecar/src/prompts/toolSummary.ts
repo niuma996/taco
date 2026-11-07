@@ -1,28 +1,15 @@
 /**
  * `toolSummaryForPrompt` — render the per-tool routing guide from inline
- * `taco` metadata that each tool's factory declares on itself.
+ * `taco` metadata that each tool's factory declares on itself, co-located
+ * with the schema description that defines what the tool does.
  *
- * Why per-tool metadata, not a central table:
- *
- *  - Single source of truth — adding a new tool means changing one file
- *    (`createXxxTool`) rather than two (the factory + a central map). The
- *    central-table version was easy to drift: a new tool would render with
- *    a fallback line until someone noticed it was missing.
- *  - Co-location — the prose lives next to the schema description that
- *    actually defines what the tool does, so updates tend to land together.
- *
- * Schema description (the JSON-schema `description:` field) and the
- * `promptSummary` field are intentionally *not* duplicates: the schema
+ * Schema description and `promptSummary` are intentionally not duplicates: the
  * description goes into the tool spec the model sees in every turn, while
- * `promptSummary` is the one-line "when to prefer this tool vs. its
- * siblings" prose that ships in the system prompt. They have different
- * budgets (spec prose must fit inside the tool's schema; system-prompt
- * prose shares budget with everything else).
+ * `promptSummary` is the one-line "when to prefer this tool" prose that ships
+ * in the system prompt — they have different budgets.
  *
  * Unknown tools (no `promptSummary`) still render a fallback line so they
- * never disappear from the prompt silently — this is the failure-safe
- * behaviour we want: if a tool's author forgets metadata, the model still
- * knows the tool exists.
+ * never disappear from the prompt silently.
  */
 
 import type { NamedTool } from "./types.ts";

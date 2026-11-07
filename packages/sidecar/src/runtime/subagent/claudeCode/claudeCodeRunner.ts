@@ -1,33 +1,18 @@
 /**
  * Run one subagent turn on the user's local Claude Code CLI via the Agent SDK.
  *
- * Counterpart to `runAttachedSubagent` for `runtime: claude-code`: there is no
- * pi harness, so this drives the SDK stream itself, persists the transcript
- * into the already-created child session, and reports the same
- * `{ resultText, isError }` shape. Never throws.
+ * Counterpart to `runAttachedSubagent` for `runtime: claude-code`: no pi
+ * harness, so this drives the SDK stream and persists the transcript into the
+ * child session. Never throws.
  *
  * taco only launches Claude Code; what the child may do is Claude Code's own
- * permission system's call, not taco's. Verified against SDK 0.3.299 + CLI
- * 2.1.295:
- *  - `tools` defaults to Claude Code's full preset (write, shell, web
- *    included); a definition may narrow it to an explicit list.
- *  - `permissionMode` defaults to `auto` (Claude Code's classifier approves or
- *    denies each call). `inherit` passes none, so the user's
- *    `permissions.defaultMode` decides.
- *  - `permissionPrompts: "none"`: taco has no surface to answer a Claude Code
- *    permission prompt, so anything that would prompt is denied in-process
- *    with a message telling Claude so. AskUserQuestion is additionally
- *    blocked via `disallowedTools` so a definition's explicit tool list
- *    cannot re-add it — the subagent reports decisions back instead of
- *    asking. This is the interim stance until prompts can be proxied to the
- *    parent session.
- *  - `settingSources: ["user"]` is required for the CLI to find the user's own
- *    login when the sidecar was started without `ANTHROPIC_*` in its env. It
- *    also loads the user's MCP servers, which `strictMcpConfig` turns off.
- *  - The env is `scrubbedProcessEnv()`: provider keys taco injected never reach
- *    the CLI. Claude Code authenticates with its own configuration.
- *  - Files Claude Code writes bypass taco's file tools, so taco checkpoints do
- *    not cover them.
+ * permission system's call. `permissionPrompts: "none"` denies every prompt
+ * in-process — taco has no surface to answer one — and `disallowedTools` keeps
+ * a definition's tool list from re-adding AskUserQuestion. `settingSources:
+ * ["user"]` lets the CLI find the user's login; `strictMcpConfig` keeps their
+ * MCP servers out. The env drops provider keys injected by taco; user-supplied
+ * env keys remain. Files Claude Code writes bypass taco's file tools, so
+ * checkpoints miss them.
  */
 
 import type { SessionId, SubagentProgressDetails } from "@taco-ai/protocol";

@@ -1,29 +1,14 @@
 /**
- * useDragResize — pointer-driven resize for a right-anchored panel.
+ * useDragResize — pointer-driven resize for a right-anchored panel, working
+ * in the caller's value units (`pixelsPerUnit` scales a pointer delta).
+ * `requested` is what the user asked for and is persisted; the exposed width
+ * is `clamp(requested)`, derived while rendering — unclamped by the
+ * layout-aware bound, so a preference survives a temporary squeeze.
  *
- * The value domain belongs to the caller: the hook works in "units" and only
- * needs to know how many pixels one unit spans (`pixelsPerUnit`) to turn a
- * pointer delta into a value delta. A pixel width passes 1; a share of the
- * chat area passes the chat area's width.
- *
- * Two values, deliberately. `requested` is what the user asked for and is
- * what gets persisted; the exposed width is `clamp(requested)`, derived while
- * rendering. Keeping the request unclamped by the layout-aware bound is what
- * lets a preference survive a temporary squeeze — a 50% panel squeezed to
- * the 250px floor on a narrow window comes back in full when the room
- * returns. The caller's `clamp` therefore owns the layout-aware bound, and the
- * caller must re-render when that bound moves.
- *
- * Dragging left widens the panel, so the delta is inverted. Listeners are
- * attached on pointerdown and removed by `stop`, rather than living in an
- * effect: window listeners with no cleanup dependency would otherwise need
- * an effect that re-runs every render just to read the latest `clamp` /
- * `onCommit`, which is both harder to reason about and trips
- * `useExhaustiveDependencies`. Attaching inline reads the current closures
- * directly and needs no dependency array at all. Include pointercancel /
- * blur alongside pointerup: without them a pointer released outside the
- * window would leave the body stuck with a resize cursor and text selection
- * disabled.
+ * Listeners attach on pointerdown and are removed by `stop`, so no effect
+ * re-runs for the latest `clamp` / `onCommit`. pointercancel / blur are
+ * handled too, or a pointer released outside the window leaves the body
+ * stuck with a resize cursor.
  */
 import { useCallback, useRef, useState } from "react";
 
