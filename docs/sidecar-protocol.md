@@ -1,6 +1,6 @@
 # Taco Sidecar Protocol
 
-> **版本**: 0.3.7
+> **版本**: 0.3.8
 > **传输**: NDJSON over stdio 或 daemon data socket
 > **来源**: 源码为唯一权威来源——`packages/protocol/src/rpcContract/`（RPC method 名、参数、返回值与 schema）和 `packages/protocol/src/push.ts`（PushMethods）。v2 起客户端走 `initialize` 拿 server capabilities。
 
@@ -297,6 +297,7 @@ The server pushes frames asynchronously.  Clients should route by `method`.
 | `tasks.updated` | TasksUpdated |
 | `plan.state.updated` | PlanStateUpdated |
 | `models.changed` | ModelsChanged |
+| `memory.changed` | MemoryChanged |
 | `session.deleted` | SessionDeleted |
 | `session.renamed` | SessionRenamed |
 | `channel.status_changed` | ChannelStatusChanged |

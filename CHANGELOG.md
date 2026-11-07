@@ -6,6 +6,96 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 starting with `v0.1.0` (the first open-source release).
 
+## [0.3.8] — 2026-11-07
+
+A patch about giving the agent a bit more room to work: file edits can be
+rolled back, a separate model can take over the small background jobs, and the
+memory behind them is a little more structured.
+
+### Added
+
+**Edits can be rolled back.** Checkpoints are grouped by the chat that created
+them, and a reply that changed files offers a one-click undo; files changed
+again afterwards are skipped rather than overwritten.
+
+**An auxiliary model for the small jobs.** Session titles and memory extraction
+can run on a separate, cheaper model with its own reasoning level. When it is
+unset or fails, the session's own model takes over.
+
+**Memories carry a bit more context.** A memory body can hold one durable theme
+instead of a single sentence, an entry can show which conversations it came
+from, and the assistant can page back through an earlier conversation to check.
+
+**Memory upkeep settings live in the Memory pane.** The consolidation
+thresholds moved next to the memory list, and archived memories can be purged
+after a retention window.
+
+### Changed
+
+**Automatic memory extraction is more selective.** It writes only what it can
+point at, skips a conversation it already saw, and backs off instead of
+retrying on a timer.
+
+**The list panes read as cards.** Agents, Tools, Skills and Memory show a card
+per entry with its description and tags, and the Tools filters are one-click
+chips.
+
+**The app is easier to drive from the keyboard.** The chat list moves with the
+arrow keys, inputs keep a visible focus ring, approval choices are four
+clearly separated buttons with "Always allow" highlighted, and the whole chat
+row is clickable.
+
+**Permanent deletions are guarded.** Every destructive confirmation uses a
+danger-styled button and opens with focus on Cancel, so a reflexive Enter no
+longer destroys anything.
+
+**Secondary text is easier to read.** It now meets WCAG AA contrast in both
+themes, and the smallest labels are no longer microscopic.
+
+### Fixed
+
+**In-app updates work on macOS again.** The update archive is now packaged in
+the format the updater expects, and the release pipeline verifies it before
+publishing.
+
+**Subagent replies no longer leak into your IM channel.** A background agent's
+output returns to its parent chat, which decides what (if anything) to send
+you.
+
+**Stopping a task now really stops the background agent.** Cancelling while
+the agent is still starting no longer lets a model run start anyway.
+
+**A shell command that ignores the stop signal no longer hangs.** Its whole
+process group is terminated, so leftover background children cannot keep the
+command running.
+
+**Archived memories are cleaned up on schedule.** Memories archived by earlier
+versions now expire based on when they were first created.
+
+### Breaking changes
+
+- Memory consolidation and memory entries changed shape: the scheduled job's
+  `minChanges` and `model` arguments are ignored, consolidation now runs on
+  the default model, a memory is a topic rather than a sentence, and the
+  length limit moved from 1000 to 2000 characters. Existing files stay
+  readable.
+- Restoring a checkpoint now requires that chat to be open; the other groups
+  offer "Open chat" instead.
+- The protocol surface grew a little: `checkpoints.restore` now returns a
+  `conflicts` array, `memory.list` entries carry the optional `sources`,
+  `explicitlyRequested` and `archivedAt` fields, and a `memory.changed` push
+  event was added. Keep the desktop and the sidecar on the same release line.
+
+### Upgrade notes
+
+- Memory consolidation now runs on your default model. If you had a dedicated
+  consolidation model configured, point it at the auxiliary model setting
+  instead.
+- macOS in-app updates install properly now. The 0.3.7 updater archive was
+  broken, so if 0.3.7 never offered you an update, update once by hand.
+- `taco.json` gains two optional keys, `liteModel` and `liteThinkingLevel`,
+  for the auxiliary model. Existing config files need no change.
+
 ## [0.3.7] — 2026-11-04
 
 A patch on top of v0.3.6: a channel that cannot start because its dependency is
