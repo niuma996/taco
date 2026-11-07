@@ -153,11 +153,11 @@ describe("Sidebar session actions", () => {
                 onDelete={() => {}}
                 onRename={() => {}}
                 search={searchStub({
-                    query: "深圳",
+                    query: "search",
                     sessions: [
                         {
                             id: "session-9",
-                            name: "今天深圳天气",
+                            name: "Matching session",
                             createdAt: "2026-01-01T00:00:00Z",
                         },
                     ],
@@ -166,8 +166,42 @@ describe("Sidebar session actions", () => {
             />,
         );
 
-        expect(screen.queryByText("今天深圳天气")).not.toBeNull();
+        expect(screen.queryByText("Matching session")).not.toBeNull();
         expect(screen.queryByText("Loaded")).toBeNull();
+    });
+
+    it("keeps the search field visible when remounted with an active query", () => {
+        render(
+            <Sidebar
+                ws={
+                    {
+                        sessions: [{ id: "session-1", name: "Loaded", createdAt: 0 }],
+                        activeSession: null,
+                        pendingBySessionId: {},
+                    } as never
+                }
+                onAttach={() => {}}
+                onDelete={() => {}}
+                onRename={() => {}}
+                onNewSession={() => {}}
+                search={searchStub({
+                    query: "search",
+                    sessions: [
+                        {
+                            id: "session-9",
+                            name: "Matching session",
+                            createdAt: "2026-01-01T00:00:00Z",
+                        },
+                    ],
+                })}
+            />,
+        );
+
+        expect(
+            (screen.getByRole("textbox", { name: "pane.searchLabel" }) as HTMLInputElement).value,
+        ).toBe("search");
+        expect(screen.queryByRole("button", { name: "session.newChat" })).toBeNull();
+        expect(screen.getByText("Matching session")).not.toBeNull();
     });
 
     it("says so when nothing matches", () => {
@@ -207,10 +241,14 @@ describe("Sidebar session actions", () => {
                 onDelete={() => {}}
                 onRename={() => {}}
                 search={searchStub({
-                    query: "深圳x",
+                    query: "searchx",
                     pending: true,
                     sessions: [
-                        { id: "session-9", name: "深圳", createdAt: "2026-01-01T00:00:00Z" },
+                        {
+                            id: "session-9",
+                            name: "Matching session",
+                            createdAt: "2026-01-01T00:00:00Z",
+                        },
                     ],
                     cursor: { updatedAt: "2026-01-01T00:00:00Z", id: "session-9" },
                     total: 3,
@@ -238,11 +276,11 @@ describe("Sidebar session actions", () => {
                 onRename={() => {}}
                 onLoadMore={() => {}}
                 search={searchStub({
-                    query: "深圳",
+                    query: "search",
                     sessions: [
                         {
                             id: "session-9",
-                            name: "今天深圳天气",
+                            name: "Matching session",
                             createdAt: "2026-01-01T00:00:00Z",
                         },
                     ],

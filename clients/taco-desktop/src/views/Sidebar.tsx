@@ -40,7 +40,8 @@ export function Sidebar(props: SidebarProps) {
     const { onNewSession, newSessionDisabled, search } = props;
     const lng = useUiLanguage();
     const nowMs = useNow();
-    const [searchOpen, setSearchOpen] = useState(false);
+    const searching = search.query.trim() !== "";
+    const [searchOpen, setSearchOpen] = useState(searching);
     const listRef = useRef<HTMLUListElement>(null);
 
     // Same keyboard pattern as WorkPane: ArrowUp/Down/Home/End move focus
@@ -75,7 +76,6 @@ export function Sidebar(props: SidebarProps) {
     // A query switches the list to the server's matches. The box's own text
     // decides, not the debounced query, so the mode flips as soon as the
     // user types.
-    const searching = search.query.trim() !== "";
     const sessions = searching ? search.sessions : (ws?.sessions ?? []);
     // Both the button and its count describe the list on screen: the
     // workspace's sessions normally, the matches while searching.
@@ -114,6 +114,7 @@ export function Sidebar(props: SidebarProps) {
                 )}
                 <PaneSearch
                     query={search.query}
+                    initiallyOpen={searching}
                     onQueryChange={search.setQuery}
                     onOpenChange={setSearchOpen}
                 />

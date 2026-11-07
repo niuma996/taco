@@ -16,13 +16,19 @@ import { TextInput } from "./ui/TextInput";
 
 export interface PaneSearchProps {
     query: string;
+    initiallyOpen?: boolean;
     onQueryChange: (q: string) => void;
     onOpenChange?: (open: boolean) => void;
 }
 
-export function PaneSearch({ query, onQueryChange, onOpenChange }: PaneSearchProps) {
+export function PaneSearch({
+    query,
+    initiallyOpen = false,
+    onQueryChange,
+    onOpenChange,
+}: PaneSearchProps) {
     const { t } = useT();
-    const [open, setOpen] = useState(false);
+    const [open, setOpen] = useState(initiallyOpen);
     const inputRef = useRef<HTMLInputElement>(null);
 
     useEffect(() => {
