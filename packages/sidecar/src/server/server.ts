@@ -550,6 +550,10 @@ export class SidecarServer implements ServerRpcSurface {
             onChange: () => this.workPush.changed(),
             onProjectionChange: () => this.workPush.changed(),
             resolveTargetState: async (workspace, sessionId) => {
+                // Target reconciliation is intentionally bounded to Work's
+                // distinct workspace keys and happens after normal runtime
+                // startup, so a missing session can be distinguished from a
+                // transient read failure.
                 const runtime = await this.ensureWorkspace(asWorkspaceId(workspace)).catch(
                     () => undefined,
                 );
