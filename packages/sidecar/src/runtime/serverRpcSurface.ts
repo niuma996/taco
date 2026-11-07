@@ -121,6 +121,8 @@ export interface JobsControl {
 }
 
 export interface ServerRpcSurface {
+    /** Whether the active client negotiated a named additive capability. */
+    supportsClientCapability?(name: string): boolean;
     workspaceIds(): WorkspaceId[];
     ensureWorkspace(cwd: WorkspaceId): Promise<WorkspaceRuntime>;
     disposeWorkspace(cwd: WorkspaceId): Promise<void>;

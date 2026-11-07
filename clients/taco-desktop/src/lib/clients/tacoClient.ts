@@ -710,7 +710,7 @@ export class TacoClient extends TacoClientBase {
                     major: SIDECAR_PROTOCOL_VERSION.major,
                     minor: SIDECAR_PROTOCOL_VERSION.minor,
                 },
-                clientCapabilities: {},
+                clientCapabilities: { workWaiting: true },
             },
         };
         const promise = this.dispatcher.registerPending(id, fallback) as Promise<{

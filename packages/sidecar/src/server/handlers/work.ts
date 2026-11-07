@@ -7,25 +7,45 @@
  * re-runs the work.
  */
 
-import type { WorkGetResult, WorkListResult, WorkRetryDeliveryResult } from "@taco-ai/protocol";
+import type {
+    WorkGetResult,
+    WorkListResult,
+    WorkRetryDeliveryResult,
+    WorkSummary,
+} from "@taco-ai/protocol";
 import { registerMethod } from "../methodRegistry.ts";
 import { SIDECAR_INSTANCE_ID } from "../push.ts";
 
 export function registerWorkHandlers(): void {
+    const legacy = (work: WorkSummary): WorkSummary =>
+        work.status === "waiting"
+            ? { ...work, status: "running", needsAttention: false, waiting: undefined }
+            : work;
+    const legacyList = (result: WorkListResult, supports: boolean): WorkListResult =>
+        supports
+            ? result
+            : {
+                  ...result,
+                  active: result.active.map(legacy),
+                  terminal: result.terminal.map(legacy),
+              };
     registerMethod("workList", false, async ({ server, params }): Promise<WorkListResult> => {
         if (!server.work) {
             return { instanceId: SIDECAR_INSTANCE_ID, active: [], terminal: [] };
         }
-        return server.work.list({
+        const result = await server.work.list({
             limit: params.limit,
             before: params.before,
             ...(params.jobId !== undefined ? { jobId: params.jobId } : {}),
         });
+        return legacyList(result, server.supportsClientCapability?.("workWaiting") ?? true);
     });
 
     registerMethod("workGet", false, async ({ server, params }): Promise<WorkGetResult> => {
         if (!server.work) return { work: null };
-        return server.work.get(params.workId);
+        const result = await server.work.get(params.workId);
+        if (server.supportsClientCapability?.("workWaiting") ?? true) return result;
+        return result.work ? { ...result, work: legacy(result.work) } : result;
     });
 
     registerMethod(

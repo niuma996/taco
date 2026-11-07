@@ -442,6 +442,14 @@ export class SidecarServer implements ServerRpcSurface {
         return this.clientContext.run(capabilities, () => this.handleRpcRequest(req));
     }
 
+    supportsClientCapability(name: string): boolean {
+        // In-process callers are current sidecar code and can consume the full shape.
+        return (
+            this.clientContext.getStore()?.[name] === true ||
+            this.clientContext.getStore() === undefined
+        );
+    }
+
     lookupRoute(workspace: string): { sessionId: string } | undefined {
         return this.conversationRouter?.lookupByWorkspace(workspace);
     }

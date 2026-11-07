@@ -81,6 +81,29 @@ describe("work.* handlers", () => {
     });
 
     describe("work.list", () => {
+        it("projects waiting Work as running for a pre-2.12 client", async () => {
+            const { controller, service } = rig();
+            const started = await controller.start({
+                sourceEventId: "subagent:p:legacy-wait",
+                workspace: "/w",
+                parentSessionId: "p",
+                childSessionId: "c-legacy",
+                agentType: "explorer",
+                title: "waiting",
+            });
+            await service.controller.waitForInput(started.workId, {
+                toolCallId: "q",
+                toolName: "askUser",
+                sessionId: "p",
+            });
+            const result = await callMethod<WorkListResult>("work.list", {
+                server: { work: service, supportsClientCapability: () => false },
+                params: {},
+            });
+            assert.equal(result.active[0]?.status, "running");
+            assert.equal(result.active[0]?.waiting, undefined);
+        });
+
         it("lists Works that no session has attached", async () => {
             const { controller, server } = rig();
             const id = await launchAndSettle(controller, 1, "answer");

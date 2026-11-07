@@ -108,7 +108,7 @@ because a registered system-service daemon can outlive a desktop upgrade.
 | 2.9 | optional `timeoutMinutes` on `agents.write` / `agents.content` — the wall-clock budget for a background spawn of that agent type; `maxTurns` and `timeoutMinutes` ceilings raised to 500 and 600 minutes |
 | 2.10 | scheduled `agent.invoke` fires are tracked as Work: `WorkSummary.kind` adds `"scheduled"` with `jobId`; `WorkSummary.sessionId` is the overview's target and `parentSessionId` stays as a deprecated alias for older clients; `childSessionId` / `agentType` become optional; `JobHistoryEntry.workId` and `JobRunResult.workId`; RPC error code `aborted` for a turn stopped before it finished |
 | 2.11 | `WorkSummary.sessionState` reports whether its target session remains available after deletion; Work results stay queryable and desktop navigation disables deleted targets |
-| 2.12 | `waiting` Work status for askUser/planExit interactions; attempt-scoped continuation; permission requests appear as process-local Work projections and are cleared on daemon replacement |
+| 2.12 | `waiting` Work status for askUser/planExit interactions; attempt-scoped continuation; permission requests appear as process-local Work projections and are cleared on daemon replacement. Clients that do not advertise `clientCapabilities.workWaiting` receive a compatibility projection (`running`, without waiting details). |
 
 After a successful initialize, every other RPC is accepted. `initialize` is idempotent
 and outside `commandRecords` dedup. In-process self-RPC callers (e.g. the memory tool)

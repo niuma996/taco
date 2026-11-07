@@ -139,6 +139,8 @@ export function isCompatibleClientProtocol(client: { major: unknown; minor: unkn
  */
 export interface ClientCapabilities {
     uiLocale?: SupportedLocale;
+    /** Client can render the 2.12 waiting Work state and interaction details. */
+    workWaiting?: boolean;
     [extension: string]: unknown;
 }
 
