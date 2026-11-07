@@ -144,7 +144,7 @@ describe("initialize", () => {
             assert.equal(result.serverCapabilities.pushes.includes("sidecar.hello"), false);
             assert.deepEqual(result.protocolVersion, SIDECAR_PROTOCOL_VERSION);
             // Pinned separately: a bump must be a deliberate edit here too.
-            assert.deepEqual(SIDECAR_PROTOCOL_VERSION, { major: 2, minor: 10 });
+            assert.deepEqual(SIDECAR_PROTOCOL_VERSION, { major: 2, minor: 11 });
             assert.equal(typeof result.instanceId, "string");
             assert.equal(typeof result.pid, "number");
         });
@@ -193,19 +193,14 @@ describe("initialize", () => {
             if (!resp.ok) assert.equal(resp.error.code, "incompatible_protocol");
         });
 
-        it("a 2.10 client refuses a 2.9 daemon (it has no scheduled Work)", () => {
-            // Client-side gate: a 2.9 daemon knows no scheduled Works, so the
-            // overview would show only subagents and its job history carries no
-            // `workId` to open a run's answer. A 2.9 *client* against this daemon
-            // still works: WorkSummary keeps the `parentSessionId` alias.
-            // 2.8 drops the agent timeout, 2.7 has no work.* methods, and 2.6
-            // ignores the session search query.
+        it("a 2.11 client refuses a 2.10 daemon (it cannot report deleted Work targets)", () => {
+            // The overview must not advertise deleted targets as openable.
             assert.equal(isCompatibleSidecarProtocol({ major: 2, minor: 5 }), false);
             assert.equal(isCompatibleSidecarProtocol({ major: 2, minor: 6 }), false);
             assert.equal(isCompatibleSidecarProtocol({ major: 2, minor: 7 }), false);
             assert.equal(isCompatibleSidecarProtocol({ major: 2, minor: 8 }), false);
             assert.equal(isCompatibleSidecarProtocol({ major: 2, minor: 9 }), false);
-            assert.equal(isCompatibleSidecarProtocol({ major: 2, minor: 10 }), true);
+            assert.equal(isCompatibleSidecarProtocol({ major: 2, minor: 10 }), false);
             // A newer sidecar is additive; the client ignores methods it lacks.
             assert.equal(isCompatibleSidecarProtocol({ major: 2, minor: 11 }), true);
         });

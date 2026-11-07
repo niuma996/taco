@@ -220,8 +220,10 @@ export function registerSessionLifecycleHandlers(): void {
     registerMethod(
         "sessionDelete",
         true,
-        async ({ workspace, params }) => {
-            await deleteSessionTree(workspace, params.sessionId);
+        async ({ workspace, server, params }) => {
+            await deleteSessionTree(workspace, params.sessionId, async (sessionId) => {
+                await server.work?.sessionDeleted({ workspace: params.workspace, sessionId });
+            });
             const result: SessionDeleteResult = { deleted: true };
             return result;
         },
@@ -301,7 +303,11 @@ const STOP_CHILD_TIMEOUT_MS = 5_000;
  * fatal: a subagent stuck on a long tool call would make the session
  * undeletable — worse than the one leftover transcript the user never sees.
  */
-async function deleteSessionTree(workspace: WorkspaceRuntime, sessionId: SessionId): Promise<void> {
+async function deleteSessionTree(
+    workspace: WorkspaceRuntime,
+    sessionId: SessionId,
+    onDeleted: (sessionId: SessionId) => Promise<void>,
+): Promise<void> {
     // Validate the raw RPC id before anything is deleted, not after.
     sessionAuxDir(workspace.sessionsRoot, sessionId);
 
@@ -336,6 +342,7 @@ async function deleteSessionTree(workspace: WorkspaceRuntime, sessionId: Session
         if (stuck.has(id)) continue;
         await workspace.deleteSession(id);
         deleted.push(id);
+        await onDeleted(id);
     }
 
     // Last: a child that settles after this point re-creates the directory in

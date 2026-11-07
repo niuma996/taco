@@ -6,6 +6,7 @@
  * routing lives here so the controller stays testable with plain fakes.
  */
 
+import type { SessionTarget } from "@taco-ai/protocol";
 import {
     type ImRoute,
     type SessionId,
@@ -47,6 +48,7 @@ export interface WorkControl {
     list(args: WorkListArgs): Promise<WorkListResult>;
     get(workId: string): Promise<WorkGetResult>;
     retryDelivery(workId: string): Promise<WorkRetryDeliveryResult>;
+    sessionDeleted(target: SessionTarget): Promise<void>;
 }
 
 export class WorkService implements BackgroundWorkHooks, ScheduledWorkHooks, WorkControl {
@@ -97,6 +99,10 @@ export class WorkService implements BackgroundWorkHooks, ScheduledWorkHooks, Wor
     }
 
     // ── WorkControl (read side) ──
+
+    sessionDeleted(target: SessionTarget): Promise<void> {
+        return this.controller.sessionDeleted(target);
+    }
 
     async list(args: WorkListArgs): Promise<WorkListResult> {
         return buildList(await this.store.list(), args, this.options.instanceId);

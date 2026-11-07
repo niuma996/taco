@@ -33,6 +33,12 @@ export type SupportedLocale = "zh" | "en";
 /** Session ID, server-generated. Clients may pass an id to reuse one. */
 export type SessionId = Brand<string, "SessionId">;
 
+/** A conversation's routing identity, captured when an operation is triggered. */
+export interface SessionTarget {
+    readonly workspace: string;
+    readonly sessionId: string;
+}
+
 /** Tool call correlation id — links tool_call_start/update/end pushes and `AssistantMessage.content[].id`. */
 export type ToolCallId = Brand<string, "ToolCallId">;
 
@@ -88,8 +94,9 @@ export type CompactionFailureReason =
  *  2.9 added `timeoutMinutes` on `agents.write` / `agents.content`; a 2.8
  *  daemon drops it, so a saved timeout would not take effect.
  *  2.10 tracks scheduled fires as Work; a 2.9 daemon sends no `workId` in job
- *  history and still names the summary's session `parentSessionId`. */
-export const SIDECAR_PROTOCOL_VERSION = { major: 2, minor: 10 } as const;
+ *  history and still names the summary's session `parentSessionId`.
+ *  2.11 reports whether a Work's target session has been deleted. */
+export const SIDECAR_PROTOCOL_VERSION = { major: 2, minor: 11 } as const;
 
 /**
  * Client-side gate for a sidecar's advertised protocol version. Semver-ish but

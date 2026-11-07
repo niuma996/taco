@@ -80,7 +80,7 @@ export async function runAttachedSubagent(args: RunAttachedSubagentArgs): Promis
     resultText: string;
     isError: boolean;
     aborted?: boolean;
-    /** The run ended on its turn cap; `resultText` is what it had so far. */
+    /** The run was interrupted; `resultText` includes unfinished findings. */
     partial?: boolean;
 }> {
     const { subSessionId, attached, agentType, readLastAssistantText } = args;
@@ -162,10 +162,12 @@ export async function runAttachedSubagent(args: RunAttachedSubagentArgs): Promis
     };
     args.signal?.addEventListener("abort", onAbortSignal, { once: true });
 
+    let promptStarted = false;
     try {
         // Setup can outlive the parent turn. An abort event that already fired
         // will not reach the listener above; do not admit a new child run.
         args.signal?.throwIfAborted();
+        promptStarted = true;
         await attached.prompt(args.prompt, undefined, undefined, args.signal);
     } catch (e) {
         // hitCap before signal.aborted: keep partial answer instead of discarding it.
@@ -184,18 +186,28 @@ export async function runAttachedSubagent(args: RunAttachedSubagentArgs): Promis
         }
         if (args.signal?.aborted) {
             const reason = args.signal.reason;
+            const notice = isSubagentTimeoutReason(reason)
+                ? subagentTimeoutText({ timeoutMinutes: reason.timeoutMinutes, turnsUsed })
+                : SUBAGENT_STOPPED_TEXT;
+            let rawText = lastTurnText ?? "";
+            if (promptStarted) {
+                try {
+                    const stored = await readLastAssistantText(subSessionId);
+                    if (stored.text.trim() !== "") rawText = stored.text;
+                } catch {
+                    // The stop still succeeds if transcript extraction fails.
+                }
+            }
+            const { text } = neutralizeControlTags(rawText.trim());
             return {
                 subSessionId,
-                resultText: isSubagentTimeoutReason(reason)
-                    ? subagentTimeoutText({
-                          timeoutMinutes: reason.timeoutMinutes,
-                          turnsUsed,
-                      })
-                    : SUBAGENT_STOPPED_TEXT,
+                resultText: text ? `${notice}\n\n[partial findings]\n${text}` : notice,
                 isError: true,
                 aborted: true,
+                ...(text ? { partial: true } : {}),
             };
         }
+
         return {
             subSessionId,
             resultText: failedResult({

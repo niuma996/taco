@@ -49,6 +49,69 @@ function overview(work: WorkSummary = runningWork) {
 }
 
 describe("WorkPane result states", () => {
+    it("opens a Work with its own workspace and session as one target", () => {
+        const onOpenSession = vi.fn();
+        render(
+            <WorkPane
+                client={{} as never}
+                overview={overview({
+                    ...runningWork,
+                    workspace: "/other-project",
+                    sessionId: "other-session",
+                })}
+                onOpenSession={onOpenSession}
+            />,
+        );
+        fireEvent.click(screen.getByRole("button", { name: "work.openSession" }));
+        assert.deepEqual(onOpenSession.mock.calls, [
+            [
+                {
+                    workspace: "/other-project",
+                    sessionId: "other-session",
+                },
+            ],
+        ]);
+    });
+
+    for (const sessionState of ["deleted", "unavailable"] as const) {
+        it(`disables navigation to a ${sessionState} target while keeping its result`, async () => {
+            const work = { ...runningWork, sessionState, status: "completed" as const };
+            const onOpenSession = vi.fn();
+            render(
+                <WorkPane
+                    client={
+                        { workGet: async () => ({ work, resultText: "Saved findings" }) } as never
+                    }
+                    overview={overview(work)}
+                    onOpenSession={onOpenSession}
+                />,
+            );
+            const open = screen.getByRole("button", {
+                name: "work.openSession",
+            }) as HTMLButtonElement;
+            assert.equal(open.disabled, true);
+            fireEvent.click(open);
+            assert.equal(onOpenSession.mock.calls.length, 0);
+            fireEvent.click(screen.getByRole("button", { name: /Review changes/ }));
+            await waitFor(() => assert.ok(screen.getByText("Saved findings")));
+        });
+    }
+
+    it("keeps records without a workspace unavailable", () => {
+        render(
+            <WorkPane
+                client={{} as never}
+                overview={overview({ ...runningWork, workspace: undefined })}
+                onOpenSession={() => {}}
+            />,
+        );
+        assert.equal(
+            (screen.getByRole("button", { name: "work.openSession" }) as HTMLButtonElement)
+                .disabled,
+            true,
+        );
+    });
+
     it("says a running Work has no result yet instead of saying it is unavailable", async () => {
         const workGet = vi.fn(async (): Promise<WorkGetResult> => ({ work: runningWork }));
         render(

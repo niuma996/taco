@@ -66,6 +66,7 @@ import { useWorkOverview } from "./hooks/useWorkOverview";
 import { useWorkspaceModels } from "./hooks/useWorkspaceModels";
 import { useWorkspaces } from "./hooks/useWorkspaces";
 import { useT } from "./i18n/useI18n";
+import type { SessionTarget } from "./lib/chat/conversationIdentity";
 import { deriveSubagents, subagentDotState } from "./lib/chat/subagentList";
 import {
     readPersistedSidebarCollapsed,
@@ -598,8 +599,8 @@ export default function App() {
      * a full path; a filesystem session needs its workspace switched to first
      * (which loads its session list) before the attach is meaningful.
      */
-    const openWorkSession = useCallback(
-        (workspace: string, sessionId: string): void => {
+    const openSessionTarget = useCallback(
+        ({ workspace, sessionId }: SessionTarget): void => {
             if (workspace.startsWith(IM_CWD_PREFIX)) {
                 openImConversationFromUi(workspace, sessionId);
             } else {
@@ -615,6 +616,10 @@ export default function App() {
             setMainView("chat");
         },
         [attachSession, openImConversationFromUi, pushNotification, switchWorkspace],
+    );
+    const openWorkSession = useCallback(
+        (workspace: string, sessionId: string) => openSessionTarget({ workspace, sessionId }),
+        [openSessionTarget],
     );
     const switchWorkspaceFromUi = useCallback(
         (cwd: string): void => {
@@ -1163,9 +1168,7 @@ export default function App() {
                         <WorkPane
                             client={client}
                             overview={workOverview}
-                            onOpenSession={(sessionId) => {
-                                if (activeCwd) openWorkSession(activeCwd, sessionId);
-                            }}
+                            onOpenSession={openSessionTarget}
                         />
                     ) : mainView === "memory" ? (
                         <MemoryPane

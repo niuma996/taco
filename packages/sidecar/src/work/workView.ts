@@ -58,6 +58,7 @@ export function toSummary(work: WorkRecord): WorkSummary {
         ...(work.endedAt !== undefined ? { endedAt: work.endedAt } : {}),
         ...(work.workspace !== undefined ? { workspace: work.workspace } : {}),
         sessionId: work.parentSessionId,
+        sessionState: work.sessionState ?? (work.workspace ? "available" : "unavailable"),
         parentSessionId: work.parentSessionId,
         ...(work.childSessionId !== undefined ? { childSessionId: work.childSessionId } : {}),
         ...(work.result ? { completeness: work.result.completeness } : {}),

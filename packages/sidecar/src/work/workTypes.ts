@@ -19,6 +19,7 @@ import type {
     WorkStatus as WireWorkStatus,
     WorkCompleteness,
     WorkDeliveryStatus,
+    WorkSessionState,
 } from "@taco-ai/protocol";
 
 export const WORK_SCHEMA_VERSION = 1;
@@ -110,6 +111,8 @@ export interface WorkRecord {
      * it stays so records already on disk keep reading.
      */
     readonly parentSessionId: string;
+    /** Persisted invalidation of the overview target; older records omit it. */
+    readonly sessionState?: WorkSessionState;
     /** The subagent's own session. Absent for a scheduled fire. */
     readonly childSessionId?: string;
     /** The subagent profile. Absent for a scheduled fire. */

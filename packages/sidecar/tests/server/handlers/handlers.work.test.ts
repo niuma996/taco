@@ -15,6 +15,7 @@ import { registerBuiltinMethods } from "../../../src/server/methods.ts";
 import type { WorkController } from "../../../src/work/workController.ts";
 import { type DeliveryClock, systemClock } from "../../../src/work/workDelivery.ts";
 import { WorkService } from "../../../src/work/workService.ts";
+import { WorkStore } from "../../../src/work/workStore.ts";
 import { callMethod } from "../../_helpers/handlerCall.ts";
 
 describe("work.* handlers", () => {
@@ -34,8 +35,9 @@ describe("work.* handlers", () => {
     };
 
     function rig() {
+        const dir = join(root, `s${seq++}`);
         const service = new WorkService({
-            root: join(root, `s${seq++}`),
+            root: dir,
             instanceId: "inst-rpc",
             channels: {
                 sendText: async () => ({ kind: "confirmed" as const }),
@@ -46,7 +48,7 @@ describe("work.* handlers", () => {
         });
         const controller: WorkController = service.controller;
         const server = { work: service };
-        return { service, controller, server };
+        return { service, controller, server, dir };
     }
 
     async function launchAndSettle(
@@ -172,6 +174,98 @@ describe("work.* handlers", () => {
             });
             assert.equal(got.work?.workId, id);
             assert.equal(got.resultText, undefined);
+        });
+    });
+
+    describe("deleted session targets", () => {
+        it("persists deletion for the exact workspace and preserves results", async () => {
+            const { service, controller, server, dir } = rig();
+            const id = await launchAndSettle(controller, 100, "saved findings");
+            const other = await controller.start({
+                sourceEventId: "subagent:other:p",
+                workspace: "/other",
+                parentSessionId: "p",
+                childSessionId: "other-child",
+                agentType: "explorer",
+                title: "other project",
+            });
+            const child = await controller.start({
+                sourceEventId: "subagent:p:child",
+                workspace: "/w",
+                parentSessionId: "c100",
+                childSessionId: "grandchild",
+                agentType: "explorer",
+                title: "child work",
+            });
+            const deleted: string[] = [];
+            const workspace = {
+                sessionsRoot: join(root, "deleted-sessions"),
+                listSessions: async () => [{ id: "p" }, { id: "c100", parentSessionId: "p" }],
+                agentSpawner: { stopChildrenOf: async () => [] },
+                deleteSession: async (sid: string) => {
+                    deleted.push(sid);
+                },
+            };
+            await callMethod("session.delete", {
+                server,
+                workspace,
+                params: { workspace: "/w", sessionId: "p" },
+            });
+            assert.deepEqual(deleted, ["c100", "p"]);
+            assert.equal((await service.get(id)).work?.sessionState, "deleted");
+            assert.equal((await service.get(id)).work?.status, "completed");
+            assert.equal((await service.get(id)).resultText, "saved findings");
+            assert.equal((await service.get(other.workId)).work?.sessionState, "available");
+            assert.equal((await service.get(child.workId)).work?.sessionState, "deleted");
+            assert.equal((await new WorkStore(dir).get(id))?.sessionState, "deleted");
+            assert.equal(
+                (await service.list({})).terminal.find((w) => w.workId === id)?.sessionState,
+                "deleted",
+            );
+        });
+
+        it("keeps the parent's navigation target when only the child was deleted", async () => {
+            const { controller, service, server } = rig();
+            const id = await launchAndSettle(controller, 101, "child findings");
+            const workspace = {
+                sessionsRoot: join(root, "child-sessions"),
+                listSessions: async () => [{ id: "c101", parentSessionId: "p" }],
+                agentSpawner: { stopChildrenOf: async () => [] },
+                deleteSession: async () => {},
+            };
+            await callMethod("session.delete", {
+                server,
+                workspace,
+                params: { workspace: "/w", sessionId: "c101" },
+            });
+            assert.equal((await service.get(id)).work?.sessionState, "available");
+        });
+
+        it("does not mark a skipped child as deleted", async () => {
+            const { controller, service, server } = rig();
+            const child = await controller.startScheduled({
+                sourceEventId: "scheduled:stuck",
+                workspace: "/w",
+                sessionId: "stuck",
+                jobId: "j",
+                title: "stuck run",
+            });
+            const workspace = {
+                sessionsRoot: join(root, "stuck-sessions"),
+                listSessions: async () => [{ id: "p" }, { id: "stuck", parentSessionId: "p" }],
+                agentSpawner: {
+                    stopChildrenOf: async (sid: string) => (sid === "p" ? ["stuck"] : []),
+                },
+                deleteSession: async (sid: string) => {
+                    assert.notEqual(sid, "stuck");
+                },
+            };
+            await callMethod("session.delete", {
+                server,
+                workspace,
+                params: { workspace: "/w", sessionId: "p" },
+            });
+            assert.equal((await service.get(child.workId)).work?.sessionState, "available");
         });
     });
 

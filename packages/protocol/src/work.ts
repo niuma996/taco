@@ -92,6 +92,9 @@ export interface WorkDeliverySummary {
     nextAttemptAt?: number;
 }
 
+/** Availability of the overview's session target, independent of Work execution. */
+export type WorkSessionState = "available" | "deleted" | "unavailable";
+
 /** One Work as a list row. Never carries the answer text. */
 export interface WorkSummary {
     workId: string;
@@ -119,6 +122,8 @@ export interface WorkSummary {
      */
     workspace?: string;
     sessionId: string;
+    /** Absent on older daemons. Deleted targets keep their Work results. */
+    sessionState?: WorkSessionState;
     /**
      * Deprecated alias of `sessionId`, kept so a 2.9 desktop can still open a
      * Work's session against a 2.10 daemon. New clients read `sessionId`.

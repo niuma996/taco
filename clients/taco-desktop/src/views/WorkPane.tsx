@@ -24,6 +24,7 @@ import { Tag } from "../components/ui/Tag";
 import { useNow } from "../hooks/useNow";
 import type { UseWorkOverviewResult } from "../hooks/useWorkOverview";
 import { useT, useUiLanguage } from "../i18n/useI18n";
+import type { SessionTarget } from "../lib/chat/conversationIdentity";
 import type { TacoClient } from "../lib/clients/tacoClient.ts";
 import { formatRelativeTime } from "../lib/relativeTime";
 import type { WorkGroupId } from "../lib/workOverview";
@@ -32,7 +33,7 @@ export interface WorkPaneProps {
     client: TacoClient;
     overview: UseWorkOverviewResult;
     /** Jump to the conversation that started a Work. */
-    onOpenSession: (workspace: string, sessionId: string) => void;
+    onOpenSession: (target: SessionTarget) => void;
 }
 
 const STATUS_TONE: Record<WorkSummary["status"], { tone?: "strong"; className?: string }> = {
@@ -132,6 +133,10 @@ export function WorkPane({ client, overview, onOpenSession }: WorkPaneProps) {
     };
 
     const renderRow = (work: WorkSummary) => {
+        const target: SessionTarget | undefined =
+            work.workspace && (work.sessionState === undefined || work.sessionState === "available")
+                ? { workspace: work.workspace, sessionId: work.sessionId }
+                : undefined;
         const isOpen = expanded === work.workId;
         const status = STATUS_TONE[work.status];
         const detail = expandedDetail?.workId === work.workId ? expandedDetail.result : undefined;
@@ -189,16 +194,14 @@ export function WorkPane({ client, overview, onOpenSession }: WorkPaneProps) {
                     <button
                         type="button"
                         className="work-action"
-                        disabled={work.workspace === undefined}
+                        disabled={target === undefined}
                         title={
-                            work.workspace === undefined
+                            target === undefined
                                 ? t("work.openSessionUnavailable")
                                 : t("work.openSession")
                         }
                         onClick={() => {
-                            if (work.workspace !== undefined) {
-                                onOpenSession(work.workspace, work.sessionId);
-                            }
+                            if (target) onOpenSession(target);
                         }}
                     >
                         <MessageSquare size={13} aria-hidden="true" />

@@ -136,6 +136,7 @@ export type {
     RpcResponse,
     ServerPush,
     SessionId,
+    SessionTarget,
     SidecarCapabilities,
     SupportedLocale,
     ToolCallId,
@@ -421,6 +422,7 @@ export type {
     WorkRetryDeliveryOutcome,
     WorkRetryDeliveryParams,
     WorkRetryDeliveryResult,
+    WorkSessionState,
     WorkStatus,
     WorkSummary,
 } from "./work.js";

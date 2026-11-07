@@ -15,7 +15,7 @@
  * race the attach-time recovery (see the Work plan, section 6).
  */
 
-import type { ImRoute } from "@taco-ai/protocol";
+import type { ImRoute, SessionTarget } from "@taco-ai/protocol";
 import { chunkText } from "../channels/builtin/channelReply.ts";
 import { createLogger } from "../lib/logger.ts";
 import { uuidv7 } from "../runtime/pi/values.ts";
@@ -419,6 +419,23 @@ export class WorkController {
         if (res?.changed) {
             this.onChange(workId);
             void this.deliverer.deliver(workId);
+        }
+    }
+
+    /** Invalidate only the overview target; execution, results and delivery stay intact. */
+    async sessionDeleted(target: SessionTarget): Promise<void> {
+        for (const record of await this.store.list()) {
+            if (
+                record.workspace !== target.workspace ||
+                record.parentSessionId !== target.sessionId
+            )
+                continue;
+            const changed = await this.store.mutate(record.workId, (current) =>
+                current.sessionState === "deleted"
+                    ? undefined
+                    : { ...current, sessionState: "deleted", updatedAt: this.now() },
+            );
+            if (changed?.changed) this.onChange(record.workId);
         }
     }
 

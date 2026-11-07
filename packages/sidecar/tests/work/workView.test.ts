@@ -48,6 +48,16 @@ function record(over: Partial<WorkRecord> = {}): WorkRecord {
 }
 
 describe("work.view", () => {
+    it("reports target availability separately from execution and delivery", () => {
+        assert.equal(toSummary(record({ workspace: "/a" })).sessionState, "available");
+        assert.equal(toSummary(record({ workspace: undefined })).sessionState, "unavailable");
+        const deleted = toSummary(record({ workspace: "/a", sessionState: "deleted" }));
+        assert.equal(deleted.sessionState, "deleted");
+        assert.equal(deleted.status, "completed");
+        assert.equal(deleted.workspace, "/a");
+        assert.equal(deleted.needsAttention, false);
+    });
+
     describe("needsAttention", () => {
         it("flags an interrupted run", () => {
             assert.equal(needsAttention(record({ status: "interrupted" })), true);
