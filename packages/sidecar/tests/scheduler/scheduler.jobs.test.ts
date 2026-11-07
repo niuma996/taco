@@ -17,7 +17,10 @@ describe("jobsController", () => {
         try {
             return await fn(dir);
         } finally {
-            await rm(dir, { recursive: true, force: true });
+            // A fired job writes to the store while the scheduler is being
+            // torn down, so the removal can race an in-flight write and fail
+            // with ENOTEMPTY. Retry rather than report a spurious failure.
+            await rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
         }
     }
 
@@ -64,13 +67,27 @@ describe("jobsController", () => {
                     fired += 1;
                 },
             });
-            await scheduler.start();
-            const ctrl = new JobsController(store, scheduler, dir);
-            const job = sampleJob("a", { enabled: true, schedule: { kind: "interval", ms: 20 } });
-            await ctrl.create(job);
-            await new Promise((r) => setTimeout(r, 80));
-            ok(fired > 0, `expected at least one fire; got ${fired}`);
-            scheduler.stop();
+            try {
+                await scheduler.start();
+                const ctrl = new JobsController(store, scheduler, dir);
+                const job = sampleJob("a", {
+                    enabled: true,
+                    schedule: { kind: "interval", ms: 20 },
+                });
+                await ctrl.create(job);
+                // Poll rather than sleep a fixed amount: a 20ms timer can be
+                // delayed well past 80ms when the machine is saturated, and the
+                // scheduler's own tick is what we are waiting on.
+                const deadline = Date.now() + 5_000;
+                while (fired === 0 && Date.now() < deadline) {
+                    await new Promise((r) => setTimeout(r, 10));
+                }
+                ok(fired > 0, `expected at least one fire; got ${fired}`);
+            } finally {
+                // An armed interval keeps the event loop alive, so a failed
+                // assertion above must not skip the teardown.
+                scheduler.stop();
+            }
         });
     });
 

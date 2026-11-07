@@ -106,3 +106,18 @@ test("markerTargetsInstall matches only the marker's own live_dir", () => {
     strictEqual(markerTargetsInstall(marker, null), false);
     strictEqual(markerTargetsInstall(marker, undefined), false);
 });
+
+test("the sidecar's reader parses a marker the CLI wrote", async () => {
+    // The two marker implementations are deliberately duplicated (the CLI
+    // ships without the sidecar's TS source), so nothing but this test stops
+    // the on-disk shape from drifting apart.
+    const { readUpgradeMarker: readSidecarMarker } = await import(
+        "@taco-ai/sidecar/src/upgrader/marker.ts"
+    );
+    await withTmp(async (dir) => {
+        const path = join(dir, "marker.json");
+        const marker = sampleMarker();
+        await writeUpgradeMarker(path, marker);
+        deepStrictEqual(await readSidecarMarker(path), marker);
+    });
+});

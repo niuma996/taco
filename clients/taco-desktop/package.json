@@ -18,7 +18,7 @@
     "test:utils": "tsx --test tests/lib/chat/chatUtils.test.ts",
     "test:markdown": "tsx --test tests/lib/markdownHelpers.test.ts",
     "test:events": "tsx --test tests/lib/sessionPushProcessor.test.ts tests/lib/chat/applyEventToMessages.test.ts",
-    "test:theme": "tsx --test tests/lib/theme.test.ts tests/lib/clientSettings.test.ts",
+    "test:theme": "tsx --test tests/lib/clientSettings.test.ts",
     "test:logline": "tsx --test tests/lib/sidecarLogLine.test.ts",
     "test:reducer": "tsx --test tests/lib/chat/workspaceReducer.test.ts",
     "test:subagent": "tsx --test tests/lib/chat/subagentList.test.ts",

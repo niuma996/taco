@@ -1,4 +1,6 @@
 import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -69,7 +71,12 @@ describe("Sidebar session actions", () => {
         // The actions must remain in the sequential focus order while idle.
         // CSS hides them visually with opacity, not display:none, so Tab can
         // focus the first action and :focus-within can reveal the row.
-        const css = readFileSync("src/styles/sidebar.css", "utf8");
+        // happy-dom replaces the global URL class, so `new URL(..., import.meta.url)`
+        // does not yield a file:// URL. Resolve the path ourselves.
+        const css = readFileSync(
+            resolve(dirname(fileURLToPath(import.meta.url)), "../../src/styles/sidebar.css"),
+            "utf8",
+        );
         const actionRule = (css.match(/\.session-action\s*\{([\s\S]*?)\}/)?.[1] ?? "").replace(
             /\/\*[\s\S]*?\*\//g,
             "",

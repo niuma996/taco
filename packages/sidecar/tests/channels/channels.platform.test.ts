@@ -113,11 +113,16 @@ describe("wechatChannel", () => {
         }
         /** The channel's batch window; `deliver` waits it out before returning. */
         quietMs = 0;
+        /** Set by the harness; resolves once the batch has been handed over. */
+        settled?: () => Promise<void>;
 
         async deliver(msg: IncomingLike): Promise<void> {
             await this.messageHandler?.(msg);
             // Batched submits land on a timer, not on the handler's return.
+            // Wait for the batch to actually flush rather than for a guessed
+            // duration — a fixed sleep is a coin flip on a loaded machine.
             await new Promise((resolve) => setTimeout(resolve, this.quietMs + 5));
+            await this.settled?.();
         }
     }
 
@@ -129,6 +134,13 @@ describe("wechatChannel", () => {
         submitted: ChannelInboundMessage[];
         /** The storage adapter handed to the SDK; set once start() runs. */
         factoryOpts?: WeChatBotFactoryOptions;
+        /**
+         * Resolves once at least `count` messages have been submitted, or
+         * after a deadline. The batch hand-over is timer-driven, so a test
+         * that asserts on `submitted` has to wait for the flush rather than
+         * for a guessed delay.
+         */
+        waitForSubmits: (count: number) => Promise<void>;
     }
 
     function harness(
@@ -162,7 +174,31 @@ describe("wechatChannel", () => {
                 },
             },
         };
-        return Object.assign(h, { channel, ctx, broker, bot, submitted });
+        const waitForSubmits = async (count: number): Promise<void> => {
+            const deadline = Date.now() + 5_000;
+            while (submitted.length < count && Date.now() < deadline) {
+                await new Promise((resolve) => setTimeout(resolve, 5));
+            }
+        };
+        // `deliver` waits for the batch it joined to be handed over. The
+        // hand-over is timer-driven, so wait until the submit count stops
+        // moving — a batch that legitimately yields no submit (a dropped
+        // message) must not stall the test.
+        bot.settled = async () => {
+            const deadline = Date.now() + 5_000;
+            let previous = -1;
+            let stable = 0;
+            while (Date.now() < deadline) {
+                await new Promise((resolve) => setTimeout(resolve, 5));
+                if (submitted.length === previous) {
+                    if (++stable >= 2) return;
+                } else {
+                    stable = 0;
+                    previous = submitted.length;
+                }
+            }
+        };
+        return Object.assign(h, { channel, ctx, broker, bot, submitted, waitForSubmits });
     }
 
     function replyFrame(text: string, session = "s1"): ServerPush {
@@ -441,6 +477,7 @@ describe("wechatChannel", () => {
             });
             release();
             await Promise.all([image, caption]);
+            await h.waitForSubmits(1);
             assert.equal(h.submitted.length, 1, "one prompt, not two messages");
             const msg = h.submitted[0];
             assert.equal(msg.text, "what is in the picture");
@@ -480,6 +517,7 @@ describe("wechatChannel", () => {
             });
             release();
             await Promise.all([image, caption]);
+            await h.waitForSubmits(1);
             assert.equal(h.submitted.length, 1, "one prompt, not two turns");
             assert.equal(h.submitted[0].text, "what is in the picture");
             assert.equal(h.submitted[0].kind, "media");
@@ -802,9 +840,12 @@ describe("wecomChannel", () => {
         }
         /** The channel's batch window; deliver helpers wait it out. */
         quietMs = 0;
+        /** Set by the harness; waits for the batch to be handed over. */
+        settled?: () => Promise<void>;
         /** Batched submits land on a timer, not on the emit. */
         private async settle(): Promise<void> {
             await new Promise((resolve) => setTimeout(resolve, this.quietMs + 5));
+            await this.settled?.();
         }
         /** Test helper — emit a typed message.text frame. */
         async deliverText(frame: WeComTextFrameLike): Promise<void> {
@@ -852,6 +893,13 @@ describe("wecomChannel", () => {
         readonly client: FakeClient;
         submitted: ChannelInboundMessage[];
         store: Map<string, unknown>;
+        /**
+         * Resolves once at least `count` messages have been submitted, or
+         * after a deadline. The batch hand-over is timer-driven, so a test
+         * that asserts on `submitted` has to wait for the flush rather than
+         * for a guessed delay.
+         */
+        waitForSubmits: (count: number) => Promise<void>;
     }
 
     function harness(
@@ -867,11 +915,29 @@ describe("wecomChannel", () => {
         const store = new Map<string, unknown>(
             opts.credentials ? Object.entries({ credentials: opts.credentials }) : [],
         );
+        // The deliver helpers wait for the batch to be handed over. The batch
+        // may legitimately produce no submit (a dropped message), so wait for
+        // the submit count to stop moving rather than for a non-zero count.
+        const settled = async (): Promise<void> => {
+            const deadline = Date.now() + 5_000;
+            let previous = -1;
+            let stable = 0;
+            while (Date.now() < deadline) {
+                await new Promise((resolve) => setTimeout(resolve, 5));
+                if (submitted.length === previous) {
+                    if (++stable >= 2) return;
+                } else {
+                    stable = 0;
+                    previous = submitted.length;
+                }
+            }
+        };
         const channel = new WeComChannel({
             broker,
             resolveRoute: () => opts.route,
             createClient: (o: WeComClientFactoryOptions) => {
                 const c = new FakeClient(o);
+                c.settled = settled;
                 clients.push(c);
                 return c;
             },
@@ -895,6 +961,12 @@ describe("wecomChannel", () => {
                 },
             },
         };
+        const waitForSubmits = async (count: number): Promise<void> => {
+            const deadline = Date.now() + 5_000;
+            while (submitted.length < count && Date.now() < deadline) {
+                await new Promise((resolve) => setTimeout(resolve, 5));
+            }
+        };
         return {
             channel,
             ctx,
@@ -907,6 +979,7 @@ describe("wecomChannel", () => {
             },
             submitted,
             store,
+            waitForSubmits,
         };
     }
 
@@ -1017,6 +1090,7 @@ describe("wecomChannel", () => {
                 },
             });
             await Promise.all([image, text]);
+            await h.waitForSubmits(1);
             assert.equal(h.submitted.length, 1);
             assert.equal(h.submitted[0].text, "what is this");
             assert.equal(h.submitted[0].kind, "media");
@@ -1046,6 +1120,7 @@ describe("wecomChannel", () => {
                 },
             });
             await Promise.all([image, text]);
+            await h.waitForSubmits(2);
             // Each sender has its own batch, so the two prompts are ordered by
             // when each batch settles — not by arrival.
             assert.deepEqual(h.submitted.map((m) => m.peerId).sort(), ["u1", "u2"]);

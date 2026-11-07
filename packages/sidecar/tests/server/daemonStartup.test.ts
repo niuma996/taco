@@ -12,7 +12,10 @@ import { type RpcResponse, SIDECAR_PROTOCOL_VERSION } from "@taco-ai/protocol";
 
 test("concurrent daemon contenders reuse the socket owner without fatal bind errors", {
     skip: process.platform === "win32",
-    timeout: 30_000,
+    // Five contenders each boot a full sidecar (TS transform included), so
+    // this needs more headroom than a default timeout allows — the `until`
+    // deadline below must be the one that fires, not the runner's.
+    timeout: 120_000,
 }, async () => {
     const home = await mkdtemp("/tmp/taco-bind-race-");
     const root = resolve(import.meta.dirname, "../../../..");
@@ -77,7 +80,9 @@ test("concurrent daemon contenders reuse the socket owner without fatal bind err
         return { child, exited, log: () => stderr };
     });
     const until = async (ready: () => Promise<boolean> | boolean) => {
-        const deadline = Date.now() + 20_000;
+        // Five contenders each boot a full sidecar; under a parallel test run
+        // that startup can take far longer than it does in isolation.
+        const deadline = Date.now() + 60_000;
         while (!(await ready())) {
             assert.ok(Date.now() < deadline, children.map((c) => c.log()).join("\n"));
             await new Promise((done) => setTimeout(done, 20));
@@ -116,7 +121,9 @@ test("concurrent daemon contenders reuse the socket owner without fatal bind err
 });
 
 test("daemon serves filesystem workspaces after router startup rejects", {
-    timeout: 90000,
+    // Same reasoning as the bind-race test above: the child boots the whole
+    // sidecar, so the budget has to cover a loaded machine.
+    timeout: 120_000,
 }, async () => {
     const home = await mkdtemp(join(tmpdir(), "taco-startup-"));
     const socketPath =

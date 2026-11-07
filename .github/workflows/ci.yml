@@ -74,10 +74,9 @@ jobs:
       # Tests import @taco-ai/protocol / @taco-ai/shared through their package
       # exports, which point at dist/ — build them before running.
       - run: pnpm protocol:build && pnpm shared:build
+      # `pnpm test` covers node:test (packages + clients) and the vitest
+      # component suite (happy-dom + React).
       - run: pnpm test
-      # The vitest component suite is separate from `pnpm test` (node:test)
-      # because it needs happy-dom and React.
-      - run: pnpm --filter @taco-ai/desktop test:components
 
   # ── Build gates ──────────────────────────────────────────────
   build-libs:

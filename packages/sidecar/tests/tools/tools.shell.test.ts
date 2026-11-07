@@ -1,7 +1,7 @@
 // Shell-family tool tests: runShell signal escalation, shellTool, glob, grep.
 
 import { strict as assert } from "node:assert";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, afterEach, before, describe, it } from "node:test";
@@ -59,6 +59,49 @@ describe("runShell — SIGTERM→SIGKILL escalation", () => {
     // timed-out or aborted compound command hung the tool, and any parent abort
     // awaiting it, for the full length of the command.
     if (process.platform !== "win32") {
+        for (const useShell of [false, true]) {
+            it(`SIGKILLs a SIGTERM-resistant ${useShell ? "grandchild after its shell exits" : "child launched with explicit argv"}`, async () => {
+                const dir = mkdtempSync(join(tmpdir(), "taco-shell-escalation-"));
+                const ready = join(dir, "ready");
+                const script = `
+                    const { writeFileSync } = await import("node:fs");
+                    process.on("SIGTERM", () => {});
+                    setTimeout(() => {
+                        process.stdout.write("natural exit");
+                        process.exit(0);
+                    }, 5000);
+                    writeFileSync(process.argv[1], "");
+                `;
+                const args = ["--input-type=module", "-e", script, ready];
+                const command = [process.execPath, ...args]
+                    .map((arg) => `'${arg.replaceAll("'", "'\\''")}'`)
+                    .join(" ");
+                const controller = new AbortController();
+                const pending = runShell(
+                    useShell ? `${command} & wait` : process.execPath,
+                    useShell ? null : args,
+                    { cwd: dir, signal: controller.signal, sigkillDelayMs: 50 },
+                );
+                try {
+                    // Abort only after the real command installed its handler;
+                    // killing it during startup would bypass the escalation.
+                    const deadline = Date.now() + 5_000;
+                    while (!existsSync(ready)) {
+                        assert.ok(Date.now() < deadline, "child did not become ready");
+                        await setTimeout(5);
+                    }
+                    controller.abort();
+                    const result = await pending;
+                    assert.equal(result.details.interrupted, true);
+                    assert.doesNotMatch(result.content[0]?.text ?? "", /natural exit/);
+                } finally {
+                    controller.abort();
+                    await pending;
+                    rmSync(dir, { recursive: true, force: true });
+                }
+            });
+        }
+
         it("returns promptly when a compound command is killed by timeout", async () => {
             const started = Date.now();
             const result = await runShell(COMPOUND_COMMAND, null, {

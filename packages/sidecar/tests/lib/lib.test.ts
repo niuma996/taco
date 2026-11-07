@@ -5,7 +5,13 @@ import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, afterEach, before, beforeEach, describe, it, test } from "node:test";
-import { DeadlineError, SingleFlight, waitForEvent, withDeadline } from "../../src/lib/async.ts";
+import {
+    DeadlineError,
+    disposeInOrder,
+    SingleFlight,
+    waitForEvent,
+    withDeadline,
+} from "../../src/lib/async.ts";
 import { buildSidecarPidRecord, computeInstallId } from "../../src/lib/installId.ts";
 import { createLogger, resetLogLevel } from "../../src/lib/logger.ts";
 import {
@@ -330,6 +336,33 @@ describe("async", () => {
     function deadline(label: string, timeoutMs = 60_000) {
         return { timeoutMs, code: "TEST_TIMEOUT", label };
     }
+
+    describe("disposeInOrder", () => {
+        it("attempts every resource in order and reports all failures", async () => {
+            const calls: number[] = [];
+            const first = new Error("first failed");
+            const last = new Error("last failed");
+            const closing = disposeInOrder([
+                () => {
+                    calls.push(1);
+                    throw first;
+                },
+                async () => {
+                    calls.push(2);
+                },
+                async () => {
+                    calls.push(3);
+                    throw last;
+                },
+            ]);
+            await assert.rejects(closing, (error: unknown) => {
+                assert.ok(error instanceof AggregateError);
+                assert.deepEqual(error.errors, [first, last]);
+                return true;
+            });
+            assert.deepEqual(calls, [1, 2, 3]);
+        });
+    });
 });
 
 describe("installId", () => {

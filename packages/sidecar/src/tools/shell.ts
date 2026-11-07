@@ -13,16 +13,15 @@ export const DEFAULT_TIMEOUT_MS = 120_000;
 export const MAX_OUTPUT_BYTES = 1024 * 1024; // 1MB
 
 /**
- * SIGKILL a child that ignored SIGTERM, unless it has already exited.
- *
- * `child.killed` is not "has this process exited" — Node sets it as soon as
- * `kill()` successfully *delivers* a signal, regardless of whether the
- * process acts on it. `if (!child.killed)` after already calling
- * `child.kill("SIGTERM")` is therefore always false, and the SIGKILL escalation
- * below it never fires. `exitCode`/`signalCode` are the pair that actually
- * reflects termination: both stay `null` until the process has exited.
+ * Escalate even after a POSIX group leader exits: descendants can still hold
+ * output pipes open. killProcessTree falls back to the direct child when an
+ * explicit argv launch did not create a separate process group.
  */
 function escalateToSigkill(child: ChildProcess): void {
+    if (process.platform !== "win32" && child.pid !== undefined) {
+        killProcessTree(child, "SIGKILL");
+        return;
+    }
     if (child.exitCode === null && child.signalCode === null) killProcessTree(child, "SIGKILL");
 }
 

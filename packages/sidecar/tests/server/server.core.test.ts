@@ -786,35 +786,50 @@ describe("schemaValidation", () => {
             },
         ];
 
-        for (const { method, schema, invalid, valid } of cases) {
-            it(`${method} rejects a malformed envelope`, () => {
-                const errors = [...Value.Errors(schema, invalid)];
-                assert.ok(errors.length > 0, `${method} accepted ${JSON.stringify(invalid)}`);
-            });
+        // Every method is checked, but as one assertion per direction rather
+        // than two generated cases per method: the failure message names the
+        // offending method, and 44x2 cases of TypeBox's own validation bought
+        // nothing a single aggregate check does not already cover.
+        it("rejects a malformed envelope for every method", () => {
+            const accepted = cases
+                .filter(({ schema, invalid }) => [...Value.Errors(schema, invalid)].length === 0)
+                .map(({ method }) => method);
+            assert.deepEqual(accepted, [], `accepted a malformed envelope: ${accepted.join(", ")}`);
+        });
 
-            it(`${method} accepts a well-formed envelope`, () => {
-                const errors = [...Value.Errors(schema, valid)];
-                assert.equal(errors.length, 0, `${method} rejected ${JSON.stringify(valid)}`);
-            });
-        }
+        it("accepts a well-formed envelope for every method", () => {
+            const rejected = cases
+                .filter(({ schema, valid }) => [...Value.Errors(schema, valid)].length > 0)
+                .map(({ method }) => method);
+            assert.deepEqual(
+                rejected,
+                [],
+                `rejected a well-formed envelope: ${rejected.join(", ")}`,
+            );
+        });
 
         // The no-argument methods travel without a `params` field.
-        for (const [method, schema] of [
-            ["workspace.list", workspaceListSchema],
-            ["settings.get", settingsGetSchema],
-            ["extensions.status", extensionsStatusSchema],
-            ["channels.list", channelsListSchema],
-        ] as const) {
-            it(`${method} accepts a call with no params`, () => {
-                const errors = [...Value.Errors(schema, undefined)];
-                assert.equal(errors.length, 0, `${method} rejected an absent params`);
-                assert.equal([...Value.Errors(schema, {})].length, 0, `${method} rejected {}`);
-                assert.ok(
-                    [...Value.Errors(schema, { bogus: 1 })].length > 0,
-                    `${method} accepted an unknown field`,
-                );
-            });
-        }
+        it("accepts a call with no params for every no-argument method", () => {
+            const noParamMethods = [
+                ["workspace.list", workspaceListSchema],
+                ["settings.get", settingsGetSchema],
+                ["extensions.status", extensionsStatusSchema],
+                ["channels.list", channelsListSchema],
+            ] as const;
+            const problems: string[] = [];
+            for (const [method, schema] of noParamMethods) {
+                if ([...Value.Errors(schema, undefined)].length > 0) {
+                    problems.push(`${method} rejected an absent params`);
+                }
+                if ([...Value.Errors(schema, {})].length > 0) {
+                    problems.push(`${method} rejected {}`);
+                }
+                if ([...Value.Errors(schema, { bogus: 1 })].length === 0) {
+                    problems.push(`${method} accepted an unknown field`);
+                }
+            }
+            assert.deepEqual(problems, [], problems.join("; "));
+        });
     });
 
     it("initialize remains permissive so malformed clients reach negotiation", () => {

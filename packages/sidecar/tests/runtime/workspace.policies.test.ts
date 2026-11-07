@@ -236,8 +236,8 @@ describe("WorkspaceRuntime.reloadSkillsNow", () => {
  * covered by the reloadSkillsNow tests above and skillFrontmatter tests with
  * stub callbacks instead of a live watcher.
  *
- * Uses a bounded poll (2s budget) rather than a fixed sleep, since the
- * debounce (300ms) plus OS fs-event latency isn't perfectly deterministic.
+ * Uses a bounded poll rather than a fixed sleep, since the debounce (300ms)
+ * plus OS fs-event latency isn't perfectly deterministic.
  */
 
 async function waitFor(
@@ -253,6 +253,12 @@ async function waitFor(
     if (!predicate()) {
         throw new Error(`condition not met within ${timeoutMs}ms`);
     }
+}
+
+// Write only once: retrying would let a change event hide a lost add event.
+async function writeAndAwaitReload(ws: WorkspaceRuntime, write: () => void): Promise<void> {
+    write();
+    await waitFor(() => (ws.resources.skills?.length ?? 0) > 0, 30_000, 40);
 }
 
 let skillsDir: string;
@@ -310,16 +316,8 @@ describe("WorkspaceRuntime skill fs watcher (real chokidar)", () => {
                     source: "user",
                 },
             ];
-            writeFileSync(join(newSkillDir, "SKILL.md"), "---\nname: watched-skill\n---\nbody");
-
-            await waitFor(
-                () => (ws.resources.skills?.length ?? 0) > 0,
-                10000,
-                // A single fs event triggers a 300ms debounce timer inside
-                // WorkspaceRuntime before reloadSkillsNow runs; poll at a
-                // strictly finer grain than that so the loop doesn't
-                // overshoot the debounce window on the first check.
-                40,
+            await writeAndAwaitReload(ws, () =>
+                writeFileSync(join(newSkillDir, "SKILL.md"), "---\nname: watched-skill\n---\nbody"),
             );
 
             assert.equal(ws.resources.skills?.[0]?.name, "watched-skill");
@@ -362,10 +360,10 @@ describe("WorkspaceRuntime skill fs watcher (real chokidar)", () => {
             ];
             // mkdir + write in one burst: the dir now exists (pre-created by the
             // runtime), so this is a post-ready `add` under a watched dir.
-            mkdirSync(newSkillDir, { recursive: true });
-            writeFileSync(join(newSkillDir, "SKILL.md"), "---\nname: fresh-skill\n---\nbody");
-
-            await waitFor(() => (ws.resources.skills?.length ?? 0) > 0, 10000, 40);
+            await writeAndAwaitReload(ws, () => {
+                mkdirSync(newSkillDir, { recursive: true });
+                writeFileSync(join(newSkillDir, "SKILL.md"), "---\nname: fresh-skill\n---\nbody");
+            });
             assert.equal(ws.resources.skills?.[0]?.name, "fresh-skill");
         } finally {
             await ws.dispose();

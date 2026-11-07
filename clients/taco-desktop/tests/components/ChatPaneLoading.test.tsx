@@ -73,6 +73,8 @@ function renderPane(ws: WorkspaceState) {
     const props: ChatPaneProps = {
         client: {} as ChatPaneProps["client"],
         ws,
+        checkpoints: [],
+        onRestoreCheckpoint: async () => ({ ok: true }),
         input: "draft",
         attachments: [
             { id: "att-1", name: "shot.png", mimeType: "image/png", size: 1024, kind: "image" },
