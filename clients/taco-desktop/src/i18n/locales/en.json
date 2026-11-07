@@ -492,7 +492,8 @@
     "unknownTime": "unknown time",
     "restore": "Restore",
     "restoring": "Restoring…",
-    "restoreNeedsSession": "Open a chat to restore.",
+    "openSession": "Open chat",
+    "restoreNeedsCurrentSession": "Open this chat to restore",
     "confirmTitle": "Restore checkpoint?",
     "confirmMessage": "Roll back {{count}} file(s) from \"{{label}}\". A pre-restore snapshot is taken first, so this can be undone.",
     "confirmRestore": "Restore",
@@ -855,9 +856,7 @@
     "undoEditsTitle": "Undo this edit?",
     "undoEditsMessage": "Restore {{count}} file(s) to their state before this response. Files changed afterward will be skipped.",
     "confirmUndoEdits": "Undo edits",
-    "cancelUndoEdits": "Cancel",
-    "openSession": "Open chat",
-    "restoreNeedsCurrentSession": "Open this chat to restore"
+    "cancelUndoEdits": "Cancel"
   },
   "plan": {
     "modeTooltip": "Plan mode: only the plan document and shell inspection (read-only commands) are writable. Tools contributed by extensions are not gated — review their output before relying on it."

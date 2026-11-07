@@ -492,7 +492,8 @@
     "unknownTime": "时间未知",
     "restore": "回滚",
     "restoring": "回滚中…",
-    "restoreNeedsSession": "请先打开一个聊天再恢复。",
+    "openSession": "打开聊天",
+    "restoreNeedsCurrentSession": "打开所属聊天后恢复",
     "confirmTitle": "确认回滚到此快照?",
     "confirmMessage": "将把 {{count}} 个文件恢复到「{{label}}」时的内容。系统会先生成当前状态的保护快照,本次操作可以撤销。",
     "confirmRestore": "回滚",
@@ -855,9 +856,7 @@
     "undoEditsTitle": "撤销本次编辑？",
     "undoEditsMessage": "将把 {{count}} 个文件恢复到本次回复前的状态。之后被修改过的文件会跳过。",
     "confirmUndoEdits": "撤销编辑",
-    "cancelUndoEdits": "取消",
-    "openSession": "打开聊天",
-    "restoreNeedsCurrentSession": "打开所属聊天后恢复"
+    "cancelUndoEdits": "取消"
   },
   "plan": {
     "modeTooltip": "Plan 模式:仅 plan 文档与只读 shell 命令可写;扩展贡献的工具不在约束范围内,使用前请人工核查其输出。"
