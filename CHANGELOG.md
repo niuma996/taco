@@ -6,6 +6,101 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 starting with `v0.1.0` (the first open-source release).
 
+## [0.3.9] — 2026-11-09
+
+A release about background work that can wait for you: a scheduled job or a
+background agent that needs an answer now says so, can be stopped, and no
+longer gets lost when the connection drops. The chat also grew a memory of
+its own — every conversation keeps its own draft, its own state and its own
+attachments.
+
+### Added
+
+**Background work can wait for you.** A scheduled job or a background agent
+that pauses for an answer or a command approval shows as "waiting" in the Work
+pane, together with what it is waiting on. Running and waiting tasks can be
+stopped there, and finished records can be deleted.
+
+**Sending an answer twice is safe.** A lost response or a restart no longer
+loses your answer; resubmitting the same answer continues the same run
+instead of repeating it.
+
+**Each chat keeps its own draft.** Text, attachments and the chosen model are
+remembered per chat, and a message that may not have been delivered can be
+pulled back into the input box.
+
+**Notifications stay with the account that started the work.** A finished
+background task is still delivered after a token refresh, but switching
+accounts no longer sends the old notification to the new one.
+
+**Stopped agents keep what they found.** A subagent that is cancelled or times
+out returns the partial results it had already produced.
+
+### Changed
+
+**The composer tells you where the conversation stands.** Sync pending, run
+state unconfirmed and partially shown history are surfaced under the input
+box, and "open chat" reaches the conversation that is actually waiting on you.
+
+**Waiting questions expire on their own.** A question left unanswered for
+seven days is closed and kept as a record; late answers are refused instead of
+reviving a dead run.
+
+**IM channels got friendlier.** The assistant asks its question in the reply
+instead of raising an error it cannot show, re-binding a WeChat account can be
+cancelled instead of hanging on the QR login, and an explicit request for a
+reply language now wins over the configured one.
+
+**The assistant converges instead of over-checking.** Project instructions,
+skills and memories can no longer override the core rules, and a scoped task
+is no longer widened into an open-ended investigation.
+
+### Fixed
+
+**Switching chats no longer mixes them up.** Late responses from a previous
+chat are discarded, state is kept per chat, history that fails to load is
+reported instead of rendered as an empty conversation, and merging history
+with live updates no longer loses or duplicates messages.
+
+**Answers and attachments survive a failure.** An answer that fails to submit
+keeps its question card so you can send it again, and pasted image previews
+and the model choice no longer break when you switch chats.
+
+**Stopping no longer kills the next run.** A stop request is matched to the run
+it was meant for, text dropped by a stop returns to the chat that asked for
+it, and approvals from before a restart are not offered again.
+
+**Work bookkeeping is more accurate.** A late result from an earlier attempt
+can no longer overwrite a run that is still waiting, work records recover
+after a crash instead of being marked failed, and deleting a chat marks the
+work attached to it as interrupted rather than leaving it "running" forever.
+
+**Unbound channels and IM routing behave.** Cleared credentials are honoured
+even if a default remains in the config file, and work started on an IM
+channel finds the right conversation.
+
+### Breaking changes
+
+- The protocol moved to 2.13 and Work gained a "waiting" status. Clients that
+  do not announce `workWaiting` keep receiving `running`, so older desktops
+  keep working. `work.cancel` and `work.delete` are new RPC methods; a
+  sidecar that predates them answers `unsupported`. Keep the desktop and the
+  sidecar on the same release line.
+- The work store does not downgrade: a daemon older than 2.11 cannot read the
+  new work records, so rolling back needs a matching backup.
+- One question, one answer. Resubmitting a *different* answer for a question
+  that was already answered is refused with `invalid_state`, and a question
+  left for seven days or cancelled with its work no longer accepts an answer.
+
+### Upgrade notes
+
+- The desktop and the sidecar should be upgraded together. The Work pane's
+  stop and delete actions, and the "waiting" status, need a sidecar from this
+  release.
+- Deliveries are still at-least-once. Deleting a work record does not recall a
+  message the platform already accepted, and a new account will not receive
+  an old notification.
+
 ## [0.3.8] — 2026-11-07
 
 A patch about giving the agent a bit more room to work: file edits can be
