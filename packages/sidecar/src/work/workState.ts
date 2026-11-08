@@ -124,6 +124,7 @@ export function interrupt(
         endedAt: args.now,
         updatedAt: args.now,
         attempt: { ...record.attempt, endedAt: args.now },
+        waiting: undefined,
         reason: args.reason,
     };
 }

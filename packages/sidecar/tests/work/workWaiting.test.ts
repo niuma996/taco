@@ -10,6 +10,7 @@ import {
     type CommandPermissionRequest,
 } from "@taco-ai/protocol";
 import { resolveWaitingInteraction } from "../../src/runtime/session/waitingInteraction.ts";
+import { WAITING_WORK_STALE_MS } from "../../src/work/workController.ts";
 import { WorkService } from "../../src/work/workService.ts";
 import { WorkStore } from "../../src/work/workStore.ts";
 
@@ -335,4 +336,40 @@ it("marks a missing target during startup reconciliation but preserves unknown t
     await service.start();
     assert.equal((await service.store.get(gone.workId))?.sessionState, "deleted");
     assert.equal((await service.store.get(unknown.workId))?.sessionState, undefined);
+});
+
+it("expires a waiting Work after the stale interaction window", async (t) => {
+    const root = await mkdtemp(join(tmpdir(), "taco-work-stale-waiting-"));
+    const service = new WorkService({
+        root,
+        instanceId: "i",
+        channels: {
+            sendText: async () => ({ kind: "confirmed" as const }),
+            maxMessageLength: () => 2000,
+        },
+        resolveRoute: () => undefined,
+    });
+    t.after(async () => {
+        service.stop();
+        await rm(root, { recursive: true, force: true });
+    });
+    const work = await service.controller.startScheduled({
+        jobId: "j",
+        title: "old",
+        sourceEventId: "old-wait",
+        workspace: "/a",
+        sessionId: "s",
+    });
+    const waiting = resolveWaitingInteraction(waitingMessage(), "s");
+    assert.ok(waiting);
+    await service.controller.waitForInput(work.workId, waiting);
+    await service.store.mutate(work.workId, (current) => ({
+        ...current,
+        updatedAt: Date.now() - WAITING_WORK_STALE_MS - 1,
+    }));
+    await service.start();
+    const after = await service.store.get(work.workId);
+    assert.equal(after?.status, "interrupted");
+    assert.equal(after?.waiting, undefined);
+    assert.match(after?.reason ?? "", /seven days/);
 });

@@ -57,6 +57,8 @@ export const WORK_RETENTION_COUNT = 500;
  * would otherwise push every subagent result out of a shared budget in a day.
  */
 export const SCHEDULED_WORK_RETENTION_PER_JOB = 20;
+/** Waiting interactions that survive this long without an answer are stale. */
+export const WAITING_WORK_STALE_MS = 7 * 24 * 60 * 60_000;
 
 export interface StartWorkArgs {
     readonly sourceEventId: string;
@@ -494,16 +496,21 @@ export class WorkController {
         const all = await this.store.list();
         let interrupted = 0;
         for (const work of all) {
-            if (work.status !== "running" || work.ownerInstanceId === this.instanceId) continue;
             const now = this.now();
+            const staleWaiting =
+                work.status === "waiting" && now - work.updatedAt >= WAITING_WORK_STALE_MS;
+            const deadRunning =
+                work.status === "running" && work.ownerInstanceId !== this.instanceId;
+            if (!staleWaiting && !deadRunning) continue;
             const next = await this.store.mutate(work.workId, (current) => {
                 const stopped = interrupt(current, {
-                    reason:
-                        current.kind === "scheduled"
-                            ? "the process that was running this stopped before it finished; " +
-                              "the job runs again at its next scheduled time"
-                            : "the process that was running this stopped before it finished; " +
-                              "continue the subagent to finish it",
+                    reason: staleWaiting
+                        ? "the user did not answer this interaction within seven days"
+                        : current.kind === "scheduled"
+                          ? "the process that was running this stopped before it finished; " +
+                            "the job runs again at its next scheduled time"
+                          : "the process that was running this stopped before it finished; " +
+                            "continue the subagent to finish it",
                     now,
                 });
                 if (!stopped) return undefined;
