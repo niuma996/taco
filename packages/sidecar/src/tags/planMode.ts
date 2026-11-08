@@ -2,7 +2,7 @@
  * Plan mode context hook — injects a planning directive while plan mode is active.
  *
  * The directive reminds the model that it is in read-only planning mode and
- * should delegate codebase exploration to the `explorer` subagent. The hook
+ * may delegate focused exploration when it helps. The hook
  * is suppressed once planExit clears `planState.active`.
  */
 
@@ -11,22 +11,20 @@ import type { PlanModeState } from "../plan/planModeState.ts";
 import { appendUserTag } from "./appendUserTag.ts";
 import { tagWrap } from "./builder.ts";
 
-const PLAN_MODE_BODY = `You are in PLAN MODE. Do not write, edit, or modify any project files. Your only outputs are:
-- Reading files
-- Calling the explorer subagent to explore the codebase
-- Writing the plan document at .taco/plans/<slug>.md
-- Calling askUser when requirements are ambiguous
+const PLAN_MODE_BODY = `You are in PLAN MODE. Keep project files unchanged except for the plan document at .taco/plans/<slug>.md. You may:
+- Inspect relevant code with the available read-only tools
+- Delegate focused read-only exploration to an available explorer subagent when it helps
+- Write or revise the plan document at .taco/plans/<slug>.md
+- Resolve required user decisions using the question mechanism available in this session
+- Call planExit when the plan is ready for approval
 
 ## Planning Process
 
-1. **Understand Requirements**: Restate the goal and identify constraints.
+1. **Understand Requirements**: Use the conversation to identify the requested outcome and constraints. Carry established findings forward; ask only about material unresolved requirements.
 
-2. **Explore with explorer**: Spawn an explorer subagent to search and trace code. Give it focused, concrete exploration tasks, e.g.:
-   - "Find all files that reference X"
-   - "Trace how Y is initialized and used"
-   - "List the public API surface of Z"
+2. **Explore Proportionally**: Inspect enough code to produce an implementable plan. Handle small lookups directly. Delegate independent searches or traces only when an explorer is available and delegation is worthwhile. Reuse findings instead of restarting completed searches.
 
-3. **Design the Solution**: Based on explorer's findings, choose an approach that follows existing patterns in the codebase.
+3. **Design the Solution**: Use the findings to choose an approach that follows existing patterns in the codebase.
 
 4. **Write the Plan Document**: Produce a structured plan at .taco/plans/<slug>.md with:
    - Summary of the goal
@@ -34,11 +32,11 @@ const PLAN_MODE_BODY = `You are in PLAN MODE. Do not write, edit, or modify any 
    - Step-by-step implementation strategy
    - Dependencies and sequencing
    - Risks / open questions
-   - ### Critical Files for Implementation (3-5 files)
+   - Critical files for implementation, limited to those actually relevant
 
-5. **Exit**: Call planExit to present the plan for user approval.
+5. **Exit**: Once the plan is implementable and required decisions are resolved, call planExit to present it for user approval. Investigate further only to resolve a concrete gap that blocks the plan.
 
-REMEMBER: You CANNOT modify project files in plan mode. Use explorer for exploration.`;
+Do not implement the plan before approval. The plan document is the only file you may modify in plan mode.`;
 
 export function buildPlanModeContextHook(
     getPlanState: () => PlanModeState,

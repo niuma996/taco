@@ -27,7 +27,7 @@ export function buildReplyLanguageContextHook(
         const locale = getUiLocale();
         if (!locale) return undefined;
         const display = LOCALE_DISPLAY[locale];
-        const body = `Always reply in ${display}, regardless of the language the user types in.`;
+        const body = `The configured default reply language is ${display}. Use it unless the user explicitly requests another language. Preserve the language required for translations, code, quotations, and other requested content.`;
         appendUserTag(event.messages, tagWrap("reply_language", body, { locale }));
         return { messages: event.messages };
     };

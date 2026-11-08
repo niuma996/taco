@@ -106,12 +106,13 @@ describe("deep-review builtin skill", () => {
         );
     });
 
-    it("body resolves reviewer-vs-verification disagreement in favor of the run", () => {
+    it("body distinguishes relevant execution evidence from incomplete verification", () => {
         const md = drBody();
         assert.ok(
-            /verdict wins/i.test(md),
-            "an empirical verification result must outrank a reviewer's static reading",
+            /tested input, setup, and path/i.test(md),
+            "execution evidence must cover the claimed failure before it settles the finding",
         );
+        assert.match(md, /PARTIAL.*leaves the claim unresolved/);
     });
 
     // ── claims about the runtime the body depends on ──────────────────────

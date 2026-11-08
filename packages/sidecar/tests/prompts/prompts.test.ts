@@ -168,6 +168,16 @@ describe("buildSystemPrompt", () => {
         const main = buildSystemPrompt({ tools: [stubTool("read"), stubTool("agent")] });
         assert.match(main, /decompose and delegate to sub-agents with the agent tool/);
 
+        const noAgent = buildSystemPrompt({ tools: [stubTool("read")] });
+        assert.ok(
+            !noAgent.includes("<subagent_delegation>"),
+            "main sessions without agent must not receive delegation instructions",
+        );
+        assert.ok(
+            !noAgent.includes("delegate to sub-agents with the agent tool"),
+            "main sessions without agent must not be told to use an unavailable tool",
+        );
+
         const sub = buildSystemPrompt({
             tools: [stubTool("read")],
             sessionKind: { role: "subagent", depth: 1 },
@@ -195,10 +205,12 @@ describe("buildSystemPrompt", () => {
     it("routes user-owned decisions per role: askUser for main, the parent for a subagent", () => {
         const main = buildSystemPrompt({ tools: [stubTool("read"), stubTool("askUser")] });
         assert.match(main, /call the `askUser` tool and block for the answer/);
+        assert.match(main, /If an <im_channel> tag is present/);
         assert.match(
             main,
-            /Stop and ask the user how to proceed instead of adjusting: call `askUser`/,
+            /does not detect an unsupported channel or automatically fall back to text/,
         );
+        assert.match(main, /Stop and ask the user how to proceed instead of adjusting/);
 
         // Regression: a subagent has no askUser (filterToolsForAgent strips it at
         // depth>=1), so telling it to call one contradicts its own tool list.
@@ -209,6 +221,13 @@ describe("buildSystemPrompt", () => {
         assert.ok(!sub.includes("askUser"), "subagent prompt must not reference askUser");
         assert.match(sub, /state the decision and its options in your final reply/);
         assert.match(sub, /report the denial in your final reply/);
+
+        const mainWithoutAskUser = buildSystemPrompt({ tools: [stubTool("read")] });
+        assert.match(mainWithoutAskUser, /State the decision and its options in your final reply/);
+        assert.ok(
+            !mainWithoutAskUser.includes("call the `askUser` tool"),
+            "main sessions without askUser must not be told to call it",
+        );
 
         for (const out of [main, sub]) {
             assert.match(out, /stop and report what is blocking you/);
@@ -237,7 +256,7 @@ describe("buildSystemPrompt", () => {
     });
 
     it("frames a permission denial as a stop-and-ask, not a retry cue", () => {
-        const out = buildSystemPrompt({ tools: [stubTool("read")] });
+        const out = buildSystemPrompt({ tools: [stubTool("read"), stubTool("askUser")] });
         assert.match(out, /A permission denial is a decision, not a mechanical failure/);
         assert.match(out, /Do not route around it/);
         assert.match(out, /Stop and ask the user how to proceed/);
@@ -251,6 +270,21 @@ describe("buildSystemPrompt", () => {
         });
         assert.match(sub, /A permission denial is a decision, not a mechanical failure/);
         assert.match(sub, /Do not route around it/);
+
+        const noAskUser = buildSystemPrompt({ tools: [stubTool("read")] });
+        assert.match(noAskUser, /Stop and explain the denial in your final reply/);
+        assert.match(noAskUser, /retry only for a mechanical error/);
+        assert.ok(
+            !noAskUser.includes("fix the path or the plan, then retry"),
+            "policy denials must not be presented as ordinary path-retry failures",
+        );
+
+        const hiddenPaths = buildSystemPrompt({
+            tools: [stubTool("read")],
+            hideWorkspacePath: true,
+        });
+        assert.match(hiddenPaths, /retry only for a mechanical error/);
+        assert.ok(!hiddenPaths.includes("fix the path or the plan, then retry"));
     });
 
     it("renders the platform section including the shell block when shell is available", () => {
@@ -505,6 +539,17 @@ describe("toolSummaryForPrompt", () => {
         assert.match(withAskUser, /`askUser` is the exception/);
         const withoutAskUser = toolSummaryForPrompt([{ name: "read", taco: { mutates: false } }]);
         assert.ok(!withoutAskUser.includes("askUser"), "no dangling mention without the tool");
+        assert.match(withoutAskUser, /dependent calls sequentially rather than batching them/);
+        assert.ok(
+            !withoutAskUser.includes("`&&`"),
+            "shell chaining must not be suggested without shell",
+        );
+
+        const withShell = toolSummaryForPrompt([
+            { name: "read", taco: { mutates: false } },
+            { name: "shell", taco: { mutates: true } },
+        ]);
+        assert.match(withShell, /current shell supports the syntax/);
     });
 });
 

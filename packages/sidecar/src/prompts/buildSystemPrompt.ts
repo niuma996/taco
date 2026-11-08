@@ -13,8 +13,10 @@ import { fillPlaceholders } from "./fillPlaceholders.ts";
 import {
     CORE_TEMPLATE,
     DECISION_RULE_MAIN,
+    DECISION_RULE_MAIN_NO_ASK_USER,
     DECISION_RULE_SUBAGENT,
     DENIAL_ESCALATION_MAIN,
+    DENIAL_ESCALATION_MAIN_NO_ASK_USER,
     DENIAL_ESCALATION_SUBAGENT,
     PATH_SEMANTICS_DEFAULT,
     PATH_SEMANTICS_HIDDEN,
@@ -133,6 +135,11 @@ function buildSessionGuidanceSection(toolNames: readonly string[]): string {
             "- Use tasks / todos to track work the user asked for, especially when it spans multiple turns.",
         );
     }
+    if (tools.has("taskList")) {
+        lines.push(
+            "- Use `taskList` to recover saved progress when resuming work or answering a status request; an old pending label is not a new request to investigate.",
+        );
+    }
     if (tools.has("memory")) {
         lines.push(
             "- Default to no memory write. Set explicitlyRequested=true only when the user directly asked you to remember something; set it false for proactive writes. Use `memory` for an explicit request to remember, a stable user preference, a general correction, a confirmed decision, or a recurring reference. Avoid one-off chatter, current-task details, and assistant guesses. Write one coherent durable theme in Markdown with a self-contained first-paragraph conclusion; use headings, lists, scope, reasons or exceptions when useful (typically 300-1000 characters, maximum 2000). Memory sources identify sessions; use `sessionRead` to resolve ambiguity.",
@@ -140,7 +147,7 @@ function buildSessionGuidanceSection(toolNames: readonly string[]): string {
     }
     if (tools.has("askUser")) {
         lines.push(
-            "- When a decision is genuinely the user's, call `askUser` — do not end the turn on a prose question.",
+            "- Follow the core question-routing rule: with an <im_channel> tag, ask in your final reply and end the turn; otherwise use `askUser` for a decision the user must own. Do not call it in IM and wait for an unavailable-channel error.",
         );
     }
 
@@ -214,8 +221,16 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
         SESSION_ROLE_BODY: isMain ? SESSION_ROLE_MAIN : SESSION_ROLE_SUBAGENT,
         // A subagent has no `askUser` (stripped at depth>=1), so user-owned
         // decisions and permission denials go back to the parent instead.
-        DECISION_RULE: isMain ? DECISION_RULE_MAIN : DECISION_RULE_SUBAGENT,
-        DENIAL_ESCALATION: isMain ? DENIAL_ESCALATION_MAIN : DENIAL_ESCALATION_SUBAGENT,
+        DECISION_RULE: isMain
+            ? toolNames.includes("askUser")
+                ? DECISION_RULE_MAIN
+                : DECISION_RULE_MAIN_NO_ASK_USER
+            : DECISION_RULE_SUBAGENT,
+        DENIAL_ESCALATION: isMain
+            ? toolNames.includes("askUser")
+                ? DENIAL_ESCALATION_MAIN
+                : DENIAL_ESCALATION_MAIN_NO_ASK_USER
+            : DENIAL_ESCALATION_SUBAGENT,
         DEPTH_LINE: sessionKind.depth > 0 ? ` Depth: ${sessionKind.depth}.` : "",
         PATH_SEMANTICS: options.hideWorkspacePath ? PATH_SEMANTICS_HIDDEN : PATH_SEMANTICS_DEFAULT,
     });
@@ -256,7 +271,9 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
     // the same single rendering. Main-only because a subagent's
     // `<session_role>` body forbids spawning further subagents, so it must not
     // read the opposite instruction.
-    if (sessionKind.role === "main") parts.push(SUBAGENT_DELEGATION_BLOCK);
+    if (sessionKind.role === "main" && toolNames.includes("agent")) {
+        parts.push(SUBAGENT_DELEGATION_BLOCK);
+    }
 
     for (const contributor of options.contributors ?? []) {
         if (contributor.prepend) parts.unshift(contributor.prepend);

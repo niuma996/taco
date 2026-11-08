@@ -40,7 +40,7 @@ export function buildImChannelContextHook(
     return (event: { messages: AgentMessage[] }): { messages: AgentMessage[] } | undefined => {
         const ctx = getContext();
         if (!ctx) return undefined;
-        const body = `type: ${ctx.type}\nchannel_id: ${ctx.channelId}`;
+        const body = `type: ${ctx.type}\nchannel_id: ${ctx.channelId}\n\nThis IM channel delivers assistant reply text, not desktop question pickers. Ask required user questions in your final assistant reply and end the turn; do not call askUser and wait for an unavailable-channel error.`;
         event.messages.push(
             createUserMessage(
                 tagWrap("im_channel", body, { type: ctx.type, channel_id: ctx.channelId }),

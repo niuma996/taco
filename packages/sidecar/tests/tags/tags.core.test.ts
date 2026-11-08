@@ -446,6 +446,32 @@ describe("active_tasks tag", () => {
         assert.equal(res, undefined);
     });
 
+    it("does not re-inject unchanged pending work on later context builds or user topics", async () => {
+        const store = createTaskStore("/ws");
+        const list = createTaskList(store, "l1", "Original work");
+        const task = addTask(store, "l1", {
+            content: "Investigate the original request",
+            status: "pending",
+            activeForm: "Investigating",
+        });
+        const hook = buildActiveTasksContextHook(() => makeState(store, false));
+        assert.ok(await hook(ctxWith([])));
+        assert.equal(await hook(ctxWith([])), undefined);
+        assert.equal(
+            await hook(ctxWith([{ role: "user", content: "An unrelated question", timestamp: 1 }])),
+            undefined,
+        );
+        assert.equal(task.status, "pending", "suppression must not cancel saved work");
+        assert.equal(list.tasks.length, 1);
+
+        task.status = "in_progress";
+        assert.ok(await hook(ctxWith([])), "a changed task snapshot must reach the model");
+        assert.equal(await hook(ctxWith([])), undefined);
+
+        const reattached = buildActiveTasksContextHook(() => makeState(store, false));
+        assert.ok(await reattached(ctxWith([])), "a new attachment can recover saved progress");
+    });
+
     it("suppresses injection while plan mode is active", async () => {
         const store = createTaskStore("/ws");
         createTaskList(store, "l1", "A");

@@ -46,16 +46,14 @@ export function createTaskCreateTool(
             "unfinished tasks), finish it (taskUpdate each task to completed/failed) or replace it with " +
             "todoWrite first. Each created task gets a stable id (task-N) to reuse in taskUpdate.\n" +
             "\n" +
-            "For complex subtasks (broad scope, independent investigation, >5 tool calls, or long-running " +
-            "work like codebase exploration / refactor / migration), prefer delegating to a subagent via " +
-            "the `agent` tool — keeps the main session's context lean and lets you " +
-            "parallelize independent subtasks. Reserve direct tools in the main session for tightly-coupled " +
-            "steps that share state with the current task's outputs.",
+            "Delegate a subtask only when the agent tool is available, the work is independent, and " +
+            "delegation helps complete the requested result. Tool-call count alone does not justify " +
+            "delegation. Keep coupled work and short investigations in the current session.",
         parameters: taskCreateSchema,
         executionMode: "sequential",
         taco: {
             promptSummary:
-                "Persistent task list that survives across sessions. Use when the user explicitly asks to track / manage work. Reuse the exact id returned by taskCreate on subsequent calls.",
+                "Start a named task list persisted for this session when none is active. Use for work the user wants tracked. Reuse the returned task IDs with taskUpdate; use todoWrite to replace the active list in full.",
             mutates: true,
         },
         async execute(

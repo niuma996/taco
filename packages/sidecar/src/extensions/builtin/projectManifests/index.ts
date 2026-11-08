@@ -25,7 +25,12 @@ import fg from "fast-glob";
 import ignore from "ignore";
 import type { ContextEvent, ContextResult } from "../../../extensions/types.ts";
 import type { AgentMessage } from "../../../runtime/pi/types.ts";
-import { createUserMessage, prefixTagSource, tagWrap } from "../../../tags/builder.ts";
+import {
+    createUserMessage,
+    escapeTagText,
+    prefixTagSource,
+    tagWrap,
+} from "../../../tags/builder.ts";
 import type { TagSpec } from "../../../tags/types.ts";
 import { MANIFEST_SAFE_DEFAULT_IGNORES } from "../../../tools/safeDefaults.ts";
 import type { BuiltinManifest } from "../../builtinContract.ts";
@@ -98,8 +103,10 @@ const SAFE_DEFAULT_IGNORES = MANIFEST_SAFE_DEFAULT_IGNORES;
 const TAG_GUIDANCE =
     "Detected manifest filenames at the workspace root. Use this to choose the " +
     "right tooling (e.g. read `package.json` for npm scripts, `pyproject.toml` " +
-    "for Python entry points) without globbing for it first. Do NOT fetch the " +
-    "files' contents unprompted — manifests may embed secrets.";
+    "for Python entry points) without globbing for it first. Read a manifest " +
+    "when its contents are needed for the current task, not merely because " +
+    "it is listed. Do not disclose any credentials it contains. " +
+    "Decode XML entities once when using the listed filenames as paths.";
 
 /**
  * Read `.gitignore` if present and return its compiled ignore matcher. Used to
@@ -153,7 +160,7 @@ async function detectManifests(cwd: string): Promise<ReadonlyArray<string>> {
 
 /** Build the tag body from detected manifests. */
 function formatManifests(filenames: ReadonlyArray<string>): string {
-    const lines = [TAG_GUIDANCE, "", ...filenames.map((f) => `- ${f}`)];
+    const lines = [TAG_GUIDANCE, "", ...filenames.map((f) => `- ${escapeTagText(f)}`)];
     return lines.join("\n");
 }
 

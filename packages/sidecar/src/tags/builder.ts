@@ -44,11 +44,12 @@ export function createUserMessage(text: string): AgentMessage {
 
 /** XML attribute value escaping. */
 export function escapeAttr(value: string): string {
-    return value
-        .replace(/&/g, "&amp;")
-        .replace(/"/g, "&quot;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;");
+    return escapeTagText(value).replace(/"/g, "&quot;");
+}
+
+/** Keep untrusted text from creating or closing context tags. */
+export function escapeTagText(value: string): string {
+    return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
 /**

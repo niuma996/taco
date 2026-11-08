@@ -59,14 +59,15 @@ function countConsecutiveTurnsWithoutTodoWrite(messages: ContextEvent["messages"
 
 const REMINDER_TEXT =
     "You haven't updated your task list (TodoWrite) in a while. " +
-    "If the current task state is stale, call TodoWrite to update it — " +
-    "mark completed tasks as done, add new ones as needed. " +
-    "This helps track progress and keeps the user informed.";
+    "If the current task state is stale, update it to match confirmed progress. " +
+    "Create tasks only for work the user requested. " +
+    "Task bookkeeping must not expand the scope or delay a ready answer.";
 
 export function buildTodoWriteReminderContextHook(
     getTaskStore: () => TaskStore,
 ): (event: ContextEvent) => ContextResult | undefined {
     const wrapped = tagWrap("todo_reminder", REMINDER_TEXT);
+    let lastRemindedSnapshot: string | undefined;
 
     return (event: ContextEvent): ContextResult | undefined => {
         // Only remind if there are active unfinished tasks.
@@ -77,11 +78,17 @@ export function buildTodoWriteReminderContextHook(
         if (!list) return undefined;
         const hasUnfinished = list.tasks.some((t) => isUnfinishedStatus(t.status));
         if (!hasUnfinished) return undefined;
+        const snapshot = JSON.stringify([
+            list.id,
+            list.tasks.map((t) => [t.id, t.status, t.content, t.activeForm]),
+        ]);
+        if (snapshot === lastRemindedSnapshot) return undefined;
 
         const streak = countConsecutiveTurnsWithoutTodoWrite(event.messages);
         if (streak < TURNS_BETWEEN_REMINDERS) return undefined;
 
         appendUserTag(event.messages, wrapped, "system-event");
+        lastRemindedSnapshot = snapshot;
         return { messages: event.messages };
     };
 }

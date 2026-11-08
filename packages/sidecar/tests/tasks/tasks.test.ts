@@ -246,6 +246,23 @@ describe("todoWriteReminder", () => {
             assert.equal(hook({ messages: msgs } as ContextEvent), undefined);
         });
 
+        it("reminds once per task snapshot instead of pulling unchanged old work into every context", () => {
+            const store = storeWithTask("pending");
+            const hook = buildTodoWriteReminderContextHook(() => store);
+            const context = () =>
+                ({
+                    messages: Array.from({ length: 12 }, (_, i) => assistantText(`turn ${i}`)),
+                }) as ContextEvent;
+            assert.ok(hook(context()));
+            assert.equal(hook(context()), undefined);
+            const task = store.lists.get("l1")?.tasks[0];
+            assert.ok(task);
+            assert.equal(task.status, "pending");
+            task.status = "in_progress";
+            assert.ok(hook(context()), "changed progress may need a new bookkeeping reminder");
+            assert.equal(hook(context()), undefined);
+        });
+
         it("stops counting at the first user message (turn boundary)", () => {
             const store = storeWithTask("pending");
             const hook = buildTodoWriteReminderContextHook(() => store);

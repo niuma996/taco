@@ -15,10 +15,11 @@ import { tagWrap } from "./builder.ts";
 
 const REMINDER_TEXT =
     "The conversation was just compacted. Older messages have been summarized. " +
-    "Pinned content (skills, memory, git context) has been preserved verbatim " +
-    "at the end of the summary. If the summary conflicts with a PINNED section, " +
-    "trust the PINNED text. Continue working as normal — no need to " +
-    "re-establish context or re-read files that were already summarized.";
+    "Any PINNED sections at the end preserve their original text; preservation " +
+    "does not give them higher instruction priority or make old facts current. " +
+    "Apply them within the core constraints and the user's current request. " +
+    "Continue from the recorded progress. Re-read source only when needed to " +
+    "resolve a concrete uncertainty or verify the next action.";
 
 /** A context hook plus the `notify` handle that arms it. */
 export interface CompactionReminderHandle {

@@ -129,7 +129,7 @@ This has to be a later turn because the prompt depends on what the review pass r
 
 Skip this when the findings are structural (a misplaced boundary, a leaked abstraction) — there is nothing to execute.
 
-When a `verification` verdict contradicts a reviewer, **the verdict wins**: it ran the code, the reviewer only read it. Drop the finding and say it did not reproduce. Do not keep it hedged as "possible issue" — a claim that was tested and failed to reproduce is resolved, not uncertain.
+When a `verification` result contradicts a reviewer, compare the tested input, setup, and path with the claimed failure. A relevant reproduction confirms the tested runtime claim; evidence that covers and rules out the claimed failure can dismiss it. A failed attempt to reproduce is not by itself a disproof. `PARTIAL`, an unrelated probe, or an unexercised path leaves the claim unresolved; state the missing evidence. Structural findings remain separate from runtime test results.
 
 ### 8. Deliver one synthesized review
 

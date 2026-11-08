@@ -72,8 +72,14 @@ export function toolSummaryForPrompt(tools: ReadonlyArray<NamedTool>): string {
             "do not make one edit depend on another's effect within the same turn; put the dependent call in the next turn.",
     );
     lines.push("- Mutating calls to DIFFERENT files are independent — batch them.");
-    lines.push(
-        "- When one step's output feeds the next, chain them with `&&` in a single `shell` call rather than splitting across turns.",
-    );
+    if (tools.some((tool) => tool.name === "shell")) {
+        lines.push(
+            "- When one step's output feeds the next, keep the work sequential. Combine shell commands only when the current shell supports the syntax; otherwise use separate calls.",
+        );
+    } else {
+        lines.push(
+            "- When one step's output feeds the next, make the dependent calls sequentially rather than batching them.",
+        );
+    }
     return lines.join("\n");
 }

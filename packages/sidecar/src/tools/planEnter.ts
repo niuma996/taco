@@ -23,17 +23,17 @@ export function createPlanEnterTool(
         description:
             "Enter plan mode. Use BEFORE you start writing code or making file changes when the task is " +
             "non-trivial: multi-file refactors, new features with design decisions, anything with " +
-            "ambiguity about scope. In plan mode you may only read files, call askUser, and write to " +
-            ".taco/plans/<slug>.md. While in plan mode a planning directive is injected into every " +
-            "context reminding you to delegate codebase exploration to the explorer subagent. You MUST " +
-            "NOT modify project files. When your plan is ready, call planExit to present it for user " +
+            "ambiguity about scope that requires user sign-off. In plan mode use available read-only tools, " +
+            "resolve required user decisions, and write only to .taco/plans/<slug>.md. Delegate focused " +
+            "read-only exploration only when an explorer is available and it helps complete the plan. " +
+            "Do not implement project changes. When your plan is ready, call planExit to present it for user " +
             "approval. Do NOT call planEnter for trivial tasks — one-line fixes, simple questions, or " +
             "changes the user has already fully specified.",
         parameters: planEnterSchema,
         executionMode: "sequential",
         taco: {
             promptSummary:
-                "Enter plan mode for non-trivial work. While active, only reading files, askUser, and writing to `.taco/plans/<slug>.md` are allowed. Exit with `planExit` to request approval.",
+                "Enter plan mode when implementation needs user sign-off. Inspect relevant code with available read-only tools, resolve required decisions, and write only `.taco/plans/<slug>.md`. Exit with `planExit` when the plan is ready for approval.",
             mutates: false,
         },
         async execute(
@@ -64,7 +64,7 @@ export function createPlanEnterTool(
                 content: [
                     {
                         type: "text",
-                        text: `Entered plan mode: **${slug}**\n\nPlan path: ${planPath}\n\nIn this mode you may only read files (text and images), call askUser, and write the plan document at ${planPath}. A planning directive will be injected into every context to guide you through exploration, design, and writing the plan.`,
+                        text: `Entered plan mode: **${slug}**\n\nPlan path: ${planPath}\n\nUse available read-only tools to inspect relevant code and resolve required user decisions. You may write only the plan document at ${planPath}. Delegate focused read-only exploration only when an explorer is available and it helps. Once the plan is implementable, call planExit for approval.`,
                     },
                 ],
                 details: {

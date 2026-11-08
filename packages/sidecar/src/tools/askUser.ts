@@ -110,12 +110,12 @@ export function createAskUserTool(): AskUserTool {
         name: "askUser",
         label: "askUser",
         description:
-            "Present one or more questions to the user and block until they answer. Use this when proceeding would require guessing on a decision the user likely has a preference on — in particular: (1) multiple valid approaches exist that aren't equivalent (architecture, library, a naming scheme the user must live with); (2) the action is destructive or hard to reverse; (3) the request is genuinely ambiguous about intent or scope. Skip it only when the answer is already determined by the code or docs, or the user has already stated a preference — not merely because you could invent a plausible default. If you are unsure whether a decision needs the user, ask. You may ask several questions in one call, but each must target a distinct topic — never split one topic across multiple questions.",
+            "Present structured questions in the desktop question picker and end the run until answers are submitted. This tool does not detect channel availability or fall back to a text question. In an IM session identified by <im_channel>, ask in your final assistant reply instead of calling this tool. Use for decisions the user must own: materially different approaches or preferences, destructive or hard-to-reverse actions requiring authorization, or genuine ambiguity about intent or scope that prevents useful progress. Reuse established preferences and authorization. Make routine reversible choices using the code, docs, and task context; uncertainty alone does not require a question. Each question must target a distinct topic.",
         parameters: askUserSchema,
         executionMode: "sequential",
         taco: {
             promptSummary:
-                "Block the current turn to ask the user a structured question (multi-choice or free-form). Route genuine decisions the user should own here rather than posing them in your reply text — a fact you can infer from the code is not a question.",
+                "Ask a user-owned decision through the desktop picker and wait for submitted answers. In IM (<im_channel>), ask in your final assistant reply instead; this tool has no channel-unavailable fallback.",
             mutates: false,
         },
         async execute(

@@ -99,8 +99,8 @@ agent(subagent_type=explorer, description="...", prompt="...")   # tc-3
 When subagents return:
 1. Read each summary — they are independent, treat them as parallel reports.
 2. Verify fixes do not conflict (overlapping file edits, shared test fixtures).
-3. Run the full test suite yourself in the main session — do not delegate verification to a subagent that just made changes.
-4. Integrate all changes.
+3. Apply confirmed proposals in the parent session, or assign edits to an available agent that can write files. An explorer returns findings, not a patch.
+4. Run checks appropriate to the integrated changes and project requirements. Use independent verification when needed; do not repeat passing checks without a relevant change or concern.
 
 ## Agent Prompt Structure
 
@@ -111,7 +111,7 @@ Good prompts are:
 3. **Specific about output** — what the subagent should return in `resultText`.
 
 ```markdown
-Fix the 3 failing tests in `packages/sidecar/tests/tools/agent.test.ts`:
+Diagnose the 3 failing tests in `packages/sidecar/tests/tools/tools.agent.test.ts`. You are an explorer: do not modify files or run tests.
 
 1. "should abort tool with partial output capture" — expects 'interrupted at' in message
 2. "should handle mixed completed and aborted tools" — fast tool aborted instead of completed
@@ -121,29 +121,26 @@ These are timing / race-condition issues. Your task:
 
 1. Read the test file and understand what each test verifies.
 2. Identify the root cause — timing issues or actual bugs?
-3. Fix by:
-   - Replacing arbitrary timeouts with event-based waiting
-   - Fixing bugs in the abort implementation if found
-   - Adjusting test expectations if behaviour legitimately changed
+3. Propose the smallest correction, distinguishing a timing flaw, an implementation bug, and an outdated expectation. Cite the code supporting the diagnosis and say which runtime claims still need execution.
 
 Do NOT just increase timeouts — find the real issue.
 
-Return: a short summary of root cause and the changes you made (file paths + one-line descriptions).
+Return: the root cause, proposed changes with file:line references, and any remaining uncertainty for the parent to verify.
 ```
 
 ## Common Mistakes
 
 **❌ Too broad:** "Fix all the failing tests" — subagent gets lost.
-**✅ Specific:** "Fix `packages/sidecar/tests/tools/agent.test.ts`" — focused scope.
+**✅ Specific:** "Diagnose `packages/sidecar/tests/tools/tools.agent.test.ts` and propose a correction" — focused scope for an explorer.
 
 **❌ No context:** "Fix the race condition" — subagent does not know where.
 **✅ Context:** paste the failing test names, expected vs actual values, the file path.
 
 **❌ No constraints:** subagent may refactor everything.
-**✅ Constraints:** "Do not change production code" or "Fix tests only".
+**✅ Constraints:** "Read-only diagnosis; return a proposal for the parent to apply" for an explorer. Request edits only from a writable agent.
 
 **❌ Vague output:** "Fix it" — you do not know what changed.
-**✅ Specific:** "Return summary of root cause and changes" — concrete deliverable.
+**✅ Specific:** "Return the root cause, supporting locations, and proposed correction" — concrete deliverable.
 
 **❌ Putting a prerequisite in the fan-out turn:** an `edit` or `shell` call issued alongside three `agent` calls does not run first — all four start together, so the agents may read the file before the edit lands. Do the prerequisite in an earlier turn.
 
@@ -173,16 +170,16 @@ agent(subagent_type=explorer, description="diag agentContinue batch", prompt="..
 agent(subagent_type=explorer, description="diag sessionSnapshot count", prompt="...paste failing test names + paths...")
 ```
 
-**Integration:** all fixes independent, no conflicts, full suite green.
+**Integration:** review the independent diagnoses, apply confirmed corrections in the parent session, and run the relevant checks.
 
 ## Verification
 
 After subagents return:
 
-1. **Review each summary** — understand what changed.
-2. **Check for conflicts** — did subagents edit the same code? (If yes, you probably should have used one subagent, not three.)
-3. **Run the full suite yourself** — verify all fixes work together; do not trust a subagent's "PASS" report.
-4. **Spot-check the diff** — subagents can make systematic errors (wrong import path, off-by-one in test setup).
+1. **Review each summary** — distinguish proposed changes from edits actually made.
+2. **Check for conflicts** — do the proposals or writable agents' edits overlap or depend on one another?
+3. **Verify the integrated result** — run the applicable checks and inspect their output; use a full suite when the scope or project requirements call for it.
+4. **Inspect the diff** — check that the applied changes match the confirmed diagnosis.
 
 ## Mode Constraint
 

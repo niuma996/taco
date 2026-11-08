@@ -44,16 +44,14 @@ export function createTodoWriteTool(
             "into trackable steps the user sees live. The replacement is total — any task IDs from the " +
             "previous list become invalid. Creates the list if none is active yet.\n" +
             "\n" +
-            "For complex subtasks (broad scope, independent investigation, >5 tool calls, or long-running " +
-            "work like codebase exploration / refactor / migration), prefer delegating to a subagent via " +
-            "the `agent` tool — keeps the main session's context lean and lets you " +
-            "parallelize independent subtasks. Reserve direct tools in the main session for tightly-coupled " +
-            "steps that share state with the current task's outputs.",
+            "Delegate a subtask only when the agent tool is available, the work is independent, and " +
+            "delegation helps complete the requested result. Tool-call count alone does not justify " +
+            "delegation. Keep coupled work and short investigations in the current session.",
         parameters: todoWriteSchema,
         executionMode: "sequential",
         taco: {
             promptSummary:
-                'Internal task list for *this* turn — replaces the whole list each call. Use for short-lived breakdowns ("here is what I\'m about to do"). For persistent tasks across sessions, use taskCreate.',
+                "Replace this session's persisted active task list in full; previous task IDs become invalid. Use taskUpdate for individual status changes and taskCreate to start a new named list when none is active.",
             mutates: true,
         },
         async execute(
