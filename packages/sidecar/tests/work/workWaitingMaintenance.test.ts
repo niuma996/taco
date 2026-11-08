@@ -113,6 +113,33 @@ it("preserves a waiting deadline through busy admission rollback", async (t) => 
     assert.equal(restored?.expiresAt, clock.now() - 200 + WAITING_WORK_STALE_MS);
 });
 
+it("does not turn an interrupted snapshot into a wait with no interaction", async (t) => {
+    const { service, clock, workId } = await rig(t);
+    const interrupted = await service.store.mutate(workId, (current) => ({
+        ...current,
+        status: "interrupted" as const,
+        endedAt: clock.now() - 500,
+        reason: "the driver stopped",
+        waiting: undefined,
+        waitingSince: undefined,
+        expiresAt: undefined,
+    }));
+    assert.ok(interrupted);
+    const snapshot = interrupted.record;
+    const resumed = await service.controller.resumeAttempt(workId);
+    assert.ok(resumed);
+    clock.advance(100);
+    await service.controller.restoreWaiting(snapshot, resumed.attempt.attemptId);
+    const restored = await service.store.get(workId);
+    assert.equal(restored?.status, "interrupted");
+    assert.equal(restored?.waiting, undefined);
+    assert.equal(restored?.waitingSince, undefined);
+    assert.equal(restored?.expiresAt, undefined);
+    assert.equal(restored?.endedAt, snapshot.endedAt);
+    assert.equal(restored?.reason, snapshot.reason);
+    assert.equal(restored?.attempt.attemptId, snapshot.attempt.attemptId);
+});
+
 it("declines an expired interaction at atomic answer admission", async (t) => {
     const { service, clock, workId } = await rig(t);
     clock.advance(WAITING_WORK_STALE_MS);

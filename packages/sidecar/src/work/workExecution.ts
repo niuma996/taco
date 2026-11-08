@@ -1,12 +1,15 @@
 import type { WorkCancelResult } from "@taco-ai/protocol";
+import { createLogger } from "../lib/logger.ts";
 import { withManagedOperation } from "../runtime/harness/operationExecution.ts";
 import { uuidv7 } from "../runtime/pi/values.ts";
 import { resolveWaitingInteraction } from "../runtime/session/waitingInteraction.ts";
 import type { WorkController } from "./workController.ts";
 import type { WorkOperationRef, WorkOperationRuntime } from "./workOperationTypes.ts";
-import { cancelWaiting, interrupt } from "./workState.ts";
+import { cancelWaiting, interrupt, UNREADABLE_WORK_STALE_MS } from "./workState.ts";
 import type { WorkStore } from "./workStore.ts";
 import { isTerminal } from "./workTypes.ts";
+
+const log = createLogger("sidecar.work.execution");
 
 function cancelled(): Error {
     return Object.assign(new Error("work attempt was cancelled or replaced"), {
@@ -147,12 +150,35 @@ export class WorkExecution {
             )
                 continue;
             const ref = snapshot.attempt.operation;
-            const observed = await this.runtime
-                .inspect(ref)
-                .catch(() => ({ kind: "unknown" as const }));
+            const cancelRequested = snapshot.attempt.cancelRequestedAt !== undefined;
+            const observed = await this.runtime.inspect(ref).catch((error) => {
+                log.warn("could not inspect the operation of a Work left by another process", {
+                    workId: snapshot.workId,
+                    error: String(error),
+                });
+                return { kind: "unknown" as const };
+            });
             if (observed.kind === "open" || observed.kind === "unknown") {
-                if (observed.kind === "open" && snapshot.attempt.cancelRequestedAt !== undefined)
-                    await this.runtime.abort(ref);
+                if (
+                    observed.kind === "unknown" &&
+                    this.now() - snapshot.attempt.startedAt >= UNREADABLE_WORK_STALE_MS
+                ) {
+                    // Unreadable forever is indistinguishable from gone: settle rather than
+                    // leave a Work that no maintenance pass will ever interrupt.
+                    await this.controller.settle({
+                        workId: snapshot.workId,
+                        attemptId: snapshot.attempt.attemptId,
+                        outcome: cancelRequested ? "aborted" : "error",
+                        resultText: "",
+                        reason: cancelRequested
+                            ? "cancelled by the user"
+                            : "the process that ran this Work stopped and its session could not be read",
+                        parentWillReply: false,
+                        deliver: snapshot.kind !== "scheduled",
+                    });
+                    continue;
+                }
+                if (observed.kind === "open" && cancelRequested) await this.runtime.abort(ref);
                 deferred.add(snapshot.workId);
                 continue;
             }

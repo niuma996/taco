@@ -6,6 +6,7 @@ import { it } from "node:test";
 import { claimManagedOperation } from "../../src/runtime/harness/operationExecution.ts";
 import type { WorkOperationRef } from "../../src/work/workOperationTypes.ts";
 import { WorkService } from "../../src/work/workService.ts";
+import { UNREADABLE_WORK_STALE_MS } from "../../src/work/workState.ts";
 
 async function rig(t: { after(fn: () => Promise<void>): void }) {
     const root = await mkdtemp(join(tmpdir(), "taco-work-execution-"));
@@ -246,4 +247,130 @@ it("ignores a late scheduled settle after its waiting answer created a new attem
         return { role: "assistant", content: [{ type: "text", text: "new answer" }], timestamp: 1 };
     });
     assert.equal((await service.get(workId)).resultText, "new answer");
+});
+
+it("keeps a cancelled Work cancelled when its settled operation carries a question", async (t) => {
+    const { service, work, root } = await rig(t);
+    await service.run(work.workId, "child", async () => {});
+    await service.store.mutate(work.workId, (current) => ({
+        ...current,
+        ownerInstanceId: "previous",
+        attempt: { ...current.attempt, cancelRequestedAt: 1 },
+    }));
+    const restarted = new WorkService({
+        root,
+        instanceId: "next",
+        channels: { sendText: async () => ({ kind: "confirmed" }), maxMessageLength: () => 1000 },
+        resolveRoute: () => undefined,
+        operations: {
+            inspect: async () => ({
+                kind: "settled",
+                outcome: "completed",
+                message: {
+                    role: "toolResult",
+                    toolCallId: "q",
+                    toolName: "askUser",
+                    content: [],
+                    details: { waiting: true, questions: [{ question: "pick one" }] },
+                    isError: false,
+                    timestamp: 1,
+                },
+            }),
+            abort: async () => ({ outcome: "accepted", newlyRequested: true }),
+        },
+    });
+    t.after(async () => {
+        restarted.stop();
+    });
+    await restarted.start();
+    const record = await restarted.store.get(work.workId);
+    assert.equal(record?.status, "cancelled");
+    assert.equal(record?.waiting, undefined);
+    assert.equal(record?.reason, "cancelled by the user");
+});
+
+it("settles a Work left running by a process whose session can never be read", async (t) => {
+    const { service, work, root } = await rig(t);
+    await service.run(work.workId, "child", async () => {});
+    await service.store.mutate(work.workId, (current) => ({
+        ...current,
+        ownerInstanceId: "previous",
+        attempt: { ...current.attempt, startedAt: Date.now() - UNREADABLE_WORK_STALE_MS - 1 },
+    }));
+    const restarted = new WorkService({
+        root,
+        instanceId: "next",
+        channels: { sendText: async () => ({ kind: "confirmed" }), maxMessageLength: () => 1000 },
+        resolveRoute: () => undefined,
+        operations: {
+            inspect: async () => {
+                throw new Error("session unreadable");
+            },
+            abort: async () => {
+                throw new Error("an unreadable session must not be aborted");
+            },
+        },
+    });
+    t.after(async () => {
+        restarted.stop();
+    });
+    await restarted.start();
+    const record = await restarted.store.get(work.workId);
+    assert.equal(record?.status, "failed");
+    assert.match(record?.reason ?? "", /could not be read/);
+});
+
+it("preserves a completed answer when a cancellation intent lost the race to completion", async (t) => {
+    const { service, work, root } = await rig(t);
+    await service.run(work.workId, "child", async () => {});
+    await service.store.mutate(work.workId, (current) => ({
+        ...current,
+        ownerInstanceId: "previous",
+        attempt: { ...current.attempt, cancelRequestedAt: 1 },
+    }));
+    const restarted = new WorkService({
+        root,
+        instanceId: "next",
+        channels: { sendText: async () => ({ kind: "confirmed" }), maxMessageLength: () => 1000 },
+        resolveRoute: () => undefined,
+        operations: {
+            inspect: async () => ({
+                kind: "settled",
+                outcome: "completed",
+                message: {
+                    role: "assistant",
+                    content: [{ type: "text", text: "already done" }],
+                    timestamp: 1,
+                },
+            }),
+            abort: async () => ({ outcome: "mismatch", newlyRequested: false }),
+        },
+    });
+    t.after(async () => {
+        restarted.stop();
+    });
+    await restarted.start();
+    const result = await restarted.get(work.workId);
+    assert.equal(result.work?.status, "completed");
+    assert.equal(result.work?.completeness, "full");
+    assert.equal(result.resultText, "already done");
+});
+
+it("invalidates a question when cancellation races with the transition to waiting", async (t) => {
+    const { service, work } = await rig(t);
+    await service.run(work.workId, "child", async () => {});
+    await service.cancel(work.workId, work.attempt.attemptId);
+    await service.controller.waitForInput(
+        work.workId,
+        { sessionId: "child", toolCallId: "late-q", toolName: "askUser" },
+        work.attempt.attemptId,
+    );
+    assert.equal((await service.get(work.workId)).work?.status, "cancelled");
+    await service.delete(work.workId);
+    await assert.rejects(
+        service.answerWaiting({ workspace: "/a", sessionId: "child" }, "late-q", async () => {
+            throw new Error("must not run");
+        }),
+        /cancelled/,
+    );
 });

@@ -18,6 +18,9 @@ import { isTerminal } from "./workTypes.ts";
 
 export const WAITING_WORK_STALE_MS = 7 * 24 * 60 * 60_000;
 
+/** A session that cannot be read for this long is treated as gone, not as still starting. */
+export const UNREADABLE_WORK_STALE_MS = 7 * 24 * 60 * 60_000;
+
 /** Legacy deadlines use the closed attempt, never a later snapshot update or restart time. */
 export function withWaitingDeadline(record: WorkRecord): WorkRecord {
     if (record.status !== "waiting") return record;
@@ -134,7 +137,7 @@ export function waitForInput(
     },
 ): WorkRecord | undefined {
     if (record.status !== "running") return undefined;
-    return {
+    const waiting: WorkRecord = {
         ...record,
         status: "waiting",
         waitingSince: args.now,
@@ -148,6 +151,9 @@ export function waitForInput(
         updatedAt: args.now,
         attempt: { ...record.attempt, endedAt: args.now },
     };
+    return record.attempt.cancelRequestedAt === undefined
+        ? waiting
+        : cancelWaiting(waiting, args.now);
 }
 
 export function resumeAttempt(

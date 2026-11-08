@@ -354,21 +354,44 @@ export class WorkController {
 
     async restoreWaiting(snapshot: WorkRecord, attemptId: string): Promise<void> {
         const res = await this.store.mutate(snapshot.workId, (current) => {
-            if (current.status !== "running" || current.attempt.attemptId !== attemptId)
+            if (
+                current.status !== "running" ||
+                current.attempt.attemptId !== attemptId ||
+                current.attempt.cancelRequestedAt !== undefined
+            )
                 return undefined;
-            const timed = withWaitingDeadline(snapshot);
             const now = this.now();
-            const restored: WorkRecord = {
-                ...current,
-                status: "waiting",
-                waiting: timed.waiting,
-                waitingSince: timed.waitingSince,
-                expiresAt: timed.expiresAt,
-                attempt: timed.attempt,
-                updatedAt: now,
-            };
-            const stopped = expireWaiting(restored, now);
-            return stopped ? withInterruptionNotice(stopped, now) : restored;
+            if (snapshot.status === "waiting" && snapshot.waiting) {
+                const timed = withWaitingDeadline(snapshot);
+                const restored: WorkRecord = {
+                    ...current,
+                    status: "waiting",
+                    waiting: timed.waiting,
+                    waitingSince: timed.waitingSince,
+                    expiresAt: timed.expiresAt,
+                    attempt: timed.attempt,
+                    updatedAt: now,
+                };
+                const stopped = expireWaiting(restored, now);
+                return stopped ? withInterruptionNotice(stopped, now) : restored;
+            }
+            // The attempt rolled back onto a snapshot that was not waiting: restore
+            // that snapshot's own lifecycle rather than invent a wait with nothing
+            // to resume.
+            if (snapshot.status === "interrupted")
+                return {
+                    ...current,
+                    status: "interrupted",
+                    waiting: undefined,
+                    waitingSince: undefined,
+                    expiresAt: undefined,
+                    endedAt: snapshot.endedAt,
+                    reason: snapshot.reason,
+                    delivery: snapshot.delivery,
+                    attempt: snapshot.attempt,
+                    updatedAt: now,
+                };
+            return { ...current, attempt: snapshot.attempt, updatedAt: now };
         });
         if (res?.changed) this.onChange(snapshot.workId);
         if (res?.changed && res.record.expiredInteraction && res.record.delivery)
