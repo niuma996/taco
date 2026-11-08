@@ -1,6 +1,6 @@
 import { strict as assert } from "node:assert";
 import { act, cleanup, renderHook } from "@testing-library/react";
-import { StrictMode } from "react";
+import { StrictMode, Suspense } from "react";
 import { afterEach, describe, it, vi } from "vitest";
 import { useConversationDrafts } from "../../src/hooks/useConversationDrafts";
 import type { StagedAttachment } from "../../src/lib/attachments";
@@ -22,6 +22,54 @@ afterEach(() => {
 });
 
 describe("useConversationDrafts", () => {
+    it("keeps callbacks stable for semantically equal targets and initial models", () => {
+        const model = { provider: "test", id: "model" };
+        const { result, rerender } = renderHook(
+            ({ target, initialModel }) => useConversationDrafts(target, initialModel),
+            { initialProps: { target: a, initialModel: model }, wrapper: StrictMode },
+        );
+        const first = result.current;
+        act(() => first.setInput("keep"));
+        rerender({ target: { ...a }, initialModel: { ...model } });
+        assert.equal(result.current.input, "keep");
+        assert.equal(result.current.setInput, first.setInput);
+        assert.equal(result.current.setAttachments, first.setAttachments);
+        assert.equal(result.current.setSelectedModel, first.setSelectedModel);
+        assert.equal(result.current.beginSubmission, first.beginSubmission);
+        assert.equal(result.current.recoverSubmission, first.recoverSubmission);
+    });
+
+    it("does not let an abandoned render pin a new target's initial model", () => {
+        const never = new Promise<never>(() => {});
+        let suspended = 0;
+        const initialModel = { provider: "test", id: "initial" };
+        const { result, rerender } = renderHook(
+            ({ target, model, suspend }) => {
+                const drafts = useConversationDrafts(target, model);
+                if (suspend) {
+                    suspended++;
+                    throw never;
+                }
+                return drafts;
+            },
+            {
+                initialProps: { target: a, model: initialModel, suspend: false },
+                wrapper: ({ children }) => (
+                    <StrictMode>
+                        <Suspense fallback={null}>{children}</Suspense>
+                    </StrictMode>
+                ),
+            },
+        );
+        rerender({ target: b, model: { provider: "test", id: "abandoned" }, suspend: true });
+        assert.ok(suspended > 0);
+        rerender({ target: a, model: initialModel, suspend: false });
+        const committedModel = { provider: "test", id: "committed" };
+        rerender({ target: b, model: committedModel, suspend: false });
+        assert.deepEqual(result.current.selectedModel, committedModel);
+        assert.deepEqual(result.current.beginSubmission()?.selectedModel, committedModel);
+    });
+
     it("retains A/B text and files and binds stale functional setters to their origin", () => {
         const { result, rerender } = renderHook(({ target }) => useConversationDrafts(target), {
             initialProps: { target: a },

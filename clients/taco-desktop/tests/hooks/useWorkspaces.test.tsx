@@ -9,9 +9,10 @@
 import { strict as assert } from "node:assert";
 import { ErrorCodes } from "@taco-ai/protocol";
 import { act, renderHook, waitFor } from "@testing-library/react";
-import type { ReactNode } from "react";
+import { type ReactNode, useEffect } from "react";
 import { beforeEach, describe, it, type Mock, vi } from "vitest";
 import { ToastProvider } from "../../src/components/ToastProvider";
+import { useConversationDrafts } from "../../src/hooks/useConversationDrafts";
 import { useWorkspaces } from "../../src/hooks/useWorkspaces";
 import type { WorkspaceState } from "../../src/lib/chat/workspaceReducer";
 import type { TacoClient } from "../../src/lib/clients/tacoClient.ts";
@@ -108,9 +109,192 @@ describe("useWorkspacesFirstTurn.test.tsx", () => {
         return view;
     }
 
+    async function renderWithDrafts(client: MockClient) {
+        const view = renderHook(() => {
+            const workspaces = useWorkspaces(client as unknown as TacoClient);
+            const drafts = useConversationDrafts(workspaces.composerTarget);
+            useEffect(
+                () =>
+                    workspaces.onSessionRemoved((target) =>
+                        drafts.release({ kind: "session", ...target }),
+                    ),
+                [workspaces.onSessionRemoved, drafts.release],
+            );
+            useEffect(
+                () =>
+                    workspaces.onDraftCreated(({ workspace, draftId, sessionId }) =>
+                        drafts.migrateDraft(workspace, draftId, sessionId),
+                    ),
+                [workspaces.onDraftCreated, drafts.migrateDraft],
+            );
+            return { ...workspaces, drafts };
+        });
+        await act(async () => {
+            view.result.current.dispatchWs({
+                type: "INIT",
+                workspaces: { [CWD]: seedEmptyWorkspace() },
+            });
+            await view.result.current.switchWorkspace(CWD);
+        });
+        await act(async () => {
+            await view.result.current.sendPrompt("create");
+        });
+        return view;
+    }
+
     describe("useWorkspaces — first turn of a new session", () => {
         beforeEach(() => {
             localStorage.clear();
+        });
+
+        it("keeps the composer target stable through renders and workspace updates", async () => {
+            const { result, rerender } = await renderSeeded(makeClient());
+            const draft = result.current.composerTarget;
+            rerender();
+            assert.equal(result.current.composerTarget, draft);
+            await act(async () => {
+                await result.current.sendPrompt("create");
+            });
+            const session = result.current.composerTarget;
+            assert.equal(session.kind, "session");
+            rerender();
+            assert.equal(result.current.composerTarget, session);
+            act(() =>
+                result.current.dispatchWs({
+                    type: "SET_PENDING",
+                    cwd: CWD,
+                    sid: NEW_SID,
+                    pending: true,
+                }),
+            );
+            assert.equal(result.current.composerTarget, session);
+        });
+
+        for (const removal of ["delete", "push", "raw", "not-found"] as const) {
+            it(`releases migrated drafts and late callbacks after ${removal} removal`, async () => {
+                const revoke = vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
+                const client = makeClient();
+                const { result } = await renderWithDrafts(client);
+                const old = result.current.drafts;
+                const file = {
+                    id: "image",
+                    name: "image.png",
+                    kind: "image" as const,
+                    mimeType: "image/png",
+                    size: 1,
+                    previewUrl: "blob:deleted",
+                };
+                act(() => {
+                    old.setInput("pending");
+                    old.setAttachments([file]);
+                });
+                const submission = old.beginSubmission();
+                assert.ok(submission);
+                act(() => {
+                    old.setInput("");
+                    old.setAttachments([]);
+                });
+                if (removal === "delete") {
+                    await act(async () => {
+                        await result.current.deleteSession(CWD, NEW_SID);
+                    });
+                } else if (removal === "not-found") {
+                    Object.assign(client, {
+                        sessionAttach: vi.fn(async () => {
+                            throw Object.assign(new Error("gone"), { code: ErrorCodes.NotFound });
+                        }),
+                    });
+                    await act(async () => {
+                        await result.current.attachSession(CWD, NEW_SID);
+                    });
+                } else {
+                    act(() =>
+                        result.current[removal === "push" ? "dispatch" : "dispatchWs"]({
+                            type: "REMOVE_SESSION",
+                            cwd: CWD,
+                            sid: NEW_SID,
+                        }),
+                    );
+                }
+                assert.equal(result.current.composerTarget.kind, "draft");
+                assert.deepEqual(revoke.mock.calls, [["blob:deleted"]]);
+                act(() => {
+                    result.current.drafts.setInput("new lifetime");
+                    old.setInput("late");
+                    old.setAttachments([{ ...file, previewUrl: "blob:late" }]);
+                    old.completeSubmission(submission, false);
+                });
+                assert.equal(result.current.drafts.input, "new lifetime");
+                assert.deepEqual(result.current.drafts.attachments, []);
+                assert.deepEqual(result.current.drafts.recoveries, []);
+                assert.deepEqual(revoke.mock.calls, [["blob:deleted"], ["blob:late"]]);
+                revoke.mockRestore();
+            });
+        }
+
+        it("keeps a same-id session in another workspace when a removal arrives", async () => {
+            const client = makeClient();
+            const { result } = await renderWithDrafts(client);
+            act(() => result.current.drafts.setInput("keep this workspace"));
+            const setter = result.current.drafts.setInput;
+            act(() =>
+                result.current.dispatch({ type: "REMOVE_SESSION", cwd: "/other", sid: NEW_SID }),
+            );
+            assert.equal(result.current.drafts.input, "keep this workspace");
+            assert.equal(result.current.composerTarget.kind, "session");
+            assert.equal(result.current.drafts.setInput, setter);
+        });
+
+        it("retains drafts when a paginated list omits a session or deletion fails", async () => {
+            const client = makeClient();
+            const { result } = await renderWithDrafts(client);
+            act(() => result.current.drafts.setInput("keep"));
+            act(() =>
+                result.current.dispatchWs({
+                    type: "LOAD_SESSIONS",
+                    cwd: CWD,
+                    sessions: [],
+                    total: 20,
+                    nextCursor: { id: "other", updatedAt: "2026-01-01T00:00:00Z" },
+                }),
+            );
+            assert.equal(result.current.drafts.input, "keep");
+            client.sessionDelete.mockRejectedValueOnce(new Error("delete failed"));
+            await act(async () => {
+                await result.current.deleteSession(CWD, NEW_SID);
+            });
+            assert.equal(result.current.drafts.input, "keep");
+            assert.equal(result.current.composerTarget.kind, "session");
+        });
+
+        it("selects the next session after deletion without releasing its draft", async () => {
+            const client = makeClient();
+            Object.assign(client, {
+                sessionAttach: vi.fn(async () => ({})),
+                sessionHistory: vi.fn(async () => ({ entries: [] })),
+            });
+            const { result } = await renderWithDrafts(client);
+            act(() => {
+                result.current.drafts.restoreTexts(
+                    { kind: "session", workspace: CWD, sessionId: "next" },
+                    ["next draft"],
+                );
+                result.current.dispatchWs({
+                    type: "ADD_SESSION",
+                    cwd: CWD,
+                    session: { id: "next", createdAt: "2026-01-01T00:00:00Z" },
+                    makeActive: false,
+                });
+            });
+            await act(async () => {
+                await result.current.deleteSession(CWD, NEW_SID);
+            });
+            assert.deepEqual(result.current.composerTarget, {
+                kind: "session",
+                workspace: CWD,
+                sessionId: "next",
+            });
+            assert.equal(result.current.drafts.input, "next draft");
         });
 
         it("keeps the session when the user stops the first turn", async () => {

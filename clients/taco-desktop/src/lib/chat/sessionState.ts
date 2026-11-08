@@ -50,6 +50,8 @@ export const SESSION_CACHE_ACTIVE_BYTE_BUDGET = 2 * 1024 * 1024;
 const emptyMessages: UiMessage[] = [];
 const emptyPending: Record<string, true> = {};
 const emptyBackground: Record<string, BackgroundSubagentState> = {};
+const transcriptMessageBytes = new WeakMap<UiMessage, number>();
+const transcriptEncoder = new TextEncoder();
 
 export function createSessionState(): SessionState {
     return {
@@ -193,8 +195,19 @@ export function projectSessionState<T extends SessionWorkspace>(ws: T): T {
     return projected;
 }
 
+/** Exact JSON UTF-8 size; published messages and their nested data must remain immutable. */
 export function transcriptBytes(messages: UiMessage[]): number {
-    return new TextEncoder().encode(JSON.stringify(messages)).byteLength;
+    // Brackets and commas are ASCII; per-message JSON preserves escaping and nested payloads.
+    let bytes = 2 + Math.max(0, messages.length - 1);
+    for (const message of messages) {
+        let size = transcriptMessageBytes.get(message);
+        if (size === undefined) {
+            size = transcriptEncoder.encode(JSON.stringify(message)).byteLength;
+            transcriptMessageBytes.set(message, size);
+        }
+        bytes += size;
+    }
+    return bytes;
 }
 
 export function updateSessionMessages(session: SessionState, messages: UiMessage[]): SessionState {
@@ -384,7 +397,6 @@ export function enforceSessionCache<T extends SessionWorkspace>(ws: T): T {
         set(sid, {
             ...updateSessionMessages(session, messages),
             truncated: true,
-            sync: "incomplete",
         });
     }
     return sessions === ws.sessionStatesById ? ws : { ...ws, sessionStatesById: sessions };

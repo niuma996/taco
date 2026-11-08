@@ -15,13 +15,17 @@ import {
     ErrorCodes,
     IM_CWD_PREFIX,
 } from "@taco-ai/protocol";
-import { useCallback, useEffect, useReducer, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { useT } from "../i18n/useI18n";
 import type { StagedAttachment, StageInput } from "../lib/attachments";
 import { toMessageAttachments } from "../lib/attachments";
 import { historyToUiMessages, type QueuedUiItem, type UiMessage } from "../lib/chat/chatUtils";
 import type { ConversationTarget } from "../lib/chat/conversationDrafts";
-import { type WorkspaceState, workspacesReducer } from "../lib/chat/workspaceReducer";
+import {
+    type WorkspaceAction,
+    type WorkspaceState,
+    workspacesReducer,
+} from "../lib/chat/workspaceReducer";
 import type { TacoClient } from "../lib/clients/tacoClient.ts";
 import { getGlobalConfig } from "../lib/globalConfig";
 import type { AppNotification, PushNotificationOptions } from "../lib/notifications";
@@ -66,7 +70,7 @@ const COALESCE_WINDOW_MS = 10_000;
 
 export function useWorkspaces(client: TacoClient): UseWorkspacesApi {
     const { t } = useT();
-    const [workspaces, dispatchWs] = useReducer(workspacesReducer, {});
+    const [workspaces, dispatchReducer] = useReducer(workspacesReducer, {});
     // Active cwd is read from desktop.json (via the IPC) inside initFromStorage;
     // the lazy initializer can only return a synchronous value, so we seed with
     // the empty string and let initFromStorage set the real value once the
@@ -129,6 +133,7 @@ export function useWorkspaces(client: TacoClient): UseWorkspacesApi {
     const draftCreatedListeners = useRef(
         new Set<(event: { workspace: string; draftId: string; sessionId: string }) => void>(),
     );
+    const sessionRemovedListeners = useRef(new Set<(target: SessionTarget) => void>());
     const navigationVersion = useRef(0);
     const runEpochs = useRef(new Map<string, number>());
     const promptTokens = useRef(new Map<string, symbol>());
@@ -148,6 +153,12 @@ export function useWorkspaces(client: TacoClient): UseWorkspacesApi {
         },
         [],
     );
+    const onSessionRemoved = useCallback((listener: (target: SessionTarget) => void) => {
+        sessionRemovedListeners.current.add(listener);
+        return () => {
+            sessionRemovedListeners.current.delete(listener);
+        };
+    }, []);
 
     function captureComposerTarget(
         workspace = activeCwdRef.current,
@@ -165,15 +176,34 @@ export function useWorkspaces(client: TacoClient): UseWorkspacesApi {
         selectedTargetsRef.current.set(workspace, target);
         return target;
     }
-    const composerTarget = captureComposerTarget(activeCwd, workspaces);
-    /**
-     * Session ids the user aborted via abortPrompt. The in-flight sessionPrompt
-     * RPC rejects once the abort lands ("session.prompt aborted") — that
-     * rejection is the expected outcome of the user's own Stop click, so
-     * sendPrompt's catch suppresses the notification for it. Keyed by sid: the
-     * user may switch sessions between abort and rejection.
-     */
+    const capturedTarget = captureComposerTarget(activeCwd, workspaces);
+    const { kind, workspace } = capturedTarget;
+    const targetId = kind === "session" ? capturedTarget.sessionId : capturedTarget.draftId;
+    const composerTarget = useMemo<ConversationTarget>(
+        () =>
+            kind === "session"
+                ? { kind, workspace, sessionId: targetId }
+                : { kind, workspace, draftId: targetId },
+        [kind, workspace, targetId],
+    );
+    // Stop-triggered prompt rejection is expected. Scope suppression to the
+    // workspace/session so navigation cannot hide another session's failure.
     const abortRequestedRef = useRef<Set<string>>(new Set());
+    const dispatchWs = useCallback((action: WorkspaceAction) => {
+        if (action.type === "REMOVE_SESSION") {
+            const key = JSON.stringify([action.cwd, action.sid]);
+            runEpochs.current.delete(key);
+            promptTokens.current.delete(key);
+            abortRequestedRef.current.delete(key);
+            const selected = selectedTargetsRef.current.get(action.cwd);
+            if (selected?.kind === "session" && selected.sessionId === action.sid)
+                selectedTargetsRef.current.delete(action.cwd);
+        }
+        dispatchReducer(action);
+        if (action.type === "REMOVE_SESSION")
+            for (const listener of sessionRemovedListeners.current)
+                listener({ workspace: action.cwd, sessionId: action.sid });
+    }, []);
     useEffect(() => {
         workspacesRef.current = workspaces;
         for (const [cwd, target] of selectedTargetsRef.current) {
@@ -242,13 +272,6 @@ export function useWorkspaces(client: TacoClient): UseWorkspacesApi {
                     promptTokens.current.delete(JSON.stringify([action.cwd, action.sid]));
                 dispatchWs(action);
             } else if (action.type === "REMOVE_SESSION") {
-                const key = JSON.stringify([action.cwd, action.sid]);
-                runEpochs.current.delete(key);
-                promptTokens.current.delete(key);
-                abortRequestedRef.current.delete(key);
-                const selected = selectedTargetsRef.current.get(action.cwd);
-                if (selected?.kind === "session" && selected.sessionId === action.sid)
-                    selectedTargetsRef.current.delete(action.cwd);
                 dispatchWs(action);
             } else if (action.type === "EVENT") {
                 if (action.ev.type === "run_start") {
@@ -433,15 +456,27 @@ export function useWorkspaces(client: TacoClient): UseWorkspacesApi {
         },
         // attachSessionRef is a stable ref object; its .current is read at call
         // time on purpose, so it must not be a dependency.
-        [client, settings, attachSessionRef, pushNotification, t, answerKey, permissionRequests],
+        [
+            client,
+            settings,
+            attachSessionRef,
+            pushNotification,
+            t,
+            answerKey,
+            permissionRequests,
+            dispatchWs,
+        ],
     );
 
-    const beginPendingNewSession = useCallback((cwd: string): void => {
-        navigationVersion.current++;
-        const draftId = crypto.randomUUID();
-        selectedTargetsRef.current.set(cwd, { kind: "draft", workspace: cwd, draftId });
-        dispatchWs({ type: "BEGIN_PENDING_NEW_SESSION", cwd, draftId });
-    }, []);
+    const beginPendingNewSession = useCallback(
+        (cwd: string): void => {
+            navigationVersion.current++;
+            const draftId = crypto.randomUUID();
+            selectedTargetsRef.current.set(cwd, { kind: "draft", workspace: cwd, draftId });
+            dispatchWs({ type: "BEGIN_PENDING_NEW_SESSION", cwd, draftId });
+        },
+        [dispatchWs],
+    );
 
     function sendPrompt(
         text: string,
@@ -895,6 +930,7 @@ export function useWorkspaces(client: TacoClient): UseWorkspacesApi {
         },
         getComposerTarget: captureComposerTarget,
         onDraftCreated,
+        onSessionRemoved,
         sessionLevels: settings.sessionLevels,
         notifications,
         defaultCwdSettled: lifecycle.defaultCwdSettled,
@@ -926,15 +962,16 @@ export function useWorkspaces(client: TacoClient): UseWorkspacesApi {
         },
         attachSession: async (cwd, sid) => {
             const version = ++navigationVersion.current;
-            selectedTargetsRef.current.set(cwd, {
-                kind: "session",
-                workspace: cwd,
-                sessionId: sid,
-            });
+            const target: ConversationTarget = { kind: "session", workspace: cwd, sessionId: sid };
+            selectedTargetsRef.current.set(cwd, target);
             try {
                 await lifecycle.attachSession(cwd, sid);
             } finally {
-                if (version === navigationVersion.current) selectedTargetsRef.current.delete(cwd);
+                if (
+                    version === navigationVersion.current &&
+                    selectedTargetsRef.current.get(cwd) === target
+                )
+                    selectedTargetsRef.current.delete(cwd);
             }
         },
         restoreSessionSnapshot: lifecycle.restoreSessionSnapshot,

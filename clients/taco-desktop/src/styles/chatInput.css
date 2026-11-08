@@ -49,6 +49,12 @@ footer.input {
     animation: ui-enter var(--motion-duration-fast) var(--motion-ease-out);
 }
 
+.input-status--neutral {
+    border-color: var(--border);
+    color: var(--fg-dim);
+    background: transparent;
+}
+
 .input-status__dot {
     display: inline-block;
     width: 0.5rem;

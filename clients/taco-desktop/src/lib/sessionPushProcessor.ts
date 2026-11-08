@@ -33,6 +33,7 @@ export interface SessionPushProcessorOptions {
 export class SessionPushProcessor {
     private readonly cursor = new SessionCursor();
     private readonly queue = new SessionQueue();
+    private readonly incompleteStreams = new Set<string>();
 
     // Throttle window for `recoverGap` / `resync` failures: at most one
     // banner per (workspace, session, kind) per `REPORT_THROTTLE_MS`.
@@ -60,7 +61,10 @@ export class SessionPushProcessor {
             }
             const afterSeq = this.cursor.last(push.workspace, session);
             if (seq <= afterSeq) return;
-            if (seq > afterSeq + 1) {
+            if (
+                seq > afterSeq + 1 ||
+                this.incompleteStreams.has(`${push.workspace}\u0000${session}`)
+            ) {
                 await this.resync(push.workspace, session, push.sessionKind ?? "main", isCurrent);
             }
             if (isCurrent() && seq === this.cursor.last(push.workspace, session) + 1)
@@ -92,11 +96,14 @@ export class SessionPushProcessor {
         this.queue.invalidate();
         this.cursor.clear();
         this.lastReportByKey.clear();
+        this.incompleteStreams.clear();
     }
 
     resetWorkspace(workspace: string): void {
         this.queue.invalidate(workspace);
         this.cursor.resetWorkspace(workspace);
+        for (const key of this.incompleteStreams)
+            if (key.startsWith(`${workspace}\u0000`)) this.incompleteStreams.delete(key);
     }
 
     /** Returns true if a (workspace, session, kind) error should surface
@@ -122,8 +129,6 @@ export class SessionPushProcessor {
     ): Promise<void> {
         this.options.onSyncState?.(workspace, session, "recovering");
         let sync: "current" | "incomplete" = "incomplete";
-        let snapshotInstalled = false;
-        let executionObserved = false;
         try {
             // One snapshot installation and one follow-up replay per attempt.
             // An unchanged retention response must not spin indefinitely.
@@ -157,7 +162,6 @@ export class SessionPushProcessor {
                     );
                     if (!isCurrent() || !recovery.recovered) return;
                     this.cursor.resetTo(workspace, session, recovery.snapshotSeq);
-                    snapshotInstalled = true;
                     continue;
                 }
                 for (const event of [...replay.events].sort(
@@ -170,28 +174,20 @@ export class SessionPushProcessor {
                         );
                         continue;
                     }
-                    const previousSeq = this.cursor.last(workspace, session);
                     this.applyReplay(event);
-                    const type = (event.params as { event?: { type?: string } } | undefined)?.event
-                        ?.type;
-                    if (
-                        event.method === "session.event" &&
-                        (type === "run_start" || type === "run_end") &&
-                        event.seq === previousSeq + 1 &&
-                        event.seq === this.cursor.last(workspace, session)
-                    ) {
-                        executionObserved = true;
-                    }
                 }
-                if (
-                    this.cursor.last(workspace, session) === replay.lastSeq &&
-                    (!snapshotInstalled || executionObserved)
-                )
-                    sync = "current";
+                // A caught-up stream does not certify execution; legacy snapshots
+                // leave that independent state unknown until a lifecycle event.
+                if (this.cursor.last(workspace, session) === replay.lastSeq) sync = "current";
                 return;
             }
         } finally {
-            if (isCurrent()) this.options.onSyncState?.(workspace, session, sync);
+            if (isCurrent()) {
+                const key = `${workspace}\u0000${session}`;
+                if (sync === "current") this.incompleteStreams.delete(key);
+                else this.incompleteStreams.add(key);
+                this.options.onSyncState?.(workspace, session, sync);
+            }
         }
     }
 

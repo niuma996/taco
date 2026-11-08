@@ -14,6 +14,44 @@ function file(id: string, previewUrl = `blob:${id}`): StagedAttachment {
 }
 
 describe("ConversationDrafts", () => {
+    it("prepares snapshots without owning a target or pinning its initial model", () => {
+        const manager = new ConversationDrafts();
+        let changes = 0;
+        manager.subscribe(() => {
+            changes++;
+        });
+        const abandoned = manager.prepare(a, { provider: "test", id: "abandoned" });
+        assert.equal(abandoned.getSnapshot().selectedModel?.id, "abandoned");
+        manager.release(a);
+        assert.equal(changes, 0, "preparation must not leave a releasable entry");
+        const committed = manager.bind(a, { provider: "test", id: "committed" });
+        assert.equal(committed.getSnapshot().selectedModel?.id, "committed");
+    });
+
+    it("lazily captures early events and follows migration before its commit effect", () => {
+        const revoked: string[] = [];
+        const manager = new ConversationDrafts((url) => revoked.push(url));
+        const prepared = manager.prepare(draft, { provider: "test", id: "chosen" });
+        prepared.setInput("early");
+        const submission = prepared.beginSubmission();
+        prepared.setInput("");
+        manager.migrateDraft("/a", "same", "same");
+        prepared.commit();
+        prepared.setAttachments([file("late")]);
+        manager.completeSubmission(submission, false);
+        const session = manager.bind(a);
+        assert.equal(session.getSnapshot().input, "early");
+        assert.equal(session.getSnapshot().selectedModel?.id, "chosen");
+        assert.deepEqual(session.getSnapshot().attachments, [file("late")]);
+        manager.migrateDraft("/a", "same", "same");
+        manager.bind(draft).setInput("late bind");
+        assert.equal(session.getSnapshot().input, "late bind");
+        manager.release(a);
+        prepared.setAttachments([file("released")]);
+        assert.deepEqual(revoked, ["blob:late", "blob:released"]);
+        assert.deepEqual(prepared.getSnapshot().attachments, []);
+    });
+
     it("isolates workspaces and session/draft namespaces", () => {
         const manager = new ConversationDrafts();
         const first = manager.bind(a);

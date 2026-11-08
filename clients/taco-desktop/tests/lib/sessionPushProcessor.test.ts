@@ -6,6 +6,12 @@ import {
     type ServerPush,
     type SessionEventsGetResult,
 } from "@taco-ai/protocol";
+import { getSessionState } from "../../src/lib/chat/sessionState";
+import {
+    createEmptyWorkspace,
+    type WorkspaceState,
+    workspacesReducer,
+} from "../../src/lib/chat/workspaceReducer";
 import { SessionPushProcessor } from "../../src/lib/sessionPushProcessor.ts";
 
 function frame(seq: number): ServerPush {
@@ -300,7 +306,7 @@ it("invalidates an old replay on clear while new work can proceed", async () => 
     assert.equal(processor.last("/workspace", "session"), 1);
 });
 
-it("reports incomplete sync after a legacy snapshot instead of claiming runtime is current", async () => {
+it("finishes event synchronization after an idle legacy snapshot without lifecycle events", async () => {
     const states: string[] = [];
     const processor = new SessionPushProcessor({
         getEvents: async (_w, _s, afterSeq) =>
@@ -313,10 +319,12 @@ it("reports incomplete sync after a legacy snapshot instead of claiming runtime 
         onSyncState: (_workspace, _session, sync) => states.push(sync),
     });
     await processor.reconcile("/workspace", "session");
-    assert.deepEqual(states, ["recovering", "incomplete"]);
+    assert.deepEqual(states, ["recovering", "current"]);
+    await processor.reconcile("/workspace", "session");
+    assert.deepEqual(states, ["recovering", "current", "recovering", "current"]);
 });
 
-it("does not treat an old duplicate run_end as execution recovered after snapshot", async () => {
+it("finishes synchronization without delivering an old duplicate run_end after snapshot", async () => {
     const states: string[] = [];
     const processor = new SessionPushProcessor({
         getEvents: async (_w, _s, afterSeq) =>
@@ -334,5 +342,132 @@ it("does not treat an old duplicate run_end as execution recovered after snapsho
         onSyncState: (_workspace, _session, sync) => states.push(sync),
     });
     await processor.reconcile("/workspace", "session");
+    assert.deepEqual(states, ["recovering", "current"]);
+});
+
+it("keeps a replay with a missing sequence incomplete even when its tail includes run_end", async () => {
+    const states: string[] = [];
+    const delivered: number[] = [];
+    const processor = new SessionPushProcessor({
+        getEvents: async () => ({
+            events: [frame(3), { ...frame(4), params: { event: { type: "run_end" } } }],
+            firstSeq: 1,
+            lastSeq: 4,
+            resetRequired: false,
+        }),
+        deliver: (push) => delivered.push(push.seq ?? 0),
+        recoverSnapshot: async () => assert.fail("snapshot is not requested"),
+        reportError: () => {},
+        onSyncState: (_workspace, _session, sync) => states.push(sync),
+    });
+    await processor.process(frame(1));
+    await processor.reconcile("/workspace", "session");
+    assert.deepEqual(delivered, [1]);
+    assert.equal(processor.last("/workspace", "session"), 1);
     assert.deepEqual(states, ["recovering", "incomplete"]);
+});
+
+it("retries failed reconciliation when the next push is contiguous", async () => {
+    const states: string[] = [];
+    const delivered: number[] = [];
+    let attempts = 0;
+    const processor = new SessionPushProcessor({
+        getEvents: async () => {
+            if (++attempts === 1) throw new Error("transient replay failure");
+            return { events: [frame(2)], firstSeq: 1, lastSeq: 2, resetRequired: false };
+        },
+        deliver: (push) => delivered.push(push.seq ?? 0),
+        recoverSnapshot: async () => assert.fail("snapshot is not required"),
+        reportError: () => {},
+        onSyncState: (_workspace, _session, sync) => states.push(sync),
+    });
+    await processor.process(frame(1));
+    await processor.reconcile("/workspace", "session");
+    assert.equal(states.at(-1), "incomplete");
+    await processor.process(frame(2));
+    assert.deepEqual(delivered, [1, 2]);
+    assert.equal(processor.last("/workspace", "session"), 2);
+    assert.equal(attempts, 2);
+    assert.deepEqual(states, ["recovering", "incomplete", "recovering", "current"]);
+});
+
+it("forgets recovery failures for reset streams without clearing another workspace", async () => {
+    let attempts = 0;
+    const processor = new SessionPushProcessor({
+        getEvents: async (workspace) => {
+            if (++attempts <= 2) throw new Error("transient replay failure");
+            return {
+                events: [{ ...frame(2), workspace: asWorkspaceId(workspace) }],
+                firstSeq: 1,
+                lastSeq: 2,
+                resetRequired: false,
+            };
+        },
+        deliver: () => {},
+        recoverSnapshot: async () => assert.fail("snapshot is not required"),
+        reportError: () => {},
+    });
+    await processor.process(frame(1));
+    await processor.process({ ...frame(1), workspace: asWorkspaceId("/other") });
+    await processor.reconcile("/workspace", "session");
+    await processor.reconcile("/other", "session");
+    processor.resetWorkspace("/workspace");
+    await processor.process(frame(1));
+    assert.equal(attempts, 2);
+    await processor.process({ ...frame(2), workspace: asWorkspaceId("/other") });
+    assert.equal(attempts, 3);
+    await processor.reconcile("/workspace", "session");
+    processor.clear();
+    const before = attempts;
+    await processor.process(frame(1));
+    assert.equal(attempts, before);
+});
+
+it("keeps execution unknown after snapshot catch-up until a new contiguous lifecycle event", async () => {
+    let state: Record<string, WorkspaceState> = {
+        "/workspace": createEmptyWorkspace("/workspace"),
+    };
+    const processor = new SessionPushProcessor({
+        getEvents: async (_workspace, _session, afterSeq) => ({
+            events: [],
+            firstSeq: 8,
+            lastSeq: 9,
+            resetRequired: afterSeq === 0,
+        }),
+        recoverSnapshot: async () => {
+            state = workspacesReducer(state, {
+                type: "RESTORE_SESSION_SNAPSHOT",
+                cwd: "/workspace",
+                sid: "session",
+                sessionKind: "main",
+                messages: [],
+                sync: "recovering",
+            });
+            return { recovered: true, snapshotSeq: 9 };
+        },
+        deliver: (push) => {
+            state = workspacesReducer(state, {
+                type: "APPLY_EVENT",
+                cwd: push.workspace,
+                sid: push.session ?? "session",
+                now: 1,
+                suppressedThinking: false,
+                ev: (push.params as { event: { type: "run_start" | "run_end" } }).event,
+            });
+        },
+        onSyncState: (cwd, sid, sync) => {
+            state = workspacesReducer(state, { type: "SET_SESSION_SYNC", cwd, sid, sync });
+        },
+        reportError: (message) => assert.fail(message),
+    });
+    await processor.reconcile("/workspace", "session");
+    assert.equal(getSessionState(state["/workspace"], "session")?.sync, "current");
+    assert.equal(getSessionState(state["/workspace"], "session")?.execution, "unknown");
+    assert.equal(state["/workspace"]?.pendingBySessionId.session, undefined);
+    await processor.process({ ...frame(10), params: { event: { type: "run_start" } } });
+    assert.equal(getSessionState(state["/workspace"], "session")?.execution, "running");
+    assert.equal(state["/workspace"]?.pendingBySessionId.session, true);
+    await processor.process({ ...frame(11), params: { event: { type: "run_end" } } });
+    assert.equal(getSessionState(state["/workspace"], "session")?.execution, "idle");
+    assert.equal(getSessionState(state["/workspace"], "session")?.sync, "current");
 });

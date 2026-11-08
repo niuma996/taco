@@ -112,6 +112,10 @@ export default function App() {
             ),
         [wsApi.onDraftCreated, drafts.migrateDraft],
     );
+    useEffect(
+        () => wsApi.onSessionRemoved((target) => drafts.release({ kind: "session", ...target })),
+        [wsApi.onSessionRemoved, drafts.release],
+    );
     // Sidebar collapse state — collapsed sidebar shrinks to a rail with only the
     // expand button, letting ChatPane fill the main area. Chat view only.
     // Persisted to localStorage so the layout survives restarts.

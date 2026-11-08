@@ -114,7 +114,7 @@ test("waiting, running, incomplete and current sessions are protected from idle 
         assert.ok(getSessionState(state["/w"], sid));
 });
 
-test("oversized active single message keeps a bounded tail with explicit incomplete sync", () => {
+test("oversized active single message keeps a bounded tail without invalidating synchronization", () => {
     let state = initial();
     state = reduce(state, {
         type: "ADD_SESSION",
@@ -129,7 +129,7 @@ test("oversized active single message keeps a bounded tail with explicit incompl
     });
     const s = getSessionState(state["/w"], "a");
     assert.ok(s);
-    assert.equal(s.sync, "incomplete");
+    assert.equal(s.sync, "current");
     assert.equal(s.truncated, true);
     assert.ok(s.cacheBytes <= SESSION_CACHE_ACTIVE_BYTE_BUDGET);
     assert.equal(
@@ -137,6 +137,32 @@ test("oversized active single message keeps a bounded tail with explicit incompl
         true,
     );
     assert.equal(hasSessionCache(state["/w"], "a"), false);
+});
+
+test("reattaching the active session hydrates a truncated cache even when its stream is current", () => {
+    let state = reduce(initial(), {
+        type: "ADD_SESSION",
+        cwd: "/w",
+        session: { id: "a", createdAt: "2026-01-01" },
+    });
+    state = reduce(state, {
+        type: "APPEND_USER",
+        cwd: "/w",
+        sid: "a",
+        msg: user(`${"x".repeat(SESSION_CACHE_ACTIVE_BYTE_BUDGET * 2)}TAIL`),
+    });
+    const tail = getSessionState(state["/w"], "a")?.messages[0]?.text;
+    assert.ok(tail);
+    const restored = user(`restored-prefix:${tail}`);
+    state = reduce(
+        state,
+        { type: "ATTACH_START", cwd: "/w", sid: "a" },
+        { type: "ATTACH", cwd: "/w", sid: "a", messages: [restored] },
+    );
+    const session = getSessionState(state["/w"], "a");
+    assert.equal(session?.messages[0], restored);
+    assert.equal(session.truncated, false);
+    assert.equal(hasSessionCache(state["/w"], "a"), true);
 });
 
 test("child streams arriving before spawn keep their identity while parents switch", () => {
@@ -306,7 +332,7 @@ test("total protected transcript bytes stay inside the workspace budget", () => 
     const sessions = Object.values(state["/w"]?.sessionStatesById ?? {});
     assert.equal(sessions.length, 12);
     assert.ok(sessions.reduce((sum, s) => sum + s.cacheBytes, 0) <= 8 * 1024 * 1024);
-    assert.ok(sessions.some((s) => s.truncated && s.sync === "incomplete"));
+    assert.ok(sessions.some((s) => s.truncated && s.sync === "current"));
     assert.ok(sessions.every((s) => s.messages.at(-1)?.text.endsWith("TAIL")));
 });
 

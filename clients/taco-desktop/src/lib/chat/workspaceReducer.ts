@@ -273,6 +273,8 @@ export type WorkspaceAction =
           sessionKind: "main" | "subagent";
           messages: UiMessage[];
           pendingAskUserIds?: string[];
+          /** Replay after this snapshot must reach its watermark before sync is current. */
+          sync?: "recovering";
       }
     | {
           type: "ASKUSER_ANSWERED";
@@ -635,7 +637,8 @@ export function workspacesReducer(
                 )
                     return undefined;
                 const session = getSessionState(ws, action.sid) ?? createSessionState();
-                const sameCurrent = ws.activeSession === action.sid && session.sync === "current";
+                const sameCurrent =
+                    ws.activeSession === action.sid && hasSessionCache(ws, action.sid);
                 // An existing live view without a history request remains authoritative.
                 const preserveLive =
                     ws.activeSession === action.sid &&
@@ -892,7 +895,11 @@ export function workspacesReducer(
                     if (!details?.answers && details?.waiting !== false)
                         restored.askUserPending[id] = true;
                 }
-                return patchSession(ws, action.sid, { ...restored, kind: action.sessionKind });
+                return patchSession(ws, action.sid, {
+                    ...restored,
+                    kind: action.sessionKind,
+                    sync: action.sync ?? restored.sync,
+                });
             });
         case "ASKUSER_ANSWERED":
             return updateWs(state, action.cwd, (ws) => {

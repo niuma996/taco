@@ -812,6 +812,7 @@ export function useWorkspaceLifecycle({
                     sid: sessionId,
                     sessionKind: snapshot.sessionKind,
                     messages,
+                    sync: "recovering",
                     pendingAskUserIds:
                         snapshot.sessionKind === "main"
                             ? findPendingAskUserIds(messages)
@@ -825,7 +826,6 @@ export function useWorkspaceLifecycle({
                     sid: sessionId,
                     execution: "unknown",
                 });
-                dispatchWs({ type: "SET_SESSION_SYNC", cwd, sid: sessionId, sync: "incomplete" });
                 if (snapshot.tasks) {
                     dispatchWs({
                         type: "TASKS_UPDATED",

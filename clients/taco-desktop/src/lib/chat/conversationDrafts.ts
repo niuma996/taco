@@ -120,36 +120,56 @@ export class ConversationDrafts {
         target: ConversationTarget,
         initialModel: ModelSelection | null = null,
     ): ConversationDraftHandle {
+        const handle = this.prepare(target, initialModel);
+        handle.commit();
+        return handle;
+    }
+
+    /** Reading a prepared handle does not acquire ownership until commit or its first event. */
+    prepare(
+        target: ConversationTarget,
+        initialModel: ModelSelection | null = null,
+    ): ConversationDraftHandle & { commit(): void } {
         const key = targetKey(target);
-        let captured = this.entries.get(key);
-        if (!captured) {
-            captured = {
-                target: { ...target },
-                state: { ...emptyState(), selectedModel: initialModel },
-                textRevision: ++this.textRevision,
-                released: this.disposed,
-            };
-            if (!this.disposed) this.entries.set(key, captured);
-        }
-        const origin = captured;
+        let origin = this.entries.get(key);
+        const initialState = { ...emptyState(), selectedModel: initialModel };
+        const getSnapshot = () => {
+            const entry = origin ?? this.entries.get(key);
+            return entry ? resolve(entry).state : initialState;
+        };
+        const activate = (): Entry => {
+            if (!origin) {
+                origin = this.entries.get(key) ?? {
+                    target: { ...target },
+                    state: initialState,
+                    textRevision: ++this.textRevision,
+                    released: this.disposed,
+                };
+                if (!this.disposed) this.entries.set(key, origin);
+            }
+            return resolve(origin);
+        };
         return {
-            getSnapshot: () => resolve(origin).state,
-            setInput: (next) => this.setInput(resolve(origin), next),
+            commit: () => {
+                activate();
+            },
+            getSnapshot,
+            setInput: (next) => this.setInput(activate(), next),
             setAttachments: (next) => {
-                const entry = resolve(origin);
+                const entry = activate();
                 const attachments = apply(next, entry.state.attachments);
                 this.trackUrls(attachments);
                 if (!entry.released) this.update(entry, { attachments: [...attachments] });
                 else this.sweepUrls();
             },
             setSelectedModel: (next) => {
-                const entry = resolve(origin);
+                const entry = activate();
                 if (!entry.released) {
                     this.update(entry, { selectedModel: apply(next, entry.state.selectedModel) });
                 }
             },
             beginSubmission: () => {
-                const entry = resolve(origin);
+                const entry = activate();
                 const snapshot: DraftSubmission = {
                     id: ++this.nextId,
                     target: { ...entry.target },
@@ -170,7 +190,7 @@ export class ConversationDrafts {
                 return snapshot;
             },
             recoverSubmission: (id) => {
-                const entry = resolve(origin);
+                const entry = activate();
                 const recovery = entry.state.recoveries.find((item) => item.id === id);
                 if (!recovery || entry.released) return;
                 this.update(entry, {

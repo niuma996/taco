@@ -258,6 +258,22 @@ export function ChatPane(props: ChatPaneProps) {
     // Until the delay passes, the previous conversation stays up (with the
     // composer locked above); the skeleton only replaces it for slow opens.
     const showSkeleton = useDelayedFlag(loadingSession, SKELETON_DELAY_MS);
+    const session = ws?.activeSession ? getSessionState(ws, ws.activeSession) : undefined;
+    const showSyncRecovering = useDelayedFlag(
+        !loadingSession && session?.sync === "recovering",
+        300,
+    );
+    const syncNotice = loadingSession
+        ? null
+        : session?.sync === "incomplete"
+          ? "input.stateSyncIncomplete"
+          : showSyncRecovering
+            ? "input.stateSyncRecovering"
+            : session?.sync === "current" &&
+                session.historyLoaded &&
+                session.execution === "unknown"
+              ? "input.executionUnknown"
+              : null;
     const loadingMeta = loadingSession
         ? ws?.sessions.find((s) => s.id === ws.loadingSessionId)
         : undefined;
@@ -418,12 +434,22 @@ export function ChatPane(props: ChatPaneProps) {
                         </output>
                     )}
                     <QueueBar items={queuedItems} onCancel={onCancelQueued} />
-                    {ws?.activeSession &&
-                        getSessionState(ws, ws.activeSession)?.sync !== "current" && (
-                            <output className="input-status">
-                                {t("input.stateSyncIncomplete")}
-                            </output>
-                        )}
+                    {syncNotice && (
+                        <output
+                            className={
+                                syncNotice === "input.stateSyncIncomplete"
+                                    ? "input-status"
+                                    : "input-status input-status--neutral"
+                            }
+                        >
+                            {t(syncNotice)}
+                        </output>
+                    )}
+                    {!loadingSession && session?.truncated && (
+                        <output className="input-status input-status--neutral">
+                            {t("input.historyTruncated")}
+                        </output>
+                    )}
                     {props.recoveries?.map((item) => (
                         <div key={item.id} className="input-status" role="status">
                             <span>

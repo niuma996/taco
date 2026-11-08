@@ -29,6 +29,7 @@ export interface UseWorkspacesApi {
     onDraftCreated: (
         listener: (event: { workspace: string; draftId: string; sessionId: string }) => void,
     ) => () => void;
+    onSessionRemoved: (listener: (target: SessionTarget) => void) => () => void;
     activeWs: WorkspaceState | undefined;
     sessionLevels: Record<string, ThinkingLevel>;
     /** Newest first. Backs the topbar notification bell. */

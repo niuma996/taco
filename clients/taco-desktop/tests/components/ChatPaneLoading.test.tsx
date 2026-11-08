@@ -8,13 +8,14 @@
  * messages that indexes the session and jumps to a row.
  */
 import { strict as assert } from "node:assert";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { createRef } from "react";
 import { afterEach, describe, it, vi } from "vitest";
 
 import { ToastProvider } from "../../src/components/ToastProvider";
 import * as useI18n from "../../src/i18n/useI18n";
 import type { UiMessage } from "../../src/lib/chat/chatUtils";
+import { createSessionState } from "../../src/lib/chat/sessionState";
 import type { WorkspaceState } from "../../src/lib/chat/workspaceReducer";
 import { ChatPane, type ChatPaneProps } from "../../src/views/ChatPane";
 
@@ -110,11 +111,21 @@ function renderPane(ws: WorkspaceState) {
         onCommandPermission: () => {},
     };
     // Image attachments report validation failures through toasts.
-    return render(
+    const view = render(
         <ToastProvider>
             <ChatPane {...props} />
         </ToastProvider>,
     );
+    return {
+        ...view,
+        rerenderWorkspace(next: WorkspaceState) {
+            view.rerender(
+                <ToastProvider>
+                    <ChatPane {...props} ws={next} />
+                </ToastProvider>,
+            );
+        },
+    };
 }
 
 describe("ChatPane composer while a session opens", () => {
@@ -154,6 +165,98 @@ describe("ChatPane composer while a session opens", () => {
             screen.getByRole("button", { name: "input.send" }).hasAttribute("disabled"),
             false,
         );
+    });
+});
+
+describe("ChatPane synchronization status", () => {
+    it("distinguishes known transcript retention from failed synchronization", () => {
+        renderPane(
+            workspace({
+                sessionStatesById: {
+                    a: {
+                        ...createSessionState(),
+                        sync: "current",
+                        execution: "idle",
+                        historyLoaded: true,
+                        truncated: true,
+                    },
+                },
+            }),
+        );
+        assert.ok(screen.getByText("input.historyTruncated"));
+        assert.equal(screen.queryByText("input.stateSyncIncomplete"), null);
+        assert.equal(screen.queryByText("input.executionUnknown"), null);
+    });
+
+    it("reports unknown execution independently of a caught-up transcript", () => {
+        renderPane(
+            workspace({
+                sessionStatesById: {
+                    a: { ...createSessionState(), sync: "current", historyLoaded: true },
+                },
+            }),
+        );
+        assert.ok(screen.getByText("input.executionUnknown"));
+        assert.equal(screen.queryByText("input.stateSyncIncomplete"), null);
+    });
+
+    it("shows an incomplete replay immediately", () => {
+        renderPane(
+            workspace({
+                sessionStatesById: { a: { ...createSessionState(), sync: "incomplete" } },
+            }),
+        );
+        assert.ok(screen.getByText("input.stateSyncIncomplete"));
+        assert.equal(screen.queryByText("input.executionUnknown"), null);
+    });
+
+    it("delays the recovering notice and removes it as soon as recovery ends", async () => {
+        vi.useFakeTimers();
+        try {
+            const view = renderPane(workspace({ sessionStatesById: { a: createSessionState() } }));
+            assert.equal(screen.queryByText("input.stateSyncIncomplete"), null);
+            assert.equal(screen.queryByText("input.stateSyncRecovering"), null);
+            await act(async () => {
+                await vi.advanceTimersByTimeAsync(350);
+            });
+            assert.ok(screen.getByText("input.stateSyncRecovering"));
+            view.rerenderWorkspace(
+                workspace({
+                    sessionStatesById: {
+                        a: { ...createSessionState(), sync: "current", execution: "idle" },
+                    },
+                }),
+            );
+            assert.equal(screen.queryByText("input.stateSyncRecovering"), null);
+            view.unmount();
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    it("never flashes a notice for a fast recovery", async () => {
+        vi.useFakeTimers();
+        try {
+            const view = renderPane(workspace({ sessionStatesById: { a: createSessionState() } }));
+            await act(async () => {
+                await vi.advanceTimersByTimeAsync(100);
+            });
+            view.rerenderWorkspace(
+                workspace({
+                    sessionStatesById: {
+                        a: { ...createSessionState(), sync: "current", execution: "idle" },
+                    },
+                }),
+            );
+            await act(async () => {
+                await vi.advanceTimersByTimeAsync(500);
+            });
+            assert.equal(screen.queryByText("input.stateSyncRecovering"), null);
+            assert.equal(screen.queryByText("input.stateSyncIncomplete"), null);
+            view.unmount();
+        } finally {
+            vi.useRealTimers();
+        }
     });
 });
 

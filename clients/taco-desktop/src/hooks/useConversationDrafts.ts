@@ -2,6 +2,7 @@ import {
     type Dispatch,
     type SetStateAction,
     useEffect,
+    useLayoutEffect,
     useMemo,
     useRef,
     useSyncExternalStore,
@@ -52,10 +53,22 @@ export function useConversationDrafts(
     const manager = managerRef.current;
     const lifetime = useRef(0);
     useSyncExternalStore(manager.subscribe, manager.getVersion, manager.getVersion);
-    const handle = useMemo(
-        () => (target ? manager.bind(target, initialModel) : null),
-        [manager, target, initialModel],
-    );
+    const kind = target?.kind;
+    const workspace = target?.workspace;
+    const id = target?.kind === "session" ? target.sessionId : target?.draftId;
+    const provider = initialModel?.provider;
+    const modelId = initialModel?.id;
+    const handle = useMemo(() => {
+        if (!kind || workspace === undefined || id === undefined) return null;
+        return manager.prepare(
+            kind === "session"
+                ? { kind, workspace, sessionId: id }
+                : { kind, workspace, draftId: id },
+            provider !== undefined && modelId !== undefined ? { provider, id: modelId } : null,
+        );
+    }, [manager, kind, workspace, id, provider, modelId]);
+
+    useLayoutEffect(() => handle?.commit(), [handle]);
 
     useEffect(() => {
         const generation = ++lifetime.current;

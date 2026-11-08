@@ -240,7 +240,7 @@ describe("workspace lifecycle isolation", () => {
         );
     });
 
-    it("marks legacy snapshot execution unknown and sync incomplete", async () => {
+    it("keeps legacy snapshot execution unknown while leaving replay completion to the processor", async () => {
         const h = setup({
             sessionSnapshotGet: vi.fn(async () => ({
                 history: { entries: [] },
@@ -255,12 +255,12 @@ describe("workspace lifecycle isolation", () => {
             sid: "A",
             execution: "unknown",
         });
-        expect(h.actions).toContainEqual({
-            type: "SET_SESSION_SYNC",
-            cwd: "/w",
-            sid: "A",
-            sync: "incomplete",
-        });
+        expect(h.actions).not.toContainEqual(
+            expect.objectContaining({ type: "SET_SESSION_SYNC", sync: "incomplete" }),
+        );
+        expect(h.workspacesRef.current["/w"]?.sessionStatesById?.A?.execution).toBe("unknown");
+        expect(h.workspacesRef.current["/w"]?.sessionStatesById?.A?.sync).toBe("recovering");
+        expect(h.workspacesRef.current["/w"]?.pendingBySessionId.A).toBeUndefined();
     });
 
     it("drops an earlier list response after a later refresh", async () => {
