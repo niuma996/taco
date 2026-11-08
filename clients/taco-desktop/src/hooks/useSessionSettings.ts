@@ -1,52 +1,69 @@
 /**
- * useSessionSettings — per-session thinking level and model selection.
- *
- * Both are optimistic maps keyed by sessionId that live outside the workspace
- * reducer: they are user preferences the server echoes back, not workspace
- * state, and a failed RPC must roll one key back without touching messages.
- *
- * The hook also owns the "staged model" slot — a model picked while the
- * workspace has no session yet (fresh session before its first send). Without
- * it a ModelMenu change on a blank session is silently dropped.
+ * useSessionSettings — optimistic settings owned by a workspace/session pair,
+ * plus model choices owned by a workspace/draft pair before session creation.
  */
 
 import { asSessionId, asWorkspaceId, type ThinkingLevel } from "@taco-ai/protocol";
-import { type Dispatch, type SetStateAction, useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import type { ModelSelection } from "../components/settings/ModelPicker";
 import type { TacoClient } from "../lib/clients/tacoClient.ts";
 import { defaultThinkingLevelForNewSession, getGlobalConfig } from "../lib/globalConfig";
 import type { PushNotificationOptions } from "../lib/notifications";
 
-/**
- * Optimistic per-session setter: write `next` under `sid`, await `rpc`, and on
- * throw roll back to the previous value if any (else drop the key). Re-throws
- * after rollback so the caller can show its own error UI (banner / toast).
- * Centralizes the hadPrev/prev/destructure dance so model/thinking rollback
- * rules don't drift between call sites.
- */
-async function applyOptimistic<K extends string, V>(
-    map: Record<K, V>,
-    setter: Dispatch<SetStateAction<Record<K, V>>>,
-    sid: K,
-    next: V,
-    rpc: () => Promise<void>,
-    label: string,
-): Promise<void> {
-    const hadPrev = Object.hasOwn(map, sid);
-    const prev = map[sid];
-    setter((m) => ({ ...m, [sid]: next }));
-    try {
-        await rpc();
-    } catch (err) {
-        console.error(`[taco] ${label} failed`, err);
-        setter((m) => {
-            if (hadPrev) return { ...m, [sid]: prev as V };
-            const { [sid]: _drop, ...rest } = m;
-            void _drop;
-            return rest as Record<K, V>;
-        });
-        throw err;
+/** An omitted draft id preserves the single-draft API within each workspace. */
+export interface DraftTarget {
+    workspace: string;
+    draftId?: string;
+}
+
+export interface SessionTarget extends DraftTarget {
+    /** Undefined means the target is a draft rather than an attached session. */
+    sessionId?: string;
+}
+
+function sessionKey(workspace: string, sessionId: string): string {
+    return JSON.stringify([workspace, sessionId]);
+}
+
+function draftKey({ workspace, draftId }: DraftTarget): string {
+    return JSON.stringify([workspace, draftId ?? null]);
+}
+
+/** Synchronous snapshots also handle multiple picks before React renders again. */
+function useVersionedMap<V>() {
+    const [values, setValues] = useState<Record<string, V>>({});
+    const current = useRef<Record<string, V>>({});
+    const versions = useRef(new Map<string, symbol>());
+
+    function read(key: string): V | undefined {
+        return current.current[key];
     }
+
+    function write(key: string, next: V | undefined): symbol {
+        const token = Symbol();
+        versions.current.set(key, token);
+        const updated = { ...current.current };
+        if (next === undefined) delete updated[key];
+        else updated[key] = next;
+        current.current = updated;
+        setValues(updated);
+        return token;
+    }
+
+    async function apply(key: string, next: V, rpc: () => Promise<unknown>, label: string) {
+        const previous = read(key);
+        const token = write(key, next);
+        try {
+            await rpc();
+        } catch (err) {
+            console.error(`[taco] ${label} failed`, err);
+            // A newer pick (even an equal value) owns the key after its write.
+            if (versions.current.get(key) === token) write(key, previous);
+            throw err;
+        }
+    }
+
+    return { values, read, write, apply };
 }
 
 /** Level + model to open a brand-new session with, resolved before its id exists. */
@@ -57,21 +74,26 @@ export interface NewSessionDefaults {
 }
 
 export interface UseSessionSettingsApi {
+    /** Keys encode [workspace, sessionId]; use isThinkingSuppressed for lookups. */
     sessionLevels: Record<string, ThinkingLevel>;
     /** Thinking level displayed for the current session. */
     activeLevel: ThinkingLevel | null;
     /** Model displayed for the current session; the staged pick when there is no session. */
     activeModel: ModelSelection | null;
-    /** Whether streaming thinking_* sub-events should be hidden for `sid`. */
-    isThinkingSuppressed: (sid: string) => boolean;
-    setSessionLevel: (next: ThinkingLevel) => Promise<void>;
-    setSessionModel: (next: ModelSelection) => Promise<void>;
+    /** Defaults to the workspace captured by this render. */
+    isThinkingSuppressed: (sid: string, workspace?: string) => boolean;
+    setSessionLevel: (next: ThinkingLevel, target?: SessionTarget) => Promise<void>;
+    setSessionModel: (next: ModelSelection, target?: SessionTarget) => Promise<void>;
     /** Resolve the level + model a new session should be created with. */
-    newSessionDefaults: () => NewSessionDefaults;
-    /** Record the defaults under the id the server just allocated, clearing the staged model. */
-    adoptNewSession: (sessionId: string, defaults: NewSessionDefaults) => void;
-    /** Drop the staged model — the session it was picked for was abandoned. */
-    clearStagedModel: () => void;
+    newSessionDefaults: (target?: DraftTarget) => NewSessionDefaults;
+    /** Adopt defaults in their original workspace, consuming only the original staged pick. */
+    adoptNewSession: (
+        sessionId: string,
+        defaults: NewSessionDefaults,
+        target?: DraftTarget,
+    ) => void;
+    /** Drop only the targeted draft's staged model. */
+    clearStagedModel: (target?: DraftTarget) => void;
 }
 
 export interface UseSessionSettingsOptions {
@@ -79,6 +101,7 @@ export interface UseSessionSettingsOptions {
     activeCwd: string;
     /** Currently attached session, or undefined on a fresh pre-send workspace. */
     activeSession: string | undefined;
+    activeDraftId?: string;
     pushNotification: (msg: string, opts?: PushNotificationOptions) => void;
 }
 
@@ -86,36 +109,38 @@ export function useSessionSettings({
     client,
     activeCwd,
     activeSession,
+    activeDraftId,
     pushNotification,
 }: UseSessionSettingsOptions): UseSessionSettingsApi {
-    const [sessionLevels, setSessionLevels] = useState<Record<string, ThinkingLevel>>({});
-    const [sessionModels, setSessionModels] = useState<Record<string, ModelSelection>>({});
-    // State (not a ref) so the ModelMenu re-renders when the staged choice changes.
-    const [stagedModel, setStagedModel] = useState<ModelSelection | null>(null);
+    const levels = useVersionedMap<ThinkingLevel>();
+    const models = useVersionedMap<ModelSelection>();
+    const stagedModels = useVersionedMap<ModelSelection>();
+    const activeTarget: SessionTarget = {
+        workspace: activeCwd,
+        sessionId: activeSession,
+        draftId: activeDraftId,
+    };
 
     const isThinkingSuppressed = useCallback(
-        (sid: string): boolean =>
-            sessionLevels[sid] !== undefined
-                ? sessionLevels[sid] === "off"
-                : defaultThinkingLevelForNewSession(getGlobalConfig().global) === "off",
-        [sessionLevels],
+        (sid: string, workspace = activeCwd): boolean =>
+            (levels.values[sessionKey(workspace, sid)] ??
+                defaultThinkingLevelForNewSession(getGlobalConfig().global)) === "off",
+        [levels.values, activeCwd],
     );
 
-    async function setSessionLevel(next: ThinkingLevel): Promise<void> {
-        if (!activeSession) return;
+    async function setSessionLevel(next: ThinkingLevel, target = activeTarget): Promise<void> {
+        const { workspace, sessionId } = target;
+        if (!sessionId) return;
         try {
-            await applyOptimistic(
-                sessionLevels,
-                setSessionLevels,
-                activeSession,
+            await levels.apply(
+                sessionKey(workspace, sessionId),
                 next,
-                async () => {
-                    await client.sessionSetThinkingLevel({
-                        workspace: asWorkspaceId(activeCwd),
-                        sessionId: asSessionId(activeSession),
+                () =>
+                    client.sessionSetThinkingLevel({
+                        workspace: asWorkspaceId(workspace),
+                        sessionId: asSessionId(sessionId),
                         level: next,
-                    });
-                },
+                    }),
                 "sessionSetThinkingLevel",
             );
         } catch (err) {
@@ -123,26 +148,23 @@ export function useSessionSettings({
         }
     }
 
-    async function setSessionModel(next: ModelSelection): Promise<void> {
-        if (!activeSession) {
-            // No session yet: stage the choice so the lazy-create path applies it.
-            setStagedModel(next);
+    async function setSessionModel(next: ModelSelection, target = activeTarget): Promise<void> {
+        const { workspace, sessionId } = target;
+        if (!sessionId) {
+            stagedModels.write(draftKey(target), next);
             return;
         }
         try {
-            await applyOptimistic(
-                sessionModels,
-                setSessionModels,
-                activeSession,
+            await models.apply(
+                sessionKey(workspace, sessionId),
                 next,
-                async () => {
-                    await client.sessionSetModel({
-                        workspace: asWorkspaceId(activeCwd),
-                        sessionId: asSessionId(activeSession),
+                () =>
+                    client.sessionSetModel({
+                        workspace: asWorkspaceId(workspace),
+                        sessionId: asSessionId(sessionId),
                         provider: next.provider,
                         modelId: next.id,
-                    });
-                },
+                    }),
                 "sessionSetModel",
             );
         } catch (err) {
@@ -150,27 +172,33 @@ export function useSessionSettings({
         }
     }
 
+    const activeKey = activeSession ? sessionKey(activeCwd, activeSession) : undefined;
     return {
-        sessionLevels,
-        activeLevel: activeSession
-            ? (sessionLevels[activeSession] ??
+        sessionLevels: levels.values,
+        activeLevel: activeKey
+            ? (levels.values[activeKey] ??
               defaultThinkingLevelForNewSession(getGlobalConfig().global))
             : null,
-        activeModel: activeSession ? (sessionModels[activeSession] ?? null) : stagedModel,
+        activeModel: activeKey
+            ? (models.values[activeKey] ?? null)
+            : (stagedModels.values[draftKey(activeTarget)] ?? null),
         isThinkingSuppressed,
         setSessionLevel,
         setSessionModel,
-        newSessionDefaults: () => ({
+        newSessionDefaults: (target = activeTarget) => ({
             initialLevel: defaultThinkingLevelForNewSession(getGlobalConfig().global),
-            initialModel: stagedModel,
+            initialModel: stagedModels.read(draftKey(target)) ?? null,
         }),
-        adoptNewSession: (sessionId, { initialLevel, initialModel }) => {
-            setSessionLevels((m) => ({ ...m, [sessionId]: initialLevel }));
-            // The staged model only applies to this session's first attach;
-            // later switches go through session.setModel.
-            setStagedModel(null);
-            if (initialModel) setSessionModels((m) => ({ ...m, [sessionId]: initialModel }));
+        adoptNewSession: (sessionId, { initialLevel, initialModel }, target = activeTarget) => {
+            const key = sessionKey(target.workspace, sessionId);
+            levels.write(key, initialLevel);
+            if (initialModel) models.write(key, initialModel);
+            // Creation may finish after a new model was picked in the same draft.
+            const stagedKey = draftKey(target);
+            if (stagedModels.read(stagedKey) === initialModel)
+                stagedModels.write(stagedKey, undefined);
         },
-        clearStagedModel: () => setStagedModel(null),
+        clearStagedModel: (target = activeTarget) =>
+            stagedModels.write(draftKey(target), undefined),
     };
 }

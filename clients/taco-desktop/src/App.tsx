@@ -48,6 +48,7 @@ import { useAppLifecycle } from "./hooks/useAppLifecycle";
 import { AskUserProvider } from "./hooks/useAskUser";
 import { CHANNEL_NAME_WECOM, useChannelsPane } from "./hooks/useChannelsPane";
 import { useCheckpointsPane } from "./hooks/useCheckpointsPane";
+import { useConversationDrafts } from "./hooks/useConversationDrafts";
 import { useConversationsPane } from "./hooks/useConversationsPane";
 import { FilePreviewOpenerProvider } from "./hooks/useFilePreviewOpener";
 import { useLlmDump } from "./hooks/useLlmDump";
@@ -58,7 +59,11 @@ import { useRightPanel } from "./hooks/useRightPanel";
 import { useRightPanelAutoOpen } from "./hooks/useRightPanelAutoOpen";
 import { useSessionContextInfo } from "./hooks/useSessionContextInfo";
 import { useSessionSearch } from "./hooks/useSessionSearch";
-import { sidecarLogListenerReady, useSidecarStream } from "./hooks/useSidecarStream";
+import {
+    getSessionRecoveryTargets,
+    sidecarLogListenerReady,
+    useSidecarStream,
+} from "./hooks/useSidecarStream";
 import { useSkillsPane } from "./hooks/useSkillsPane";
 import { SubagentProvider } from "./hooks/useSubagent";
 import { useToolsPane } from "./hooks/useToolsPane";
@@ -66,6 +71,7 @@ import { useWorkOverview } from "./hooks/useWorkOverview";
 import { useWorkspaceModels } from "./hooks/useWorkspaceModels";
 import { useWorkspaces } from "./hooks/useWorkspaces";
 import { useT } from "./i18n/useI18n";
+import type { ConversationTarget } from "./lib/chat/conversationDrafts";
 import { deriveSubagents, subagentDotState } from "./lib/chat/subagentList";
 import {
     readPersistedSidebarCollapsed,
@@ -96,6 +102,16 @@ import { WorkPane } from "./views/WorkPane";
 export default function App() {
     const [client] = useState(() => new TacoClient());
     const wsApi = useWorkspaces(client);
+    const drafts = useConversationDrafts(wsApi.composerTarget);
+    const { input, setInput, attachments, setAttachments } = drafts;
+    const pendingNewDraft = useRef<ConversationTarget | null>(null);
+    useEffect(
+        () =>
+            wsApi.onDraftCreated(({ workspace, draftId, sessionId }) =>
+                drafts.migrateDraft(workspace, draftId, sessionId),
+            ),
+        [wsApi.onDraftCreated, drafts.migrateDraft],
+    );
     // Sidebar collapse state — collapsed sidebar shrinks to a rail with only the
     // expand button, letting ChatPane fill the main area. Chat view only.
     // Persisted to localStorage so the layout survives restarts.
@@ -133,8 +149,6 @@ export default function App() {
         renameSession,
         beginPendingNewSession,
         openImConversation,
-        sendPrompt,
-        steerPrompt,
         cancelQueued,
         abortPrompt,
         setSessionModel,
@@ -419,6 +433,7 @@ export default function App() {
     const { clearCursors } = useSidecarStream(client, {
         onAction: dispatch,
         onSnapshotRequired: wsApi.restoreSessionSnapshot,
+        getRecoveryTargets: () => getSessionRecoveryTargets(workspaces, activeCwd),
         // The sidecar's own stream: it arrives unprompted, so it goes to the
         // bell without a toast — a daemon retrying a dead channel would
         // otherwise toast every tick. Warns are degradations, kept apart by
@@ -461,10 +476,6 @@ export default function App() {
     const {
         copiedSessionId,
         setCopiedSessionId,
-        input,
-        setInput,
-        attachments,
-        setAttachments,
         confirmNewSession,
         setConfirmNewSession,
         pendingNewSessionCwd,
@@ -777,13 +788,34 @@ export default function App() {
 
     function handleNewSession(): void {
         if (input.trim() !== "" || attachments.length > 0) {
+            pendingNewDraft.current = wsApi.composerTarget;
             setPendingNewSessionCwd(activeCwd);
             setConfirmNewSession(true);
             return;
         }
         startNewSession(activeCwd);
+    }
+
+    async function submitComposer(): Promise<void> {
+        const snapshot = drafts.beginSubmission();
+        if (!snapshot || (!snapshot.input.trim() && snapshot.attachments.length === 0)) {
+            if (snapshot) drafts.completeSubmission(snapshot, false);
+            return;
+        }
         setInput("");
         setAttachments([]);
+        if (textareaRef.current) textareaRef.current.style.height = "auto";
+        const outcome = await wsApi.submitPrompt(
+            snapshot.target,
+            snapshot.input,
+            undefined,
+            snapshot.attachments,
+            runInFlight,
+        );
+        drafts.completeSubmission(
+            snapshot,
+            outcome === "unknown" ? "unknown" : outcome === "accepted",
+        );
     }
 
     return (
@@ -952,7 +984,11 @@ export default function App() {
                                             }
                                             input={input}
                                             attachments={attachments}
-                                            onStageAttachment={wsApi.stageAttachment}
+                                            onStageAttachment={(source) =>
+                                                wsApi.stageAttachment(source, wsApi.composerTarget)
+                                            }
+                                            recoveries={drafts.recoveries}
+                                            onRecoverDraft={drafts.recoverSubmission}
                                             busy={busy}
                                             runInFlight={runInFlight}
                                             queuedItems={
@@ -976,36 +1012,13 @@ export default function App() {
                                                 autoResizeTextarea();
                                             }}
                                             onAttachmentsChange={setAttachments}
-                                            onSend={async () => {
-                                                const text = input;
-                                                const files = attachments;
-                                                setInput("");
-                                                setAttachments([]);
-                                                if (textareaRef.current) {
-                                                    textareaRef.current.style.height = "auto";
-                                                }
-                                                const send = runInFlight ? steerPrompt : sendPrompt;
-                                                if (!(await send(text, undefined, files))) {
-                                                    setInput(text);
-                                                    setAttachments(files);
-                                                }
-                                            }}
+                                            onSend={submitComposer}
                                             onAbort={() => {
-                                                void abortPrompt().then((texts) => {
-                                                    if (texts.length === 0) return;
-                                                    setInput((prev) => {
-                                                        const restored = texts.join("\n");
-                                                        // Append, never overwrite — the composer
-                                                        // may hold an unsent draft. Trim the
-                                                        // draft's trailing newlines so the join
-                                                        // doesn't leave a blank gap.
-                                                        const head = prev.replace(/\n+$/, "");
-                                                        return head
-                                                            ? `${head}\n${restored}`
-                                                            : restored;
-                                                    });
-                                                    autoResizeTextarea();
-                                                });
+                                                const target = wsApi.composerTarget;
+                                                if (target.kind !== "session") return;
+                                                void abortPrompt(target).then((texts) =>
+                                                    drafts.restoreTexts(target, texts),
+                                                );
                                             }}
                                             activeLevel={activeLevel}
                                             onLevelChange={(next) => void setSessionLevel(next)}
@@ -1022,20 +1035,7 @@ export default function App() {
                                             modelOptions={filteredOptions}
                                             onRefreshModels={refreshModels}
                                             textareaRef={textareaRef}
-                                            onEnter={async () => {
-                                                const text = input;
-                                                const files = attachments;
-                                                setInput("");
-                                                setAttachments([]);
-                                                if (textareaRef.current) {
-                                                    textareaRef.current.style.height = "auto";
-                                                }
-                                                const send = runInFlight ? steerPrompt : sendPrompt;
-                                                if (!(await send(text, undefined, files))) {
-                                                    setInput(text);
-                                                    setAttachments(files);
-                                                }
-                                            }}
+                                            onEnter={submitComposer}
                                             onCopySessionId={(sid) => void copySessionId(sid)}
                                             copiedSessionId={copiedSessionId}
                                             onToggleFiles={() => rightPanel.toggle("files")}
@@ -1278,8 +1278,8 @@ export default function App() {
                     setConfirmNewSession(false);
                     const cwd = pendingNewSessionCwd ?? activeCwd;
                     setPendingNewSessionCwd(null);
-                    setInput("");
-                    setAttachments([]);
+                    if (pendingNewDraft.current) drafts.release(pendingNewDraft.current);
+                    pendingNewDraft.current = null;
                     startNewSession(cwd);
                 }}
                 onCancel={() => {

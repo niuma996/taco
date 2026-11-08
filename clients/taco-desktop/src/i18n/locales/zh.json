@@ -82,6 +82,10 @@
     "resizeHandle": "拖动调整面板宽度"
   },
   "input": {
+    "deliveryUnknown": "发送结果待核对，请先查看聊天记录",
+    "unsentDraft": "有一条未发送的输入",
+    "recoverDraft": "恢复到输入框",
+    "stateSyncIncomplete": "状态待同步",
     "commandPermissionModeHint": "对所有聊天生效。手动审批：白名单之外需确认。自动审批：黑名单和内置高风险命令需确认。黑名单优先。",
     "placeholderRunning": "助手运行中…可直接插话",
     "placeholderIdle": "输入提示后按回车…(可粘贴或附加图片)",

@@ -1,24 +1,10 @@
 import { type Dispatch, type SetStateAction, useState } from "react";
-import type { StagedAttachment } from "../../lib/attachments";
 
-/** UI-only state for the chat input area + the modals it drives.
- *
- *  Groups seven sibling `useState`s that share a single call-site
- *  (chat input + Confirm/Rename modals + session-id copy hint) so
- *  App.tsx doesn't re-accrete one every time someone adds a chip.
- *  Setters keep the standard `Dispatch<SetStateAction<T>>` shape —
- *  needed by the auto-clear updater on `copiedSessionId`.
- */
+/** Modal and copy-feedback state; conversation drafts have a separate owner. */
 export interface UseChatInputStateResult {
     /** Session row id that just had its id copied; auto-clears. */
     copiedSessionId: string | null;
     setCopiedSessionId: Dispatch<SetStateAction<string | null>>;
-    /** Chat textarea content. */
-    input: string;
-    setInput: Dispatch<SetStateAction<string>>;
-    /** Pending image attachments for the next sendPrompt. */
-    attachments: StagedAttachment[];
-    setAttachments: Dispatch<SetStateAction<StagedAttachment[]>>;
     /** "Discard unsent draft and create a new session" confirm modal. */
     confirmNewSession: boolean;
     setConfirmNewSession: Dispatch<SetStateAction<boolean>>;
@@ -44,8 +30,6 @@ export interface UseChatInputStateResult {
 
 export function useChatInputState(): UseChatInputStateResult {
     const [copiedSessionId, setCopiedSessionId] = useState<string | null>(null);
-    const [input, setInput] = useState("");
-    const [attachments, setAttachments] = useState<StagedAttachment[]>([]);
     const [confirmNewSession, setConfirmNewSession] = useState(false);
     const [pendingNewSessionCwd, setPendingNewSessionCwd] = useState<string | null>(null);
     const [pendingDeleteSession, setPendingDeleteSession] = useState<{
@@ -61,10 +45,6 @@ export function useChatInputState(): UseChatInputStateResult {
     return {
         copiedSessionId,
         setCopiedSessionId,
-        input,
-        setInput,
-        attachments,
-        setAttachments,
         confirmNewSession,
         setConfirmNewSession,
         pendingNewSessionCwd,

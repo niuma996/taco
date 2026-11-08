@@ -189,3 +189,74 @@ test("a waiting tool arriving after the history read survives attach", () => {
         true,
     );
 });
+
+test("canonical sessions keep identical ids isolated by workspace and preserve active references", () => {
+    let state = {
+        "/w": { ...createEmptyWorkspace("/w"), activeSession: "same" },
+        "/other": createEmptyWorkspace("/other"),
+    };
+    state = workspacesReducer(state, {
+        type: "APPLY_EVENT",
+        cwd: "/w",
+        sid: "same",
+        now: 1,
+        suppressedThinking: false,
+        ev: { type: "message_end", message: { role: "user", timestamp: 1, content: "one" } },
+    }) as typeof state;
+    const messages = state["/w"].messages;
+    state = workspacesReducer(state, {
+        type: "APPLY_EVENT",
+        cwd: "/other",
+        sid: "same",
+        now: 2,
+        suppressedThinking: false,
+        ev: { type: "message_end", message: { role: "user", timestamp: 2, content: "two" } },
+    }) as typeof state;
+    assert.equal(state["/w"].messages, messages);
+    const canonical = (
+        state["/w"] as unknown as { sessionStatesById?: Record<string, { messages: UiMessage[] }> }
+    ).sessionStatesById;
+    assert.equal(canonical?.same?.messages, messages);
+});
+
+test("late attach history retains live non-interactive messages", () => {
+    let state = { "/w": { ...createEmptyWorkspace("/w"), activeSession: "b" } };
+    state = workspacesReducer(state, { type: "ATTACH_START", cwd: "/w", sid: "a" }) as typeof state;
+    state = workspacesReducer(state, {
+        type: "APPLY_EVENT",
+        cwd: "/w",
+        sid: "a",
+        now: 2,
+        suppressedThinking: false,
+        ev: { type: "message_end", message: { role: "user", timestamp: 2, content: "live" } },
+    }) as typeof state;
+    state = workspacesReducer(state, {
+        type: "ATTACH",
+        cwd: "/w",
+        sid: "a",
+        messages: [{ kind: "user", id: "history", ts: 1, text: "old" }],
+    }) as typeof state;
+    assert.deepEqual(
+        state["/w"].messages.map((m) => m.kind === "user" && m.text),
+        ["old", "live"],
+    );
+});
+
+test("restart clears operational state instead of retaining a running pending flag", () => {
+    const state = {
+        "/w": {
+            ...createEmptyWorkspace("/w"),
+            activeSession: "a",
+            pendingBySessionId: { a: true },
+            queuedBySessionId: {
+                a: [{ id: "q", text: "do not rerun", kind: "nextRun" as const, optimistic: true }],
+            },
+            askUserPending: { same: true as const },
+        },
+    };
+    const ws = workspacesReducer(state, { type: "SIDECAR_RESTARTED", cwd: "/w" })["/w"];
+    assert.ok(ws);
+    assert.deepEqual(ws.pendingBySessionId, {});
+    assert.deepEqual(ws.queuedBySessionId, {});
+    assert.deepEqual(ws.askUserPending, {});
+});

@@ -269,3 +269,15 @@ taco-sidecar [--default-model <model>] [--sessions-root <path>]
 | `--thinking-level` | — | `off` |
 | `--anthropic-api-key` | `ANTHROPIC_API_KEY` | `process.env` |
 | `--openai-api-key` | `OPENAI_API_KEY` | `process.env` |
+
+## 5. 长期记忆
+
+项目记忆以 Markdown 主题文件保存在 `$TACO_HOME/memory/projects/<workspace-key>/`；
+用户级 `MEMORY.md` 提供共享上下文。项目主题的摘要会进入模型上下文，需要时再读取完整正文。
+
+可以在记忆面板查看和编辑主题、检查已记录的来源会话，以及预览整理结果。
+旧主题可能没有来源信息；删除来源会话会使该会话无法再打开，但不会删除记忆本身。
+记忆整理支持归档和恢复，清空归档会永久删除对应的归档副本。
+
+自动提取采取保守策略：对话没有包含有依据、值得长期保留的信息时，记忆可以不发生变化。
+记忆更新与聊天历史独立，因此未提取新记忆不代表聊天记录丢失。

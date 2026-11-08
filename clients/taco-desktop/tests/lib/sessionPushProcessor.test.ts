@@ -272,3 +272,67 @@ describe("SessionPushProcessor", () => {
         assert.equal(reports.length, 2);
     });
 });
+
+it("invalidates an old replay on clear while new work can proceed", async () => {
+    let resolve!: (value: SessionEventsGetResult) => void;
+    const slow = new Promise<SessionEventsGetResult>((r) => {
+        resolve = r;
+    });
+    const delivered: number[] = [];
+    const processor = new SessionPushProcessor({
+        getEvents: () => slow,
+        deliver: (push) => delivered.push(push.seq ?? 0),
+        recoverSnapshot: async () => ({ recovered: false }),
+        reportError: (message) => assert.fail(message),
+    });
+    const old = processor.process(frame(3));
+    await Promise.resolve();
+    processor.clear();
+    await processor.process(frame(1));
+    resolve({
+        events: [frame(1), frame(2), frame(3)],
+        firstSeq: 1,
+        lastSeq: 3,
+        resetRequired: false,
+    });
+    await old;
+    assert.deepEqual(delivered, [1]);
+    assert.equal(processor.last("/workspace", "session"), 1);
+});
+
+it("reports incomplete sync after a legacy snapshot instead of claiming runtime is current", async () => {
+    const states: string[] = [];
+    const processor = new SessionPushProcessor({
+        getEvents: async (_w, _s, afterSeq) =>
+            afterSeq === 0
+                ? { events: [], firstSeq: 8, lastSeq: 9, resetRequired: true }
+                : { events: [], firstSeq: 8, lastSeq: 9, resetRequired: false },
+        deliver: () => {},
+        recoverSnapshot: async () => ({ recovered: true, snapshotSeq: 9 }),
+        reportError: (message) => assert.fail(message),
+        onSyncState: (_workspace, _session, sync) => states.push(sync),
+    });
+    await processor.reconcile("/workspace", "session");
+    assert.deepEqual(states, ["recovering", "incomplete"]);
+});
+
+it("does not treat an old duplicate run_end as execution recovered after snapshot", async () => {
+    const states: string[] = [];
+    const processor = new SessionPushProcessor({
+        getEvents: async (_w, _s, afterSeq) =>
+            afterSeq === 0
+                ? { events: [], firstSeq: 5, lastSeq: 5, resetRequired: true }
+                : {
+                      events: [{ ...frame(5), params: { event: { type: "run_end" } } }],
+                      firstSeq: 5,
+                      lastSeq: 5,
+                      resetRequired: false,
+                  },
+        deliver: () => assert.fail("old run_end must not be delivered"),
+        recoverSnapshot: async () => ({ recovered: true, snapshotSeq: 5 }),
+        reportError: (message) => assert.fail(message),
+        onSyncState: (_workspace, _session, sync) => states.push(sync),
+    });
+    await processor.reconcile("/workspace", "session");
+    assert.deepEqual(states, ["recovering", "incomplete"]);
+});

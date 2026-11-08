@@ -13,7 +13,7 @@ import type {
     ThinkingLevel,
 } from "@taco-ai/protocol";
 import { ArrowUp, Paperclip, Square } from "lucide-react";
-import type { ReactNode, RefObject } from "react";
+import type { Dispatch, ReactNode, RefObject, SetStateAction } from "react";
 import { useEffect, useRef } from "react";
 import { AttachmentChip } from "../components/AttachmentChip";
 import { CommandPermissionModeSelector } from "../components/CommandPermissionModeSelector";
@@ -37,6 +37,7 @@ import { useT } from "../i18n/useI18n";
 import { ATTACHMENT_MAX_COUNT, type StagedAttachment, type StageFn } from "../lib/attachments";
 import type { QueuedUiItem, UiMessage } from "../lib/chat/chatUtils";
 import { checkpointForMessage, isLastInTurn, isTurnInProgress } from "../lib/chat/chatUtils";
+import { getSessionState } from "../lib/chat/sessionState";
 import type { TacoClient } from "../lib/clients/tacoClient";
 import { defaultThinkingLevelForNewSession, getGlobalConfig } from "../lib/globalConfig";
 
@@ -84,7 +85,13 @@ export interface ChatPaneProps {
         sessionBusy?: boolean;
     };
     onInputChange: (next: string) => void;
-    onAttachmentsChange: (next: StagedAttachment[]) => void;
+    onAttachmentsChange: Dispatch<SetStateAction<StagedAttachment[]>>;
+    recoveries?: readonly {
+        readonly id: number;
+        readonly input: string;
+        readonly uncertain?: boolean;
+    }[];
+    onRecoverDraft?: (id: number) => void;
     onSend: () => void;
     onAbort: () => void;
     onEnter: () => void;
@@ -245,9 +252,8 @@ export function ChatPane(props: ChatPaneProps) {
     );
     const { t } = useT();
 
-    // Text and attachment input are locked while compacting, and while another
-    // session opens: the draft is one shared field, so anything typed now
-    // would land in the session being opened, not the one still on screen.
+    // Loading displays the previous transcript until target hydration completes;
+    // lock its controls so they cannot operate on the new target prematurely.
     const composerLocked = compacting || loadingSession;
     // Until the delay passes, the previous conversation stays up (with the
     // composer locked above); the skeleton only replaces it for slow opens.
@@ -412,6 +418,26 @@ export function ChatPane(props: ChatPaneProps) {
                         </output>
                     )}
                     <QueueBar items={queuedItems} onCancel={onCancelQueued} />
+                    {ws?.activeSession &&
+                        getSessionState(ws, ws.activeSession)?.sync !== "current" && (
+                            <output className="input-status">
+                                {t("input.stateSyncIncomplete")}
+                            </output>
+                        )}
+                    {props.recoveries?.map((item) => (
+                        <div key={item.id} className="input-status" role="status">
+                            <span>
+                                {t(item.uncertain ? "input.deliveryUnknown" : "input.unsentDraft")}
+                            </span>
+                            <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => props.onRecoverDraft?.(item.id)}
+                            >
+                                {t("input.recoverDraft")}
+                            </Button>
+                        </div>
+                    ))}
                     <div className="input-card">
                         {dragging && (
                             <div className="attachment-drop-hint" aria-hidden="true">

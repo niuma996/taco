@@ -72,7 +72,10 @@ describe("useWorkspacesFirstTurn.test.tsx", () => {
     function makeClient(overrides: ClientOverrides = {}) {
         return {
             start: vi.fn(async () => ({})),
-            sessionList: vi.fn(async () => ({ sessions: [], total: 0 })),
+            sessionList: vi.fn(async () => ({
+                sessions: [] as { id: string; createdAt: string }[],
+                total: 0,
+            })),
             onWorkspaceEpochChanged: vi.fn(() => () => {}),
             sessionCreate: vi.fn(async () => ({
                 sessionId: NEW_SID,
@@ -192,6 +195,181 @@ describe("useWorkspacesFirstTurn.test.tsx", () => {
             const { workspace, sessionId, text } = client.sessionPrompt.mock.calls[0]?.[0] ?? {};
             assert.deepEqual([workspace, sessionId, text], [CWD, NEW_SID, "hello"]);
             assert.equal(result.current.workspaces[CWD]?.activeSession, NEW_SID);
+        });
+
+        it("creates and runs a second draft while the first turn is still running", async () => {
+            let finishFirst!: () => void;
+            const first = new Promise<{ assistantMessage: null }>((resolve) => {
+                finishFirst = () => resolve({ assistantMessage: null });
+            });
+            const client = makeClient({
+                sessionCreate: vi
+                    .fn()
+                    .mockResolvedValueOnce({ sessionId: "a1", filePath: "a1" })
+                    .mockResolvedValueOnce({ sessionId: "a2", filePath: "a2" }),
+                sessionPrompt: vi
+                    .fn()
+                    .mockImplementationOnce(() => first)
+                    .mockResolvedValue({ assistantMessage: null }),
+            });
+            const { result } = await renderSeeded(client);
+            let running!: Promise<boolean>;
+            act(() => {
+                running = result.current.sendPrompt("first");
+            });
+            await waitFor(() => assert.equal(client.sessionPrompt.mock.calls.length, 1));
+            act(() => {
+                result.current.beginPendingNewSession(CWD);
+            });
+            let second!: Promise<boolean>;
+            act(() => {
+                second = result.current.sendPrompt("second");
+            });
+            await waitFor(() => assert.equal(client.sessionPrompt.mock.calls.length, 2));
+            assert.deepEqual(
+                client.sessionPrompt.mock.calls.map(([params]) => params.sessionId),
+                ["a1", "a2"],
+            );
+            await act(async () => {
+                finishFirst();
+                await running;
+                await second;
+            });
+            assert.equal(result.current.workspaces[CWD]?.activeSession, "a2");
+        });
+
+        it("does not let an older draft creation select itself over a newer draft", async () => {
+            let finishOld!: (value: { sessionId: string; filePath: string }) => void;
+            const client = makeClient({
+                sessionCreate: vi
+                    .fn()
+                    .mockImplementationOnce(
+                        () =>
+                            new Promise((resolve) => {
+                                finishOld = resolve;
+                            }),
+                    )
+                    .mockResolvedValue({ sessionId: "newer", filePath: "newer" }),
+            });
+            const { result } = await renderSeeded(client);
+            let old!: Promise<boolean>;
+            act(() => {
+                old = result.current.sendPrompt("old");
+            });
+            await waitFor(() => assert.equal(client.sessionCreate.mock.calls.length, 1));
+            act(() => {
+                result.current.beginPendingNewSession(CWD);
+            });
+            client.sessionList.mockResolvedValue({
+                sessions: [{ id: "newer", createdAt: "2026-01-01" }],
+                total: 1,
+            });
+            await act(async () => {
+                await result.current.sendPrompt("new");
+            });
+            client.sessionList.mockResolvedValue({
+                sessions: [
+                    { id: "older", createdAt: "2026-01-01" },
+                    { id: "newer", createdAt: "2026-01-01" },
+                ],
+                total: 2,
+            });
+            await act(async () => {
+                finishOld({ sessionId: "older", filePath: "older" });
+                await old;
+            });
+            assert.equal(result.current.workspaces[CWD]?.activeSession, "newer");
+            assert.deepEqual(
+                new Set(result.current.workspaces[CWD]?.sessions.map((session) => session.id)),
+                new Set(["older", "newer"]),
+            );
+        });
+
+        it("sends to an attached session while its auxiliary state is still loading", async () => {
+            let finishTasks!: (value: { active: null; history: never[] }) => void;
+            const client = Object.assign(makeClient(), {
+                sessionAttach: vi.fn(async () => ({})),
+                sessionHistory: vi.fn(async () => ({ entries: [] })),
+                sessionTasksGet: vi.fn(
+                    () =>
+                        new Promise((resolve) => {
+                            finishTasks = resolve;
+                        }),
+                ),
+                sessionPlanStateGet: vi.fn(async () => ({ active: false })),
+            });
+            const { result } = await renderSeeded(client);
+            let attaching!: Promise<void>;
+            act(() => {
+                attaching = result.current.attachSession(CWD, "existing");
+            });
+            await waitFor(() =>
+                assert.equal(result.current.workspaces[CWD]?.activeSession, "existing"),
+            );
+            await act(async () => {
+                await result.current.sendPrompt("on existing");
+            });
+            assert.equal(client.sessionCreate.mock.calls.length, 0);
+            assert.equal(client.sessionPrompt.mock.calls[0]?.[0].sessionId, "existing");
+            await act(async () => {
+                finishTasks({ active: null, history: [] });
+                await attaching;
+            });
+        });
+
+        it("adopts a created session within its source workspace without navigating away from another project", async () => {
+            let create!: (value: { sessionId: string; filePath: string }) => void;
+            const client = makeClient({
+                sessionCreate: vi.fn(
+                    () =>
+                        new Promise((resolve) => {
+                            create = resolve;
+                        }),
+                ),
+            });
+            const { result } = await renderSeeded(client);
+            let sending!: Promise<boolean>;
+            act(() => {
+                sending = result.current.sendPrompt("from a");
+            });
+            await act(async () => {
+                result.current.dispatchWs({ type: "UPSERT_WORKSPACE", cwd: "/b" });
+                await result.current.switchWorkspace("/b");
+            });
+            await act(async () => {
+                create({ sessionId: "a1", filePath: "a1" });
+                await sending;
+            });
+            assert.equal(result.current.activeCwd, "/b");
+            assert.equal(result.current.workspaces[CWD]?.activeSession, "a1");
+            await act(async () => {
+                await result.current.switchWorkspace(CWD);
+            });
+            assert.equal(result.current.composerTarget.kind, "session");
+            if (result.current.composerTarget.kind === "session")
+                assert.equal(result.current.composerTarget.sessionId, "a1");
+        });
+
+        it("creates a fresh conversation after deleting the last session", async () => {
+            const client = makeClient();
+            const { result } = await renderSeeded(client);
+            await act(async () => {
+                await result.current.sendPrompt("first conversation");
+            });
+            await act(async () => {
+                await result.current.deleteSession(CWD, NEW_SID);
+            });
+
+            assert.equal(result.current.composerTarget.kind, "draft");
+            await act(async () => {
+                await result.current.sendPrompt(
+                    "new conversation",
+                    undefined,
+                    undefined,
+                    result.current.composerTarget,
+                );
+            });
+            assert.equal(client.sessionCreate.mock.calls.length, 2);
         });
 
         it("reports a create failure without leaving a session behind", async () => {
@@ -318,6 +496,137 @@ describe("useWorkspacesSteer.test.tsx", () => {
     describe("useWorkspaces — steer degrade chain", () => {
         beforeEach(() => {
             localStorage.clear();
+        });
+
+        it("keeps a busy prompt fallback on the original target after navigation", async () => {
+            let reject!: (error: Error) => void;
+            const client = makeClient({
+                sessionPrompt: vi.fn(
+                    () =>
+                        new Promise((_resolve, fail) => {
+                            reject = fail;
+                        }),
+                ),
+            });
+            const { result } = await renderSeeded(client);
+            let sending!: Promise<boolean>;
+            act(() => {
+                sending = result.current.sendPrompt("original");
+            });
+            act(() => {
+                result.current.beginPendingNewSession(CWD);
+            });
+            await act(async () => {
+                reject(busyError());
+                assert.equal(await sending, true);
+            });
+            assert.equal(client.sessionSteer.mock.calls[0]?.[0].sessionId, SID);
+            assert.equal(result.current.workspaces[CWD]?.activeSession, undefined);
+        });
+
+        it("marks transport response loss unknown without making an automatic resend", async () => {
+            const client = makeClient({
+                sessionPrompt: vi.fn(async () => {
+                    throw new Error("socket closed");
+                }),
+            });
+            const { result } = await renderSeeded(client);
+            let outcome: string | undefined;
+            await act(async () => {
+                outcome = await result.current.submitPrompt(
+                    { kind: "session", workspace: CWD, sessionId: SID },
+                    "maybe submitted",
+                    undefined,
+                    undefined,
+                );
+            });
+            assert.equal(outcome, "unknown");
+            assert.equal(client.sessionPrompt.mock.calls.length, 1);
+            assert.equal(
+                result.current.workspaces[CWD]?.sessionStatesById?.[SID]?.execution,
+                "unknown",
+            );
+            assert.equal(
+                result.current.workspaces[CWD]?.sessionStatesById?.[SID]?.sync,
+                "incomplete",
+            );
+        });
+
+        it("does not let an older prompt response clear a newer running turn", async () => {
+            let complete!: (value: { assistantMessage: null }) => void;
+            const client = makeClient({
+                sessionPrompt: vi.fn(
+                    () =>
+                        new Promise((resolve) => {
+                            complete = resolve;
+                        }),
+                ),
+            });
+            const { result } = await renderSeeded(client);
+            let first!: Promise<boolean>;
+            act(() => {
+                first = result.current.sendPrompt("one");
+            });
+            act(() => {
+                result.current.dispatch({
+                    type: "EVENT",
+                    cwd: CWD,
+                    sid: SID,
+                    ev: { type: "run_start" },
+                });
+                result.current.dispatch({
+                    type: "EVENT",
+                    cwd: CWD,
+                    sid: SID,
+                    ev: { type: "run_end" },
+                });
+                result.current.dispatch({
+                    type: "EVENT",
+                    cwd: CWD,
+                    sid: SID,
+                    ev: { type: "run_start" },
+                });
+            });
+            await act(async () => {
+                complete({ assistantMessage: null });
+                await first;
+            });
+            assert.equal(result.current.workspaces[CWD]?.pendingBySessionId[SID], true);
+        });
+
+        it("does not downgrade a newer run when the previous RPC loses its response", async () => {
+            let fail!: (error: Error) => void;
+            const client = makeClient({
+                sessionPrompt: vi.fn(
+                    () =>
+                        new Promise((_resolve, reject) => {
+                            fail = reject;
+                        }),
+                ),
+            });
+            const { result } = await renderSeeded(client);
+            let sending!: Promise<string>;
+            act(() => {
+                sending = result.current.submitPrompt(
+                    { kind: "session", workspace: CWD, sessionId: SID },
+                    "old",
+                    undefined,
+                    undefined,
+                );
+            });
+            act(() => {
+                for (const type of ["run_start", "run_end", "run_start"] as const)
+                    result.current.dispatch({ type: "EVENT", cwd: CWD, sid: SID, ev: { type } });
+            });
+            await act(async () => {
+                fail(new Error("response lost"));
+                assert.equal(await sending, "unknown");
+            });
+            assert.equal(
+                result.current.workspaces[CWD]?.sessionStatesById?.[SID]?.execution,
+                "running",
+            );
+            assert.equal(result.current.workspaces[CWD]?.pendingBySessionId[SID], true);
         });
 
         it("session_busy degrades to steerPrompt once and reports success", async () => {

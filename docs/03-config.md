@@ -253,3 +253,19 @@ Workspaces are identified by absolute `cwd` paths; sessions are
 identified by `uuidv7` ids. Tooling differences (e.g. available MCP
 servers, IM policy) are per-session or per-workspace-runtime, not per-cwd
 config.
+
+## 6. Long-term memory
+
+Project memories are Markdown topics under `$TACO_HOME/memory/projects/<workspace-key>/`;
+user-level `MEMORY.md` supplies shared context. Project topic summaries enter the
+model context, and the full topic text remains available to read when needed.
+
+Use the Memory pane to review and edit topics, inspect recorded conversation
+sources, and preview consolidation changes. Source metadata may be absent on
+older topics; deleting a source conversation makes that conversation unavailable
+without deleting the memory itself. Consolidation supports archive and restore;
+purging an archive permanently removes those archived copies.
+
+Automatic extraction is conservative: it may leave memory unchanged when a
+conversation contains no supported, durable information. Memory updates are
+separate from chat history, so an empty extraction does not mean a chat was lost.

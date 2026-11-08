@@ -17,16 +17,13 @@ import {
     ErrorCodes,
     SESSION_LIST_DEFAULT_LIMIT,
 } from "@taco-ai/protocol";
+import { listen } from "@tauri-apps/api/event";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { type MutableRefObject, useCallback, useEffect, useRef, useState } from "react";
 import { bootMark, bootPhase } from "../lib/bootTrace";
 import { findPendingAskUserIds, historyToUiMessages } from "../lib/chat/chatUtils";
-import {
-    createEmptyWorkspace,
-    type SessionMeta,
-    type WorkspaceAction,
-    type WorkspaceState,
-} from "../lib/chat/workspaceReducer";
+import { getSessionState } from "../lib/chat/sessionState";
+import type { SessionMeta, WorkspaceAction, WorkspaceState } from "../lib/chat/workspaceReducer";
 import type { TacoClient } from "../lib/clients/tacoClient.ts";
 import { loadGlobalConfig } from "../lib/globalConfig";
 import type { PushNotificationOptions } from "../lib/notifications";
@@ -56,18 +53,22 @@ function toSessionMeta(s: NonNullable<SessionListResult["sessions"]>[number]): S
 }
 
 export interface UseWorkspaceLifecycleApi {
+    /** Invalidate pending navigation when the caller opens a draft or another pane. */
+    markNavigationIntent: () => number;
+    getNavigationVersion: () => number;
     initFromStorage: () => Promise<void>;
     reloadAllWorkspaces: () => Promise<void>;
     loadMoreSessions: (cwd: string) => Promise<void>;
     openWorkspace: (rawCwd: string) => Promise<boolean>;
     browseAndOpen: () => Promise<void>;
     switchWorkspace: (cwd: string) => Promise<void>;
-    attachSession: (cwd: string, sid: string) => Promise<void>;
+    attachSession: (cwd: string, sid: string, isCurrent?: () => boolean) => Promise<void>;
     openImConversation: (cwd: string, sid: string, isCurrent?: () => boolean) => Promise<void>;
     restoreSessionSnapshot: (
         cwd: string,
         sid: string,
         sessionKind: "main" | "subagent",
+        isCurrent?: () => boolean,
     ) => Promise<SnapshotRecovery>;
     deleteSession: (cwd: string, sid: string) => Promise<void>;
     renameSession: (cwd: string, sid: string, name: string) => Promise<void>;
@@ -90,6 +91,8 @@ export interface UseWorkspaceLifecycleApi {
 
 export interface UseWorkspaceLifecycleOptions {
     client: TacoClient;
+    /** Optional navigation clock owned by useWorkspaces (including new-draft intents). */
+    getNavigationVersion?: () => number;
     dispatchWs: (action: WorkspaceAction) => void;
     /** Latest committed workspaces map, for read-after-write paths. */
     workspacesRef: MutableRefObject<Record<string, WorkspaceState>>;
@@ -100,12 +103,59 @@ export interface UseWorkspaceLifecycleOptions {
 
 export function useWorkspaceLifecycle({
     client,
+    getNavigationVersion: getExternalNavigationVersion,
     dispatchWs,
     workspacesRef,
     activeCwd,
     setActiveCwd,
     pushNotification,
 }: UseWorkspaceLifecycleOptions): UseWorkspaceLifecycleApi {
+    const navigationVersion = useRef(0);
+    const connectionGeneration = useRef(0);
+    const listEpochs = useRef(new Map<string, number>());
+    const listedWorkspaces = useRef(new Set<string>());
+    const markNavigationIntent = useCallback(() => ++navigationVersion.current, []);
+    const getNavigationVersion = useCallback(() => navigationVersion.current, []);
+    const beginNavigation = useCallback(() => {
+        const version = markNavigationIntent();
+        const external = getExternalNavigationVersion?.();
+        return () =>
+            version === navigationVersion.current && external === getExternalNavigationVersion?.();
+    }, [markNavigationIntent, getExternalNavigationVersion]);
+    const beginList = useCallback((cwd: string, bindConnection = true) => {
+        const epoch = (listEpochs.current.get(cwd) ?? 0) + 1;
+        listEpochs.current.set(cwd, epoch);
+        const generation = connectionGeneration.current;
+        return () =>
+            epoch === listEpochs.current.get(cwd) &&
+            (!bindConnection || generation === connectionGeneration.current);
+    }, []);
+    useEffect(() => {
+        let disposed = false;
+        const invalidate = () => {
+            connectionGeneration.current++;
+        };
+        const unsubscribeReady = client.onConnectionReady?.(invalidate);
+        const unsubscribeEpoch = client.onWorkspaceEpochChanged(invalidate);
+        let unlisten: (() => void) | undefined;
+        void listen("sidecar-exited", invalidate)
+            .then((off) => {
+                if (disposed) off();
+                else unlisten = off;
+            })
+            .catch(() => {
+                // Browser-only consumers have no native event bus. Connection-ready
+                // and workspace epoch subscriptions still invalidate old responses.
+            });
+        return () => {
+            disposed = true;
+            invalidate();
+            unsubscribeReady?.();
+            unsubscribeEpoch();
+            unlisten?.();
+        };
+    }, [client]);
+
     /** StrictMode double-run guard — see initFromStorage top. */
     const initStartedRef = useRef(false);
     /** See `UseWorkspaceLifecycleApi.defaultCwdSettled`. */
@@ -117,6 +167,7 @@ export function useWorkspaceLifecycle({
      *  useReducer dispatch, so no deps are needed. */
     const dispatchListResult = useCallback(
         (cwd: string, result: SessionListResult, append: boolean): void => {
+            listedWorkspaces.current.add(cwd);
             dispatchWs({
                 type: "LOAD_SESSIONS",
                 cwd,
@@ -133,6 +184,7 @@ export function useWorkspaceLifecycle({
 
     const loadWorkspaceSessions = useCallback(
         async (cwd: string): Promise<void> => {
+            const isCurrent = beginList(cwd, false);
             // The stderr listener must be up before the sidecar can emit a
             // startup line, or the first log is dropped (Tauri's event bus
             // is fire-and-forget). initFromStorage awaits this once at mount;
@@ -144,13 +196,13 @@ export function useWorkspaceLifecycle({
             await client.start(asWorkspaceId(cwd));
             // Default page size (no full:true) — pagination must actually page on
             // initial load, not fetch every session up front.
-            dispatchListResult(
-                cwd,
-                await client.sessionList({ workspace: asWorkspaceId(cwd) }),
-                false,
-            );
+            if (!isCurrent()) return;
+            const generation = connectionGeneration.current;
+            const list = await client.sessionList({ workspace: asWorkspaceId(cwd) });
+            if (isCurrent() && generation === connectionGeneration.current)
+                dispatchListResult(cwd, list, false);
         },
-        [client, dispatchListResult],
+        [client, dispatchListResult, beginList],
     );
 
     /** Refresh only one workspace's session list (pull latest name etc. for the sidebar).
@@ -163,49 +215,54 @@ export function useWorkspaceLifecycle({
                 // Re-fetch as one page sized to what the user has already paged
                 // in, so a refresh after a turn keeps an expanded list expanded
                 // instead of collapsing it back to the first page.
+                const isCurrent = beginList(cwd);
                 const loaded = workspacesRef.current[cwd]?.sessions.length ?? 0;
                 const list = await client.sessionList({
                     workspace: asWorkspaceId(cwd),
                     ...(loaded > SESSION_LIST_DEFAULT_LIMIT ? { limit: loaded } : undefined),
                 });
-                dispatchListResult(cwd, list, false);
+                if (isCurrent()) dispatchListResult(cwd, list, false);
             } catch (err) {
                 console.error("[taco] refreshSessionList failed", cwd, err);
             }
         },
-        [client, dispatchListResult, workspacesRef],
+        [client, dispatchListResult, workspacesRef, beginList],
     );
 
     const attachSession = useCallback(
-        async (cwd: string, sessionId: string): Promise<void> => {
-            let inFlightAgentToolCallIds: string[] | undefined;
-            let settledBackgroundSubSessionIds: string[] | undefined;
-            // Show the loading skeleton now; the history RPC can take a while
-            // for a long session, and the old conversation must not linger as
-            // if the click did nothing.
+        async (
+            cwd: string,
+            sessionId: string,
+            isCurrent: () => boolean = () => true,
+        ): Promise<void> => {
+            const currentNavigation = beginNavigation();
+            const navigationIsCurrent = () => currentNavigation() && isCurrent();
+            const generation = connectionGeneration.current;
+            const connectionIsCurrent = () => generation === connectionGeneration.current;
+            const cached = getSessionState(workspacesRef.current[cwd], sessionId);
             dispatchWs({ type: "ATTACH_START", cwd, sid: sessionId });
+            if (cached?.historyLoaded && !cached.truncated && cached.sync === "current") {
+                dispatchWs({
+                    type: "ATTACH",
+                    cwd,
+                    sid: sessionId,
+                    messages: cached.messages,
+                    pendingAskUserIds: Object.keys(cached.askUserPending),
+                    makeActive: true,
+                });
+                return;
+            }
+            let attachResult: Awaited<ReturnType<typeof client.sessionAttach>>;
             try {
-                const attachResult = await client.sessionAttach({
+                attachResult = await client.sessionAttach({
                     workspace: asWorkspaceId(cwd),
                     sessionId: asSessionId(sessionId),
                 });
-                inFlightAgentToolCallIds = attachResult?.inFlightAgentToolCallIds;
-                settledBackgroundSubSessionIds = attachResult?.settledBackgroundSubSessionIds;
             } catch (err) {
-                const msg = `Cannot open session: ${(err as Error).message}`;
+                if (!connectionIsCurrent()) return;
                 console.error("[taco] sessionAttach failed", cwd, sessionId, err);
-                pushNotification(msg);
-                // Prune only when the session really is gone. Every other
-                // failure — no model configured, harness error, transport —
-                // leaves a perfectly valid row on disk, and dropping it here
-                // turned a recoverable error into what looked like lost chat
-                // history. The sidecar answers a missing session with
-                // `not_found` (SessionNotFoundError, mapped in normalizeError);
-                // anything else normalizes to `internal` / `invalid_state`, so
-                // the code discriminates.
-                // REMOVE_SESSION's reducer strips this sid's pendingBySessionId
-                // slot in the same commit, so the sidebar's "running" dot
-                // clears with the row.
+                if (navigationIsCurrent())
+                    pushNotification(`Cannot open session: ${(err as Error).message}`);
                 if ((err as { code?: string }).code === ErrorCodes.NotFound) {
                     dispatchWs({ type: "REMOVE_SESSION", cwd, sid: sessionId });
                 } else {
@@ -213,6 +270,9 @@ export function useWorkspaceLifecycle({
                 }
                 return;
             }
+            if (!connectionIsCurrent()) return;
+            const inFlightAgentToolCallIds = attachResult?.inFlightAgentToolCallIds;
+            const settledBackgroundSubSessionIds = attachResult?.settledBackgroundSubSessionIds;
             let hist: Awaited<ReturnType<typeof client.sessionHistory>>;
             try {
                 hist = await client.sessionHistory({
@@ -220,24 +280,16 @@ export function useWorkspaceLifecycle({
                     sessionId: asSessionId(sessionId),
                 });
             } catch (err) {
-                // sessionAttach succeeded — the session is valid on the sidecar.
-                // Only the history pull failed; dispatch an empty ATTACH so the
-                // chat panel renders in a known empty state and the user can
-                // still send a new turn. Surface the error so the failure isn't
-                // silent (Unahandled Promise Rejection escape route from F1).
-                const msg = `Cannot load session history: ${(err as Error).message}`;
+                if (!connectionIsCurrent()) return;
                 console.error("[taco] sessionHistory failed", cwd, sessionId, err);
-                pushNotification(msg);
-                dispatchWs({
-                    type: "ATTACH",
-                    cwd,
-                    sid: sessionId,
-                    messages: [],
-                    pendingAskUserIds: [],
-                });
+                if (navigationIsCurrent())
+                    pushNotification(`Cannot load session history: ${(err as Error).message}`);
+                // Failed history is not an authoritative empty transcript.
+                dispatchWs({ type: "ATTACH_FAILED", cwd, sid: sessionId });
                 return;
             }
-            const msgs = historyToUiMessages(
+            if (!connectionIsCurrent()) return;
+            const messages = historyToUiMessages(
                 hist.entries as Parameters<typeof historyToUiMessages>[0],
                 { inFlightAgentToolCallIds },
             );
@@ -245,52 +297,58 @@ export function useWorkspaceLifecycle({
                 type: "ATTACH",
                 cwd,
                 sid: sessionId,
-                messages: msgs,
-                pendingAskUserIds: findPendingAskUserIds(msgs),
+                messages,
+                pendingAskUserIds: findPendingAskUserIds(messages),
                 inFlightAgentToolCallIds,
                 settledBackgroundSubSessionIds,
+                makeActive: navigationIsCurrent(),
             });
-            // tasks / planState fallback — sidecar pushes on session.attached, but we proactively
-            // pull once to cover push-channel drops. RPC reads sidecar memory directly.
-            //
-            // These reads look redundant next to session.snapshot.get (returns history + tasks +
-            // planState in one call). Attach deliberately does NOT use snapshot.get: it carries a
-            // snapshotSeq that exists to reset the push cursor, and session.attached's sequenced
-            // tasks/plan pushes land right after this attach — swapping without reconciling the
-            // cursor would discard those pushes as duplicates. Keep the split until push-recovery
-            // semantics change deliberately.
+            // Hydrate the captured target only if no newer push replaced its entry.
             try {
-                const r = await client.sessionTasksGet({
+                const previousTasks =
+                    workspacesRef.current[cwd]?.taskSnapshotsBySessionId[sessionId];
+                const tasks = await client.sessionTasksGet({
                     workspace: asWorkspaceId(cwd),
                     sessionId: asSessionId(sessionId),
                 });
-                dispatchWs({
-                    type: "TASKS_UPDATED",
-                    cwd,
-                    sid: sessionId,
-                    active: r.active,
-                    history: r.history,
-                });
+                if (!connectionIsCurrent()) return;
+                if (
+                    workspacesRef.current[cwd]?.taskSnapshotsBySessionId[sessionId] ===
+                    previousTasks
+                ) {
+                    dispatchWs({
+                        type: "TASKS_UPDATED",
+                        cwd,
+                        sid: sessionId,
+                        active: tasks.active,
+                        history: tasks.history,
+                    });
+                }
             } catch {
-                /* Older sidecar may lack this RPC — rely on push. */
+                /* Older sidecars may lack this RPC. */
             }
+            if (!connectionIsCurrent()) return;
             try {
-                const p = await client.sessionPlanStateGet({
+                const previousPlan = workspacesRef.current[cwd]?.planStatesBySessionId[sessionId];
+                const plan = await client.sessionPlanStateGet({
                     workspace: asWorkspaceId(cwd),
                     sessionId: asSessionId(sessionId),
                 });
-                dispatchWs({
-                    type: "PLAN_STATE_UPDATED",
-                    cwd,
-                    sid: sessionId,
-                    active: p.active,
-                    currentSlug: p.currentSlug,
-                });
+                if (!connectionIsCurrent()) return;
+                if (workspacesRef.current[cwd]?.planStatesBySessionId[sessionId] === previousPlan) {
+                    dispatchWs({
+                        type: "PLAN_STATE_UPDATED",
+                        cwd,
+                        sid: sessionId,
+                        active: plan.active,
+                        currentSlug: plan.currentSlug,
+                    });
+                }
             } catch {
-                /* Same as above. */
+                /* Older sidecars may lack this RPC. */
             }
         },
-        [client, dispatchWs, pushNotification],
+        [client, dispatchWs, pushNotification, workspacesRef, beginNavigation],
     );
 
     const attachSessionRef = useRef(attachSession);
@@ -310,6 +368,7 @@ export function useWorkspaceLifecycle({
 
     const switchWorkspace = useCallback(
         async (cwd: string): Promise<void> => {
+            markNavigationIntent();
             setActiveCwd(cwd);
             persistActiveCwd(cwd);
             dispatchWs({ type: "SET_ACTIVE", cwd });
@@ -320,7 +379,7 @@ export function useWorkspaceLifecycle({
             // from one that was fetched and is genuinely empty (total 0). Refetching
             // on every switch would put a `session.list` on a hot UI path.
             let ws = workspacesRef.current[cwd];
-            if (ws && ws.listTotal === undefined) {
+            if (ws && ws.listTotal === undefined && !listedWorkspaces.current.has(cwd)) {
                 try {
                     await loadWorkspaceSessions(cwd);
                     ws = workspacesRef.current[cwd];
@@ -336,7 +395,7 @@ export function useWorkspaceLifecycle({
             // attachSession). Picking a session implicitly here would
             // resurrect stale history on every workspace switch.
         },
-        [dispatchWs, setActiveCwd, workspacesRef, loadWorkspaceSessions],
+        [dispatchWs, setActiveCwd, workspacesRef, loadWorkspaceSessions, markNavigationIntent],
     );
 
     const initFromStorage = useCallback(async () => {
@@ -346,6 +405,7 @@ export function useWorkspaceLifecycle({
         // The in-flight ref guarantees a single run.
         if (initStartedRef.current) return;
         initStartedRef.current = true;
+        const navigationIsCurrent = beginNavigation();
         bootMark("ui.initFromStorage.enter");
         // Block until the stderr listener is up — otherwise startup lines
         // emitted by the sidecar between cmd.spawn and the listener's
@@ -386,16 +446,14 @@ export function useWorkspaceLifecycle({
             storedActive && opened.includes(storedActive) ? storedActive : null,
             opened,
         );
-        setActiveCwd(activeTarget);
+        if (navigationIsCurrent()) setActiveCwd(activeTarget);
         // Persist the post-prune list back so a workspace that disappeared
         // between sessions does not get carried forward. Failure is logged but
         // non-fatal — the in-memory `opened` already excludes the dropped ones.
         await persistCwds(opened);
-        const placeholder: Record<string, WorkspaceState> = {};
-        for (const cwd of opened) {
-            placeholder[cwd] = createEmptyWorkspace(cwd, cwd === activeTarget);
-        }
-        dispatchWs({ type: "INIT", workspaces: placeholder });
+        for (const cwd of opened) dispatchWs({ type: "UPSERT_WORKSPACE", cwd });
+        if (navigationIsCurrent() && activeTarget)
+            dispatchWs({ type: "SET_ACTIVE", cwd: activeTarget });
         // No workspace to load: `resolveActiveCwd` returns "" when nothing is
         // opened and `initDefaultCwd` failed (see `defaultCwdSettled`). `asWorkspaceId`
         // rejects "", so the leader barrier and per-cwd retries below would only
@@ -485,10 +543,11 @@ export function useWorkspaceLifecycle({
                         // answers this call, the await parks here for ~17min
                         // with no error to catch — the mark is how we tell that
                         // apart from a slow-but-answering daemon.
+                        const isCurrent = beginList(cwd);
                         const list = await bootPhase(`ui.percwd.sessionList[${cwd}]`, () =>
                             client.sessionList({ workspace: asWorkspaceId(cwd) }),
                         );
-                        dispatchListResult(cwd, list, false);
+                        if (isCurrent()) dispatchListResult(cwd, list, false);
                         lastErr = undefined;
                         break;
                     } catch (err) {
@@ -532,7 +591,7 @@ export function useWorkspaceLifecycle({
         // a prior session is the sidebar's job. Auto-attaching here would
         // surface stale history on every restart.
         bootMark("ui.initFromStorage.done");
-    }, [client, dispatchListResult, dispatchWs, setActiveCwd]);
+    }, [client, dispatchListResult, dispatchWs, setActiveCwd, beginList, beginNavigation]);
 
     /** Called after sidecar restart — the sidecar process is replaced, so all attached session
      * IDs become invalid in the new process. Refetch every workspace's session list so the
@@ -552,8 +611,9 @@ export function useWorkspaceLifecycle({
                 for (const delay of [0, 2000]) {
                     if (delay > 0) await new Promise((r) => setTimeout(r, delay));
                     try {
+                        const isCurrent = beginList(cwd);
                         const list = await client.sessionList({ workspace: asWorkspaceId(cwd) });
-                        dispatchListResult(cwd, list, false);
+                        if (isCurrent()) dispatchListResult(cwd, list, false);
                         return;
                     } catch (err) {
                         console.error("[taco] sessionList failed (restart)", cwd, err);
@@ -561,7 +621,7 @@ export function useWorkspaceLifecycle({
                 }
             }),
         );
-    }, [client, dispatchListResult, workspacesRef]);
+    }, [client, dispatchListResult, workspacesRef, beginList]);
 
     useEffect(() => {
         reloadAllWorkspacesRef.current = reloadAllWorkspaces;
@@ -585,6 +645,7 @@ export function useWorkspaceLifecycle({
 
     const openWorkspace = useCallback(
         async (rawCwd: string): Promise<boolean> => {
+            const navigationIsCurrent = beginNavigation();
             const cwd = rawCwd.trim().replace(/\/+$/, "");
             if (!cwd) return false;
             if (!isValidWorkspaceCwd(cwd)) {
@@ -598,18 +659,12 @@ export function useWorkspaceLifecycle({
                 // reading workspacesRef.current right after dispatchWs would be
                 // stale and would drop the new cwd from desktop.json.
                 const nextCwds = [...Object.keys(workspacesRef.current), cwd];
-                dispatchWs({
-                    type: "INIT",
-                    workspaces: {
-                        ...workspacesRef.current,
-                        [cwd]: createEmptyWorkspace(cwd),
-                    },
-                });
+                dispatchWs({ type: "UPSERT_WORKSPACE", cwd });
                 persistCwds(nextCwds);
             }
             try {
                 await loadWorkspaceSessions(cwd);
-                await switchWorkspace(cwd);
+                if (navigationIsCurrent()) await switchWorkspace(cwd);
                 return true;
             } catch (err) {
                 const msg = `Failed to open ${cwd}: ${(err as Error).message}`;
@@ -620,7 +675,14 @@ export function useWorkspaceLifecycle({
                 return false;
             }
         },
-        [dispatchWs, loadWorkspaceSessions, pushNotification, switchWorkspace, workspacesRef],
+        [
+            dispatchWs,
+            loadWorkspaceSessions,
+            pushNotification,
+            switchWorkspace,
+            workspacesRef,
+            beginNavigation,
+        ],
     );
 
     const browseAndOpen = useCallback(async () => {
@@ -636,25 +698,35 @@ export function useWorkspaceLifecycle({
         }
     }, [openWorkspace, pushNotification]);
 
+    const imOpenOwners = useRef(new Map<string, symbol>());
     const openImConversation = useCallback(
         async (cwd: string, sid: string, isCurrent: () => boolean = () => true): Promise<void> => {
+            let navigationIsCurrent = beginNavigation();
             const addedNew = !workspacesRef.current[cwd];
+            const owner = Symbol("im-open");
+            imOpenOwners.current.set(cwd, owner);
             const discardIfStale = (): boolean => {
-                if (isCurrent()) return false;
-                if (addedNew) dispatchWs({ type: "REMOVE_WORKSPACE", cwd });
+                if (isCurrent() && navigationIsCurrent()) return false;
+                const ws = workspacesRef.current[cwd];
+                // Only roll back our own unused placeholder. A later opener or
+                // direct navigation may already own the same workspace.
+                if (
+                    addedNew &&
+                    imOpenOwners.current.get(cwd) === owner &&
+                    !ws?.active &&
+                    !ws?.activeSession &&
+                    !ws?.loadingSessionId
+                ) {
+                    dispatchWs({ type: "REMOVE_WORKSPACE", cwd });
+                    imOpenOwners.current.delete(cwd);
+                }
                 return true;
             };
             if (discardIfStale()) return;
             // Seed WorkspaceState FIRST — the ATTACH reducer is a no-op without
             // an existing entry, so the order is load-bearing.
             if (addedNew) {
-                dispatchWs({
-                    type: "INIT",
-                    workspaces: {
-                        ...workspacesRef.current,
-                        [cwd]: createEmptyWorkspace(cwd),
-                    },
-                });
+                dispatchWs({ type: "UPSERT_WORKSPACE", cwd });
             }
             const prevActive = activeCwd;
             try {
@@ -666,7 +738,13 @@ export function useWorkspaceLifecycle({
                 // conversation even though the chat itself attached fine.
                 await loadWorkspaceSessions(cwd);
                 if (discardIfStale()) return;
-                await attachSession(cwd, sid);
+                const externalVersion = getExternalNavigationVersion?.();
+                const attaching = attachSession(cwd, sid, isCurrent);
+                const version = getNavigationVersion();
+                navigationIsCurrent = () =>
+                    version === getNavigationVersion() &&
+                    externalVersion === getExternalNavigationVersion?.();
+                await attaching;
                 if (discardIfStale()) return;
                 // Activate inline rather than via switchWorkspace: that helper
                 // auto-attaches sessions[0] when the workspace has no active
@@ -680,10 +758,7 @@ export function useWorkspaceLifecycle({
                 setActiveCwd(cwd);
                 dispatchWs({ type: "SET_ACTIVE", cwd });
             } catch (err) {
-                if (!isCurrent()) {
-                    if (addedNew) dispatchWs({ type: "REMOVE_WORKSPACE", cwd });
-                    return;
-                }
+                if (discardIfStale()) return;
                 const msg = `Failed to open IM conversation: ${(err as Error).message}`;
                 console.error("[taco] openImConversation failed", cwd, err);
                 pushNotification(msg);
@@ -706,6 +781,9 @@ export function useWorkspaceLifecycle({
             setActiveCwd,
             pushNotification,
             workspacesRef,
+            beginNavigation,
+            getNavigationVersion,
+            getExternalNavigationVersion,
         ],
     );
 
@@ -714,12 +792,17 @@ export function useWorkspaceLifecycle({
             cwd: string,
             sessionId: string,
             _sessionKind: "main" | "subagent",
+            isCurrent: () => boolean = () => true,
         ): Promise<SnapshotRecovery> => {
+            const generation = connectionGeneration.current;
+            const canInstall = () => isCurrent() && generation === connectionGeneration.current;
+            if (!canInstall()) return { recovered: false };
             try {
                 const snapshot = await client.sessionSnapshotGet({
                     workspace: asWorkspaceId(cwd),
                     sessionId: asSessionId(sessionId),
                 });
+                if (!canInstall()) return { recovered: false };
                 const messages = historyToUiMessages(
                     snapshot.history.entries as Parameters<typeof historyToUiMessages>[0],
                 );
@@ -734,6 +817,15 @@ export function useWorkspaceLifecycle({
                             ? findPendingAskUserIds(messages)
                             : undefined,
                 });
+                // Protocol 2.13 snapshots contain transcript/tasks/plan only.
+                // They cannot certify whether a run is still executing.
+                dispatchWs({
+                    type: "SET_SESSION_EXECUTION",
+                    cwd,
+                    sid: sessionId,
+                    execution: "unknown",
+                });
+                dispatchWs({ type: "SET_SESSION_SYNC", cwd, sid: sessionId, sync: "incomplete" });
                 if (snapshot.tasks) {
                     dispatchWs({
                         type: "TASKS_UPDATED",
@@ -754,6 +846,7 @@ export function useWorkspaceLifecycle({
                 }
                 return { recovered: true, snapshotSeq: snapshot.snapshotSeq };
             } catch (err) {
+                if (!canInstall()) return { recovered: false };
                 console.error("[taco] session snapshot recovery failed", cwd, sessionId, err);
                 // Push-driven (a seq gap in the sidecar's stream), not a click.
                 pushNotification(`Session recovery failed: ${(err as Error).message}`, {
@@ -798,23 +891,21 @@ export function useWorkspaceLifecycle({
         async (cwd: string): Promise<void> => {
             const cursor = workspacesRef.current[cwd]?.listCursor;
             if (!cursor) return;
+            const isCurrent = beginList(cwd);
             try {
-                dispatchListResult(
-                    cwd,
-                    await client.sessionList({
-                        workspace: asWorkspaceId(cwd),
-                        cursor: {
-                            updatedAt: cursor.updatedAt,
-                            id: asSessionId(cursor.id),
-                        },
-                    }),
-                    true,
-                );
+                const list = await client.sessionList({
+                    workspace: asWorkspaceId(cwd),
+                    cursor: {
+                        updatedAt: cursor.updatedAt,
+                        id: asSessionId(cursor.id),
+                    },
+                });
+                if (isCurrent()) dispatchListResult(cwd, list, true);
             } catch (err) {
                 console.error("[taco] loadMoreSessions failed", cwd, err);
             }
         },
-        [client, dispatchListResult, workspacesRef],
+        [client, dispatchListResult, workspacesRef, beginList],
     );
 
     const renameSession = useCallback(
@@ -841,6 +932,8 @@ export function useWorkspaceLifecycle({
     );
 
     return {
+        markNavigationIntent,
+        getNavigationVersion,
         initFromStorage,
         reloadAllWorkspaces,
         loadMoreSessions,

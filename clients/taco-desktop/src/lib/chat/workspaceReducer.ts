@@ -19,6 +19,22 @@ import { applyEventToMessages } from "./applyEventToMessages";
 import type { QueuedUiItem, SessionEventLike, UiMessage } from "./chatUtils";
 import { AGENT_TOOL_NAMES, isBackgroundLaunchDetails, queuedItemsFromEvent } from "./chatUtils";
 import {
+    type BackgroundSubagentState,
+    createSessionState,
+    enforceSessionCache,
+    getSessionState,
+    hasSessionCache,
+    mergeSessionHistory,
+    normalizeSessionStates,
+    projectSessionState,
+    type SessionExecution,
+    type SessionState,
+    type SessionSync,
+    type SubagentSpawnedEntry,
+    updateSessionMessages,
+} from "./sessionState";
+
+import {
     attachAskUserAnswers,
     attachCommandPermission,
     backfillSubagentDetails,
@@ -39,139 +55,42 @@ export interface SessionMeta {
     messageCount?: number;
 }
 
-export interface SubagentSpawnedEntry {
-    subSessionId: string;
-    agentType: string;
-    /** Key for agentToolPending; not consumed by UI, only used for reverse lookup on end. */
-    parentToolCallId: string;
-}
-
-/**
- * Lifecycle of an `agent` call launched with `background: true`. Named because
- * the subagent panel derives from it too — see `WorkspaceState.backgroundSubagents`.
- * `aborted` is a deliberate stop (panel stop button / `agentAbort` / wall-clock
- * timeout), deliberately distinct from `error`.
- */
-export type BackgroundSubagentState = "running" | "completed" | "error" | "aborted";
+export type { BackgroundSubagentState, SubagentSpawnedEntry } from "./sessionState";
 
 export interface WorkspaceState {
     cwd: string;
     active: boolean;
     sessions: SessionMeta[];
     activeSession?: string;
+    draftId?: string;
+    /** Optional only for callers constructing legacy workspace fixtures. */
+    sessionStatesById?: Record<string, SessionState>;
+    /** Compatibility reads project the active canonical session. */
     messages: UiMessage[];
-    /** Inactive sessions only; the active projection above owns its messages and pending. */
     sessionInteractions?: Record<
         string,
         { messages: UiMessage[]; askUserPending: Record<string, true> }
     >;
-    /**
-     * sessionId → whether that session has an in-flight turn.
-     * Per-session slot: switching sessions doesn't cross-contaminate; switching
-     * back to a running session restores the "stop" button.
-     * Driven by run_start / run_end events (not turn_end — that fires at every
-     * mid-run tool-batch boundary); SET_PENDING stays as the optimistic /
-     * RPC-settle override.
-     */
     pendingBySessionId: Record<string, boolean>;
-    /**
-     * sessionId → steering messages waiting in the lane's inbox (steer /
-     * followUp / nextRun). Replaced wholesale by each queue_update; drained
-     * by operation_abort. Optimistic rows (APPEND_QUEUED) survive until the
-     * server's list echoes the same kind + text.
-     */
     queuedBySessionId: Record<string, QueuedUiItem[]>;
-    /**
-     * parentSession + parentToolCallId composite key → child sessionId + agentType.
-     * Written by SUBAGENT_SPAWNED; cleared on ATTACH/INIT/REMOVE_SESSION (no cross-session residue).
-     */
     subagentSpawned: Record<string, SubagentSpawnedEntry>;
-    /** child sessionId → live-accumulated UiMessage stream (written by CHILD_MESSAGE_EVENT) */
     childMessagesBySubSessionId: Record<string, UiMessage[]>;
-    /** child sessionId → lazily-loaded history UiMessages (triggered on expand) */
     childHistoryLoaded: Record<string, UiMessage[]>;
-    /**
-     * toolCallId → true means an askUser tool is waiting for user selection.
-     * Source of truth for questions is tool.details.questions (written by
-     * applyEventToMessages). Set when tool_end has details.waiting === true;
-     * cleared by ASKUSER_ANSWERED. Also applies to planExit: reducer treats it as an
-     * askUser-style two-state tool (first waiting=true, second answered).
-     */
     askUserPending: Record<string, true>;
-    /**
-     * requestId → the shell approval still awaiting a decision.
-     *
-     * Not derivable from a tool card: a background spawn's card settles to `ok`
-     * the moment it launches, so its status says nothing about whether the child
-     * is now blocked waiting for the user. Entries must survive a session switch
-     * — a background child runs for minutes — so this is workspace-scoped, not
-     * stored in the active session's messages alone.
-     */
     pendingCommandPermissions: Record<string, CommandPermissionRequest>;
-    /**
-     * sessionId → task snapshot.
-     * Driven by sidecar's tasks.updated push (normalized via useSidecarStream dispatch).
-     * Per-session slot: switching sessions doesn't cross-contaminate.
-     */
     taskSnapshotsBySessionId: Record<
         string,
         { active: TasksUpdatedParams["active"]; history: TaskListMeta[]; updatedAt: number }
     >;
-    /** sessionId → plan truth state. */
     planStatesBySessionId: Record<string, { active: boolean; currentSlug: string | null }>;
-    /**
-     * sessionId → (historyListId → full task details + load timestamp).
-     * History only sends meta by default; UI fetches full details via RPC on expand.
-     */
     historyDetailsBySessionId: Record<
         string,
         Record<string, { tasks: TaskItem[]; loadedAt: number }>
     >;
-    /**
-     * parentToolCallId → true tracks agent tool calls awaiting subagent results.
-     * Written by SUBAGENT_SPAWNED; cleared by the corresponding tool_end (agent).
-     * Used by UI to block sending: pending is false but a subagent running should still block.
-     *
-     * Background spawns are deliberately excluded — see `backgroundSubagents`.
-     */
     agentToolPending: Record<string, true>;
-    /**
-     * parentToolCallId → lifecycle of an `agent` call launched with
-     * `background: true`.
-     *
-     * A background spawn's `tool_end` fires at launch, so it cannot mean "the
-     * child finished" the way a synchronous one does. Two things follow.
-     *
-     * First, its `subagent.spawned` arrives *after* that `tool_end`, which used
-     * to re-set `agentToolPending` with nothing left to clear it — leaving the
-     * composer idle but the Stop button stuck on screen forever. Recording the
-     * launch here lets SUBAGENT_SPAWNED skip the pending write: the whole point
-     * of a background spawn is that the parent keeps working, so it must not
-     * make the session look busy.
-     *
-     * Second, the tool call's own status is `ok` from the moment it launches, so
-     * the subagent panel cannot derive liveness from it. `"running"` here is
-     * what tells the panel the child is still working; SUBAGENT_SETTLED replaces
-     * it with the real outcome rather than deleting it, because the panel still
-     * has to render a finished background child.
-     */
     backgroundSubagents: Record<string, BackgroundSubagentState>;
-    /**
-     * Pagination cursor for "load more". Undefined = first page (or a refresh
-     * reset the list to the first page). Sidebar uses this to enable/disable
-     * the load-more button. */
     listCursor?: { updatedAt: string; id: string };
-    /** Total session count in the workspace; only set when the server returned
-     *  the full list (params.full === true). Lets the sidebar show "N sessions"
-     *  even after a paged load hides the rest. */
     listTotal?: number;
-    /**
-     * Session the user just opened whose history is still loading. Set by
-     * ATTACH_START, cleared when its ATTACH lands or the open fails / is
-     * superseded. While set, `activeSession` and `messages` still hold the
-     * previous session (the chat shows a loading skeleton over them), so a
-     * failed open falls back to it intact.
-     */
     loadingSessionId?: string;
 }
 
@@ -226,6 +145,10 @@ export function createEmptyWorkspace(cwd: string, active = false): WorkspaceStat
 
 export type WorkspaceAction =
     | { type: "INIT"; workspaces: Record<string, WorkspaceState> }
+    | { type: "UPSERT_WORKSPACE"; cwd: string }
+    | { type: "SESSION_UNCERTAIN"; cwd: string; sid: string }
+    | { type: "SET_SESSION_SYNC"; cwd: string; sid: string; sync: SessionSync }
+    | { type: "SET_SESSION_EXECUTION"; cwd: string; sid: string; execution: SessionExecution }
     | { type: "REMOVE_WORKSPACE"; cwd: string }
     | { type: "SIDECAR_RESTARTED"; cwd: string }
     | { type: "SET_ACTIVE"; cwd: string }
@@ -246,12 +169,11 @@ export type WorkspaceAction =
     /** Opening `sid` failed before any history arrived; fall back to what was shown. */
     | { type: "ATTACH_FAILED"; cwd: string; sid: string }
     | {
-          /**
-           * Applied only for the session being loaded (or a same-session
-           * re-attach): an ATTACH that lost a race to a later open is dropped.
-           */
+          /** Legacy callers without makeActive retain navigation race guards. */
           type: "ATTACH";
           cwd: string;
+          /** Explicit false installs background history without changing selection. */
+          makeActive?: boolean;
           sid: string;
           messages: UiMessage[];
           /** askUser toolCallIds still waiting in history — restore pending so selection can resume the turn */
@@ -275,17 +197,18 @@ export type WorkspaceAction =
     | { type: "BUMP_SESSION_TIME"; cwd: string; sid: string; updatedAt: string }
     | { type: "SESSION_RENAMED"; cwd: string; sid: string; name: string }
     | { type: "APPEND_SYSTEM"; cwd: string; sid: string; msg: UiMessage }
-    | { type: "APPEND_ASSISTANT_FINAL"; cwd: string; sid: string; reply: AgentMessage }
     | {
-          /**
-           * Optimistic user message appended before the server confirms. Used by
-           * sendPrompt's lazy-create branch so the user sees their input immediately
-           * while sessionCreate is in flight. When the server's `message_end(user)`
-           * push arrives, applyEventToMessages replaces this entry with the
-           * server-timestamped one (matched by text).
-           */
+          type: "APPEND_ASSISTANT_FINAL";
+          cwd: string;
+          sid: string;
+          reply: AgentMessage;
+          preserveExecution?: boolean;
+      }
+    | {
+          /** The matching server message replaces this optimistic row by text. */
           type: "APPEND_USER";
           cwd: string;
+          sid?: string;
           msg: UiMessage;
       }
     | {
@@ -324,6 +247,7 @@ export type WorkspaceAction =
     | {
           type: "SUBAGENT_SETTLED";
           cwd: string;
+          parentSessionId?: string;
           parentToolCallId: string;
           outcome: Exclude<BackgroundSubagentState, "running">;
       }
@@ -389,6 +313,7 @@ export type WorkspaceAction =
            */
           type: "BEGIN_PENDING_NEW_SESSION";
           cwd: string;
+          draftId?: string;
       };
 
 /** Sessions sorted by updatedAt desc, falling back to createdAt when updatedAt
@@ -479,75 +404,6 @@ function sameBackgroundStates(
     return aKeys.length === Object.keys(b).length && aKeys.every((k) => a[k] === b[k]);
 }
 
-/** History owns the transcript; cached interactive tool details cover pushes after its read. */
-function restoreInteractionMessages(
-    history: UiMessage[],
-    cached: UiMessage[] | undefined,
-): UiMessage[] {
-    if (!cached?.length) return history;
-    const historyIds = new Set(
-        history.flatMap((message) =>
-            message.kind === "assistant" ? message.tools.map((tool) => tool.id) : [],
-        ),
-    );
-    const details = new Map(
-        cached.flatMap((message) =>
-            message.kind === "assistant"
-                ? message.tools
-                      .filter((tool) => isAskUserStyleTool(tool.name) && !historyIds.has(tool.id))
-                      .map((tool) => [tool.id, tool.details] as const)
-                : [],
-        ),
-    );
-    const merged = history.map((message) =>
-        message.kind !== "assistant"
-            ? message
-            : {
-                  ...message,
-                  tools: message.tools.map((tool) =>
-                      details.has(tool.id)
-                          ? {
-                                ...tool,
-                                details: {
-                                    ...(tool.details as object),
-                                    ...(details.get(tool.id) as object),
-                                },
-                            }
-                          : tool,
-                  ),
-              },
-    );
-    const cachedOnly = cached.filter(
-        (message) =>
-            message.kind === "assistant" &&
-            message.tools.some((tool) => details.has(tool.id)) &&
-            !history.some((current) => current.id === message.id),
-    );
-    return cachedOnly.length > 0 ? [...merged, ...cachedOnly] : merged;
-}
-
-function pendingInteractionsForHistory(
-    history: UiMessage[],
-    cached: { messages: UiMessage[]; askUserPending: Record<string, true> } | undefined,
-): Record<string, true> {
-    const historyIds = new Set(
-        history.flatMap((message) =>
-            message.kind === "assistant" ? message.tools.map((tool) => tool.id) : [],
-        ),
-    );
-    return cached
-        ? Object.fromEntries(
-              Object.entries(cached.askUserPending).filter(([id]) => !historyIds.has(id)),
-          )
-        : {};
-}
-
-/**
- * Guard + merge for the "patch exactly one workspace" shape nearly every action
- * shares. `patch` returning undefined means "no-op": the original `state`
- * reference is handed back, which is load-bearing — useReducer only skips the
- * re-render on referential equality.
- */
 function updateWs(
     state: Record<string, WorkspaceState>,
     cwd: string,
@@ -555,20 +411,82 @@ function updateWs(
 ): Record<string, WorkspaceState> {
     const existing = state[cwd];
     if (!existing) return state;
-    const next = patch(existing);
+    const normalized = normalizeSessionStates(existing);
+    const next = patch(normalized);
     if (!next) return state;
-    // Moving away parks just interaction state; the shown session has no cache copy.
-    if ("activeSession" in next && next.activeSession !== existing.activeSession) {
-        const cache = { ...existing.sessionInteractions, ...next.sessionInteractions };
-        if (existing.activeSession && next.sessionInteractions === undefined)
-            cache[existing.activeSession] = {
-                messages: existing.messages,
-                askUserPending: existing.askUserPending,
-            };
-        if (next.activeSession) delete cache[next.activeSession];
-        next.sessionInteractions = cache;
+    const ws = projectSessionState(enforceSessionCache({ ...normalized, ...next }));
+    return { ...state, [cwd]: ws };
+}
+
+function patchSession(
+    ws: WorkspaceState,
+    sid: string,
+    patch: Partial<SessionState>,
+): Partial<WorkspaceState> {
+    const previous = getSessionState(ws, sid) ?? createSessionState();
+    const updated = patch.messages ? updateSessionMessages(previous, patch.messages) : previous;
+    const lastAccess =
+        Math.max(0, ...Object.values(ws.sessionStatesById ?? {}).map((s) => s.lastAccess)) + 1;
+    return {
+        sessionStatesById: { ...ws.sessionStatesById, [sid]: { ...updated, ...patch, lastAccess } },
+    };
+}
+
+function applySessionEvent(
+    ws: WorkspaceState,
+    sid: string,
+    action: Extract<WorkspaceAction, { type: "APPLY_EVENT" | "CHILD_MESSAGE_EVENT" }>,
+): Partial<WorkspaceState> {
+    const session = getSessionState(ws, sid) ?? createSessionState();
+    const ev = action.ev;
+    const messages = applyEventToMessages(session.messages, ev, {
+        now: action.now,
+        suppressedThinking: action.suppressedThinking,
+    }).messages;
+    let pendingBySessionId = ws.pendingBySessionId;
+    let execution = session.execution;
+    if (ev.type === "run_start" || ev.type === "run_end") {
+        execution = ev.type === "run_start" ? "running" : "idle";
+        pendingBySessionId = { ...pendingBySessionId, [sid]: execution === "running" };
     }
-    return { ...state, [cwd]: { ...existing, ...next } };
+    let queuedBySessionId = ws.queuedBySessionId;
+    if (ev.type === "queue_update") {
+        const next = [
+            ...(queuedBySessionId[sid] ?? []).filter((q) => q.optimistic),
+            ...queuedItemsFromEvent(ev),
+        ];
+        queuedBySessionId = next.length
+            ? { ...queuedBySessionId, [sid]: next }
+            : omitKey(queuedBySessionId, sid);
+    } else if (ev.type === "operation_abort") queuedBySessionId = omitKey(queuedBySessionId, sid);
+    let askUserPending = session.askUserPending;
+    let agentToolPending = session.agentToolPending;
+    let backgroundSubagents = session.backgroundSubagents;
+    if (ev.type === "tool_end") {
+        const id = ev.toolCallId ?? "";
+        if (!ev.isError && isAskUserStyleTool(ev.toolName)) {
+            askUserPending =
+                (ev.result?.details as { waiting?: boolean } | undefined)?.waiting === true
+                    ? { ...askUserPending, [id]: true }
+                    : omitKey(askUserPending, id);
+        }
+        if (ev.toolName === "agent" || ev.toolName === "skill")
+            agentToolPending = omitKey(agentToolPending, id);
+        if (ev.toolName === "agent" && isBackgroundLaunchDetails(ev.result?.details))
+            backgroundSubagents = { ...backgroundSubagents, [id]: "running" };
+    }
+    return {
+        ...patchSession(ws, sid, {
+            messages,
+            execution,
+            askUserPending,
+            agentToolPending,
+            backgroundSubagents,
+            ...(action.type === "CHILD_MESSAGE_EVENT" ? { kind: "subagent" } : {}),
+        }),
+        pendingBySessionId,
+        queuedBySessionId,
+    };
 }
 
 export function workspacesReducer(
@@ -577,167 +495,200 @@ export function workspacesReducer(
 ): Record<string, WorkspaceState> {
     switch (action.type) {
         case "INIT":
-            return action.workspaces;
-        case "REMOVE_WORKSPACE": {
-            // Drop the entry; no cross-state cleanup needed.
-            const next: Record<string, WorkspaceState> = {};
-            for (const k of Object.keys(state)) {
-                if (k !== action.cwd) next[k] = state[k];
+            return Object.fromEntries(
+                Object.entries(action.workspaces).map(([cwd, ws]) => [
+                    cwd,
+                    projectSessionState(enforceSessionCache(normalizeSessionStates(ws))),
+                ]),
+            );
+        case "UPSERT_WORKSPACE":
+            return state[action.cwd]
+                ? state
+                : { ...state, [action.cwd]: createEmptyWorkspace(action.cwd) };
+        case "REMOVE_WORKSPACE":
+            return omitKey(state, action.cwd);
+        case "SET_ACTIVE": {
+            const next = { ...state };
+            for (const [cwd, ws] of Object.entries(state)) {
+                if (ws.active !== (cwd === action.cwd))
+                    next[cwd] = projectSessionState({
+                        ...normalizeSessionStates(ws),
+                        active: cwd === action.cwd,
+                    });
             }
             return next;
         }
         case "SIDECAR_RESTARTED":
-            return updateWs(state, action.cwd, (existing) => {
-                const childMessagesBySubSessionId: typeof existing.childMessagesBySubSessionId = {};
-                for (const [subSid, childMessages] of Object.entries(
-                    existing.childMessagesBySubSessionId ?? {},
-                )) {
-                    childMessagesBySubSessionId[subSid] =
-                        markRunningShellToolsFailed(childMessages);
-                }
-                return {
-                    messages: markRunningShellToolsFailed(existing.messages),
-                    childMessagesBySubSessionId,
-                    childHistoryLoaded: Object.fromEntries(
-                        Object.entries(existing.childHistoryLoaded).map(([sid, messages]) => [
-                            sid,
-                            markRunningShellToolsFailed(messages),
-                        ]),
-                    ),
-                    sessionInteractions: Object.fromEntries(
-                        Object.entries(existing.sessionInteractions ?? {}).map(
-                            ([sid, interaction]) => [
-                                sid,
-                                {
-                                    ...interaction,
-                                    messages: markRunningShellToolsFailed(interaction.messages),
-                                },
-                            ],
-                        ),
-                    ),
-                    // The dead daemon's broker took its pending requests with it,
-                    // and no resolved push will ever arrive for them.
-                    pendingCommandPermissions: {},
-                };
-            });
-        case "SET_ACTIVE": {
-            const next: Record<string, WorkspaceState> = {};
-            for (const k of Object.keys(state)) {
-                const ws = state[k];
-                if (ws) next[k] = { ...ws, active: k === action.cwd };
-            }
-            return next;
-        }
+            return updateWs(state, action.cwd, (ws) => ({
+                sessionStatesById: Object.fromEntries(
+                    Object.entries(ws.sessionStatesById ?? {}).map(([sid, session]) => [
+                        sid,
+                        {
+                            ...updateSessionMessages(
+                                session,
+                                markRunningShellToolsFailed(session.messages),
+                            ),
+                            execution: "unknown" as const,
+                            sync: "recovering" as const,
+                            historyRequestRevision: session.revision,
+                            askUserPending: {},
+                            agentToolPending: {},
+                            backgroundSubagents: Object.fromEntries(
+                                Object.entries(session.backgroundSubagents).filter(
+                                    ([, value]) => value !== "running",
+                                ),
+                            ),
+                        },
+                    ]),
+                ),
+                pendingBySessionId: {},
+                queuedBySessionId: {},
+                pendingCommandPermissions: {},
+            }));
+        case "SESSION_UNCERTAIN":
+            return updateWs(state, action.cwd, (ws) => ({
+                ...patchSession(ws, action.sid, { execution: "unknown", sync: "incomplete" }),
+                pendingBySessionId: omitKey(ws.pendingBySessionId, action.sid),
+            }));
+        case "SET_SESSION_SYNC":
+            return updateWs(state, action.cwd, (ws) =>
+                patchSession(ws, action.sid, {
+                    sync: action.sync,
+                    ...(action.sync === "recovering"
+                        ? { historyRequestRevision: getSessionState(ws, action.sid)?.revision ?? 0 }
+                        : {}),
+                }),
+            );
+        case "SET_SESSION_EXECUTION":
+            return updateWs(state, action.cwd, (ws) => ({
+                ...patchSession(ws, action.sid, { execution: action.execution }),
+                pendingBySessionId:
+                    action.execution === "unknown"
+                        ? omitKey(ws.pendingBySessionId, action.sid)
+                        : {
+                              ...ws.pendingBySessionId,
+                              [action.sid]: action.execution === "running",
+                          },
+            }));
         case "LOAD_SESSIONS": {
-            const existing = state[action.cwd];
-            const base: WorkspaceState = existing ?? createEmptyWorkspace(action.cwd);
-            // append mode (load more): append new page to existing list, then re-sort;
-            // replace mode (refresh/reset): overwrite. Both update cursor + total.
-            const merged = action.append
-                ? sortSessionsByUpdatedDesc([...(existing?.sessions ?? []), ...action.sessions])
-                : sortSessionsByUpdatedDesc(action.sessions);
-            return {
-                ...state,
-                [action.cwd]: {
-                    ...base,
-                    sessions: merged,
-                    listCursor: action.nextCursor,
-                    listTotal: action.total,
-                },
-            };
+            const ws = state[action.cwd] ?? createEmptyWorkspace(action.cwd);
+            return updateWs({ ...state, [action.cwd]: ws }, action.cwd, (existing) => ({
+                sessions: sortSessionsByUpdatedDesc(
+                    action.append ? [...existing.sessions, ...action.sessions] : action.sessions,
+                ),
+                listCursor: action.nextCursor,
+                listTotal: action.total,
+            }));
         }
         case "ADD_SESSION":
-            return updateWs(state, action.cwd, (existing) => ({
-                sessions: sortSessionsByUpdatedDesc([...(existing.sessions ?? []), action.session]),
-                activeSession:
-                    action.makeActive === false ? existing.activeSession : action.session.id,
+            return updateWs(state, action.cwd, (ws) => ({
+                ...patchSession(
+                    ws,
+                    action.session.id,
+                    getSessionState(ws, action.session.id)
+                        ? {}
+                        : { sync: "current", execution: "unknown" },
+                ),
+                sessions: sortSessionsByUpdatedDesc([...ws.sessions, action.session]),
+                ...(action.makeActive === false
+                    ? {}
+                    : { activeSession: action.session.id, draftId: undefined }),
             }));
         case "ATTACH_START":
-            return updateWs(state, action.cwd, (existing) => {
-                // Re-opening the shown session keeps its messages on screen;
-                // the ATTACH that follows takes the same-session branch.
-                if (existing.activeSession === action.sid) {
-                    return existing.loadingSessionId === undefined
+            return updateWs(state, action.cwd, (ws) => {
+                if (ws.activeSession === action.sid)
+                    return ws.loadingSessionId === undefined
                         ? undefined
                         : { loadingSessionId: undefined };
-                }
-                return existing.loadingSessionId === action.sid
-                    ? undefined
-                    : { loadingSessionId: action.sid };
+                const session = getSessionState(ws, action.sid) ?? createSessionState();
+                if (hasSessionCache(ws, action.sid))
+                    return {
+                        ...patchSession(ws, action.sid, {}),
+                        activeSession: action.sid,
+                        draftId: undefined,
+                        loadingSessionId: undefined,
+                    };
+                if (ws.loadingSessionId === action.sid) return undefined;
+                return {
+                    ...patchSession(ws, action.sid, {
+                        sync: "recovering",
+                        historyRequestRevision: session.revision,
+                    }),
+                    loadingSessionId: action.sid,
+                };
             });
         case "ATTACH_FAILED":
-            return updateWs(state, action.cwd, (existing) =>
-                existing.loadingSessionId === action.sid
-                    ? { loadingSessionId: undefined }
+            return updateWs(state, action.cwd, (ws) =>
+                ws.loadingSessionId === action.sid
+                    ? {
+                          ...patchSession(ws, action.sid, { sync: "incomplete" }),
+                          loadingSessionId: undefined,
+                      }
                     : undefined,
             );
         case "ATTACH":
-            return updateWs(state, action.cwd, (existing) => {
-                // Same-session re-attach: keep the in-flight subagent live stream
-                // intact. The one piece worth refreshing is backgroundSubagents —
-                // after a sidecar restart the live map is stale (a child the old
-                // process ran shows "running" forever), and the attach response's
-                // fresh in-flight + settled signals are the only correction.
-                if (existing.activeSession === action.sid) {
-                    if (
-                        action.inFlightAgentToolCallIds === undefined &&
-                        action.settledBackgroundSubSessionIds === undefined
-                    ) {
-                        return undefined;
-                    }
-                    const rebuilt = rebuildBackgroundSubagents(
-                        action.messages,
-                        action.inFlightAgentToolCallIds,
-                        action.settledBackgroundSubSessionIds,
-                    );
-                    // Existing terminal outcomes win: they came from
-                    // SUBAGENT_SETTLED, which knows the real outcome, while the
-                    // rebuild can only say "completed" for any settled child.
-                    // Entries missing from the rebuild keep their value.
-                    const merged = { ...existing.backgroundSubagents, ...rebuilt };
-                    for (const [id, s] of Object.entries(existing.backgroundSubagents)) {
-                        if (s !== "running") merged[id] = s;
-                    }
-                    return sameBackgroundStates(merged, existing.backgroundSubagents)
-                        ? undefined
-                        : { backgroundSubagents: merged };
-                }
-                // Superseded: the user opened another session (or started a new
-                // chat, or deleted this one) while this history was loading.
-                if (existing.loadingSessionId !== action.sid) return undefined;
-                // Restore history, retaining interactions received while this session was hidden.
-                const restoredPending: Record<string, true> = {};
-                for (const id of action.pendingAskUserIds ?? []) restoredPending[id] = true;
-                return {
-                    activeSession: action.sid,
-                    loadingSessionId: undefined,
-                    messages: restoreInteractionMessages(
-                        action.messages,
-                        existing.sessionInteractions?.[action.sid]?.messages,
-                    ),
-                    subagentSpawned: {},
-                    childMessagesBySubSessionId: {},
-                    childHistoryLoaded: {},
-                    askUserPending: {
-                        ...pendingInteractionsForHistory(
-                            action.messages,
-                            existing.sessionInteractions?.[action.sid],
-                        ),
-                        ...restoredPending,
-                    },
-                    agentToolPending: {},
-                    backgroundSubagents: rebuildBackgroundSubagents(
+            return updateWs(state, action.cwd, (ws) => {
+                if (
+                    action.makeActive === undefined &&
+                    ws.activeSession !== action.sid &&
+                    ws.loadingSessionId !== action.sid
+                )
+                    return undefined;
+                const session = getSessionState(ws, action.sid) ?? createSessionState();
+                const sameCurrent = ws.activeSession === action.sid && session.sync === "current";
+                // An existing live view without a history request remains authoritative.
+                const preserveLive =
+                    ws.activeSession === action.sid &&
+                    session.historyRequestRevision === undefined &&
+                    session.revision === 0;
+                if (
+                    (sameCurrent || preserveLive) &&
+                    action.inFlightAgentToolCallIds === undefined &&
+                    action.settledBackgroundSubSessionIds === undefined
+                )
+                    return undefined;
+                const restored =
+                    sameCurrent || preserveLive
+                        ? session
+                        : mergeSessionHistory(session, action.messages);
+                const backgroundSubagents = {
+                    ...session.backgroundSubagents,
+                    ...rebuildBackgroundSubagents(
                         action.messages,
                         action.inFlightAgentToolCallIds,
                         action.settledBackgroundSubSessionIds,
                     ),
                 };
+                for (const [id, value] of Object.entries(session.backgroundSubagents))
+                    if (value !== "running") backgroundSubagents[id] = value;
+                if (
+                    (sameCurrent || preserveLive) &&
+                    sameBackgroundStates(backgroundSubagents, session.backgroundSubagents)
+                )
+                    return undefined;
+                const askUserPending = { ...restored.askUserPending };
+                for (const id of action.pendingAskUserIds ?? []) {
+                    const tool = restored.messages
+                        .flatMap((m) => (m.kind === "assistant" ? (m.tools ?? []) : []))
+                        .find((t) => t.id === id);
+                    const details = tool?.details as
+                        | { answers?: unknown; waiting?: boolean }
+                        | undefined;
+                    if (!details?.answers && details?.waiting !== false) askUserPending[id] = true;
+                }
+                return {
+                    ...patchSession(ws, action.sid, {
+                        ...restored,
+                        askUserPending,
+                        backgroundSubagents,
+                    }),
+                    ...(action.makeActive === false
+                        ? {}
+                        : { activeSession: action.sid, draftId: undefined }),
+                    ...(ws.loadingSessionId === action.sid ? { loadingSessionId: undefined } : {}),
+                };
             });
         case "ATTACHED_PUSH":
-            // activeSession is set uniformly by the ATTACH action (with history). This
-            // push is just sidecar's ack for session.attach; overwriting activeSession
-            // here would short-circuit the subsequent ATTACH (same-session) and drop
-            // history — causing blank first-open or stale messages on new sessions.
             return state;
         case "COMMAND_PERMISSION_REQUESTED":
             return updateWs(
@@ -745,388 +696,223 @@ export function workspacesReducer(
                     ? state
                     : { ...state, [action.cwd]: createEmptyWorkspace(action.cwd) },
                 action.cwd,
-                (existing) => ({
+                (ws) => ({
+                    ...patchSession(ws, action.sid, {
+                        messages: attachCommandPermission(
+                            getSessionState(ws, action.sid)?.messages ?? [],
+                            action.request,
+                        ),
+                    }),
                     pendingCommandPermissions: {
-                        ...existing.pendingCommandPermissions,
+                        ...ws.pendingCommandPermissions,
                         [action.request.requestId]: action.request,
                     },
-                    // Only the session on screen has messages to patch. The entry above is
-                    // written regardless, so a session switch can no longer strand a
-                    // request that is still holding a subagent's shell call open.
-                    messages:
-                        existing.activeSession === action.sid
-                            ? attachCommandPermission(existing.messages, action.request)
-                            : existing.messages,
                 }),
             );
         case "COMMAND_PERMISSION_RESOLVED":
-            return updateWs(state, action.cwd, (existing) => ({
-                pendingCommandPermissions: omitKey(
-                    existing.pendingCommandPermissions,
-                    action.requestId,
-                ),
+            return updateWs(state, action.cwd, (ws) => ({
+                pendingCommandPermissions: omitKey(ws.pendingCommandPermissions, action.requestId),
             }));
         case "REMOVE_SESSION":
-            return updateWs(state, action.cwd, (existing) => {
-                const remaining = existing.sessions.filter((s) => s.id !== action.sid);
-                const wasActive = existing.activeSession === action.sid;
-                // Cursor might have pointed at the removed session — clear it so the
-                // sidebar doesn't try to load-more from a stale position. The next
-                // refreshSessionList call refills cursor + total from the server.
-                const clearedCursor =
-                    existing.listCursor?.id === action.sid ? undefined : existing.listCursor;
-                // Drop the removed sid's pending slot if present. A session that is
-                // being removed (user deleted it, attach threw "session not found",
-                // or any future caller) cannot still have a live turn — any `true`
-                // here is a stale "running" indicator the sidebar would otherwise
-                // keep rendering. Per-sid delete (not whole-map reset) so other
-                // sessions' pending state survives when the user is multi-streaming.
-                return {
-                    sessions: remaining,
-                    listCursor: clearedCursor,
-                    ...(existing.listTotal !== undefined
-                        ? { listTotal: Math.max(0, existing.listTotal - 1) }
-                        : {}),
-                    ...(wasActive ? { activeSession: undefined, messages: [] } : {}),
-                    ...(existing.loadingSessionId === action.sid
-                        ? { loadingSessionId: undefined }
-                        : {}),
-                    sessionInteractions: omitKey(existing.sessionInteractions ?? {}, action.sid),
-                    ...(wasActive ? { askUserPending: {} } : {}),
-                    pendingBySessionId: omitKey(existing.pendingBySessionId, action.sid),
-                    queuedBySessionId: omitKey(existing.queuedBySessionId, action.sid),
-                    // The broker aborts these server-side, but the resolved push is
-                    // routed to the session being removed and may never be applied.
-                    pendingCommandPermissions: omitRequestsForSession(
-                        existing.pendingCommandPermissions,
-                        action.sid,
-                    ),
-                };
-            });
+            return updateWs(state, action.cwd, (ws) => ({
+                sessions: ws.sessions.filter((s) => s.id !== action.sid),
+                sessionStatesById: omitKey(ws.sessionStatesById ?? {}, action.sid),
+                ...(ws.activeSession === action.sid ? { activeSession: undefined } : {}),
+                ...(ws.loadingSessionId === action.sid ? { loadingSessionId: undefined } : {}),
+                ...(ws.listCursor?.id === action.sid ? { listCursor: undefined } : {}),
+                ...(ws.listTotal === undefined ? {} : { listTotal: Math.max(0, ws.listTotal - 1) }),
+                pendingBySessionId: omitKey(ws.pendingBySessionId, action.sid),
+                queuedBySessionId: omitKey(ws.queuedBySessionId, action.sid),
+                pendingCommandPermissions: omitRequestsForSession(
+                    ws.pendingCommandPermissions,
+                    action.sid,
+                ),
+                taskSnapshotsBySessionId: omitKey(ws.taskSnapshotsBySessionId, action.sid),
+                planStatesBySessionId: omitKey(ws.planStatesBySessionId, action.sid),
+                historyDetailsBySessionId: omitKey(ws.historyDetailsBySessionId, action.sid),
+            }));
         case "SET_PENDING":
-            return updateWs(state, action.cwd, (existing) => ({
-                pendingBySessionId: {
-                    ...existing.pendingBySessionId,
-                    [action.sid]: action.pending,
-                },
+            return updateWs(state, action.cwd, (ws) => ({
+                ...patchSession(ws, action.sid, { execution: action.pending ? "running" : "idle" }),
+                pendingBySessionId: { ...ws.pendingBySessionId, [action.sid]: action.pending },
             }));
         case "BUMP_SESSION_TIME":
-            return updateWs(state, action.cwd, (existing) => {
-                const target = existing.sessions.find((s) => s.id === action.sid);
-                if (!target) return undefined;
-                const updated = { ...target, updatedAt: action.updatedAt };
-                return {
-                    sessions: sortSessionsByUpdatedDesc(
-                        existing.sessions.map((s) => (s.id === action.sid ? updated : s)),
-                    ),
-                };
-            });
         case "SESSION_RENAMED":
-            // Patches the sidebar title in place for an async rename (currently only the
-            // one-shot LLM title summary — see `session.renamed` push doc). No re-sort:
-            // a title change alone doesn't affect updatedAt-based ordering.
-            return updateWs(state, action.cwd, (existing) => {
-                const target = existing.sessions.find((s) => s.id === action.sid);
-                if (!target) return undefined;
-                return {
-                    sessions: existing.sessions.map((s) =>
-                        s.id === action.sid ? { ...s, name: action.name } : s,
-                    ),
-                };
-            });
+            return updateWs(state, action.cwd, (ws) =>
+                ws.sessions.some((s) => s.id === action.sid)
+                    ? {
+                          sessions:
+                              action.type === "BUMP_SESSION_TIME"
+                                  ? sortSessionsByUpdatedDesc(
+                                        ws.sessions.map((s) =>
+                                            s.id === action.sid
+                                                ? { ...s, updatedAt: action.updatedAt }
+                                                : s,
+                                        ),
+                                    )
+                                  : ws.sessions.map((s) =>
+                                        s.id === action.sid ? { ...s, name: action.name } : s,
+                                    ),
+                      }
+                    : undefined,
+            );
         case "APPEND_SYSTEM":
-            return updateWs(state, action.cwd, (existing) =>
-                existing.activeSession !== action.sid
-                    ? undefined
-                    : {
-                          messages: [...existing.messages, action.msg],
-                          pendingBySessionId: {
-                              ...existing.pendingBySessionId,
-                              [action.sid]: false,
-                          },
-                      },
-            );
         case "APPEND_ASSISTANT_FINAL":
-            return updateWs(state, action.cwd, (existing) =>
-                existing.activeSession !== action.sid
-                    ? undefined
-                    : {
-                          messages: mergeAssistantFinal(existing.messages, action.reply),
-                          pendingBySessionId: {
-                              ...existing.pendingBySessionId,
-                              [action.sid]: false,
-                          },
-                      },
-            );
-        case "APPEND_USER":
-            // Optimistic user message: id is "optimistic-user-${ts}" so the
-            // server push handler (applyEventToMessages.handleMessageEnd) can
-            // recognise it later and replace it with the server-timestamped
-            // entry instead of duplicating. See APPEND_USER's JSDoc.
-            return updateWs(state, action.cwd, (existing) => ({
-                messages: [...existing.messages, action.msg],
+            return updateWs(state, action.cwd, (ws) => ({
+                ...patchSession(ws, action.sid, {
+                    messages:
+                        action.type === "APPEND_SYSTEM"
+                            ? [...(getSessionState(ws, action.sid)?.messages ?? []), action.msg]
+                            : mergeAssistantFinal(
+                                  getSessionState(ws, action.sid)?.messages ?? [],
+                                  action.reply,
+                              ),
+                    ...(action.type === "APPEND_ASSISTANT_FINAL" && !action.preserveExecution
+                        ? { execution: "idle" as const }
+                        : {}),
+                }),
+                ...(action.type === "APPEND_ASSISTANT_FINAL" && !action.preserveExecution
+                    ? { pendingBySessionId: { ...ws.pendingBySessionId, [action.sid]: false } }
+                    : {}),
             }));
+        case "APPEND_USER":
+            return updateWs(state, action.cwd, (ws) => {
+                const sid = action.sid ?? ws.activeSession;
+                return sid
+                    ? patchSession(ws, sid, {
+                          messages: [...(getSessionState(ws, sid)?.messages ?? []), action.msg],
+                      })
+                    : undefined;
+            });
         case "APPEND_QUEUED":
-            return updateWs(state, action.cwd, (existing) => ({
+            return updateWs(state, action.cwd, (ws) => ({
                 queuedBySessionId: {
-                    ...existing.queuedBySessionId,
-                    [action.sid]: [...(existing.queuedBySessionId[action.sid] ?? []), action.item],
+                    ...ws.queuedBySessionId,
+                    [action.sid]: [...(ws.queuedBySessionId[action.sid] ?? []), action.item],
                 },
             }));
         case "REMOVE_QUEUED":
-            return updateWs(state, action.cwd, (existing) => {
-                const prev = existing.queuedBySessionId[action.sid];
-                if (!prev?.some((q) => q.id === action.id)) return undefined;
-                const remaining = prev.filter((q) => q.id !== action.id);
+            return updateWs(state, action.cwd, (ws) => {
+                const previous = ws.queuedBySessionId[action.sid];
+                if (!previous?.some((q) => q.id === action.id)) return undefined;
+                const remaining = previous.filter((q) => q.id !== action.id);
                 return {
-                    queuedBySessionId:
-                        remaining.length > 0
-                            ? { ...existing.queuedBySessionId, [action.sid]: remaining }
-                            : omitKey(existing.queuedBySessionId, action.sid),
+                    queuedBySessionId: remaining.length
+                        ? { ...ws.queuedBySessionId, [action.sid]: remaining }
+                        : omitKey(ws.queuedBySessionId, action.sid),
                 };
             });
         case "APPLY_EVENT":
-            return updateWs(state, action.cwd, (existing) => {
-                // Run lifecycle + steering-queue state are keyed per session and
-                // drive the sidebar status dot / queue strip, so they update for
-                // background sessions too — before the activeSession guard below.
-                // Only run boundaries flip pending: `turn_end` fires mid-run at
-                // every tool-batch / response boundary (a steered turn extends
-                // the same run), so it must not be treated as "the turn is over".
-                let pendingBySessionId = existing.pendingBySessionId;
-                if (action.ev.type === "run_start") {
-                    pendingBySessionId = { ...pendingBySessionId, [action.sid]: true };
-                } else if (action.ev.type === "run_end") {
-                    // Completed / aborted / failed all mean the operation left the lane.
-                    pendingBySessionId = { ...pendingBySessionId, [action.sid]: false };
-                }
-                // Steering queue: queue_update replaces the server-owned rows,
-                // operation_abort drains everything. Neither touches messages.
-                //
-                // Optimistic rows are deliberately left alone here. pi emits
-                // queue_update from inside the lane command, before the enqueue
-                // RPC returns, so the server row for a message normally arrives
-                // while that message's own optimistic row is still pending —
-                // dropping optimistic rows on any server list would retire them
-                // a beat early, and matching them by text would conflate two
-                // identical steers. REMOVE_QUEUED retires them instead, keyed by
-                // the id the RPC caller holds.
-                let queuedBySessionId = existing.queuedBySessionId;
-                if (action.ev.type === "queue_update") {
-                    const prev = existing.queuedBySessionId[action.sid] ?? [];
-                    const next = [
-                        ...prev.filter((q) => q.optimistic),
-                        ...queuedItemsFromEvent(action.ev),
-                    ];
-                    queuedBySessionId =
-                        next.length > 0
-                            ? { ...existing.queuedBySessionId, [action.sid]: next }
-                            : omitKey(existing.queuedBySessionId, action.sid);
-                } else if (action.ev.type === "operation_abort") {
-                    queuedBySessionId = omitKey(existing.queuedBySessionId, action.sid);
-                }
-                const interaction =
-                    action.sid === existing.activeSession
-                        ? existing
-                        : (existing.sessionInteractions?.[action.sid] ?? {
-                              messages: [],
-                              askUserPending: {},
-                          });
-                const result = applyEventToMessages(interaction.messages, action.ev, {
-                    suppressedThinking: action.suppressedThinking,
-                    now: action.now,
+            return updateWs(state, action.cwd, (ws) => applySessionEvent(ws, action.sid, action));
+        case "SUBAGENT_SPAWNED":
+            return updateWs(state, action.cwd, (ws) => {
+                const parent = getSessionState(ws, action.parentSessionId) ?? createSessionState();
+                const child = getSessionState(ws, action.subSessionId) ?? createSessionState();
+                const parentPatch = patchSession(ws, action.parentSessionId, {
+                    messages: backfillSubagentDetails(
+                        parent.messages,
+                        action.parentToolCallId,
+                        action.subSessionId,
+                        action.agentType,
+                    ),
+                    agentToolPending:
+                        parent.backgroundSubagents[action.parentToolCallId] !== undefined
+                            ? parent.agentToolPending
+                            : { ...parent.agentToolPending, [action.parentToolCallId]: true },
                 });
-                // toolName / isError / toolCallId live on the tool_end branch of
-                // the SessionEventLike union; access them only after the type guard so TS
-                // narrows correctly.
-                const endedToolCallId =
-                    action.ev.type === "tool_end" ? (action.ev.toolCallId ?? "") : null;
-                let askUserPending = interaction.askUserPending;
-                // askUser / planExit share the same trigger: terminate + questions + a
-                // two-state waiting flag. Both tool_end frames write the same
-                // tool card, so the second one carries no questions — clearing pending
-                // relies on applyEventToMessages having already merged them.
-                if (
-                    action.ev.type === "tool_end" &&
-                    !action.ev.isError &&
-                    isAskUserStyleTool(action.ev.toolName)
-                ) {
-                    const toolCallId = endedToolCallId ?? "";
-                    const details = action.ev.result?.details as { waiting?: boolean } | undefined;
-                    askUserPending =
-                        details?.waiting === true
-                            ? { ...askUserPending, [toolCallId]: true }
-                            : omitKey(askUserPending, toolCallId);
-                }
-                if (existing.activeSession !== action.sid) {
-                    if (
-                        result.messages === interaction.messages &&
-                        askUserPending === interaction.askUserPending
-                    ) {
-                        return pendingBySessionId === existing.pendingBySessionId &&
-                            queuedBySessionId === existing.queuedBySessionId
-                            ? undefined
-                            : { pendingBySessionId, queuedBySessionId };
-                    }
-                    return {
-                        pendingBySessionId,
-                        queuedBySessionId,
-                        sessionInteractions: {
-                            ...existing.sessionInteractions,
-                            [action.sid]: { messages: result.messages, askUserPending },
-                        },
-                    };
-                }
-                // Clear agentToolPending on any agent / skill end, keyed directly by
-                // toolCallId. The previous subagentSpawned reverse-lookup leaked whenever
-                // that frame was lost or arrived late — the tool finished but pending never
-                // cleared, leaving the composer disabled forever.
-                const clearsAgentPending =
-                    action.ev.type === "tool_end" &&
-                    (action.ev.toolName === "agent" || action.ev.toolName === "skill");
-                // `status: "launched"` means this tool_end is a background spawn's
-                // launch receipt, not a finished child. Record it so the
-                // SUBAGENT_SPAWNED that lands next does not mark the session busy.
-                const isBackgroundLaunch =
-                    action.ev.type === "tool_end" &&
-                    action.ev.toolName === "agent" &&
-                    isBackgroundLaunchDetails(action.ev.result?.details);
                 return {
-                    messages: result.messages,
-                    pendingBySessionId,
-                    askUserPending,
-                    agentToolPending: clearsAgentPending
-                        ? omitKey(existing.agentToolPending, endedToolCallId ?? "")
-                        : existing.agentToolPending,
-                    backgroundSubagents:
-                        isBackgroundLaunch && endedToolCallId
-                            ? { ...existing.backgroundSubagents, [endedToolCallId]: "running" }
-                            : existing.backgroundSubagents,
-                    queuedBySessionId,
+                    ...patchSession({ ...ws, ...parentPatch }, action.subSessionId, {
+                        ...child,
+                        kind: "subagent",
+                    }),
+                    subagentSpawned: {
+                        ...ws.subagentSpawned,
+                        [subagentKey(action.parentSessionId, action.parentToolCallId)]: {
+                            subSessionId: action.subSessionId,
+                            agentType: action.agentType,
+                            parentToolCallId: action.parentToolCallId,
+                        },
+                    },
                 };
             });
-        case "SUBAGENT_SPAWNED":
-            return updateWs(state, action.cwd, (existing) => ({
-                messages: backfillSubagentDetails(
-                    existing.messages,
-                    action.parentToolCallId,
-                    action.subSessionId,
-                    action.agentType,
-                ),
-                subagentSpawned: {
-                    ...existing.subagentSpawned,
-                    [subagentKey(action.parentSessionId, action.parentToolCallId)]: {
-                        subSessionId: action.subSessionId,
-                        agentType: action.agentType,
-                        parentToolCallId: action.parentToolCallId,
-                    },
-                },
-                // A background spawn's launch receipt already landed as tool_end
-                // before this frame, so writing pending here would strand it:
-                // nothing clears it, and the composer goes idle with the Stop
-                // button still showing. Background children keep the session
-                // usable by design.
-                agentToolPending:
-                    existing.backgroundSubagents[action.parentToolCallId] !== undefined
-                        ? existing.agentToolPending
-                        : {
-                              ...existing.agentToolPending,
-                              [action.parentToolCallId]: true,
-                          },
-            }));
         case "SUBAGENT_SETTLED":
-            return updateWs(state, action.cwd, (existing) => ({
-                agentToolPending: omitKey(existing.agentToolPending, action.parentToolCallId),
-                // Outcome recorded, not deleted: the panel still renders this
-                // child, and its tool call has said `ok` since launch, so this
-                // is the only place the real result is known.
-                backgroundSubagents: {
-                    ...existing.backgroundSubagents,
-                    [action.parentToolCallId]: action.outcome,
-                },
-            }));
-        case "CHILD_MESSAGE_EVENT":
-            return updateWs(state, action.cwd, (existing) => ({
-                childMessagesBySubSessionId: {
-                    ...existing.childMessagesBySubSessionId,
-                    [action.subSessionId]: applyEventToMessages(
-                        existing.childMessagesBySubSessionId[action.subSessionId] ?? [],
-                        action.ev,
-                        { suppressedThinking: action.suppressedThinking, now: action.now },
-                    ).messages,
-                },
-            }));
-        case "LOAD_SUBAGENT_HISTORY":
-            return updateWs(state, action.cwd, (existing) => ({
-                childHistoryLoaded: {
-                    ...existing.childHistoryLoaded,
-                    [action.subSessionId]: action.messages,
-                },
-            }));
-        case "RESTORE_SESSION_SNAPSHOT":
-            return updateWs(state, action.cwd, (existing) => {
-                if (action.sessionKind === "subagent") {
-                    return {
-                        childMessagesBySubSessionId: {
-                            ...existing.childMessagesBySubSessionId,
-                            [action.sid]: action.messages,
-                        },
-                        childHistoryLoaded: {
-                            ...existing.childHistoryLoaded,
-                            [action.sid]: action.messages,
-                        },
-                    };
-                }
-                const askUserPending: Record<string, true> = {};
-                for (const id of action.pendingAskUserIds ?? []) askUserPending[id] = true;
-                if (existing.activeSession !== action.sid)
-                    return {
-                        sessionInteractions: {
-                            ...existing.sessionInteractions,
-                            [action.sid]: { messages: action.messages, askUserPending },
-                        },
-                    };
-                return {
-                    messages: action.messages,
-                    askUserPending,
-                    // A restore is about messages, not liveness — run_start /
-                    // run_end own this flag. Re-attaching to a session whose
-                    // turn is still in flight (switch away mid-run and back, or
-                    // a reload) must not mark it stopped, so seed `false` only
-                    // when nothing is known about this session yet. Without
-                    // this, a long tool call — e.g. a Claude Code subagent
-                    // running for minutes — shows as finished while it works.
-                    pendingBySessionId: {
-                        ...existing.pendingBySessionId,
-                        [action.sid]: existing.pendingBySessionId[action.sid] ?? false,
+            return updateWs(state, action.cwd, (ws) => {
+                const matches = action.parentSessionId
+                    ? [action.parentSessionId]
+                    : Object.keys(ws.sessionStatesById ?? {}).filter((sid) => {
+                          const s = ws.sessionStatesById?.[sid];
+                          return (
+                              s?.agentToolPending[action.parentToolCallId] ||
+                              s?.backgroundSubagents[action.parentToolCallId] !== undefined
+                          );
+                      });
+                const sid =
+                    matches.length === 1
+                        ? matches[0]
+                        : matches.length === 0
+                          ? ws.activeSession
+                          : undefined;
+                if (!sid) return undefined;
+                const session = getSessionState(ws, sid) ?? createSessionState();
+                return patchSession(ws, sid, {
+                    agentToolPending: omitKey(session.agentToolPending, action.parentToolCallId),
+                    backgroundSubagents: {
+                        ...session.backgroundSubagents,
+                        [action.parentToolCallId]: action.outcome,
                     },
-                };
+                });
+            });
+        case "CHILD_MESSAGE_EVENT":
+            return updateWs(state, action.cwd, (ws) =>
+                applySessionEvent(ws, action.subSessionId, action),
+            );
+        case "LOAD_SUBAGENT_HISTORY":
+            return updateWs(state, action.cwd, (ws) =>
+                patchSession(ws, action.subSessionId, {
+                    ...mergeSessionHistory(
+                        getSessionState(ws, action.subSessionId) ?? createSessionState(),
+                        action.messages,
+                    ),
+                    kind: "subagent",
+                }),
+            );
+        case "RESTORE_SESSION_SNAPSHOT":
+            return updateWs(state, action.cwd, (ws) => {
+                const restored = mergeSessionHistory(
+                    getSessionState(ws, action.sid) ?? createSessionState(),
+                    action.messages,
+                );
+                for (const id of action.pendingAskUserIds ?? []) {
+                    const tool = restored.messages
+                        .flatMap((m) => (m.kind === "assistant" ? (m.tools ?? []) : []))
+                        .find((t) => t.id === id);
+                    const details = tool?.details as
+                        | { answers?: unknown; waiting?: boolean }
+                        | undefined;
+                    if (!details?.answers && details?.waiting !== false)
+                        restored.askUserPending[id] = true;
+                }
+                return patchSession(ws, action.sid, { ...restored, kind: action.sessionKind });
             });
         case "ASKUSER_ANSWERED":
-            return updateWs(state, action.cwd, (existing) => {
-                const sid = action.sid ?? existing.activeSession;
-                if (!sid) return undefined;
-                const interaction =
-                    sid === existing.activeSession ? existing : existing.sessionInteractions?.[sid];
-                if (!interaction) return undefined;
-                const next = {
-                    askUserPending: omitKey(interaction.askUserPending, action.toolCallId),
-                    messages: attachAskUserAnswers(
-                        interaction.messages,
-                        action.toolCallId,
-                        action.answers,
-                    ),
-                };
-                return sid === existing.activeSession
-                    ? next
-                    : {
-                          sessionInteractions: { ...existing.sessionInteractions, [sid]: next },
-                      };
+            return updateWs(state, action.cwd, (ws) => {
+                const sid = action.sid ?? ws.activeSession;
+                const session = sid ? getSessionState(ws, sid) : undefined;
+                return session && sid
+                    ? patchSession(ws, sid, {
+                          messages: attachAskUserAnswers(
+                              session.messages,
+                              action.toolCallId,
+                              action.answers,
+                          ),
+                          askUserPending: omitKey(session.askUserPending, action.toolCallId),
+                      })
+                    : undefined;
             });
         case "TASKS_UPDATED":
-            return updateWs(state, action.cwd, (existing) => ({
+            return updateWs(state, action.cwd, (ws) => ({
                 taskSnapshotsBySessionId: {
-                    ...existing.taskSnapshotsBySessionId,
+                    ...ws.taskSnapshotsBySessionId,
                     [action.sid]: {
                         active: action.active,
                         history: action.history,
@@ -1135,46 +921,27 @@ export function workspacesReducer(
                 },
             }));
         case "PLAN_STATE_UPDATED":
-            return updateWs(state, action.cwd, (existing) => ({
+            return updateWs(state, action.cwd, (ws) => ({
                 planStatesBySessionId: {
-                    ...existing.planStatesBySessionId,
+                    ...ws.planStatesBySessionId,
                     [action.sid]: { active: action.active, currentSlug: action.currentSlug },
                 },
             }));
         case "HISTORY_DETAIL_LOADED":
-            return updateWs(state, action.cwd, (existing) => ({
+            return updateWs(state, action.cwd, (ws) => ({
                 historyDetailsBySessionId: {
-                    ...existing.historyDetailsBySessionId,
+                    ...ws.historyDetailsBySessionId,
                     [action.sid]: {
-                        ...(existing.historyDetailsBySessionId[action.sid] ?? {}),
+                        ...ws.historyDetailsBySessionId[action.sid],
                         [action.listId]: { tasks: action.tasks, loadedAt: Date.now() },
                     },
                 },
             }));
         case "BEGIN_PENDING_NEW_SESSION":
-            // Same reset shape as ATTACH's switch branch (subagent state, child streams,
-            // askUser/agent-tool pendings): the new session must not inherit anything
-            // from the previous one. The sessions list is kept so sidebar entries remain
-            // and the user can re-attach to a prior chat.
-            //
-            // pendingBySessionId / queuedBySessionId are deliberately kept. They are
-            // keyed per session id, so nothing in them can leak into the new session,
-            // and starting a new chat does not stop the old one — its run keeps going
-            // on the server. Clearing them dropped that session's running mark, and
-            // nothing put it back: run lifecycle events update these maps before the
-            // activeSession guard, but `run_start` has already fired, so the sidebar
-            // dot and the stop button read "idle" until the run ended.
-            // A session still loading is abandoned too; its late ATTACH is dropped.
             return updateWs(state, action.cwd, () => ({
                 activeSession: undefined,
                 loadingSessionId: undefined,
-                messages: [],
-                subagentSpawned: {},
-                childMessagesBySubSessionId: {},
-                childHistoryLoaded: {},
-                askUserPending: {},
-                agentToolPending: {},
-                backgroundSubagents: {},
+                draftId: action.draftId,
             }));
     }
 }

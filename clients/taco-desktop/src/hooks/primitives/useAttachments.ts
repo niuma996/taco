@@ -12,7 +12,7 @@
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
-import { useEffect, useRef, useState } from "react";
+import { type Dispatch, type SetStateAction, useEffect, useRef, useState } from "react";
 import { useT } from "../../i18n/useI18n";
 import {
     ATTACHMENT_MAX_COUNT,
@@ -43,7 +43,7 @@ function rejectionKey(rejected: readonly AttachRejection[]): string {
 
 export function useAttachments(
     attachments: StagedAttachment[],
-    onAttachmentsChange: (next: StagedAttachment[]) => void,
+    onAttachmentsChange: Dispatch<SetStateAction<StagedAttachment[]>>,
     stage: StageFn,
     /** Disabled while the composer is locked (compaction, session loading). */
     enabled: boolean,
@@ -52,35 +52,36 @@ export function useAttachments(
     const { t } = useT();
     const [dragging, setDragging] = useState(false);
 
-    // The drag-drop listener is registered once; it reads the latest values
-    // through a ref instead of re-subscribing on every keystroke.
-    // Object URLs made for pasted previews. Revoked on removal; whatever is left
-    // (sent, or rejected by the sidecar) is released when the pane unmounts.
-    const objectUrls = useRef(new Set<string>());
-    useEffect(() => {
-        const urls = objectUrls.current;
-        return () => {
-            for (const url of urls) URL.revokeObjectURL(url);
-            urls.clear();
-        };
-    }, []);
-
-    const latest = useRef({ attachments, onAttachmentsChange, stage, enabled, addPaths });
-    latest.current = { attachments, onAttachmentsChange, stage, enabled, addPaths };
+    // The native listener reads the current render at event entry. The async
+    // operation then keeps that render's stage, setter and enabled flag.
+    const latest = useRef({ enabled, addPaths });
+    latest.current = { enabled, addPaths };
 
     async function addSources(sources: Parameters<typeof stageSources>[0]): Promise<void> {
-        const cur = latest.current;
-        const { staged, rejected } = await stageSources(sources, cur.attachments.length, cur.stage);
+        if (!enabled) return;
+        const { staged, rejected } = await stageSources(sources, attachments.length, stage);
+        // Accepted previews belong to the draft manager. Only URLs created for
+        // pasted files that did not become a preview are still ours to release.
+        const acceptedPreviews = new Set(staged.map((item) => item.previewUrl));
+        for (const item of sources) {
+            if (
+                "blob" in item.source &&
+                item.previewUrl &&
+                !acceptedPreviews.has(item.previewUrl)
+            ) {
+                URL.revokeObjectURL(item.previewUrl);
+            }
+        }
         if (rejected.length > 0) {
             showToast(
                 t(rejectionKey(rejected), { count: rejected.length, limit: ATTACHMENT_MAX_COUNT }),
                 "warn",
             );
         }
-        // Read the list again: staging is async and the user may have removed
-        // or added something meanwhile.
+        // The setter is bound to the original draft; merge into its latest
+        // contents even if another draft is now on screen.
         if (staged.length > 0) {
-            latest.current.onAttachmentsChange([...latest.current.attachments, ...staged]);
+            onAttachmentsChange((current) => [...current, ...staged]);
         }
     }
 
@@ -93,6 +94,7 @@ export function useAttachments(
     }
 
     async function pick(): Promise<void> {
+        if (!enabled) return;
         const chosen = await openDialog({ multiple: true, directory: false });
         if (!chosen) return;
         await addPaths(Array.isArray(chosen) ? chosen : [chosen]);
@@ -107,11 +109,10 @@ export function useAttachments(
         // without this, that text lands in the textarea next to the chip.
         // Plain text pastes carry no file items and are untouched.
         e.preventDefault();
-        if (!latest.current.enabled) return;
+        if (!enabled) return;
         void (async () => {
             const sources = files.map((file) => {
                 const previewUrl = URL.createObjectURL(file);
-                objectUrls.current.add(previewUrl);
                 return {
                     previewUrl,
                     size: file.size,
@@ -130,11 +131,7 @@ export function useAttachments(
     }
 
     function removeAttachment(idx: number) {
-        const removed = attachments[idx];
-        if (removed?.previewUrl && objectUrls.current.delete(removed.previewUrl)) {
-            URL.revokeObjectURL(removed.previewUrl);
-        }
-        onAttachmentsChange(attachments.filter((_, i) => i !== idx));
+        onAttachmentsChange((current) => current.filter((_, i) => i !== idx));
     }
 
     // Native drag-drop. Tauri swallows the HTML5 drop event for files, so this

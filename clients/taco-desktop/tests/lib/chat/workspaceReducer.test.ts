@@ -647,7 +647,7 @@ describe("workspacesReducer — guards", () => {
         assert.equal(next, state);
     });
 
-    it("APPEND_SYSTEM ignored when sid mismatches activeSession", () => {
+    it("APPEND_SYSTEM updates its session while keeping the active transcript", () => {
         const state = { "/ws": baseWs({ activeSession: "a" }) };
         const next = workspacesReducer(state, {
             type: "APPEND_SYSTEM",
@@ -655,7 +655,8 @@ describe("workspacesReducer — guards", () => {
             sid: "b",
             msg: { id: "s", kind: "system", text: "x", ts: 1 } as UiMessage,
         });
-        assert.equal(next, state);
+        assert.equal(next["/ws"]?.messages, state["/ws"]?.messages);
+        assert.equal(next["/ws"]?.sessionStatesById?.b?.messages[0]?.text, "x");
     });
 
     it("APPLY_EVENT caches background messages without changing the active transcript", () => {
@@ -695,10 +696,7 @@ describe("workspacesReducer — guards", () => {
 });
 
 describe("workspacesReducer — APPEND_ASSISTANT_FINAL", () => {
-    // Guards the reason sendPrompt must dispatch SET_PENDING(false) explicitly
-    // on both branches: once the user has moved on to another session, this
-    // action is dropped whole and can no longer clear the turn's pending slot.
-    it("drops the action for a non-active sid, leaving its pending slot untouched", () => {
+    it("settles a non-active session without touching the active transcript", () => {
         const state = {
             "/ws": baseWs({
                 activeSession: "s2",
@@ -711,8 +709,8 @@ describe("workspacesReducer — APPEND_ASSISTANT_FINAL", () => {
             sid: "s1",
             reply: { role: "assistant", content: [], timestamp: 1 } as never,
         });
-        assert.equal(next, state);
-        assert.equal(next["/ws"]?.pendingBySessionId.s1, true);
+        assert.equal(next["/ws"]?.messages, state["/ws"]?.messages);
+        assert.equal(next["/ws"]?.pendingBySessionId.s1, false);
     });
 
     it("renders an empty stopReason=error reply as a single error row, no empty bubble", () => {
@@ -1132,7 +1130,7 @@ describe("subagent actions", () => {
         assert.equal(next["/ws"]?.pendingBySessionId["main-1"], true);
     });
 
-    it("RESTORE_SESSION_SNAPSHOT seeds pending false for a session it knows nothing about", () => {
+    it("RESTORE_SESSION_SNAPSHOT keeps an unknown execution state unknown", () => {
         const state = { "/ws": baseWs({ activeSession: "main-1" }) };
 
         const next = workspacesReducer(state, {
@@ -1144,7 +1142,8 @@ describe("subagent actions", () => {
             pendingAskUserIds: [],
         });
 
-        assert.equal(next["/ws"]?.pendingBySessionId["main-1"], false);
+        assert.equal(next["/ws"]?.pendingBySessionId["main-1"], undefined);
+        assert.equal(next["/ws"]?.sessionStatesById?.["main-1"]?.execution, "unknown");
     });
 
     it("BEGIN_PENDING_NEW_SESSION keeps an abandoned session's running mark", () => {
@@ -1299,7 +1298,7 @@ describe("subagent actions", () => {
         assert.deepEqual(next["/ws"]?.messages, []);
     });
 
-    it("ATTACH clears subagent state when switching session", () => {
+    it("ATTACH retains independently cached child streams and parent relations", () => {
         const state = {
             "/ws": baseWs({
                 activeSession: "main-1",
@@ -1324,9 +1323,9 @@ describe("subagent actions", () => {
             messages: [],
         });
         assert.equal(next["/ws"]?.activeSession, "main-2");
-        assert.deepEqual(next["/ws"]?.subagentSpawned, {});
-        assert.deepEqual(next["/ws"]?.childMessagesBySubSessionId, {});
-        assert.deepEqual(next["/ws"]?.childHistoryLoaded, {});
+        assert.equal(next["/ws"]?.subagentSpawned["main-1:tc-1"]?.subSessionId, "sub-1");
+        assert.equal(next["/ws"]?.childMessagesBySubSessionId["sub-1"]?.length, 1);
+        assert.equal(next["/ws"]?.childHistoryLoaded["sub-1"]?.length, 1);
     });
 });
 
@@ -1743,7 +1742,7 @@ describe("workspacesReducer — per-session pending", () => {
         assert.equal(next["/ws"]?.pendingBySessionId.s1, true);
     });
 
-    it("APPEND_SYSTEM clears pending only for its own sid", () => {
+    it("APPEND_SYSTEM does not infer execution completion from a diagnostic message", () => {
         const state = {
             "/ws": baseWs({
                 activeSession: "s1",
@@ -1756,22 +1755,19 @@ describe("workspacesReducer — per-session pending", () => {
             sid: "s1",
             msg: { id: "sys", kind: "system", text: "x", ts: 1 } as UiMessage,
         });
-        assert.equal(next["/ws"]?.pendingBySessionId.s1, false);
+        assert.equal(next["/ws"]?.pendingBySessionId.s1, true);
         assert.equal(next["/ws"]?.pendingBySessionId.s2, true);
     });
 
     it("SET_PENDING clears pending for background session by its own sid, without affecting active session", () => {
-        // Simulate useWorkspaces dispatch sequence for background session completion:
-        // 1. APPEND_ASSISTANT_FINAL on background session (guard returns early, no state change)
-        // 2. SET_PENDING with captured promptSid clears background session's slot
+        // Both completion paths settle the captured session independently of navigation.
         const state = {
             "/ws": baseWs({
                 activeSession: "s2",
                 pendingBySessionId: { s1: true, s2: false },
             }),
         };
-        // Step 1: APPEND_ASSISTANT_FINAL on background session s1 — guard blocks state update,
-        // messages and pendingBySessionId both unchanged
+        // The final response settles s1 while s2 remains selected.
         const afterAppend = workspacesReducer(state, {
             type: "APPEND_ASSISTANT_FINAL",
             cwd: "/ws",
@@ -1784,8 +1780,7 @@ describe("workspacesReducer — per-session pending", () => {
                 timestamp: 0,
             } as never,
         });
-        // Guard on non-active session: pending unchanged
-        assert.equal(afterAppend["/ws"]?.pendingBySessionId.s1, true);
+        assert.equal(afterAppend["/ws"]?.pendingBySessionId.s1, false);
         // active session untouched
         assert.equal(afterAppend["/ws"]?.pendingBySessionId.s2, false);
 

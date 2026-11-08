@@ -26,12 +26,21 @@ import type { UnlistenFn } from "@tauri-apps/api/event";
 import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useRef } from "react";
 import type { SessionEventLike, SessionEventParams } from "../lib/chat/chatUtils";
+import { getSessionState } from "../lib/chat/sessionState";
+import type { WorkspaceState } from "../lib/chat/workspaceReducer";
 import type { TacoClient } from "../lib/clients/tacoClient.ts";
 import { SessionPushProcessor, type SnapshotRecovery } from "../lib/sessionPushProcessor";
 import { bannerSeverity, formatForBanner, parseLogLine } from "../lib/sidecarLogLine";
 import { useStableCallback } from "./primitives/useStableCallback";
 
 export type SidecarAction =
+    | { type: "SESSION_UNCERTAIN"; cwd: string; sid: string }
+    | {
+          type: "SET_SESSION_SYNC";
+          cwd: string;
+          sid: string;
+          sync: "recovering" | "current" | "incomplete";
+      }
     | { type: "EVENT"; cwd: string; sid: string; ev: SessionEventLike }
     | {
           type: "CHILD_MESSAGE_EVENT";
@@ -98,7 +107,14 @@ export interface UseSidecarStreamOpts {
         cwd: string,
         sid: string,
         sessionKind: "main" | "subagent",
+        isCurrent?: () => boolean,
     ) => Promise<SnapshotRecovery>;
+    /** Current + running/waiting/unknown cached sessions; do not enumerate disk history. */
+    getRecoveryTargets?: () => readonly {
+        cwd: string;
+        sid: string;
+        sessionKind?: "main" | "subagent";
+    }[];
     /**
      * Receives sidecar failures — `[error]` lines plus unformatted stderr that
      * looks like a crash.
@@ -141,6 +157,66 @@ export interface UseSidecarStreamOpts {
     onImWorkspacesInvalidated?: (channelId: string) => void;
     /** Invalidate: a workspace's associated-directory set was written. */
     onWorkspaceAssociationsChanged?: (key: WorkspaceAssociationKey) => void;
+}
+
+/** Recovery candidates come from local runtime caches and selection, never disk history. */
+export function getSessionRecoveryTargets(
+    workspaces: Record<string, WorkspaceState>,
+    activeCwd: string,
+): { cwd: string; sid: string; sessionKind: "main" | "subagent" }[] {
+    const targets: {
+        cwd: string;
+        sid: string;
+        sessionKind: "main" | "subagent";
+        priority: number;
+    }[] = [];
+    for (const [cwd, ws] of Object.entries(workspaces)) {
+        const ids = new Set([
+            ...Object.keys(ws.sessionStatesById ?? {}),
+            ...Object.keys(ws.pendingBySessionId),
+            ...Object.keys(ws.sessionInteractions ?? {}),
+            ...Object.keys(ws.childMessagesBySubSessionId),
+            ...(cwd === activeCwd && ws.activeSession ? [ws.activeSession] : []),
+        ]);
+        const waiting = new Set<string>();
+        for (const request of Object.values(ws.pendingCommandPermissions)) {
+            for (const sid of [request.sessionId, request.displaySessionId]) {
+                if (sid) {
+                    ids.add(sid);
+                    waiting.add(sid);
+                }
+            }
+        }
+        for (const sid of ids) {
+            const session = getSessionState(ws, sid);
+            const selected = cwd === activeCwd && ws.activeSession === sid;
+            const needsAnswer =
+                waiting.has(sid) || (session && Object.keys(session.askUserPending).length > 0);
+            const running =
+                ws.pendingBySessionId[sid] ||
+                (session &&
+                    (session.execution === "running" ||
+                        Object.keys(session.agentToolPending).length > 0 ||
+                        Object.values(session.backgroundSubagents).includes("running")));
+            if (
+                selected ||
+                needsAnswer ||
+                running ||
+                (session && (session.execution === "unknown" || session.sync !== "current")) ||
+                ws.queuedBySessionId[sid]?.length
+            ) {
+                targets.push({
+                    cwd,
+                    sid,
+                    sessionKind: session?.kind ?? "main",
+                    priority: selected ? 0 : needsAnswer ? 1 : running ? 2 : 3,
+                });
+            }
+        }
+    }
+    return targets
+        .sort((a, b) => a.priority - b.priority)
+        .map(({ cwd, sid, sessionKind }) => ({ cwd, sid, sessionKind }));
 }
 
 const LLM_DUMP_PREFIX = "[taco:llm]";
@@ -358,8 +434,11 @@ export function useSidecarStream(
         opts.onWorkspaceAssociationsChanged?.(key),
     );
 
+    const clientRef = useRef(client);
+    clientRef.current = client;
     const processorRef = useRef<SessionPushProcessor | undefined>(undefined);
-    const processingRef = useRef<Promise<void>>(Promise.resolve());
+    const getRecoveryTargets = useStableCallback(() => opts.getRecoveryTargets?.() ?? []);
+    const recoveryGenerationRef = useRef(0);
     const logUnlistenRef = useRef<UnlistenFn | undefined>(undefined);
     const unsubscribePushRef = useRef<(() => void) | undefined>(undefined);
     // `ready` is created once on first render. The resolve callback is
@@ -373,14 +452,16 @@ export function useSidecarStream(
     if (!processorRef.current) {
         processorRef.current = new SessionPushProcessor({
             getEvents: (workspace, session, afterSeq) =>
-                client.sessionEventsGet({
+                clientRef.current.sessionEventsGet({
                     workspace: asWorkspaceId(workspace),
                     sessionId: asSessionId(session),
                     afterSeq,
                 }),
             deliver: (push) => normalizePushFrame(push, onActionRef),
-            recoverSnapshot: (workspace, session, sessionKind) =>
-                onSnapshotRequiredRef(workspace, session, sessionKind),
+            onSyncState: (cwd, sid, sync) =>
+                onActionRef({ type: "SET_SESSION_SYNC", cwd, sid, sync }),
+            recoverSnapshot: (workspace, session, sessionKind, _lastSeq, _targetSeq, isCurrent) =>
+                onSnapshotRequiredRef(workspace, session, sessionKind, isCurrent),
             reportError: (message, error) => {
                 console.error("[taco] session push recovery", message, error);
                 onLogLineRef(`[sidecar] ${message}`);
@@ -389,6 +470,41 @@ export function useSidecarStream(
     }
 
     useEffect(() => {
+        const processor = processorRef.current;
+        if (!processor) return;
+        const invalidate = (markUncertain = false) => {
+            recoveryGenerationRef.current++;
+            processor.invalidate();
+            if (markUncertain) {
+                for (const { cwd, sid } of getRecoveryTargets())
+                    onActionRef({ type: "SESSION_UNCERTAIN", cwd, sid });
+            }
+        };
+        const reportFailure = (error: unknown) => {
+            console.error("[taco] push processing failed", error);
+            onLogLineRef(`[sidecar] push processing failed: ${String(error)}`);
+        };
+        const unsubscribeReady = client.onConnectionReady(() => {
+            invalidate(true);
+            const generation = recoveryGenerationRef.current;
+            const unique = new Map(
+                getRecoveryTargets().map((target) => [`${target.cwd}\u0000${target.sid}`, target]),
+            );
+            const targets = [...unique.values()];
+            let next = 0;
+            const recover = async () => {
+                while (generation === recoveryGenerationRef.current && next < targets.length) {
+                    const target = targets[next++];
+                    if (!target) return;
+                    try {
+                        await processor.reconcile(target.cwd, target.sid, target.sessionKind);
+                    } catch (error) {
+                        if (generation === recoveryGenerationRef.current) reportFailure(error);
+                    }
+                }
+            };
+            void Promise.all([recover(), recover()]);
+        });
         const unsubscribeEpoch = client.onWorkspaceEpochChanged((workspace) => {
             processorRef.current?.resetWorkspace(workspace);
             onActionRef({ type: "SIDECAR_RESTARTED", cwd: workspace });
@@ -445,21 +561,23 @@ export function useSidecarStream(
                 if (params?.key) onWorkspaceAssociationsChangedRef(params.key);
                 return;
             }
-            processingRef.current = processingRef.current
-                .then(() => processorRef.current?.process(push))
-                .catch((error) => {
-                    console.error("[taco] push processing failed", error);
-                    onLogLineRef(`[sidecar] push processing failed: ${String(error)}`);
-                });
+            void processor.process(push).catch(reportFailure);
         });
 
         let cancelled = false;
+        let exitUnlisten: UnlistenFn | undefined;
         const init = async () => {
             // Rust batches stderr lines into one event per ~50ms / 64 lines
             // (`{lines: string[]}` payload) so a single LLM payload's
             // hundreds of folded `[taco:llm]` lines don't drown IPC. The
             // single-line `{line}` payload is kept as a fallback for any
             // out-of-tree emitter.
+            const onExitUnlisten = await listen("sidecar-exited", () => invalidate(true));
+            if (cancelled) {
+                onExitUnlisten();
+                return;
+            }
+            exitUnlisten = onExitUnlisten;
             const unlisten = await listen<{ line?: string; lines?: string[] }>(
                 "sidecar-log",
                 (event) => {
@@ -491,6 +609,9 @@ export function useSidecarStream(
 
         return () => {
             cancelled = true;
+            invalidate();
+            unsubscribeReady();
+            exitUnlisten?.();
             unsubscribePushRef.current?.();
             unsubscribePushRef.current = undefined;
             unsubscribeEpoch();
@@ -499,6 +620,7 @@ export function useSidecarStream(
         };
     }, [
         client,
+        getRecoveryTargets,
         onActionRef,
         onChannelStatusChangedRef,
         onConversationsChangedRef,
@@ -513,6 +635,9 @@ export function useSidecarStream(
         onWarningLineRef,
     ]);
 
-    const clearCursors = useCallback(() => processorRef.current?.clear(), []);
+    const clearCursors = useCallback(() => {
+        recoveryGenerationRef.current++;
+        processorRef.current?.clear();
+    }, []);
     return { clearCursors };
 }

@@ -82,6 +82,10 @@
     "resizeHandle": "Drag to resize panel"
   },
   "input": {
+    "deliveryUnknown": "Delivery is unconfirmed. Check the conversation before resending.",
+    "unsentDraft": "An input was not sent",
+    "recoverDraft": "Restore input",
+    "stateSyncIncomplete": "State pending synchronization",
     "commandPermissionModeHint": "Applies to all chats. Manual: approve commands outside the allowlist. Automatic: approve denylisted and built-in high-risk commands. The denylist takes priority.",
     "placeholderRunning": "Assistant is running… type here to steer",
     "placeholderIdle": "Type a prompt and hit Enter… (paste or attach images)",
