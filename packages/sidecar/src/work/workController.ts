@@ -20,13 +20,16 @@ import { chunkText } from "../channels/builtin/channelReply.ts";
 import { createLogger } from "../lib/logger.ts";
 import { uuidv7 } from "../runtime/pi/values.ts";
 import { PARENT_REPLY_GRACE_MS, type WorkDeliverer } from "./workDelivery.ts";
+import type { WorkOperationRef } from "./workOperationTypes.ts";
 import {
     completenessFor,
+    expireWaiting,
     interrupt,
     resumeAttempt as resumeWorkAttempt,
     type SettleOutcome,
     settle,
     waitForInput as waitWorkForInput,
+    withWaitingDeadline,
 } from "./workState.ts";
 import { type WorkStore, workIdForSource } from "./workStore.ts";
 import {
@@ -57,8 +60,7 @@ export const WORK_RETENTION_COUNT = 500;
  * would otherwise push every subagent result out of a shared budget in a day.
  */
 export const SCHEDULED_WORK_RETENTION_PER_JOB = 20;
-/** Waiting interactions that survive this long without an answer are stale. */
-export const WAITING_WORK_STALE_MS = 7 * 24 * 60 * 60_000;
+export { WAITING_WORK_STALE_MS } from "./workState.ts";
 
 export interface StartWorkArgs {
     readonly sourceEventId: string;
@@ -307,18 +309,29 @@ export class WorkController {
     }
 
     /** Resume only the specified waiting interaction, or an interrupted child. */
-    async resumeAttempt(workId: string, toolCallId?: string): Promise<WorkRecord | undefined> {
-        const now = this.now();
+    async resumeAttempt(
+        workId: string,
+        toolCallId?: string,
+        operation?: WorkOperationRef,
+    ): Promise<WorkRecord | undefined> {
+        let expired = false;
         const res = await this.store.mutate(workId, (current) => {
             if (
                 toolCallId !== undefined &&
                 (current.status !== "waiting" || current.waiting?.toolCallId !== toolCallId)
             )
                 return undefined;
+            const now = this.now();
+            const stopped = expireWaiting(current, now);
+            if (stopped) {
+                expired = true;
+                return withInterruptionNotice(stopped, now);
+            }
             const next = resumeWorkAttempt(current, { attemptId: uuidv7(), now });
             if (!next) return undefined;
             return {
                 ...next,
+                ...(operation ? { attempt: { ...next.attempt, operation } } : {}),
                 ownerInstanceId: this.instanceId,
                 ...(current.delivery?.status === "pending"
                     ? {
@@ -332,22 +345,34 @@ export class WorkController {
             };
         });
         if (res?.changed) this.onChange(workId);
+        if (expired) {
+            if (res?.record.delivery) void this.deliverer.deliver(workId);
+            return undefined;
+        }
         return toolCallId !== undefined && !res?.changed ? undefined : res?.record;
     }
 
     async restoreWaiting(snapshot: WorkRecord, attemptId: string): Promise<void> {
-        const res = await this.store.mutate(snapshot.workId, (current) =>
-            current.status === "running" && current.attempt.attemptId === attemptId
-                ? {
-                      ...current,
-                      status: "waiting",
-                      waiting: snapshot.waiting,
-                      attempt: snapshot.attempt,
-                      updatedAt: this.now(),
-                  }
-                : undefined,
-        );
+        const res = await this.store.mutate(snapshot.workId, (current) => {
+            if (current.status !== "running" || current.attempt.attemptId !== attemptId)
+                return undefined;
+            const timed = withWaitingDeadline(snapshot);
+            const now = this.now();
+            const restored: WorkRecord = {
+                ...current,
+                status: "waiting",
+                waiting: timed.waiting,
+                waitingSince: timed.waitingSince,
+                expiresAt: timed.expiresAt,
+                attempt: timed.attempt,
+                updatedAt: now,
+            };
+            const stopped = expireWaiting(restored, now);
+            return stopped ? withInterruptionNotice(stopped, now) : restored;
+        });
         if (res?.changed) this.onChange(snapshot.workId);
+        if (res?.changed && res.record.expiredInteraction && res.record.delivery)
+            void this.deliverer.deliver(snapshot.workId);
     }
 
     /** Whether this Work's outcome already reached the user another way. */
@@ -482,47 +507,73 @@ export class WorkController {
         await this.deliverer.resume();
     }
 
-    /**
-     * Startup pass: mark Works whose driver process is gone, then prune.
-     *
-     * Read-only toward pi on purpose: deciding whether a stored operation is
-     * still resumable would mean attaching every child session at startup, which
-     * is exactly the cost this pass exists to avoid. So "interrupted" here means
-     * "the driver died", not "the run is unrecoverable": a later `agentContinue`
-     * reopens the Work through `resumeAttempt`, and a settle from that run
-     * closes it normally. The reason text says so.
-     */
-    async reconcile(): Promise<{ interrupted: number; pruned: number }> {
+    /** Startup fallback skips operations retained by the read-only execution reconciler. */
+    async reconcile(
+        skipWorkIds?: ReadonlySet<string>,
+    ): Promise<{ interrupted: number; pruned: number }> {
+        return this.reconcileLifecycle(true, skipWorkIds);
+    }
+
+    /** Running maintenance never treats another process's running Work as abandoned. */
+    async maintain(): Promise<{ interrupted: number; pruned: number }> {
+        return this.reconcileLifecycle(false);
+    }
+
+    private async reconcileLifecycle(
+        interruptOrphans: boolean,
+        skipWorkIds?: ReadonlySet<string>,
+    ): Promise<{ interrupted: number; pruned: number }> {
         const all = await this.store.list();
         let interrupted = 0;
         for (const work of all) {
-            const now = this.now();
-            const staleWaiting =
-                work.status === "waiting" && now - work.updatedAt >= WAITING_WORK_STALE_MS;
             const deadRunning =
-                work.status === "running" && work.ownerInstanceId !== this.instanceId;
-            if (!staleWaiting && !deadRunning) continue;
+                interruptOrphans &&
+                !skipWorkIds?.has(work.workId) &&
+                work.status === "running" &&
+                work.ownerInstanceId !== this.instanceId;
+            if (work.status !== "waiting" && !deadRunning) continue;
+            let didInterrupt = false;
             const next = await this.store.mutate(work.workId, (current) => {
-                const stopped = interrupt(current, {
-                    reason: staleWaiting
-                        ? "the user did not answer this interaction within seven days"
-                        : current.kind === "scheduled"
-                          ? "the process that was running this stopped before it finished; " +
-                            "the job runs again at its next scheduled time"
-                          : "the process that was running this stopped before it finished; " +
-                            "continue the subagent to finish it",
-                    now,
-                });
+                if (current.attempt.attemptId !== work.attempt.attemptId) return undefined;
+                const now = this.now();
+                let stopped: WorkRecord | undefined;
+                if (work.status === "waiting") {
+                    if (
+                        current.status !== "waiting" ||
+                        current.waiting?.toolCallId !== work.waiting?.toolCallId ||
+                        current.waiting?.sessionId !== work.waiting?.sessionId ||
+                        current.expiresAt !== work.expiresAt
+                    )
+                        return undefined;
+                    const timed = withWaitingDeadline(current);
+                    stopped = expireWaiting(timed, now);
+                    if (!stopped) return timed === current ? undefined : timed;
+                } else {
+                    if (current.status !== "running" || current.ownerInstanceId === this.instanceId)
+                        return undefined;
+                    stopped = interrupt(current, {
+                        reason:
+                            current.kind === "scheduled"
+                                ? "the process that was running this stopped before it finished; " +
+                                  "the job runs again at its next scheduled time"
+                                : "the process that was running this stopped before it finished; " +
+                                  "continue the subagent to finish it",
+                        now,
+                    });
+                }
                 if (!stopped) return undefined;
+                didInterrupt = true;
                 // The user who launched this is on the other end of a channel and
                 // has no other way to learn it stopped. Queue the notice now: the
                 // target was frozen at launch precisely for this case.
                 return withInterruptionNotice(stopped, now);
             });
             if (next?.changed) {
-                interrupted++;
                 this.onChange(work.workId);
-                if (next.record.delivery) void this.deliverer.deliver(work.workId);
+                if (didInterrupt) {
+                    interrupted++;
+                    if (next.record.delivery) void this.deliverer.deliver(work.workId);
+                }
             }
         }
         const pruned = await this.prune(await this.store.list());
@@ -557,18 +608,20 @@ export class WorkController {
 
     private async prune(all: readonly WorkRecord[]): Promise<number> {
         const doomed = pruneTargets(all, this.now());
-        for (const workId of doomed) await this.store.delete(workId);
-        if (doomed.size > 0) log.info("pruned finished work", { count: doomed.size });
-        return doomed.size;
+        let count = 0;
+        for (const record of all)
+            if (doomed.has(record.workId) && (await this.store.deleteIfUnchanged(record))) count++;
+        if (count > 0) log.info("pruned finished work", { count });
+        return count;
     }
 
     /** Keep one job's finished fires within its own budget. */
     private async pruneJob(jobId: string): Promise<void> {
         const fires = (await this.store.list()).filter((w) => w.jobId === jobId);
         const doomed = pruneTargets(fires, this.now());
-        for (const workId of doomed) {
-            await this.store.delete(workId);
-            this.onChange(workId);
+        for (const record of fires) {
+            if (doomed.has(record.workId) && (await this.store.deleteIfUnchanged(record)))
+                this.onChange(record.workId);
         }
     }
 }

@@ -33,3 +33,12 @@ export const workGetSchema = Type.Object({
 export const workRetryDeliverySchema = Type.Object({
     workId: workIdSchema,
 });
+
+export const workCancelSchema = Type.Object({
+    workId: workIdSchema,
+    attemptId: Type.String({ minLength: 1, maxLength: 128 }),
+});
+
+export const workDeleteSchema = Type.Object({
+    workId: workIdSchema,
+});

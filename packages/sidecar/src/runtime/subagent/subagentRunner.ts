@@ -15,6 +15,7 @@ import type { SessionId, SubagentProgressDetails } from "@taco-ai/protocol";
 import type { SubagentProgressSink } from "../../agents/types.ts";
 import type { SubagentBudgetState } from "../../tags/subagentBudget.ts";
 import type { AttachedSession } from "../harness/attachedSession.ts";
+import { isAbortedTurn } from "../harness/harnessErrors.ts";
 import type { AgentToolResult, HarnessEvent } from "../pi/types.ts";
 import {
     resolveWaitingInteraction,
@@ -204,8 +205,8 @@ export async function runAttachedSubagent(
                 partial: true,
             };
         }
-        if (args.signal?.aborted) {
-            const reason = args.signal.reason;
+        if (args.signal?.aborted || isAbortedTurn(e)) {
+            const reason = args.signal?.reason;
             const notice = isSubagentTimeoutReason(reason)
                 ? subagentTimeoutText({ timeoutMinutes: reason.timeoutMinutes, turnsUsed })
                 : SUBAGENT_STOPPED_TEXT;

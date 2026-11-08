@@ -47,6 +47,11 @@ export function toSummary(work: WorkRecord): WorkSummary {
     return {
         workId: work.workId,
         revision: work.revision,
+        attemptId: work.attempt.attemptId,
+        canCancel:
+            (work.status === "waiting" && work.waiting?.toolName !== "permission") ||
+            ((work.status === "running" || work.waiting?.toolName === "permission") &&
+                work.attempt.operation !== undefined),
         kind: work.kind,
         title: work.title,
         ...(work.agentType !== undefined ? { agentType: work.agentType } : {}),

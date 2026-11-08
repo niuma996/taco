@@ -219,7 +219,7 @@ describe("work × background subagent", () => {
             assert.equal(a?.status, "completed");
             assert.equal(a?.result?.completeness, "partial");
             assert.equal((await service.store.get(failed.workId))?.status, "failed");
-            assert.equal((await service.store.get(stopped.workId))?.status, "failed");
+            assert.equal((await service.store.get(stopped.workId))?.status, "cancelled");
         } finally {
             restoreParent();
         }
@@ -491,14 +491,18 @@ describe("work × background subagent", () => {
                 interrupt(w, { reason: "driver died", now: Date.now() }),
             );
 
-            await service.onResumeStart(asSessionId("c-resume"));
+            const handle = await service.onResumeStart(asSessionId("c-resume"));
             assert.equal((await service.store.get(workId))?.status, "running");
 
-            await service.onResumeSettle(asSessionId("c-resume"), {
-                outcome: "completed",
-                resultText: "finished after resume",
-                partial: false,
-            });
+            await service.onResumeSettle(
+                asSessionId("c-resume"),
+                {
+                    outcome: "completed",
+                    resultText: "finished after resume",
+                    partial: false,
+                },
+                handle,
+            );
             const after = await service.store.get(workId);
             assert.equal(after?.status, "completed");
             assert.equal(after?.result?.summary, "finished after resume");

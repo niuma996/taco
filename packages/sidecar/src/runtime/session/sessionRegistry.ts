@@ -87,6 +87,7 @@ export interface AttachOptions {
 }
 
 export interface SessionRegistryOptions {
+    shouldAbortOperation?: (sessionId: string, operationId: string) => Promise<boolean>;
     readonly cwd: WorkspaceId;
     readonly repo: JsonlSessionRepo;
     /** Root dir the repo's sessions live under — task state persists alongside it. */
@@ -304,6 +305,7 @@ export class SessionRegistry extends EventEmitter {
      * renameSession (avoids N repo.open calls on next list).
      */
     private readonly _nameCache = new Map<SessionId, string | undefined>();
+    private readonly shouldAbortOperation?: SessionRegistryOptions["shouldAbortOperation"];
 
     /**
      * sessionId → last facts record written. Populated together with the
@@ -411,6 +413,7 @@ export class SessionRegistry extends EventEmitter {
 
     constructor(options: SessionRegistryOptions) {
         super();
+        this.shouldAbortOperation = options.shouldAbortOperation;
         this.sessionCwd = options.cwd;
         this.repo = options.repo;
         this.sessionsRoot = options.sessionsRoot;
@@ -1066,6 +1069,9 @@ export class SessionRegistry extends EventEmitter {
                     getToolContext: this.getToolContext,
                     sessionCwd: this.sessionCwd,
                     sessionKind,
+                    shouldAbortOperation: (operationId) =>
+                        this.shouldAbortOperation?.(sessionId, operationId) ??
+                        Promise.resolve(false),
                 });
             } catch (error) {
                 // The handle owns pi's slot until it closes. A failed attach

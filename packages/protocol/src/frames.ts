@@ -96,14 +96,16 @@ export type CompactionFailureReason =
  *  2.10 tracks scheduled fires as Work; a 2.9 daemon sends no `workId` in job
  *  history and still names the summary's session `parentSessionId`.
  *  2.11 reports whether a Work's target session has been deleted.
- *  2.12 adds managed Work waiting interactions and live permission projections. */
-export const SIDECAR_PROTOCOL_VERSION = { major: 2, minor: 12 } as const;
+ *  2.12 adds managed Work waiting interactions and live permission projections.
+ *  2.13 adds attempt-scoped Work cancellation and terminal-record deletion. */
+export const SIDECAR_PROTOCOL_VERSION = { major: 2, minor: 13 } as const;
 
 /**
  * Client-side gate for a sidecar's advertised protocol version. Semver-ish but
  * deliberately not semver-compat: major must match exactly, and the sidecar's
- * minor must be >= the client's. A newer sidecar (higher minor) is additive —
- * the client ignores methods it doesn't know. An older sidecar may lack methods
+ * minor must be >= the client's. New response vocabulary requires capability
+ * negotiation or a major bump; a minor alone cannot protect older readers.
+ * An older sidecar may lack methods
  * the client calls, so the client must reject it up front rather than fail on a
  * specific RPC at runtime. A missing/malformed protocol field rejects.
  */
@@ -133,9 +135,8 @@ export function isCompatibleClientProtocol(client: { major: unknown; minor: unkn
 
 /**
  * Client-declared capabilities negotiated via the `initialize` RPC. The
- * shape is open: `uiLocale` is the only field declared today, but the index
- * signature lets clients and servers agree on new fields without a protocol
- * bump. The server does not retain the declaration yet — nothing reads it.
+ * shape is open so clients can opt into response vocabulary independently of
+ * method availability. Declarations belong to a connection, never the process.
  */
 export interface ClientCapabilities {
     uiLocale?: SupportedLocale;

@@ -10,6 +10,7 @@
  */
 
 import type { SessionId } from "@taco-ai/protocol";
+import type { WorkAttemptHandle } from "./workOperationTypes.ts";
 
 export interface WorkLaunch {
     readonly workspace?: string;
@@ -21,6 +22,7 @@ export interface WorkLaunch {
 }
 
 export interface WorkSettle {
+    readonly attemptId?: string;
     readonly outcome: "completed" | "error" | "aborted";
     readonly resultText: string;
     /** True when the run ended on its turn cap and returned what it had. */
@@ -38,6 +40,12 @@ export interface WorkWaiting {
 }
 
 export interface BackgroundWorkHooks {
+    cancellationRequested?(
+        workspace: string,
+        sessionId: string,
+        operationId: string,
+    ): Promise<boolean>;
+    run?<T>(workId: string, sessionId: string, run: (attemptId: string) => Promise<T>): Promise<T>;
     /** Stable Work id for a launch; lets a later flush find the Work without a map. */
     workIdFor(parentSessionId: SessionId, parentToolCallId: string): string;
     /** Record the launch. Resolves to the Work id, or undefined if tracking is off. */
@@ -49,7 +57,7 @@ export interface BackgroundWorkHooks {
      */
     onSettle(workId: string, parentSessionId: SessionId, settle: WorkSettle): Promise<void>;
     /** Park a background Work until its child session receives an answer. */
-    onWaiting?(workId: string, waiting: WorkWaiting): Promise<void>;
+    onWaiting?(workId: string, waiting: WorkWaiting, attemptId?: string): Promise<void>;
     /**
      * Whether a notice run's reply should be captured for this Work: only while
      * its delivery still waits for one. Once a message is frozen, a later run
@@ -76,12 +84,19 @@ export interface BackgroundWorkHooks {
      * A resumed run is about to start for a child session. Reopens an
      * interrupted Work so its result can be recorded when the run ends.
      */
-    onResumeStart(childSessionId: SessionId): Promise<void>;
+    onResumeStart(
+        childSessionId: SessionId,
+        workspace?: string,
+    ): Promise<WorkAttemptHandle | undefined>;
     /**
      * A resumed run ended. Closes the reopened Work; `agentContinue` reports
      * through the conversation, so this queues no notice of its own.
      */
-    onResumeSettle(childSessionId: SessionId, settle: WorkSettle): Promise<void>;
+    onResumeSettle(
+        childSessionId: SessionId,
+        settle: WorkSettle,
+        handle?: WorkAttemptHandle,
+    ): Promise<void>;
     /**
      * Whether this Work's outcome already reached the user another way: the
      * deliverer confirmed it, the parent's own reply carried it, or a resume
@@ -117,6 +132,8 @@ export type ScheduledFireSettle =
     | { readonly outcome: "error"; readonly message: string };
 
 export interface ScheduledWorkHooks {
+    onFireQueued?(workId: string, entryId: string): Promise<void>;
+    run?<T>(workId: string, sessionId: string, run: (attemptId: string) => Promise<T>): Promise<T>;
     /** Record the fire before its turn starts. Resolves to the Work id, or undefined. */
     onFire(fire: ScheduledFire): Promise<string | undefined>;
     /** The fire's turn ended. */

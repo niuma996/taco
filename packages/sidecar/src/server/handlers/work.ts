@@ -1,10 +1,6 @@
 /**
- * work.* handlers: the read-only overview of managed background work.
- *
- * Process-scoped, like jobs.*: a Work outlives the session that started it, so
- * nothing here needs a workspace runtime and nothing attaches a session. The
- * only write is `work.retryDelivery`, which re-sends a notice and never
- * re-runs the work.
+ * Process-scoped overview and controls. A Work outlives its session;
+ * handlers delegate attempt cancellation and record deletion without attaching.
  */
 
 import type {
@@ -17,6 +13,23 @@ import { registerMethod } from "../methodRegistry.ts";
 import { SIDECAR_INSTANCE_ID } from "../push.ts";
 
 export function registerWorkHandlers(): void {
+    registerMethod(
+        "workCancel",
+        false,
+        async ({ server, params }) =>
+            server.work?.cancel(params.workId, params.attemptId) ?? {
+                outcome: "not_found" as const,
+                newlyRequested: false,
+            },
+        { command: true },
+    );
+    registerMethod(
+        "workDelete",
+        false,
+        async ({ server, params }) =>
+            server.work?.delete(params.workId) ?? { outcome: "not_found" as const },
+        { command: true },
+    );
     const legacy = (work: WorkSummary): WorkSummary =>
         work.status === "waiting"
             ? { ...work, status: "running", needsAttention: false, waiting: undefined }

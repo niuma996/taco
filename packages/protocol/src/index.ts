@@ -408,10 +408,16 @@ export type {
     ToolsListResult,
 } from "./tools.js";
 export { BINARY_READ_MARKER } from "./tools.js";
-// work.* RPC types and vocabularies: the read-only overview of managed work.
+// work.* RPC types and vocabularies.
 export type {
+    WorkCancelOutcome,
+    WorkCancelParams,
+    WorkCancelResult,
     WorkChangedParams,
     WorkCompleteness,
+    WorkDeleteOutcome,
+    WorkDeleteParams,
+    WorkDeleteResult,
     WorkDeliveryStatus,
     WorkDeliverySummary,
     WorkGetParams,

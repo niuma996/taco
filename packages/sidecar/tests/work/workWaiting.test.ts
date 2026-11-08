@@ -365,11 +365,14 @@ it("expires a waiting Work after the stale interaction window", async (t) => {
     await service.controller.waitForInput(work.workId, waiting);
     await service.store.mutate(work.workId, (current) => ({
         ...current,
-        updatedAt: Date.now() - WAITING_WORK_STALE_MS - 1,
+        waitingSince: Date.now() - WAITING_WORK_STALE_MS - 1,
+        expiresAt: Date.now() - 1,
+        updatedAt: Date.now(),
     }));
     await service.start();
     const after = await service.store.get(work.workId);
     assert.equal(after?.status, "interrupted");
     assert.equal(after?.waiting, undefined);
+    assert.equal(after?.expiredInteraction?.toolCallId, waiting.toolCallId);
     assert.match(after?.reason ?? "", /seven days/);
 });

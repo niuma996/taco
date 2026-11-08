@@ -31,7 +31,7 @@ export class WorkPermissionProjection {
     }
 
     project(work: WorkRecord): WorkRecord {
-        if (work.status !== "running") return work;
+        if (work.status !== "running" || work.attempt.sharedQueue) return work;
         const sessionId = work.childSessionId ?? work.parentSessionId;
         for (const request of this.pending.values()) {
             if (request.workspace !== work.workspace || request.sessionId !== sessionId) continue;

@@ -55,6 +55,58 @@ describe("work.store", () => {
         assert.equal((await store.list()).length, 1);
     });
 
+    it("keeps deleted sources tombstoned across restart and rejects late result writes", async () => {
+        const dir = join(root, "tombstone");
+        const store = new WorkStore(dir);
+        const rec = record("deleted-source", { status: "completed" });
+        await store.createIfAbsent(rec);
+        assert.equal(await store.markDeleted(rec.workId), "deleted");
+        assert.equal(await store.get(rec.workId), undefined);
+        await store.delete(rec.workId);
+        const restarted = new WorkStore(dir);
+        await assert.rejects(restarted.createIfAbsent(rec), /deleted/);
+        await assert.rejects(
+            restarted.writeResult({ workId: rec.workId, attemptId: "old", text: "late", now: 3 }),
+            /deleted/,
+        );
+        assert.deepEqual(await restarted.list(), []);
+        assert.equal(await restarted.markDeleted(rec.workId), "deleted");
+    });
+
+    it("does not tombstone running or waiting work", async () => {
+        const store = new WorkStore(join(root, "active-delete"));
+        for (const status of ["running", "waiting"] as const) {
+            const rec = record(`active-${status}`, { status });
+            await store.createIfAbsent(rec);
+            assert.equal(await store.markDeleted(rec.workId), "running");
+            assert.ok(await store.get(rec.workId));
+        }
+    });
+
+    it("does not overwrite an unrecognized snapshot when its source is replayed", async () => {
+        const dir = join(root, "unknown-source");
+        const rec = record("unknown-source");
+        mkdirSync(join(dir, rec.workId), { recursive: true });
+        writeFileSync(
+            join(dir, rec.workId, "work.json"),
+            JSON.stringify({ ...rec, schemaVersion: 99 }),
+        );
+        await assert.rejects(new WorkStore(dir).createIfAbsent(rec), /unrecognized/);
+    });
+
+    it("declines a stale prune after an interrupted Work resumes", async () => {
+        const store = new WorkStore(join(root, "prune-race"));
+        const snapshot = record("prune-race", { status: "interrupted" });
+        await store.createIfAbsent(snapshot);
+        await store.mutate(snapshot.workId, (current) => ({
+            ...current,
+            status: "running",
+            attempt: { attemptId: "new", startedAt: 3 },
+        }));
+        assert.equal(await store.deleteIfUnchanged(snapshot), false);
+        assert.equal((await store.get(snapshot.workId))?.status, "running");
+    });
+
     it("dedups across a restart: a fresh store instance sees the earlier Work", async () => {
         const dir = join(root, "restart");
         const rec = record("subagent:p:restart");

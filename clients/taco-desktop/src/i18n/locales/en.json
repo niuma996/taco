@@ -510,7 +510,7 @@
     "loadingMore": "Loading…",
     "partial": "Partial",
     "openSession": "Open chat",
-    "openSessionUnavailable": "This record predates workspace tracking.",
+    "openSessionUnavailable": "The target chat is unavailable.",
     "retryDelivery": "Send again",
     "resultLoading": "Loading the answer…",
     "resultPending": "The result will appear here when the work finishes.",
@@ -527,7 +527,8 @@
       "completed": "Completed",
       "failed": "Failed",
       "cancelled": "Stopped",
-      "interrupted": "Interrupted"
+      "interrupted": "Interrupted",
+      "unknown": "Unknown status"
     },
     "delivery": {
       "pending": "Sending",
@@ -540,6 +541,19 @@
     },
     "kind": {
       "scheduled": "Scheduled"
+    },
+    "openSessionDeleted": "The target chat has been deleted.",
+    "permissionRequired": "Command approval required",
+    "cancel": "Stop work",
+    "delete": "Delete record",
+    "actionUnsupported": "This background service does not support this action.",
+    "actionFailed": "The action failed. Refresh and try again.",
+    "actionOutcome": {
+      "not_found": "This work record is no longer available.",
+      "not_running": "This attempt has already stopped.",
+      "attempt_mismatch": "A newer attempt has started. Review the updated record before stopping it.",
+      "unsupported": "This attempt does not support cancellation.",
+      "running": "Stop the work before deleting its record."
     }
   },
   "plugins": {

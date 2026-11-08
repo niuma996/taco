@@ -36,6 +36,7 @@ import { tagWrap } from "../../tags/builder.ts";
 import type { SubagentBudgetState } from "../../tags/subagentBudget.ts";
 import type { TacoTool } from "../../tools/index.ts";
 import type { BackgroundWorkHooks } from "../../work/workHooks.ts";
+import type { WorkAttemptHandle } from "../../work/workOperationTypes.ts";
 import type { AttachedSession } from "../harness/attachedSession.ts";
 import { findModelById } from "../models/modelLookup.ts";
 import type { NodeExecutionEnv } from "../pi/node.ts";
@@ -1166,32 +1167,43 @@ export class AgentSpawner extends EventEmitter {
         // formatBackgroundNotification / deliverSubagentResult, and still
         // delivers an error envelope so the parent is not left with a receipt
         // that never settles.
-        const run = this.executeSubagentSession({
-            ...sessionArgs,
-            childSessionId,
-            signal: controller.signal,
-            abortController: controller,
-        })
+        let workAttemptId: string | undefined;
+        const execute = async (attemptId?: string) => {
+            workAttemptId = attemptId;
+            return this.executeSubagentSession({
+                ...sessionArgs,
+                childSessionId,
+                signal: controller.signal,
+                abortController: controller,
+            });
+        };
+        const execution =
+            workId && this.workHooks?.run && sessionArgs.runtime !== "claude-code"
+                ? this.workHooks.run(workId, childSessionId, execute)
+                : execute();
+        const run = execution
             .then(async (result) => {
                 if (result.waiting) {
                     if (workId !== undefined)
-                        await this.workHooks?.onWaiting?.(workId, result.waiting);
+                        await this.workHooks?.onWaiting?.(workId, result.waiting, workAttemptId);
                     return;
                 }
                 // The timeout and `abortSubagentRun` fire the same controller,
                 // so an aborted run reads as "aborted" here regardless of
                 // which one stopped it — a deliberate stop, not a failure.
-                const outcome = controller.signal.aborted
-                    ? ("aborted" as const)
-                    : result.isError
-                      ? ("error" as const)
-                      : ("completed" as const);
+                const outcome =
+                    controller.signal.aborted || result.aborted
+                        ? ("aborted" as const)
+                        : result.isError
+                          ? ("error" as const)
+                          : ("completed" as const);
                 const path = await this.writeBackgroundResult(resultPath, result.resultText);
                 // Result and delivery intent land in one Work snapshot before
                 // anything else observes the settle. A crash after this line
                 // still leaves a record that someone must be told.
                 if (workId !== undefined) {
                     await this.workHooks?.onSettle(workId, parentSessionId, {
+                        attemptId: workAttemptId,
                         outcome,
                         resultText: result.resultText,
                         partial: result.partial === true,
@@ -1277,6 +1289,7 @@ export class AgentSpawner extends EventEmitter {
                     // state wins, so this cannot rewrite a finished Work.
                     await this.workHooks?.onSettle(workId, parentSessionId, {
                         outcome: "error",
+                        attemptId: workAttemptId,
                         resultText: e instanceof Error ? e.message : String(e),
                         partial: false,
                     });
@@ -1857,9 +1870,13 @@ export class AgentSpawner extends EventEmitter {
      * Tell the Work layer a resumed run is beginning. Never throws: Work
      * tracking is additive, and a store failure must not stop the resume.
      */
-    private async reportResumeStart(subSessionId: SessionId): Promise<void> {
+    private async reportResumeStart(
+        subSessionId: SessionId,
+    ): Promise<WorkAttemptHandle | undefined> {
         try {
-            await this.workHooks?.onResumeStart(subSessionId);
+            return (
+                (await this.workHooks?.onResumeStart(subSessionId, this.workspaceKey)) ?? undefined
+            );
         } catch (e) {
             log.warn("work resume start record failed", {
                 subSessionId,
@@ -1872,15 +1889,20 @@ export class AgentSpawner extends EventEmitter {
     private async reportResumeSettle(
         subSessionId: SessionId,
         result: SubagentRunResult,
+        handle?: WorkAttemptHandle,
     ): Promise<void> {
         if (!this.workHooks) return;
         try {
-            await this.workHooks.onResumeSettle(subSessionId, {
-                outcome: result.isError ? (result.aborted ? "aborted" : "error") : "completed",
-                resultText: result.resultText,
-                partial: result.partial === true,
-                ...(result.waiting ? { waiting: result.waiting } : {}),
-            });
+            await this.workHooks.onResumeSettle(
+                subSessionId,
+                {
+                    outcome: result.isError ? (result.aborted ? "aborted" : "error") : "completed",
+                    resultText: result.resultText,
+                    partial: result.partial === true,
+                    ...(result.waiting ? { waiting: result.waiting } : {}),
+                },
+                handle,
+            );
         } catch (e) {
             log.warn("work resume settle record failed", {
                 subSessionId,
@@ -2040,21 +2062,26 @@ export class AgentSpawner extends EventEmitter {
         try {
             // Reopen an interrupted Work before the run so the overview stops
             // showing it as stopped while it is working again.
-            await this.reportResumeStart(args.subSessionId);
-            const result = await runAttachedSubagent({
-                subSessionId: args.subSessionId,
-                attached,
-                prompt: args.prompt,
-                agentType,
-                maxTurns,
-                budget: resumeBudget,
-                signal: controller.signal,
-                onUpdate: args.onUpdate,
-                // Reached here only after the profile resolved, so it can be resumed again.
-                resumability: "resumable",
-                readLastAssistantText: (id) => this.extractLastAssistantText(id),
-            });
-            await this.reportResumeSettle(args.subSessionId, result);
+            const handle = await this.reportResumeStart(args.subSessionId);
+            const execute = () =>
+                runAttachedSubagent({
+                    subSessionId: args.subSessionId,
+                    attached,
+                    prompt: args.prompt,
+                    agentType,
+                    maxTurns,
+                    budget: resumeBudget,
+                    signal: controller.signal,
+                    onUpdate: args.onUpdate,
+                    // Reached here only after the profile resolved, so it can be resumed again.
+                    resumability: "resumable",
+                    readLastAssistantText: (id) => this.extractLastAssistantText(id),
+                });
+            const result =
+                handle && this.workHooks?.run
+                    ? await this.workHooks.run(handle.workId, args.subSessionId, execute)
+                    : await execute();
+            await this.reportResumeSettle(args.subSessionId, result, handle);
             return result;
         } finally {
             args.signal?.removeEventListener("abort", link);

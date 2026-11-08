@@ -510,7 +510,7 @@
     "loadingMore": "加载中…",
     "partial": "部分结果",
     "openSession": "打开聊天",
-    "openSessionUnavailable": "这条记录早于工作区记录，无法定位对应聊天。",
+    "openSessionUnavailable": "无法打开这条记录对应的聊天。",
     "retryDelivery": "重新发送",
     "resultLoading": "正在加载结果…",
     "resultPending": "任务完成后可在这里查看结果。",
@@ -527,7 +527,8 @@
       "completed": "已完成",
       "failed": "失败",
       "cancelled": "已停止",
-      "interrupted": "已中断"
+      "interrupted": "已中断",
+      "unknown": "未知状态"
     },
     "delivery": {
       "pending": "发送中",
@@ -540,6 +541,19 @@
     },
     "kind": {
       "scheduled": "定时任务"
+    },
+    "openSessionDeleted": "对应的聊天已删除。",
+    "permissionRequired": "等待命令审批",
+    "cancel": "停止任务",
+    "delete": "删除记录",
+    "actionUnsupported": "当前后台服务不支持此操作。",
+    "actionFailed": "操作失败，请刷新后重试。",
+    "actionOutcome": {
+      "not_found": "这条任务记录已不存在。",
+      "not_running": "本次执行已经停止。",
+      "attempt_mismatch": "任务已开始新的尝试，请查看更新后的记录再停止。",
+      "unsupported": "本次执行不支持取消。",
+      "running": "请先停止任务，再删除记录。"
     }
   },
   "plugins": {

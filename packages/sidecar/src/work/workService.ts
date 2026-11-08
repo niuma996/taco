@@ -15,6 +15,8 @@ import {
     type SessionTarget,
     WORK_REASON_MERGED,
     WORK_RESULT_TEXT_LIMIT,
+    type WorkCancelResult,
+    type WorkDeleteResult,
     type WorkGetResult,
     type WorkListResult,
     type WorkRetryDeliveryResult,
@@ -24,6 +26,7 @@ import { createLogger } from "../lib/logger.ts";
 import type { WaitingInteraction } from "../runtime/session/waitingInteraction.ts";
 import { type SettleWorkArgs, WorkController } from "./workController.ts";
 import { type DeliveryClock, systemClock, WorkDeliverer } from "./workDelivery.ts";
+import { WorkExecution } from "./workExecution.ts";
 import type {
     BackgroundWorkHooks,
     ScheduledFire,
@@ -32,6 +35,12 @@ import type {
     WorkLaunch,
     WorkSettle,
 } from "./workHooks.ts";
+import { WorkMaintenance } from "./workMaintenance.ts";
+import type {
+    WorkAnswerContext,
+    WorkAttemptHandle,
+    WorkOperationRuntime,
+} from "./workOperationTypes.ts";
 import { WorkPermissionProjection } from "./workPermissionProjection.ts";
 
 import { WorkReconciler } from "./workReconciler.ts";
@@ -41,6 +50,7 @@ import { buildList, toSummary, type WorkListArgs } from "./workView.ts";
 const log = createLogger("sidecar.work.service");
 
 export interface WorkServiceOptions {
+    readonly operations?: WorkOperationRuntime;
     readonly root: string;
     readonly instanceId: string;
     readonly channels: Pick<ChannelRegistry, "sendText" | "maxMessageLength">;
@@ -57,6 +67,9 @@ export interface WorkServiceOptions {
 
 /** What the `work.*` handlers need from the Work layer; nothing about stores or timers. */
 export interface WorkControl {
+    cancel(workId: string, attemptId: string): Promise<WorkCancelResult>;
+    delete(workId: string): Promise<WorkDeleteResult>;
+    sessionSkipped(target: SessionTarget): Promise<void>;
     list(args: WorkListArgs): Promise<WorkListResult>;
     get(workId: string): Promise<WorkGetResult>;
     retryDelivery(workId: string): Promise<WorkRetryDeliveryResult>;
@@ -65,6 +78,7 @@ export interface WorkControl {
         target: SessionTarget,
         toolCallId: string,
         run: () => Promise<AgentMessage>,
+        context?: WorkAnswerContext,
     ): Promise<AgentMessage>;
 }
 
@@ -72,8 +86,11 @@ export class WorkService implements BackgroundWorkHooks, ScheduledWorkHooks, Wor
     readonly store: WorkStore;
     readonly controller: WorkController;
     readonly deliverer: WorkDeliverer;
+    private readonly maintenance: WorkMaintenance;
+    private maintenanceStopped = false;
     private readonly reconciler: WorkReconciler;
     private readonly permissions: WorkPermissionProjection;
+    private readonly execution: WorkExecution;
     private readonly launchAttempts = new Map<string, string>();
 
     constructor(private readonly options: WorkServiceOptions) {
@@ -92,7 +109,23 @@ export class WorkService implements BackgroundWorkHooks, ScheduledWorkHooks, Wor
             now: () => clock.now(),
             onChange: options.onChange,
         });
-        this.reconciler = new WorkReconciler(this.store, this.controller);
+        this.execution = new WorkExecution(
+            this.store,
+            this.controller,
+            options.operations,
+            () => clock.now(),
+            options.onChange ?? (() => undefined),
+            options.instanceId,
+        );
+        this.reconciler = new WorkReconciler(
+            this.store,
+            this.controller,
+            (workId, sessionId, run) => this.execution.run(workId, sessionId, run),
+        );
+        this.maintenance = new WorkMaintenance(async () => {
+            await this.execution.recover();
+            return this.controller.maintain();
+        }, clock);
         this.permissions = new WorkPermissionProjection(options.instanceId, () =>
             options.onProjectionChange?.(),
         );
@@ -100,9 +133,11 @@ export class WorkService implements BackgroundWorkHooks, ScheduledWorkHooks, Wor
 
     /** Startup: close out Works whose process died, prune, then re-send what is still owed. */
     async start(): Promise<void> {
+        await this.store.cleanupDeleted();
         await this.migrateLegacyWorkspaceKeys();
         try {
-            const { interrupted, pruned } = await this.controller.reconcile();
+            const deferred = await this.execution.recover();
+            const { interrupted, pruned } = await this.controller.reconcile(deferred);
             if (interrupted > 0 || pruned > 0) log.info("work reconciled", { interrupted, pruned });
             if (this.options.resolveTargetState) {
                 const marked = await this.controller.reconcileTargets(
@@ -116,6 +151,7 @@ export class WorkService implements BackgroundWorkHooks, ScheduledWorkHooks, Wor
         await this.controller.resumeDeliveries().catch((e: unknown) => {
             log.error("work delivery resume failed", { error: String(e) });
         });
+        if (!this.maintenanceStopped) this.maintenance.start();
     }
 
     /** Rewrite pre-2.11 IM Work snapshots that stored the physical scratch cwd. */
@@ -141,6 +177,8 @@ export class WorkService implements BackgroundWorkHooks, ScheduledWorkHooks, Wor
     }
 
     stop(): void {
+        this.maintenanceStopped = true;
+        this.maintenance.stop();
         this.deliverer.stop();
         this.permissions.clear();
         this.launchAttempts.clear();
@@ -150,6 +188,43 @@ export class WorkService implements BackgroundWorkHooks, ScheduledWorkHooks, Wor
 
     sessionDeleted(target: SessionTarget): Promise<void> {
         return this.controller.sessionDeleted(target);
+    }
+
+    sessionSkipped(target: SessionTarget): Promise<void> {
+        return this.execution.sessionSkipped(target.workspace, target.sessionId);
+    }
+
+    async cancellationRequested(
+        workspace: string,
+        sessionId: string,
+        operationId: string,
+    ): Promise<boolean> {
+        return (await this.store.list()).some(
+            (work) =>
+                work.status === "running" &&
+                work.attempt.cancelRequestedAt !== undefined &&
+                work.attempt.operation?.workspace === workspace &&
+                work.attempt.operation.sessionId === sessionId &&
+                work.attempt.operation.operationId === operationId,
+        );
+    }
+
+    run<T>(workId: string, sessionId: string, run: (attemptId: string) => Promise<T>): Promise<T> {
+        return this.execution.run(workId, sessionId, run);
+    }
+
+    cancel(workId: string, attemptId: string): Promise<WorkCancelResult> {
+        return this.execution.cancel(workId, attemptId);
+    }
+
+    async delete(workId: string): Promise<WorkDeleteResult> {
+        const outcome = await this.store.markDeleted(workId);
+        if (outcome === "deleted") {
+            this.options.onChange?.(workId);
+            await this.deliverer.forget(workId);
+            await this.store.delete(workId);
+        }
+        return { outcome };
     }
 
     async list(args: WorkListArgs): Promise<WorkListResult> {
@@ -192,8 +267,9 @@ export class WorkService implements BackgroundWorkHooks, ScheduledWorkHooks, Wor
         target: SessionTarget,
         toolCallId: string,
         run: () => Promise<AgentMessage>,
+        context?: WorkAnswerContext,
     ): Promise<AgentMessage> {
-        return this.reconciler.answer(target, toolCallId, run);
+        return this.reconciler.answer(target, toolCallId, run, context);
     }
 
     async retryDelivery(workId: string): Promise<WorkRetryDeliveryResult> {
@@ -239,8 +315,9 @@ export class WorkService implements BackgroundWorkHooks, ScheduledWorkHooks, Wor
     async onSettle(workId: string, parentSessionId: SessionId, settle: WorkSettle): Promise<void> {
         try {
             const route = this.options.resolveRoute(parentSessionId);
-            const attemptId = this.launchAttempts.get(workId);
-            this.launchAttempts.delete(workId);
+            const attemptId = settle.attemptId ?? this.launchAttempts.get(workId);
+            if (!attemptId) return;
+            if (this.launchAttempts.get(workId) === attemptId) this.launchAttempts.delete(workId);
             await this.controller.settle({
                 workId,
                 attemptId,
@@ -261,35 +338,51 @@ export class WorkService implements BackgroundWorkHooks, ScheduledWorkHooks, Wor
         }
     }
 
-    async onWaiting(workId: string, waiting: WaitingInteraction): Promise<void> {
+    async onWaiting(
+        workId: string,
+        waiting: WaitingInteraction,
+        capturedAttemptId?: string,
+    ): Promise<void> {
         try {
-            const attemptId = this.launchAttempts.get(workId);
-            this.launchAttempts.delete(workId);
+            const attemptId = capturedAttemptId ?? this.launchAttempts.get(workId);
+            if (!attemptId) return;
+            if (this.launchAttempts.get(workId) === attemptId) this.launchAttempts.delete(workId);
             await this.controller.waitForInput(workId, waiting, attemptId);
         } catch (e) {
             log.error("work waiting record failed", { workId, error: String(e) });
         }
     }
 
-    async onResumeStart(childSessionId: SessionId): Promise<void> {
+    async onResumeStart(
+        childSessionId: SessionId,
+        workspace?: string,
+    ): Promise<WorkAttemptHandle | undefined> {
         try {
-            const work = await this.store.findByChildSessionId(childSessionId);
-            if (work) await this.controller.resumeAttempt(work.workId);
+            const work = await this.store.findByChildSessionId(childSessionId, workspace);
+            const resumed = work ? await this.controller.resumeAttempt(work.workId) : undefined;
+            if (resumed?.status === "running")
+                return { workId: resumed.workId, attemptId: resumed.attempt.attemptId };
         } catch (e) {
             log.error("work resume start failed", { childSessionId, error: String(e) });
         }
     }
 
-    async onResumeSettle(childSessionId: SessionId, settle: WorkSettle): Promise<void> {
+    async onResumeSettle(
+        childSessionId: SessionId,
+        settle: WorkSettle,
+        handle?: WorkAttemptHandle,
+    ): Promise<void> {
         try {
-            const work = await this.store.findByChildSessionId(childSessionId);
-            if (!work) return;
+            if (!handle) return;
+            const work = await this.store.get(handle.workId);
+            if (work?.childSessionId !== childSessionId) return;
             if (settle.waiting) {
-                await this.controller.waitForInput(work.workId, settle.waiting);
+                await this.controller.waitForInput(work.workId, settle.waiting, handle.attemptId);
                 return;
             }
             await this.controller.settle({
                 workId: work.workId,
+                attemptId: handle.attemptId,
                 outcome: settle.outcome,
                 resultText: settle.resultText,
                 partial: settle.partial,
@@ -305,6 +398,23 @@ export class WorkService implements BackgroundWorkHooks, ScheduledWorkHooks, Wor
     }
 
     // ── ScheduledWorkHooks ──
+
+    async onFireQueued(workId: string, _entryId: string): Promise<void> {
+        const result = await this.store.mutate(workId, (current) =>
+            current.status === "running"
+                ? {
+                      ...current,
+                      attempt: {
+                          ...current.attempt,
+                          operation: undefined,
+                          operationAccepted: undefined,
+                          sharedQueue: true,
+                      },
+                  }
+                : undefined,
+        );
+        if (result?.changed) this.options.onChange?.(workId);
+    }
 
     async onFire(fire: ScheduledFire): Promise<string | undefined> {
         try {
@@ -330,6 +440,7 @@ export class WorkService implements BackgroundWorkHooks, ScheduledWorkHooks, Wor
                 return;
             }
             const attemptId = this.launchAttempts.get(workId);
+            if (!attemptId) return;
             this.launchAttempts.delete(workId);
             await this.controller.settle({
                 workId,
@@ -347,6 +458,7 @@ export class WorkService implements BackgroundWorkHooks, ScheduledWorkHooks, Wor
 
     async noticeSettled(workId: string): Promise<boolean> {
         try {
+            if (await this.store.isDeleted(workId)) return true;
             return await this.controller.isNoticeSettled(workId);
         } catch (e) {
             log.error("work notice check failed", { workId, error: String(e) });

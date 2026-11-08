@@ -15,7 +15,7 @@ import { createAskUserTool } from "../../src/tools/askUser.ts";
 import { WorkService } from "../../src/work/workService.ts";
 import { isTerminal } from "../../src/work/workTypes.ts";
 
-it("runs a real scheduled question through RPC, persists waiting, answers in the same Work and rejects a stale answer", async () => {
+it("runs a scheduled question through RPC and retries the same answer without another attempt", async () => {
     const root = await mkdtemp(join(tmpdir(), "taco-wait-rpc-"));
     const provider = fauxProvider({ provider: "waiting-test", tokensPerSecond: 0 } as never);
     const questions = [
@@ -127,7 +127,7 @@ it("runs a real scheduled question through RPC, persists waiting, answers in the
             id: "answer",
             method: "session.submitAnswers",
             params: {
-                workspace,
+                workspace: asWorkspaceId(`${root}/./`),
                 sessionId: before.parentSessionId,
                 toolCallId: "q-1",
                 toolName: "askUser",
@@ -139,6 +139,20 @@ it("runs a real scheduled question through RPC, persists waiting, answers in the
         assert.equal(after.status, "completed");
         assert.notEqual(after.attempt.attemptId, before.attempt.attemptId);
         assert.match((await work.get(fire.workId)).resultText ?? "", /Work finished using A/);
+        await dispatchRpc({
+            id: "answer-retry",
+            method: "session.submitAnswers",
+            params: {
+                workspace,
+                sessionId: before.parentSessionId,
+                toolCallId: "q-1",
+                answers: { "Choose an approach?": "A" },
+            },
+        });
+        assert.equal(
+            (await work.store.get(fire.workId))?.attempt.attemptId,
+            after.attempt.attemptId,
+        );
         await assert.rejects(
             dispatchRpc({
                 id: "stale",
@@ -150,7 +164,7 @@ it("runs a real scheduled question through RPC, persists waiting, answers in the
                     answers: { "Choose an approach?": "B" },
                 },
             }),
-            /no waiting/,
+            /different answers/,
         );
     } finally {
         work.stop();

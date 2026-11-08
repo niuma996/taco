@@ -83,6 +83,11 @@ import {
     type QueueKind,
     type SteerEnqueueResult,
 } from "./laneQueue.ts";
+import {
+    claimManagedOperation,
+    executePromptOperation,
+    type PromptOperation,
+} from "./operationExecution.ts";
 import { resolvePromptReply } from "./promptReply.ts";
 import {
     DefaultSessionToolController,
@@ -111,6 +116,7 @@ export interface AbortResult {
 }
 
 export interface AttachedSessionOptions {
+    shouldAbortOperation?: (operationId: string) => Promise<boolean>;
     session: Session;
     models: Models;
     env: NodeExecutionEnv;
@@ -926,6 +932,7 @@ export class AttachedSession extends EventEmitter {
                 lane,
                 sessionId: asSessionId(args.session.metadata.id),
                 open,
+                shouldAbort: args.shouldAbortOperation,
             })
                 .then((outcomes) => {
                     attached.recoveryOutcomes = outcomes;
@@ -962,6 +969,7 @@ export class AttachedSession extends EventEmitter {
         images?: ImageContent[],
         uiLocale?: SupportedLocale,
         signal?: AbortSignal,
+        operation?: PromptOperation,
     ): Promise<ProtocolAgentMessage> {
         if (uiLocale !== undefined) {
             this.uiLocale = uiLocale;
@@ -976,11 +984,22 @@ export class AttachedSession extends EventEmitter {
         // A child may have been stopped while recovery or tool preparation
         // held it here, before the lane had an operation for abort() to stop.
         signal?.throwIfAborted();
-        const result = await this.lane.prompt(
-            text,
-            images,
-            signal ? contextFor(signal) : harnessContext,
-        );
+        const managed = claimManagedOperation(this.session.metadata.id);
+        const identity = operation ?? managed;
+        const context = signal ? contextFor(signal) : harnessContext;
+        const result = identity
+            ? {
+                  ok: true as const,
+                  value: await executePromptOperation(
+                      this.lane,
+                      identity,
+                      text,
+                      images,
+                      context,
+                      managed,
+                  ),
+              }
+            : await this.lane.prompt(text, images, context);
         if (!result.ok) throw toHarnessError("session.prompt", result.error);
 
         if (result.value.status === "suspended") {
@@ -1104,6 +1123,33 @@ export class AttachedSession extends EventEmitter {
      * `NoActiveOperation` result, so it maps to "nothing cleared" rather than
      * a throw.
      */
+    getOperationResult(operationId: string) {
+        return this.lane.getResult(operationId, harnessContext);
+    }
+
+    async getOperationText(operationId: string): Promise<string> {
+        const outcome = await this.getOperationResult(operationId);
+        if (!outcome?.tipId || outcome.tipId === outcome.fromTipId) return "";
+        const entry = await this.session.getEntry(outcome.tipId, harnessContext);
+        return entry?.type === "message" && entry.message.role === "assistant"
+            ? entry.message.content
+                  .flatMap((block) => (block.type === "text" ? [block.text] : []))
+                  .join("\n")
+            : "";
+    }
+
+    async requestOperationAbort(
+        operationId: string,
+    ): Promise<{ outcome: "accepted" | "mismatch"; newlyRequested: boolean }> {
+        const result = await this.lane.requestAbort(operationId, harnessContext);
+        if (!result.ok) {
+            if (result.error._tag === "OperationMismatch")
+                return { outcome: "mismatch", newlyRequested: false };
+            throw toHarnessError("session.requestAbort", result.error);
+        }
+        return { outcome: "accepted", newlyRequested: result.value.newlyRequested };
+    }
+
     async abort(): Promise<AbortResult> {
         // Cancel checks already queued by earlier run_ends; lane.abort() owns an
         // admitted run or compaction. The aborted run's own run_end still

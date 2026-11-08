@@ -1,5 +1,5 @@
 /**
- * `work.*` wire contract: the read-only overview of managed background work.
+ * `work.*` wire contract for tracking and controlling managed background work.
  *
  * A Work is one tracked unit of work: a background subagent launch, or one
  * fire of a scheduled job. Three axes are reported separately on purpose: what
@@ -12,7 +12,13 @@
  */
 
 import type { ParamsOf } from "./rpcContract/types.js";
-import type { workGetSchema, workListSchema, workRetryDeliverySchema } from "./schemas/work.js";
+import type {
+    workCancelSchema,
+    workDeleteSchema,
+    workGetSchema,
+    workListSchema,
+    workRetryDeliverySchema,
+} from "./schemas/work.js";
 
 export const WORK_STATUSES = [
     "running",
@@ -120,6 +126,10 @@ export interface WorkSummary {
     /** The job that fired, for a scheduled Work. */
     jobId?: string;
     status: WorkStatus;
+    /** Current attempt identity; absent on older daemons. */
+    attemptId?: string;
+    /** Whether this attempt supports cancellation; absent on older daemons. */
+    canCancel?: boolean;
     /** Why a failed, cancelled or interrupted Work ended. */
     reason?: string;
     createdAt: number;
@@ -156,6 +166,28 @@ export interface WorkSummary {
 export type WorkListParams = ParamsOf<typeof workListSchema>;
 export type WorkGetParams = ParamsOf<typeof workGetSchema>;
 export type WorkRetryDeliveryParams = ParamsOf<typeof workRetryDeliverySchema>;
+export type WorkCancelParams = ParamsOf<typeof workCancelSchema>;
+export type WorkDeleteParams = ParamsOf<typeof workDeleteSchema>;
+
+export type WorkCancelOutcome =
+    | "accepted"
+    | "not_found"
+    | "not_running"
+    | "attempt_mismatch"
+    | "unsupported";
+
+export interface WorkCancelResult {
+    outcome: WorkCancelOutcome;
+    /** False for a repeated request or when cancellation was not accepted. */
+    newlyRequested: boolean;
+}
+
+export type WorkDeleteOutcome = "deleted" | "not_found" | "running";
+
+export interface WorkDeleteResult {
+    /** Only terminal records are deletable; waiting records must first be cancelled. */
+    outcome: WorkDeleteOutcome;
+}
 
 export interface WorkListResult {
     /** The daemon that answered. A different value than last time means it was replaced. */

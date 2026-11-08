@@ -245,7 +245,10 @@ async function trackTurn(
     const watch = server.queueWatch?.(workspace, sessionId);
     let outcome: TurnOutcome;
     try {
-        outcome = await turn(watch);
+        outcome =
+            workId !== undefined && work?.run
+                ? await work.run(workId, sessionId, () => turn(watch))
+                : await turn(watch);
     } catch (err) {
         watch?.stop();
         if (workId !== undefined) {
@@ -267,6 +270,7 @@ async function trackTurn(
     }
     if (work !== undefined && workId !== undefined) {
         if (outcome.kind === "queued") {
+            await work.onFireQueued?.(workId, outcome.entryId);
             // Whether the entry ever ran decides this Work's ending, so the
             // settle moves to the watcher. Without one (a test stub), fall back
             // to the old "accepted" reading rather than leaving it running.

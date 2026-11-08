@@ -113,6 +113,7 @@ export class WorkDeliverer {
     /** Triggers that arrived while a delivery was running; re-run once it ends. */
     private readonly rerun = new Set<string>();
     private readonly timers = new Map<string, () => void>();
+    private readonly idleWaiters = new Map<string, Array<() => void>>();
     private stopped = false;
 
     constructor(
@@ -147,6 +148,8 @@ export class WorkDeliverer {
             log.error("work delivery pass failed", { workId, error: String(e) });
         } finally {
             this.running.delete(workId);
+            for (const resolve of this.idleWaiters.get(workId) ?? []) resolve();
+            this.idleWaiters.delete(workId);
         }
         if (this.rerun.delete(workId)) void this.deliver(workId);
     }
@@ -221,6 +224,18 @@ export class WorkDeliverer {
         this.rerun.clear();
         for (const cancel of this.timers.values()) cancel();
         this.timers.clear();
+    }
+
+    /** Tombstone first; an already-started platform send must finish before files are removed. */
+    async forget(workId: string): Promise<void> {
+        this.cancelTimer(workId);
+        this.rerun.delete(workId);
+        if (!this.running.has(workId)) return;
+        await new Promise<void>((resolve) => {
+            const waiters = this.idleWaiters.get(workId) ?? [];
+            waiters.push(resolve);
+            this.idleWaiters.set(workId, waiters);
+        });
     }
 
     private async run(workId: string): Promise<void> {

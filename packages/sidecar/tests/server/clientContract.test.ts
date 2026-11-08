@@ -242,6 +242,8 @@ test("every facade method serializes a payload accepted by its registered schema
     await client.workList({});
     await client.workGet({ workId: "w-1" });
     await client.workRetryDelivery({ workId: "w-1" });
+    await client.workCancel({ workId: "w-1", attemptId: "a-1" });
+    await client.workDelete({ workId: "w-1" });
     await client.agentsList({ workspace });
     await client.agentsContent({ workspace, agentType: "reviewer" });
     await client.agentsWrite({

@@ -109,6 +109,42 @@ because a registered system-service daemon can outlive a desktop upgrade.
 | 2.10 | scheduled `agent.invoke` fires are tracked as Work: `WorkSummary.kind` adds `"scheduled"` with `jobId`; `WorkSummary.sessionId` is the overview's target and `parentSessionId` stays as a deprecated alias for older clients; `childSessionId` / `agentType` become optional; `JobHistoryEntry.workId` and `JobRunResult.workId`; RPC error code `aborted` for a turn stopped before it finished |
 | 2.11 | `WorkSummary.sessionState` reports whether its target session remains available after deletion; Work results stay queryable and desktop navigation disables deleted targets |
 | 2.12 | `waiting` Work status for askUser/planExit interactions; attempt-scoped continuation; permission requests appear as process-local Work projections and are cleared on daemon replacement. Clients that do not advertise `clientCapabilities.workWaiting` receive a compatibility projection (`running`, without waiting details). |
+| 2.13 | `work.cancel` targets the displayed `attemptId`; `work.delete` removes terminal records through a durable tombstone. Optional `attemptId` / `canCancel` fields support method-gated controls. |
+
+Adding a value to an existing response enum is potentially breaking: older clients
+may index exhaustive maps with it. Such values require connection-scoped capability
+negotiation with a defined projection, or a major version change. Optional fields
+and new methods do not by themselves authorize new enum values on old connections.
+
+Work execution references and answer receipts are internal persistence contracts;
+the wire version and `sessionFormatVersion` do not substitute for their validation.
+New daemons read legacy Work records without operation references, but cannot
+precisely cancel those runs by guessing a session's current operation. Rolling back
+to a daemon predating waiting is not supported against the upgraded Work directory;
+restore a matching data backup when rolling back. No session-history format bump
+is required for application-owned values in the existing session format.
+
+Waiting questions expire after seven days using an independent persisted deadline;
+startup and periodic maintenance apply the same transition to interrupted. Answer
+submissions persist their payload identity and operation id before admission, so
+the same answer can be retried after response loss or restart. Different answers
+for an already accepted question return `invalid_state`.
+
+`work.cancel` takes `{workId, attemptId}` and never aborts an unrelated session
+turn. It returns `accepted`, `not_found`, `not_running`, `attempt_mismatch`, or
+`unsupported`, plus `newlyRequested`. Execution ends through the normal settle
+path; a waiting question can be cancelled without a live operation. `work.delete`
+takes `{workId}` and returns `deleted`, `not_found`, or `running`. Only terminal
+records are deletable. Its tombstone blocks reads, writes and source recreation
+before in-flight sends are drained and result files removed. Compact tombstones
+are retained for source deduplication; deleting Work does not undo platform sends.
+
+Precise controls require an owned harness operation. Legacy records, external
+executors without an operation reference, and scheduled prompts merged into a
+shared follow-up queue report `unsupported` instead of aborting the session's
+current turn. An open operation from a previous process retains durable cancel
+intent; the unified session attach recovery applies it before driving. Work
+reconciliation itself never starts a recovery driver.
 
 After a successful initialize, every other RPC is accepted. `initialize` is idempotent
 and outside `commandRecords` dedup. In-process self-RPC callers (e.g. the memory tool)
@@ -222,6 +258,8 @@ fields of `settings.get` or `settings.write`.
 | `skills.list` | skills.* |
 | `subagent.abort` | subagent.* |
 | `tools.list` | tools.* |
+| `work.cancel` | work.* |
+| `work.delete` | work.* |
 | `work.get` | work.* |
 | `work.list` | work.* |
 | `work.retryDelivery` | work.* |

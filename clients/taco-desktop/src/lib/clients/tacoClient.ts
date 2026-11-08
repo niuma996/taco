@@ -15,6 +15,7 @@ import {
     PushMethods,
     type RpcRequest,
     SIDECAR_PROTOCOL_VERSION,
+    type SidecarCapabilities,
     type WorkspaceId,
 } from "@taco-ai/protocol";
 import {
@@ -171,6 +172,7 @@ export class TacoClient extends TacoClientBase {
      *  SessionEpochs stamps every Attached push with so a daemon restart can
      *  fire synthetic "replaced" transitions for every tracked session. */
     private currentInstanceId: string | undefined;
+    private serverCapabilities: SidecarCapabilities | undefined;
     private readonly sessionEpochs = new SessionEpochs();
     private readonly sessionEpochChangeHandlers = new Set<(event: SessionEpochEvent) => void>();
 
@@ -267,6 +269,7 @@ export class TacoClient extends TacoClientBase {
         }
         this.initializeAttempt = undefined;
         this.processInitialized = false;
+        this.serverCapabilities = undefined;
         this.pendingProcessCwd = undefined;
         this.ensuredCwds.clear();
         this.replacedCwds.clear();
@@ -286,6 +289,11 @@ export class TacoClient extends TacoClientBase {
         return () => {
             this.connectionReadyHandlers.delete(handler);
         };
+    }
+
+    /** Capabilities belong to the current initialized connection, never a past daemon. */
+    getServerCapabilities(): SidecarCapabilities | undefined {
+        return this.serverCapabilities;
     }
 
     /** Fires before pushes from a replacement sidecar instance enter the dispatcher. */
@@ -818,6 +826,7 @@ export class TacoClient extends TacoClientBase {
             // Settle exactly once. Concurrent start() awaiters all observe
             // the same resolution.
             this.processInitialized = true;
+            this.serverCapabilities = result.serverCapabilities;
             this.handshake = null;
             this.initializeAttempt = undefined;
             handshake.resolve();
@@ -856,6 +865,7 @@ export class TacoClient extends TacoClientBase {
         }
         this.initializeAttempt = undefined;
         this.processInitialized = false;
+        this.serverCapabilities = undefined;
         this.pendingProcessCwd = undefined;
         // Fan-out: every started workspace's pending RPCs fail. callProcess's
         // pending also hangs under some ensured cwd (callProcess → call(fallback)),

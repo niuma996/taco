@@ -116,6 +116,7 @@ import {
 import type { TacoSkill } from "../skills/tacoSkill.ts";
 import { TaskPushAdapter } from "../tasks/taskPushAdapter.ts";
 import { builtinToolCandidates } from "../tools/builtinCandidates.ts";
+import { workRuntimeAdapter } from "../work/workRuntimeAdapter.ts";
 import { WorkService } from "../work/workService.ts";
 import {
     associationAffectsWorkspace,
@@ -543,6 +544,9 @@ export class SidecarServer implements ServerRpcSurface {
             return sent;
         });
         this.work = new WorkService({
+            operations: workRuntimeAdapter((workspace) =>
+                this.ensureWorkspace(asWorkspaceId(workspace)),
+            ),
             root: join(tacoHome(), "work"),
             instanceId: SIDECAR_INSTANCE_ID,
             channels: this.channelRegistry,

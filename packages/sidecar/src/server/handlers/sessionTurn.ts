@@ -18,6 +18,7 @@ import { composeForSession } from "../../attachments/composePrompt.ts";
 import { createLogger } from "../../lib/logger.ts";
 import { isBusyError } from "../../runtime/harness/harnessErrors.ts";
 import { textsFromAgentMessages } from "../../runtime/harness/messageText.ts";
+import { AnswerReceiptConflict, withAnswerReceipt } from "../../runtime/session/answerReceipt.ts";
 import type { AttachOptions } from "../../runtime/workspace.ts";
 import {
     formatAskUserContextBody,
@@ -217,25 +218,55 @@ export function registerSessionTurnHandlers(): void {
             await requireCompactionSettled(server, params.workspace, params.sessionId);
 
             const toolName = params.toolName ?? "askUser";
-            const questions = await resolveAskUserQuestions(attached, params.toolCallId, toolName);
-            if (questions === null) {
-                throw new RpcHandlerError(
-                    ErrorCodes.InvalidState,
-                    `no waiting ${toolName} tool result for toolCallId=${params.toolCallId}`,
-                );
-            }
-
-            const body = formatAskUserContextBody(toolName, questions, params.answers);
-            const text = wrapAskUserContext(body);
-            const run = () => attached.prompt(text);
-            await (server.work
-                ? server.work.answerWaiting(
-                      { workspace: params.workspace, sessionId: params.sessionId },
-                      params.toolCallId,
-                      run,
-                  )
-                : run()
-            ).catch(rethrowBusyAsSessionBusy);
+            await withAnswerReceipt(
+                attached.session,
+                { toolName, toolCallId: params.toolCallId, answers: params.answers },
+                async (answers) => {
+                    const questions = await resolveAskUserQuestions(
+                        attached,
+                        params.toolCallId,
+                        toolName,
+                    );
+                    if (questions === null) {
+                        throw new RpcHandlerError(
+                            ErrorCodes.InvalidState,
+                            `no waiting ${toolName} tool result for toolCallId=${params.toolCallId}`,
+                        );
+                    }
+                    return wrapAskUserContext(
+                        formatAskUserContextBody(toolName, questions, answers),
+                    );
+                },
+                async (receipt, bind) => {
+                    const run = () =>
+                        attached.prompt(receipt.text, undefined, undefined, undefined, {
+                            operationId: receipt.operationId,
+                        });
+                    await (server.work
+                        ? server.work.answerWaiting(
+                              { workspace: workspace.workspaceKey, sessionId: params.sessionId },
+                              params.toolCallId,
+                              run,
+                              {
+                                  operationId: receipt.operationId,
+                                  attempt: receipt.work,
+                                  bind,
+                                  readPartial: () => attached.getOperationText(receipt.operationId),
+                              },
+                          )
+                        : run());
+                },
+            ).catch((error: unknown) => {
+                if (
+                    error instanceof AnswerReceiptConflict ||
+                    (error instanceof Error &&
+                        "code" in error &&
+                        error.code === ErrorCodes.InvalidState)
+                ) {
+                    throw new RpcHandlerError(ErrorCodes.InvalidState, error.message);
+                }
+                rethrowBusyAsSessionBusy(error);
+            });
             workspace.invalidateListCache();
             return null;
         },

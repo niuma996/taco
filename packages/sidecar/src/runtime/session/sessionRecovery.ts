@@ -41,6 +41,7 @@ export interface RecoveryOutcome {
 }
 
 export interface ResumeOperationsArgs {
+    readonly shouldAbort?: (operationId: string) => Promise<boolean>;
     readonly lane: AgentLane;
     readonly sessionId: SessionId;
     readonly open: ReadonlyArray<OpenOperation>;
@@ -97,6 +98,11 @@ export async function resumeOpenOperations(args: ResumeOperationsArgs): Promise<
     const identity = { operationId: mine.operationId, lane: mine.lane, kind: mine.kind };
     const record = (outcome: RecoveryOutcome): RecoveryOutcome[] => [...skipped, outcome];
     try {
+        if (await args.shouldAbort?.(mine.operationId)) {
+            const requested = await lane.requestAbort(mine.operationId, harnessContext);
+            if (!requested.ok && requested.error._tag !== "OperationMismatch")
+                throw requested.error;
+        }
         const result = await lane.resume(harnessContext);
         if (!result.ok) {
             // NothingToResume is the benign race: the operation settled

@@ -654,6 +654,12 @@ export class WorkspaceRuntime extends EventEmitter {
         // it may be assigned afterwards — lazy evaluation avoids a construction-time
         // mutual-reference deadlock.
         this.sessionRegistry = new SessionRegistry({
+            shouldAbortOperation: (sessionId, operationId) =>
+                options.workHooks?.cancellationRequested?.(
+                    this.workspaceKey,
+                    sessionId,
+                    operationId,
+                ) ?? Promise.resolve(false),
             cwd: this.sessionCwd,
             repo: this.repo,
             sessionsRoot: this.sessionsRoot,

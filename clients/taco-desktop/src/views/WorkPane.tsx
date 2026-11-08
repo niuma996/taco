@@ -1,5 +1,5 @@
 /**
- * WorkPane — the read-only overview of managed background work.
+ * WorkPane — the overview and controls for managed background work.
  *
  * Every row is one Work the daemon tracks: a background subagent launch, or one
  * fire of a scheduled job.
@@ -7,8 +7,7 @@
  * could not be delivered, a run a crash cut short) and what is finished. The
  * answer text is fetched only when a row is opened.
  *
- * The pane never drives execution. Its one action is re-sending a notice that
- * gave up; execution is cancelled from the session, as before.
+ * Controls use the displayed attempt identity and the daemon's method capabilities.
  */
 
 import type { SessionTarget } from "@taco-ai/protocol";
@@ -18,10 +17,19 @@ import {
     type WorkGetResult,
     type WorkSummary,
 } from "@taco-ai/protocol";
-import { ChevronDown, ChevronRight, ClipboardList, MessageSquare, RefreshCw } from "lucide-react";
+import {
+    ChevronDown,
+    ChevronRight,
+    ClipboardList,
+    MessageSquare,
+    RefreshCw,
+    Square,
+    Trash2,
+} from "lucide-react";
 import { type KeyboardEvent, useEffect, useRef, useState } from "react";
 import { IconButton } from "../components/ui/IconButton";
 import { Tag } from "../components/ui/Tag";
+import { useAutoClearError } from "../hooks/primitives/useAutoClearError";
 import { useNow } from "../hooks/useNow";
 import type { UseWorkOverviewResult } from "../hooks/useWorkOverview";
 import { useT, useUiLanguage } from "../i18n/useI18n";
@@ -76,6 +84,40 @@ export function WorkPane({ client, overview, onOpenSession }: WorkPaneProps) {
     const [expandedDetail, setExpandedDetail] = useState<
         { workId: string; result: WorkGetResult } | undefined
     >(undefined);
+    const pendingRef = useRef(new Set<string>());
+    const [pendingIds, setPendingIds] = useState<ReadonlySet<string>>(new Set());
+    const { error: actionError, fail, clearError } = useAutoClearError();
+    const [, capabilitiesChanged] = useState(0);
+    useEffect(
+        () => client.onConnectionReady?.(() => capabilitiesChanged((value) => value + 1)),
+        [client],
+    );
+    const methods = client.getServerCapabilities?.()?.methods ?? [];
+    const runAction = async (work: WorkSummary, action: "cancel" | "delete"): Promise<void> => {
+        if (pendingRef.current.has(work.workId) || !methods.includes(`work.${action}`)) return;
+        if (action === "cancel" && !work.attemptId) return;
+        pendingRef.current.add(work.workId);
+        setPendingIds(new Set(pendingRef.current));
+        clearError();
+        try {
+            const result =
+                action === "cancel"
+                    ? await client.workCancel({
+                          workId: work.workId,
+                          attemptId: work.attemptId as string,
+                      })
+                    : await client.workDelete({ workId: work.workId });
+            if (result.outcome !== "accepted" && result.outcome !== "deleted") {
+                fail(new Error(t(`work.actionOutcome.${result.outcome}`)));
+            }
+        } catch {
+            fail(new Error(t("work.actionFailed")));
+        } finally {
+            pendingRef.current.delete(work.workId);
+            setPendingIds(new Set(pendingRef.current));
+            refresh();
+        }
+    };
     const expandedWork =
         expanded === null
             ? undefined
@@ -142,7 +184,19 @@ export function WorkPane({ client, overview, onOpenSession }: WorkPaneProps) {
                   }
                 : undefined;
         const isOpen = expanded === work.workId;
-        const status = STATUS_TONE[work.status];
+        const knownStatus = Object.hasOwn(STATUS_TONE, work.status);
+        const status = knownStatus ? STATUS_TONE[work.status] : {};
+        const cancellable =
+            (work.status === "running" || work.status === "waiting") &&
+            work.canCancel === true &&
+            !!work.attemptId;
+        const deletable =
+            work.attemptId !== undefined &&
+            ["completed", "failed", "cancelled", "interrupted"].includes(work.status);
+        const waitingDescription =
+            work.waiting?.toolName === "permission"
+                ? t("work.permissionRequired")
+                : work.waiting?.description;
         const detail = expandedDetail?.workId === work.workId ? expandedDetail.result : undefined;
         return (
             <li
@@ -184,7 +238,7 @@ export function WorkPane({ client, overview, onOpenSession }: WorkPaneProps) {
                             </Tag>
                         )}
                         <Tag size="sm" className={status.className} tone={status.tone}>
-                            {t(`work.status.${work.status}`)}
+                            {t(`work.status.${knownStatus ? work.status : "unknown"}`)}
                         </Tag>
                     </div>
                 </div>
@@ -194,11 +248,11 @@ export function WorkPane({ client, overview, onOpenSession }: WorkPaneProps) {
                     {work.reason && <span className="work-item-reason">{work.reason}</span>}
                 </div>
 
-                {work.waiting?.description && (
+                {waitingDescription && (
                     <p className="work-item-waiting">
-                        {work.waiting.description.length > 240
-                            ? `${work.waiting.description.slice(0, 239)}…`
-                            : work.waiting.description}
+                        {waitingDescription.length > 240
+                            ? `${waitingDescription.slice(0, 239)}…`
+                            : waitingDescription}
                     </p>
                 )}
 
@@ -209,7 +263,11 @@ export function WorkPane({ client, overview, onOpenSession }: WorkPaneProps) {
                         disabled={target === undefined}
                         title={
                             target === undefined
-                                ? t("work.openSessionUnavailable")
+                                ? t(
+                                      work.sessionState === "deleted"
+                                          ? "work.openSessionDeleted"
+                                          : "work.openSessionUnavailable",
+                                  )
                                 : t("work.openSession")
                         }
                         onClick={() => {
@@ -219,6 +277,42 @@ export function WorkPane({ client, overview, onOpenSession }: WorkPaneProps) {
                         <MessageSquare size={13} aria-hidden="true" />
                         {t("work.openSession")}
                     </button>
+                    {cancellable && (
+                        <button
+                            type="button"
+                            className="work-action"
+                            disabled={
+                                pendingIds.has(work.workId) || !methods.includes("work.cancel")
+                            }
+                            title={
+                                !methods.includes("work.cancel")
+                                    ? t("work.actionUnsupported")
+                                    : t("work.cancel")
+                            }
+                            onClick={() => void runAction(work, "cancel")}
+                        >
+                            <Square size={13} aria-hidden="true" />
+                            {t("work.cancel")}
+                        </button>
+                    )}
+                    {deletable && (
+                        <button
+                            type="button"
+                            className="work-action"
+                            disabled={
+                                pendingIds.has(work.workId) || !methods.includes("work.delete")
+                            }
+                            title={
+                                !methods.includes("work.delete")
+                                    ? t("work.actionUnsupported")
+                                    : t("work.delete")
+                            }
+                            onClick={() => void runAction(work, "delete")}
+                        >
+                            <Trash2 size={13} aria-hidden="true" />
+                            {t("work.delete")}
+                        </button>
+                    )}
                     {retryable(work.delivery) && (
                         <button
                             type="button"
@@ -294,6 +388,11 @@ export function WorkPane({ client, overview, onOpenSession }: WorkPaneProps) {
             {error && (
                 <div className="pane-error" role="alert">
                     {error}
+                </div>
+            )}
+            {actionError && (
+                <div className="pane-error" role="alert">
+                    {actionError}
                 </div>
             )}
 

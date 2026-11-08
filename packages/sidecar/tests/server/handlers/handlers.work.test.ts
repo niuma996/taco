@@ -74,10 +74,44 @@ describe("work.* handlers", () => {
         return work.workId;
     }
 
-    it("registers the three methods under their wire names", () => {
+    it("registers the Work methods under their wire names", () => {
         assert.equal(RPC.workList, "work.list");
         assert.equal(RPC.workGet, "work.get");
         assert.equal(RPC.workRetryDelivery, "work.retryDelivery");
+        assert.equal(RPC.workCancel, "work.cancel");
+        assert.equal(RPC.workDelete, "work.delete");
+    });
+
+    it("cancels a displayed waiting attempt and deletes its record through RPC", async () => {
+        const { controller, service, server } = rig();
+        const work = await controller.startScheduled({
+            sourceEventId: "rpc-control",
+            jobId: "j",
+            workspace: "/w",
+            sessionId: "s",
+            title: "test",
+        });
+        await controller.waitForInput(work.workId, {
+            sessionId: "s",
+            toolName: "askUser",
+            toolCallId: "q",
+        });
+        const stale = await callMethod("work.cancel", {
+            server,
+            params: { workId: work.workId, attemptId: "old" },
+        });
+        assert.deepEqual(stale, { outcome: "attempt_mismatch", newlyRequested: false });
+        const cancelled = await callMethod("work.cancel", {
+            server,
+            params: { workId: work.workId, attemptId: work.attempt.attemptId },
+        });
+        assert.deepEqual(cancelled, { outcome: "accepted", newlyRequested: true });
+        assert.deepEqual(
+            await callMethod("work.delete", { server, params: { workId: work.workId } }),
+            { outcome: "deleted" },
+        );
+        assert.equal((await service.get(work.workId)).work, null);
+        assert.equal(await service.noticeSettled(work.workId), true);
     });
 
     describe("work.list", () => {
@@ -222,6 +256,7 @@ describe("work.* handlers", () => {
             });
             const deleted: string[] = [];
             const workspace = {
+                workspaceKey: "/w",
                 sessionsRoot: join(root, "deleted-sessions"),
                 listSessions: async () => [{ id: "p" }, { id: "c100", parentSessionId: "p" }],
                 agentSpawner: { stopChildrenOf: async () => [] },

@@ -19,6 +19,7 @@ class FakeSidecarClient implements SidecarClient {
     readonly failEnsureFor = new Set<string>();
     /** When false: receiving initialize does not reply — simulates server unresponsive / process half-dead. */
     ackInitialize = true;
+    methods = ["initialize"];
 
     /** Initialize request count — asserts "one process only handshakes once". */
     initializeCount(): number {
@@ -48,7 +49,7 @@ class FakeSidecarClient implements SidecarClient {
                             result: {
                                 serverVersion: "test",
                                 serverCapabilities: {
-                                    methods: ["initialize"],
+                                    methods: this.methods,
                                     pushes: ["session.attached"],
                                 },
                                 protocolVersion: SIDECAR_PROTOCOL_VERSION,
@@ -845,4 +846,45 @@ test("independent desktop clients never reuse a command id in the same milliseco
     } finally {
         await Promise.all(clients.map((client) => client.dispose()));
     }
+});
+
+test("work controls retain their attempt identity through process routing", async () => {
+    const sidecar = new FakeSidecarClient();
+    sidecar.methods.push("work.cancel", "work.delete");
+    const client = new TacoClient({ sidecar });
+    await client.start(asWorkspaceId("/workspace/a"));
+    const cancel = client.workCancel({ workId: "w-1", attemptId: "attempt-visible" });
+    await flush();
+    const cancelFrame = sidecar.sent.at(-1)?.frame;
+    assert.equal(cancelFrame?.method, "work.cancel");
+    assert.deepEqual(cancelFrame?.params, { workId: "w-1", attemptId: "attempt-visible" });
+    sidecar.emitResponse(cancelFrame?.id as string, true, {
+        result: { outcome: "accepted", newlyRequested: false },
+    });
+    assert.deepEqual(await cancel, { outcome: "accepted", newlyRequested: false });
+    const deletion = client.workDelete({ workId: "w-1" });
+    await flush();
+    const deleteFrame = sidecar.sent.at(-1)?.frame;
+    assert.equal(deleteFrame?.method, "work.delete");
+    assert.deepEqual(deleteFrame?.params, { workId: "w-1" });
+    assert.equal((deleteFrame?.params as Record<string, unknown>).workspace, undefined);
+    sidecar.emitResponse(deleteFrame?.id as string, true, { result: { outcome: "deleted" } });
+    assert.deepEqual(await deletion, { outcome: "deleted" });
+    await client.dispose();
+});
+
+test("server method capabilities follow the current initialized connection", async () => {
+    const sidecar = new FakeSidecarClient();
+    sidecar.methods.push("work.cancel");
+    const client = new TacoClient({ sidecar });
+    assert.equal(client.getServerCapabilities(), undefined);
+    await client.start(asWorkspaceId("/workspace/a"));
+    assert.ok(client.getServerCapabilities()?.methods.includes("work.cancel"));
+    await client.dispose();
+    assert.equal(client.getServerCapabilities(), undefined);
+    sidecar.methods = ["initialize", "work.delete"];
+    await client.start(asWorkspaceId("/workspace/a"));
+    assert.equal(client.getServerCapabilities()?.methods.includes("work.cancel"), false);
+    assert.equal(client.getServerCapabilities()?.methods.includes("work.delete"), true);
+    await client.dispose();
 });

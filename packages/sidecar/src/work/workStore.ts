@@ -14,9 +14,11 @@
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readdir, readFile, rename, rm, stat, unlink, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import type { SessionTarget } from "@taco-ai/protocol";
+import { WORK_STATUSES } from "@taco-ai/protocol";
 import { restrictOwner } from "../lib/fsPermissions.ts";
 import { createLogger } from "../lib/logger.ts";
-import { WORK_SCHEMA_VERSION, type WorkRecord } from "./workTypes.ts";
+import { isTerminal, WORK_SCHEMA_VERSION, type WorkRecord } from "./workTypes.ts";
 
 const log = createLogger("sidecar.work.store");
 
@@ -65,8 +67,17 @@ export class WorkStore {
      */
     async createIfAbsent(record: WorkRecord): Promise<{ record: WorkRecord; created: boolean }> {
         return this.withQueue(record.workId, async () => {
+            if (await this.isDeleted(record.workId)) throw new Error("work source was deleted");
             const existing = await this.readSnapshot(record.workId);
             if (existing) return { record: existing, created: false };
+            const snapshotExists = await stat(join(this.dir(record.workId), "work.json")).then(
+                () => true,
+                (error: NodeJS.ErrnoException) => {
+                    if (error.code === "ENOENT") return false;
+                    throw error;
+                },
+            );
+            if (snapshotExists) throw new Error("cannot replace an unrecognized work snapshot");
             await this.write(record);
             return { record, created: true };
         });
@@ -98,6 +109,7 @@ export class WorkStore {
             if (!next) return { record: current, changed: false };
             if (next.workId !== workId) throw new Error("work mutation cannot change workId");
             const stamped: WorkRecord = { ...next, revision: current.revision + 1 };
+            await this.persistInvalidatedInteraction(stamped);
             await this.write(stamped);
             return { record: stamped, changed: true };
         });
@@ -108,9 +120,16 @@ export class WorkStore {
      * resumed subagent finishes: `agentContinue` has no launch tool call, so the
      * child session id is the only key back to the record.
      */
-    async findByChildSessionId(childSessionId: string): Promise<WorkRecord | undefined> {
+    async findByChildSessionId(
+        childSessionId: string,
+        workspace?: string,
+    ): Promise<WorkRecord | undefined> {
         for (const record of await this.list()) {
-            if (record.childSessionId === childSessionId) return record;
+            if (
+                record.childSessionId === childSessionId &&
+                (workspace === undefined || record.workspace === workspace)
+            )
+                return record;
         }
         return undefined;
     }
@@ -130,6 +149,93 @@ export class WorkStore {
         await this.withQueue(workId, () => rm(this.dir(workId), { recursive: true, force: true }));
     }
 
+    /** Recheck inside the same queue as mutations so pruning cannot remove a resumed run. */
+    async deleteIfUnchanged(snapshot: WorkRecord): Promise<boolean> {
+        return this.withQueue(snapshot.workId, async () => {
+            const current = await this.readSnapshot(snapshot.workId);
+            if (
+                !current ||
+                current.revision !== snapshot.revision ||
+                current.attempt.attemptId !== snapshot.attempt.attemptId ||
+                !isTerminal(current.status) ||
+                current.delivery?.status === "pending"
+            )
+                return false;
+            await this.persistInvalidatedInteraction(current);
+            await rm(this.dir(current.workId), { recursive: true, force: true });
+            return true;
+        });
+    }
+
+    private interactionPath(target: SessionTarget, toolCallId: string): string {
+        const key = createHash("sha256")
+            .update(JSON.stringify([target.workspace, target.sessionId, toolCallId]))
+            .digest("hex");
+        return join(this.root, "interactions", `${key}.json`);
+    }
+
+    async isInteractionInvalidated(target: SessionTarget, toolCallId: string): Promise<boolean> {
+        try {
+            await stat(this.interactionPath(target, toolCallId));
+            return true;
+        } catch (error) {
+            if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+            throw error;
+        }
+    }
+
+    private async persistInvalidatedInteraction(record: WorkRecord): Promise<void> {
+        const interaction = record.expiredInteraction ?? record.invalidatedInteraction;
+        if (!record.workspace || !interaction) return;
+        const path = this.interactionPath(
+            { workspace: record.workspace, sessionId: interaction.sessionId },
+            interaction.toolCallId,
+        );
+        await this.ensureDir(dirname(path));
+        await this.atomicWrite(path, JSON.stringify({ invalidated: true }));
+    }
+
+    async isDeleted(workId: string): Promise<boolean> {
+        assertSafeWorkId(workId);
+        try {
+            await stat(join(this.root, "deleted", `${workId}.json`));
+            return true;
+        } catch (error) {
+            if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+            throw error;
+        }
+    }
+
+    /** The compact marker outlives result cleanup so replay cannot recreate the source. */
+    async markDeleted(workId: string): Promise<"deleted" | "not_found" | "running"> {
+        return this.withQueue(workId, async () => {
+            if (await this.isDeleted(workId)) return "deleted";
+            const current = await this.readSnapshot(workId);
+            if (!current) return "not_found";
+            if (!isTerminal(current.status)) return "running";
+            await this.persistInvalidatedInteraction(current);
+            const dir = join(this.root, "deleted");
+            await this.ensureDir(dir);
+            await this.atomicWrite(
+                join(dir, `${workId}.json`),
+                JSON.stringify({ workId, deletedAt: Date.now() }),
+            );
+            return "deleted";
+        });
+    }
+
+    async cleanupDeleted(): Promise<void> {
+        const entries = await readdir(join(this.root, "deleted")).catch((error) => {
+            if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+            throw error;
+        });
+        for (const file of entries) {
+            if (!file.endsWith(".json")) continue;
+            const id = file.slice(0, -5);
+            if (isSafeWorkId(id)) await this.delete(id);
+        }
+    }
+
     /**
      * Write the immutable answer. The resultId is derived from the checksum, so
      * rewriting the same text is a no-op rather than a second copy.
@@ -140,6 +246,16 @@ export class WorkStore {
         text: string;
         now: number;
     }): Promise<StoredResult> {
+        return this.withQueue(args.workId, () => this.writeResultUnlocked(args));
+    }
+
+    private async writeResultUnlocked(args: {
+        workId: string;
+        attemptId: string;
+        text: string;
+        now: number;
+    }): Promise<StoredResult> {
+        if (await this.isDeleted(args.workId)) throw new Error("work source was deleted");
         const checksum = checksumOf(args.text);
         const resultId = `r-${checksum.slice(0, 24)}`;
         const stored: StoredResult = {
@@ -218,6 +334,7 @@ export class WorkStore {
     }
 
     private async readSnapshot(workId: string): Promise<WorkRecord | undefined> {
+        if (await this.isDeleted(workId)) return undefined;
         const path = join(this.dir(workId), "work.json");
         let raw: string;
         try {
@@ -230,7 +347,12 @@ export class WorkStore {
         }
         try {
             const parsed = JSON.parse(raw) as WorkRecord;
-            if (parsed.schemaVersion !== WORK_SCHEMA_VERSION || parsed.workId !== workId) {
+            if (
+                parsed.schemaVersion !== WORK_SCHEMA_VERSION ||
+                parsed.workId !== workId ||
+                !WORK_STATUSES.includes(parsed.status) ||
+                !parsed.attempt?.attemptId
+            ) {
                 log.warn(`ignoring work snapshot with unexpected shape: ${path}`);
                 return undefined;
             }

@@ -23,6 +23,7 @@ import type {
     WorkWaitingSummary,
     WorkWaitingTool,
 } from "@taco-ai/protocol";
+import type { WorkOperationRef } from "./workOperationTypes.ts";
 
 export const WORK_SCHEMA_VERSION = 1;
 
@@ -80,9 +81,14 @@ export interface WorkDelivery {
 }
 
 export interface WorkAttempt {
+    readonly interaction?: { readonly sessionId: string; readonly toolCallId: string };
+    readonly sharedQueue?: boolean;
     readonly attemptId: string;
     readonly startedAt: number;
     readonly endedAt?: number;
+    readonly operation?: WorkOperationRef;
+    readonly operationAccepted?: boolean;
+    readonly cancelRequestedAt?: number;
 }
 
 export interface WorkResultRef {
@@ -95,7 +101,20 @@ export interface WorkResultRef {
     readonly path?: string;
 }
 
+/** Persisted identity of an expired question, so a late answer cannot run untracked. */
+export interface ExpiredWorkInteraction {
+    readonly workspace?: string;
+    readonly sessionId: string;
+    readonly toolCallId: string;
+    readonly toolName: WaitingTool;
+    readonly attemptId: string;
+    readonly waitingSince: number;
+    readonly expiresAt: number;
+    readonly expiredAt: number;
+}
+
 export interface WorkRecord {
+    readonly invalidatedInteraction?: { readonly sessionId: string; readonly toolCallId: string };
     readonly schemaVersion: typeof WORK_SCHEMA_VERSION;
     readonly workId: string;
     /** Bumped on every write; lets a reader tell two snapshots apart. */
@@ -118,6 +137,10 @@ export interface WorkRecord {
     /** Persisted invalidation from session.delete or startup target reconciliation; older records omit it. */
     readonly sessionState?: WorkSessionState;
     readonly waiting?: WorkWaiting;
+    /** Independent of updatedAt; legacy waiting records acquire these once on reconciliation. */
+    readonly waitingSince?: number;
+    readonly expiresAt?: number;
+    readonly expiredInteraction?: ExpiredWorkInteraction;
     /** The subagent's own session. Absent for a scheduled fire. */
     readonly childSessionId?: string;
     /** The subagent profile. Absent for a scheduled fire. */

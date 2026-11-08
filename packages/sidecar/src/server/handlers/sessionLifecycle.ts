@@ -221,9 +221,22 @@ export function registerSessionLifecycleHandlers(): void {
         "sessionDelete",
         true,
         async ({ workspace, server, params }) => {
-            await deleteSessionTree(workspace, params.sessionId, async (sessionId) => {
-                await server.work?.sessionDeleted({ workspace: params.workspace, sessionId });
-            });
+            await deleteSessionTree(
+                workspace,
+                params.sessionId,
+                async (sessionId) => {
+                    await server.work?.sessionDeleted({
+                        workspace: workspace.workspaceKey,
+                        sessionId,
+                    });
+                },
+                async (sessionId) => {
+                    await server.work?.sessionSkipped({
+                        workspace: workspace.workspaceKey,
+                        sessionId,
+                    });
+                },
+            );
             const result: SessionDeleteResult = { deleted: true };
             return result;
         },
@@ -307,6 +320,7 @@ async function deleteSessionTree(
     workspace: WorkspaceRuntime,
     sessionId: SessionId,
     onDeleted: (sessionId: SessionId) => Promise<void>,
+    onSkipped: (sessionId: SessionId) => Promise<void>,
 ): Promise<void> {
     // Validate the raw RPC id before anything is deleted, not after.
     sessionAuxDir(workspace.sessionsRoot, sessionId);
@@ -339,7 +353,10 @@ async function deleteSessionTree(
     // the server's per-session event buffer depend on.
     const deleted: SessionId[] = [];
     for (const id of ordered) {
-        if (stuck.has(id)) continue;
+        if (stuck.has(id)) {
+            await onSkipped(id);
+            continue;
+        }
         await workspace.deleteSession(id);
         deleted.push(id);
         await onDeleted(id);

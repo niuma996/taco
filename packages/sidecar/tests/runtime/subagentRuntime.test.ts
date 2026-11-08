@@ -485,6 +485,30 @@ describe("subagentRunner", () => {
             });
         }
 
+        it("preserves partial findings when an exact operation abort does not cancel the parent signal", async () => {
+            const attached = new FakeAttached();
+            const signal = new AbortController().signal;
+            attached.prompt = async () => {
+                throw Object.assign(new Error("operation stopped"), { terminalStatus: "aborted" });
+            };
+            let reads = 0;
+            const result = await runAttachedSubagent({
+                subSessionId: asSessionId("exact-abort"),
+                attached: attached.asSession(),
+                prompt: "review",
+                agentType: "e",
+                signal,
+                readLastAssistantText: async () => ({
+                    text: reads++ === 0 ? "old" : "new finding",
+                    isEmpty: false,
+                }),
+            });
+            assert.equal(signal.aborted, false);
+            assert.equal(result.aborted, true);
+            assert.equal(result.partial, true);
+            assert.match(result.resultText, /new finding/);
+        });
+
         it("keeps observed findings when an interrupted transcript cannot be read", async () => {
             const attached = new FakeAttached();
             const controller = new AbortController();

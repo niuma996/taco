@@ -22,7 +22,14 @@ import {
 } from "../../src/runtime/harness/deferredToolRegistry.ts";
 import { resolvePromptReply } from "../../src/runtime/harness/promptReply.ts";
 import { NodeExecutionEnv } from "../../src/runtime/pi/node.ts";
-import type { AgentMessage, Api, Entry, Model } from "../../src/runtime/pi/types.ts";
+import type {
+    AgentLane,
+    AgentMessage,
+    Api,
+    Entry,
+    Model,
+    Session,
+} from "../../src/runtime/pi/types.ts";
 import { JsonlSessionRepo, uuidv7 } from "../../src/runtime/pi/values.ts";
 import { normalizeMessageUpdate } from "../../src/server/push.ts";
 import type { TaskStore } from "../../src/tasks/taskTypes.ts";
@@ -58,6 +65,8 @@ describe("attachedSession.streaming", () => {
         options: {
             responses?: unknown[];
             tools?: unknown[];
+            session?: Session;
+            shouldAbortOperation?: (operationId: string) => Promise<boolean>;
         } = {},
     ) {
         const env = new NodeExecutionEnv({ cwd: tmp });
@@ -71,9 +80,10 @@ describe("attachedSession.streaming", () => {
         const models = createModels();
         if (register) models.setProvider(faux.provider);
 
-        const session = await repo.create({ cwd: tmp }, harnessContext);
+        const session = options.session ?? (await repo.create({ cwd: tmp }, harnessContext));
         const attached = await AttachedSession.create({
             session,
+            shouldAbortOperation: options.shouldAbortOperation,
             models,
             model: faux.getModel(),
             env,
@@ -81,6 +91,7 @@ describe("attachedSession.streaming", () => {
             tools: (options.tools ?? []) as never,
             resources: {},
             streamOptions: {},
+            compaction: { enabled: false },
             taskStore: {
                 lists: new Map(),
                 getTaskState: () => ({ planMode: false, currentTask: undefined }),
@@ -95,6 +106,76 @@ describe("attachedSession.streaming", () => {
 
         return attached;
     }
+
+    it("reuses a completed explicit operation instead of admitting the same prompt twice", async () => {
+        const attached = await makeAttached("once");
+        let starts = 0;
+        attached.on("event", (event) => {
+            if (event.type === "run_start") starts++;
+        });
+        try {
+            const operation = { operationId: uuidv7() };
+            const first = await attached.prompt(
+                "hello",
+                undefined,
+                undefined,
+                undefined,
+                operation,
+            );
+            const second = await attached.prompt(
+                "hello",
+                undefined,
+                undefined,
+                undefined,
+                operation,
+            );
+            assert.deepEqual(second, first);
+            assert.equal(starts, 1);
+            assert.equal(
+                (await attached.getOperationResult(operation.operationId))?.status,
+                "completed",
+            );
+            assert.equal((await attached.requestOperationAbort("stale-id")).outcome, "mismatch");
+        } finally {
+            await attached.dispose();
+        }
+    });
+
+    it("applies a persisted cancellation before recovery drives an open operation", async () => {
+        const first = await makeAttached("must not run");
+        const lane = (first as unknown as { lane: AgentLane }).lane;
+        const operationId = uuidv7();
+        const accepted = await lane.accept(
+            { kind: "prompt", operationId, prompt: "old" },
+            harnessContext,
+        );
+        assert.equal(accepted.ok, true);
+        const metadata = first.session.metadata;
+        await first.session.close(harnessContext);
+        const env = new NodeExecutionEnv({ cwd: tmp });
+        const repo = new JsonlSessionRepo({ fileSystem: env, sessionsRoot: join(tmp, "sessions") });
+        const persisted = (await repo.list(undefined, harnessContext)).find(
+            (entry) => entry.id === metadata.id,
+        );
+        assert.ok(persisted);
+        const session = await repo.open(persisted, harnessContext);
+        let checked = "";
+        const restored = await makeAttached("fresh reply", true, {
+            session,
+            shouldAbortOperation: async (id) => {
+                checked = id;
+                return true;
+            },
+        });
+        try {
+            await restored.prompt("fresh");
+            assert.equal(checked, operationId);
+            assert.equal((await restored.getOperationResult(operationId))?.status, "aborted");
+            assert.equal(restored.recoveryOutcomes[0]?.outcome, "aborted");
+        } finally {
+            await restored.dispose();
+        }
+    });
 
     /** Stream `reply` through a real harness; return every republished event. */
     async function runStreamingTurn(reply: string): Promise<Array<Record<string, unknown>>> {
