@@ -431,7 +431,7 @@ button svg > * {
 }
 
 .activity-rail-item.active .activity-rail-content {
-    color: var(--brand-orange);
+    color: var(--rail-fg-active);
 }
 
 /* Label tooltip: hidden until hover/focus, then floats clear of the rail on the right.

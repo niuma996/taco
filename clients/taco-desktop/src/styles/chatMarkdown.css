@@ -141,8 +141,8 @@
     margin: 1em 0;
 }
 
-/* Borderless chip: the orange border doubled the visual weight of the already
-   saturated --code-fg; background + text color alone carry the highlight. */
+/* Borderless chip: a border doubled the visual weight of the chip, so
+   background + text color alone carry the highlight. */
 .md-assistant :not(pre) > code {
     background: var(--code-bg);
     color: var(--code-fg);

@@ -45,11 +45,13 @@
     --accent-bg-hover: rgba(136, 192, 208, 0.1);
     --accent-bg-active: rgba(136, 192, 208, 0.18);
     --accent-border: rgba(136, 192, 208, 0.55);
-    /* ActivityRail hover/active orange — same family as the icon-brand orange.
-       Distinguishes "primary nav active" from the global --accent blue.
-       Hover is near-transparent (only a faint warm tint); active is the sole high-saturation orange. */
-    --rail-bg-hover: rgba(251, 117, 30, 0.05);
-    --rail-bg-active: rgba(251, 117, 30, 0.22);
+    /* ActivityRail hover/active — brand orange at low alpha. Distinguishes
+       "primary nav active" from the global --accent blue. */
+    --rail-bg-hover: color-mix(in srgb, var(--brand-orange) 6%, transparent);
+    --rail-bg-active: color-mix(in srgb, var(--brand-orange) 20%, transparent);
+    /* Active rail icon colour — brand orange desaturated toward the body text,
+       8.9:1 on --shell-bg and 6.9:1 on the active chip background. */
+    --rail-fg-active: color-mix(in srgb, var(--brand-orange) 70%, var(--fg));
     --success: #a3be8c; /* Nord 14 green — same as --user, for task done icons etc. */
     --success-bg: rgba(163, 190, 140, 0.08);
     --tool-bg: rgba(235, 203, 139, 0.05);
@@ -58,10 +60,12 @@
        Bright enough to avoid looking brown. */
     --brand-orange: #f27c2e;
     --brand-orange-hover: #f78c42;
-    /* Inline code background — warm orange, distinguishes from the Nord blue accent. */
-    --code-bg: #261a0d;
-    /* Inline code text color — orange, stays legible on dark bg instead of going gray. */
-    --code-fg: #f27c2e;
+    /* Inline code background — brand orange at low alpha. Warm enough to read
+       as code, muted enough not to glare against the chat surface. */
+    --code-bg: color-mix(in srgb, var(--brand-orange) 9%, transparent);
+    /* Inline code text colour — brand orange desaturated toward the body text,
+       6.5:1 on the composited chip background. */
+    --code-fg: color-mix(in srgb, var(--brand-orange) 70%, var(--fg));
     --overlay-scrim: rgba(0, 0, 0, 0.6);
     --shadow-color: rgba(0, 0, 0, 0.4);
     --shadow-color-strong: rgba(0, 0, 0, 0.35);
@@ -288,10 +292,12 @@
     --accent-bg-hover: rgba(94, 129, 172, 0.1);
     --accent-bg-active: rgba(94, 129, 172, 0.18);
     --accent-border: rgba(94, 129, 172, 0.5);
-    /* Light theme uses deeper alpha for orange to ensure readability on light bg.
-       Hover is near-transparent (faint warm tint); active is the sole saturated orange. */
-    --rail-bg-hover: rgba(211, 95, 16, 0.05);
-    --rail-bg-active: rgba(211, 95, 16, 0.2);
+    /* Light theme uses deeper alpha for orange to ensure readability on light bg. */
+    --rail-bg-hover: color-mix(in srgb, var(--brand-orange) 6%, transparent);
+    --rail-bg-active: color-mix(in srgb, var(--brand-orange) 18%, transparent);
+    /* Active rail icon colour — same 70/30 mix as the dark theme, so the two
+       themes stay in step; 4.2:1 on --shell-bg, 3.5:1 on the active chip. */
+    --rail-fg-active: color-mix(in srgb, var(--brand-orange) 70%, var(--fg));
     --provider-status-ready: #059669;
     --success: #5b8a3c; /* Same as --user, for task done icons etc. */
     --success-bg: rgba(91, 138, 60, 0.12);
@@ -300,10 +306,11 @@
     /* Deeper orange on light bg to maintain contrast. */
     --brand-orange: #d96a1a;
     --brand-orange-hover: #c25f16;
-    /* Inline code background — warm orange on warm paper bg, readable contrast. */
-    --code-bg: rgba(211, 95, 16, 0.1);
-    /* Inline code text — deeper orange to ensure contrast on light bg. */
-    --code-fg: #b25a14;
+    /* Inline code background — brand orange tint on warm paper bg. */
+    --code-bg: color-mix(in srgb, var(--brand-orange) 8%, transparent);
+    /* Inline code text — same 70/30 mix as the dark theme, 4.5:1 on the
+       composited chip background. */
+    --code-fg: color-mix(in srgb, var(--brand-orange) 70%, var(--fg));
     --overlay-scrim: rgba(0, 0, 0, 0.6);
     --shadow-color: rgba(43, 38, 32, 0.18);
     --shadow-color-strong: rgba(43, 38, 32, 0.22);
@@ -392,9 +399,9 @@
     box-sizing: border-box;
 }
 
-/* Inline code outside markdown: the borderless orange chip .md-assistant uses
-   for :not(pre) > code. Without it the default fg reads gray on the darker
-   orange in dark mode. Block code containers reset their own styling. */
+/* Inline code outside markdown: the borderless chip .md-assistant uses for
+   :not(pre) > code. Without it the default fg reads gray on the tinted chip
+   background in dark mode. Block code containers reset their own styling. */
 :not(pre) > code {
     background: var(--code-bg);
     color: var(--code-fg);

@@ -113,7 +113,7 @@ function RailButton({
             onClick={() => onSelect(type)}
             aria-pressed={activeView === type}
         >
-            {/* Background layer: square that turns orange on hover/active, no clipping. */}
+            {/* Background layer: square that takes an orange tint on hover/active, no clipping. */}
             <span className="activity-rail-bg" aria-hidden="true" />
             {/* Content layer: icon centered over the background. */}
             <span className="activity-rail-content">
