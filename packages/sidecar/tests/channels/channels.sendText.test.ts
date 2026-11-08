@@ -175,4 +175,84 @@ describe("ChannelRegistry.sendText", () => {
         assert.equal(registry.maxMessageLength("c1"), 321);
         assert.equal(registry.maxMessageLength("nope"), undefined);
     });
+
+    it("rechecks the frozen binding after an earlier queued push changes accounts", async () => {
+        const registry = new ChannelRegistry();
+        let binding = "account-a";
+        const texts: string[] = [];
+        register(registry, {
+            getDeliveryBinding: () => binding,
+            push: async () => {
+                binding = "account-b";
+            },
+            sendText: async (_route, text) => {
+                texts.push(text);
+                return { kind: "confirmed" };
+            },
+        });
+        assert.equal(registry.getDeliveryBinding("c1"), "account-a");
+        registry.push("c1", { method: "x" } as never);
+        const result = await registry.sendText("c1", route, "private", { bindingId: "account-a" });
+        assert.deepEqual(result, { kind: "permanentFailure", code: "binding_changed" });
+        assert.deepEqual(texts, []);
+    });
+
+    it("does not send through a superseded handle when queued work is released", async () => {
+        const registry = new ChannelRegistry();
+        let release!: () => void;
+        const gate = new Promise<void>((resolve) => {
+            release = resolve;
+        });
+        let sends = 0;
+        register(registry, {
+            getDeliveryBinding: () => "binding",
+            push: async () => gate,
+            sendText: async () => {
+                sends++;
+                return { kind: "confirmed" };
+            },
+        });
+        registry.push("c1", { method: "x" } as never);
+        const pending = registry.sendText("c1", route, "private", { bindingId: "binding" });
+        register(registry, {
+            getDeliveryBinding: () => "new-binding",
+            sendText: async () => {
+                sends++;
+                return { kind: "confirmed" };
+            },
+        });
+        release();
+        assert.equal((await pending).kind, "unavailable");
+        assert.equal(sends, 0);
+    });
+
+    for (const action of ["stop", "logout"] as const) {
+        it(`${action} cancels an interactive login before draining the send queue`, async () => {
+            const registry = new ChannelRegistry();
+            let entered!: () => void;
+            const started = new Promise<void>((resolve) => {
+                entered = resolve;
+            });
+            let closed = false;
+            let loggedOut = false;
+            register(registry, {
+                login: async () => {
+                    entered();
+                    await new Promise<void>(() => {});
+                },
+                close: async () => {
+                    closed = true;
+                },
+                logout: async () => {
+                    loggedOut = true;
+                },
+            });
+            const login = registry.login("c1");
+            const rejected = assert.rejects(login, /cancel/);
+            await started;
+            await registry[action]("c1");
+            await rejected;
+            assert.equal(action === "stop" ? closed : loggedOut, true);
+        });
+    }
 });

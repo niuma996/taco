@@ -34,7 +34,7 @@ class RecordingSender implements DeliverySender {
     }
 }
 
-const route: ImRoute = { channelId: "wechat-1", peerId: "peer", chatId: "chat" };
+const route = { channelId: "wechat-1", peerId: "peer", chatId: "chat", bindingId: "test-binding" };
 
 describe("work.controller", () => {
     let root: string;
@@ -297,10 +297,14 @@ describe("work.controller", () => {
             assert.deepEqual(sender.texts, ["first"]);
         });
 
-        it("a notice queued behind a busy parent is handed off: no second copy from here", async () => {
+        it("keeps a legacy handed-off delivery final instead of replacing it with another reply", async () => {
             const { controller, sender, store, workId } = await settledWithReplyPending();
-            await controller.handOff(workId);
-            await new Promise((r) => setTimeout(r, 20));
+            await store.mutate(workId, (work) =>
+                work.delivery
+                    ? { ...work, delivery: { ...work.delivery, status: "handedOff" } }
+                    : undefined,
+            );
+            await controller.completeWithReply(workId, "late reply");
             assert.equal((await store.get(workId))?.delivery?.status, "handedOff");
             assert.equal(sender.texts.length, 0);
         });
@@ -341,15 +345,6 @@ describe("work.controller", () => {
             const { controller } = rig();
             controller.holdReplies("w-a", "p");
             assert.equal(controller.isHoldingReplies("other"), false);
-        });
-
-        it("stopCapturing lets the session speak again", () => {
-            const { controller } = rig();
-            controller.holdReplies("w-a", "p");
-            controller.stopCapturing("w-a");
-            assert.equal(controller.isHoldingReplies("p"), false);
-            controller.releaseReplies("w-a");
-            assert.equal(controller.isHoldingReplies("p"), false, "the late release is harmless");
         });
     });
 

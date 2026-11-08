@@ -1086,6 +1086,7 @@ export class SessionRegistry extends EventEmitter {
             // Forward harness events to workspace-level events
             attached.on("event", (e) => this.emit("session.event", { sessionId, event: e }));
             attached.on("error", (e) => this.emit("session.error", { sessionId, error: e }));
+            attached.on("prompt.settled", () => this.emit("session.idle", { sessionId }));
 
             // Emit a one-shot attached push event
             this.emit("session.attached", { sessionId });

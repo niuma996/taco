@@ -24,6 +24,7 @@ import { hasStoredCredentials } from "../channels/channelConfigStore.ts";
 import { isValidChannelId } from "../channels/configValidator.ts";
 import type { ConversationRouter } from "../channels/conversationRouter.ts";
 import type { ChannelConfig, ChannelRegistry } from "../channels/registry.ts";
+import { ChannelBindingCancelled } from "../channels/registry.ts";
 import { readGlobalConfig, updateGlobalConfig } from "../config/config.ts";
 import { createLogger } from "../lib/logger.ts";
 import type { ChannelControl } from "../runtime/serverRpcSurface.ts";
@@ -63,6 +64,7 @@ function failChannel(
     verb: string,
     error: unknown,
 ): void {
+    if (error instanceof ChannelBindingCancelled) return;
     const message = error instanceof Error ? error.message : String(error);
     log.error(`channel ${channelId} ${verb} failed: ${message}`);
     deps.channelBindBroker.setState(channelId, "error", { message });

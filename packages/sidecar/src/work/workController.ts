@@ -15,7 +15,7 @@
  * race the attach-time recovery (see the Work plan, section 6).
  */
 
-import type { ImRoute, SessionTarget } from "@taco-ai/protocol";
+import type { SessionTarget } from "@taco-ai/protocol";
 import { chunkText } from "../channels/builtin/channelReply.ts";
 import { createLogger } from "../lib/logger.ts";
 import { uuidv7 } from "../runtime/pi/values.ts";
@@ -33,6 +33,7 @@ import {
 } from "./workState.ts";
 import { type WorkStore, workIdForSource } from "./workStore.ts";
 import {
+    type DeliveryTarget,
     isTerminal,
     WORK_SCHEMA_VERSION,
     type WorkDelivery,
@@ -66,7 +67,7 @@ export interface StartWorkArgs {
     readonly sourceEventId: string;
     readonly workspace?: string;
     /** Where an interruption notice would go if the driver dies. */
-    readonly deliverTo?: ImRoute;
+    readonly deliverTo?: DeliveryTarget;
     readonly maxMessageLength?: number;
     readonly parentSessionId: string;
     readonly childSessionId: string;
@@ -93,7 +94,7 @@ export interface SettleWorkArgs {
     readonly path?: string;
     readonly reason?: string;
     /** Set when the user who started this should be told, over IM. */
-    readonly deliverTo?: ImRoute;
+    readonly deliverTo?: DeliveryTarget;
     /** Per-channel message cap, used to split the template notice. */
     readonly maxMessageLength?: number;
     /**
@@ -194,6 +195,9 @@ export class WorkController {
                           channelId: args.deliverTo.channelId,
                           peerId: args.deliverTo.peerId,
                           chatId: args.deliverTo.chatId,
+                          ...(args.deliverTo.bindingId
+                              ? { bindingId: args.deliverTo.bindingId }
+                              : {}),
                       },
                   }
                 : {}),
@@ -259,7 +263,7 @@ export class WorkController {
         }
 
         const target =
-            args.deliver === false ? undefined : (args.deliverTo ?? current.deliveryTarget);
+            args.deliver === false ? undefined : (current.deliveryTarget ?? args.deliverTo);
         const maxMessageLength = args.maxMessageLength ?? current.maxMessageLength;
         const delivery = target
             ? buildDelivery({
@@ -398,12 +402,6 @@ export class WorkController {
             void this.deliverer.deliver(snapshot.workId);
     }
 
-    /** Whether this Work's outcome already reached the user another way. */
-    async isNoticeSettled(workId: string): Promise<boolean> {
-        const status = (await this.store.get(workId))?.delivery?.status;
-        return status === "confirmed" || status === "handedOff" || status === "cancelled";
-    }
-
     /** A notice run for `workId` started: capture the session's text instead of sending it live. */
     holdReplies(workId: string, sessionId: string): void {
         const hold = this.holds.get(workId);
@@ -430,60 +428,35 @@ export class WorkController {
     }
 
     /**
-     * The template was frozen while a notice run was still writing. Stop
-     * holding that run's text: its reply can no longer become the message, so
-     * keeping it from the channel would lose it rather than deduplicate it.
-     */
-    stopCapturing(workId: string): void {
-        this.holds.delete(workId);
-    }
-
-    /** Whether this Work's delivery is still waiting for the parent model's reply. */
-    async awaitsReply(workId: string): Promise<boolean> {
-        const d = (await this.store.get(workId))?.delivery;
-        return d?.status === "pending" && d.chunks === undefined;
-    }
-
-    /**
      * The parent model answered the notice. Freeze its reply as the message
      * and start delivering. A reply with no text falls back to the template.
      */
-    async completeWithReply(workId: string, text: string): Promise<void> {
+    async completeWithReply(workId: string, text: string, attemptId?: string): Promise<void> {
         const trimmed = text.trim();
-        if (trimmed === "") return this.replyFailed(workId);
-        await this.freeze(workId, (d) => ({
-            chunks: chunkText(trimmed, d.maxMessageLength),
-            source: "parentReply",
-        }));
+        if (trimmed === "") return this.replyFailed(workId, attemptId);
+        await this.freeze(
+            workId,
+            (d) => ({
+                chunks: chunkText(trimmed, d.maxMessageLength),
+                source: "parentReply",
+            }),
+            attemptId,
+        );
     }
 
     /**
      * No reply is coming (parent unreachable, run failed, or it said nothing):
      * send the template now instead of waiting out the grace period.
      */
-    async replyFailed(workId: string): Promise<void> {
-        await this.freeze(workId, (d) => ({
-            chunks: d.templateChunks ?? [],
-            source: "template",
-        }));
-    }
-
-    /**
-     * The notice went into the parent's follow-up queue because it was mid-turn.
-     * Its own reply will carry the news through the ordinary channel path, so
-     * a second copy from here would only repeat it.
-     */
-    async handOff(workId: string): Promise<void> {
-        const res = await this.store.mutate(workId, (work) => {
-            const d = work.delivery;
-            if (d?.status !== "pending" || d.chunks) return undefined;
-            return {
-                ...work,
-                updatedAt: this.now(),
-                delivery: { ...d, status: "handedOff", awaitingParentReplyUntil: undefined },
-            };
-        });
-        if (res?.changed) this.onChange(workId);
+    async replyFailed(workId: string, attemptId?: string): Promise<void> {
+        await this.freeze(
+            workId,
+            (d) => ({
+                chunks: d.templateChunks ?? [],
+                source: "template",
+            }),
+            attemptId,
+        );
     }
 
     private async freeze(
@@ -492,8 +465,10 @@ export class WorkController {
             chunks: readonly string[];
             source: "parentReply" | "template";
         },
+        attemptId?: string,
     ): Promise<void> {
         const res = await this.store.mutate(workId, (work) => {
+            if (attemptId !== undefined && work.attempt.attemptId !== attemptId) return undefined;
             const d = work.delivery;
             if (d?.status !== "pending" || d.chunks) return undefined;
             return {
@@ -757,7 +732,7 @@ function withInterruptionNotice(record: WorkRecord, now: number): WorkRecord {
 }
 
 function buildDelivery(args: {
-    route: ImRoute;
+    route: DeliveryTarget;
     now: number;
     parentWillReply: boolean;
     template: string;
@@ -771,6 +746,7 @@ function buildDelivery(args: {
             channelId: args.route.channelId,
             peerId: args.route.peerId,
             chatId: args.route.chatId,
+            ...(args.route.bindingId ? { bindingId: args.route.bindingId } : {}),
         },
         status: "pending",
         confirmedChunks: 0,

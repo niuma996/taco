@@ -150,6 +150,8 @@ export class WeComChannelHandle implements ChannelHandle {
      *  credentials holds no client at all, so a push before bind is dropped
      *  instead of being sent over an unauthenticated socket. */
     private client?: WeComClientLike;
+    private clientBinding?: string;
+    private bindingGeneration = 0;
     /** Set while a disconnect() we initiated is in flight, so the SDK's
      *  `disconnected` event doesn't surface as a broker error. Cleared by the
      *  next reconnect, since each reconnect builds a fresh client. */
@@ -167,6 +169,14 @@ export class WeComChannelHandle implements ChannelHandle {
             mergeMaxWaitMs: DEFAULT_MERGE_MAX_WAIT_MS,
         },
     ) {}
+
+    getDeliveryBinding(): string | undefined {
+        return this.clientBinding;
+    }
+
+    cancelBinding(): void {
+        this.bindingGeneration++;
+    }
 
     async push(frame: ServerPush): Promise<void> {
         const text = extractReplyText(frame);
@@ -229,6 +239,8 @@ export class WeComChannelHandle implements ChannelHandle {
             logger: createLoggerAdapter(this.ctx.logger),
         });
         this.client = client;
+        // Config may already name another account while this client is offline.
+        this.clientBinding = this.ctx.config.getDeliveryBinding?.();
         this.intentionalClose = false;
         this.attachHandlers(client);
 
@@ -413,6 +425,7 @@ export class WeComChannelHandle implements ChannelHandle {
         if (!client) return;
         this.intentionalClose = true;
         this.client = undefined;
+        this.clientBinding = undefined;
         try {
             client.disconnect();
         } catch {
@@ -435,6 +448,7 @@ export class WeComChannelHandle implements ChannelHandle {
      *  wecom there is no QR re-run; force without fresh creds is rejected
      *  so callers cannot silently keep stale ones. */
     async login(force?: boolean, creds?: ChannelsBindCreds): Promise<void> {
+        const generation = this.bindingGeneration;
         let next = creds;
         if (!next) {
             if (force) {
@@ -449,10 +463,12 @@ export class WeComChannelHandle implements ChannelHandle {
             next = stored;
         }
         await this.ctx.config.set(CREDENTIALS_KEY, next);
+        if (generation !== this.bindingGeneration) throw new Error("channel binding cancelled");
         this.reconnect(next);
     }
 
     async logout(): Promise<void> {
+        this.cancelBinding();
         this.closeClient();
         // Wipe the whole store, not just credentials: the store may carry
         // future per-channel runtime state. clear() mirrors wechat semantics
@@ -479,6 +495,7 @@ export class WeComChannelHandle implements ChannelHandle {
     }
 
     async close(): Promise<void> {
+        this.cancelBinding();
         this.broker.cancel(this.ctx.channelId, "channel closing");
         this.closeClient();
         this.batcher?.dispose();

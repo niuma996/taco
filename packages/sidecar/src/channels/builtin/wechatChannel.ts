@@ -293,6 +293,15 @@ interface SdkLogger {
     child(context: string): SdkLogger;
 }
 
+interface WeChatClient {
+    readonly bot: WeChatBotLike;
+    readonly callbacks: SdkLoginCallbacks;
+    readonly controller: AbortController;
+    readonly binding: { value: string | undefined };
+    readonly dispose: () => void;
+    readonly drainStorage: () => Promise<void>;
+}
+
 export class WeChatChannel implements Channel {
     readonly manifest = wechatChannelManifest;
 
@@ -301,92 +310,151 @@ export class WeChatChannel implements Channel {
     async start(ctx: ChannelContext): Promise<ChannelHandle> {
         const { broker, resolveRoute, listPeers } = this.options;
         const log = ctx.logger;
-        // The poller retries network errors forever but emits nothing when one
-        // succeeds again, so an `error` set by a blip would outlive the outage.
-        // A cursor write (or an inbound message) proves a poll got through.
-        // Only `error` is lifted: a mid-bind state belongs to the QR flow.
-        const markHealthy = () => {
-            if (broker.status(ctx.channelId).state === "error") {
+        const createClient = async (): Promise<WeChatClient> => {
+            // The SDK cannot abort QR auth. Each client gets storage and callbacks
+            // that become inert on cancellation; a replacement uses a fresh bot.
+            const controller = new AbortController();
+            const active = () => !controller.signal.aborted;
+            // The poller retries network errors forever but emits nothing when one
+            // succeeds again, so an `error` set by a blip would outlive the outage.
+            // A cursor write (or an inbound message) proves a poll got through.
+            // Only `error` is lifted: a mid-bind state belongs to the QR flow.
+            const markHealthy = () => {
+                if (!active()) return;
+                if (broker.status(ctx.channelId).state === "error") {
+                    broker.setState(ctx.channelId, "connected");
+                }
+            };
+            const storage = createStorageAdapter(ctx, controller.signal, (key) => {
+                if (key === CURSOR_KEY) markHealthy();
+            });
+
+            const bot = await (this.options.createBot ?? defaultCreateBot)({
+                storage,
+                logger: createLoggerAdapter(log),
+            });
+            const binding: { value: string | undefined } = { value: undefined };
+
+            const callbacks: SdkLoginCallbacks = {
+                onQrUrl: (url) => {
+                    controller.signal.throwIfAborted();
+                    broker.requestScan(ctx.channelId, url);
+                },
+                onScanned: () => {
+                    controller.signal.throwIfAborted();
+                    broker.setState(ctx.channelId, "scanned");
+                },
+                onExpired: () => {
+                    controller.signal.throwIfAborted();
+                    broker.setState(ctx.channelId, "expired");
+                },
+                onVerifyCode: async (isRetry) => {
+                    controller.signal.throwIfAborted();
+                    const code = await broker.requestVerifyCode(ctx.channelId, isRetry);
+                    controller.signal.throwIfAborted();
+                    return code;
+                },
+            };
+
+            bot.on("login", () => {
+                if (!active()) return;
+                // The SDK has adopted the persisted credentials before emitting login.
+                binding.value = ctx.config.getDeliveryBinding?.();
                 broker.setState(ctx.channelId, "connected");
-            }
+            });
+            bot.on("poll:start", () => {
+                // start() may still be awaiting notifyStart when cancellation stops it.
+                if (!active()) queueMicrotask(() => bot.stop());
+                else broker.setState(ctx.channelId, "connected");
+            });
+            // iLink revoked the token: the SDK wipes the stored credentials, so no
+            // retry can recover — only a fresh QR scan.
+            bot.on("session:expired", () => {
+                if (!active()) return;
+                binding.value = undefined;
+                broker.setState(ctx.channelId, "unbound", {
+                    message: "WeChat login expired — bind again to scan a new QR code",
+                });
+            });
+            bot.on("session:restored", () => {
+                if (active()) broker.setState(ctx.channelId, "connected");
+            });
+            bot.on("error", (e: unknown) => {
+                if (!active()) return;
+                const message = e instanceof Error ? e.message : String(e);
+                log.error(`bot error: ${message}`);
+                broker.setState(ctx.channelId, "error", { message });
+            });
+
+            // A picture and the words sent with it are separate platform messages
+            // with no guaranteed order between them, and the poller does not wait
+            // for one batch before emitting the next. One prompt per message starts
+            // a run on whichever arrives first and demotes the other to a follow-up
+            // the model only sees after it has answered. Hold each chat's messages
+            // for a short quiet window and submit them as one prompt instead.
+            const batcher = new InboundBatcher<PreparedInbound | undefined>({
+                quietMs: this.options.mergeWindowMs ?? DEFAULT_MERGE_WINDOW_MS,
+                maxWaitMs: this.options.mergeMaxWaitMs ?? DEFAULT_MERGE_MAX_WAIT_MS,
+                flush: (_key, items) => {
+                    if (!active()) return;
+                    // A dropped message (failed download) leaves a hole, not text.
+                    const ready = items.filter(
+                        (item): item is PreparedInbound => item !== undefined,
+                    );
+                    if (ready.length > 0) void submitPreparedBatch(ctx, log, ready);
+                },
+            });
+
+            bot.onMessage((msg) => {
+                if (!active()) return;
+                markHealthy();
+                // chatId groups a conversation: a group shares one session, a 1:1
+                // chat falls back to the peer's own id.
+                //
+                // iLink sends group_id as an EMPTY STRING for 1:1 chats, not
+                // undefined, so `??` would let "" through — and an empty chatId
+                // produces a workspace key that parseImCwd cannot parse, which
+                // silently breaks the reply path (no peer resolves for the session).
+                const peerId = msg.userId;
+                const chatId = msg.raw.group_id?.trim() || msg.userId;
+                // The sender is part of the key as well as the chat: two people
+                // writing in a group are two turns, not one.
+                batcher.push(
+                    `${peerId}\u0000${chatId}`,
+                    prepareInbound(ctx, log, bot, msg, peerId, chatId),
+                );
+            });
+
+            return {
+                bot,
+                callbacks,
+                controller,
+                binding,
+                dispose: () => batcher.dispose(),
+                drainStorage: storage.drain,
+            };
         };
-        const storage = createStorageAdapter(ctx, (key) => {
-            if (key === CURSOR_KEY) markHealthy();
-        });
 
-        const bot = await (this.options.createBot ?? defaultCreateBot)({
-            storage,
-            logger: createLoggerAdapter(log),
-        });
-
-        const callbacks: SdkLoginCallbacks = {
-            onQrUrl: (url) => broker.requestScan(ctx.channelId, url),
-            onScanned: () => broker.setState(ctx.channelId, "scanned"),
-            onExpired: () => broker.setState(ctx.channelId, "expired"),
-            onVerifyCode: (isRetry) => broker.requestVerifyCode(ctx.channelId, isRetry),
-        };
-
-        bot.on("login", () => broker.setState(ctx.channelId, "connected"));
-        bot.on("poll:start", () => broker.setState(ctx.channelId, "connected"));
-        // iLink revoked the token: the SDK wipes the stored credentials, so no
-        // retry can recover — only a fresh QR scan.
-        bot.on("session:expired", () =>
-            broker.setState(ctx.channelId, "unbound", {
-                message: "WeChat login expired — bind again to scan a new QR code",
-            }),
+        const client = await createClient();
+        const handle = new WeChatChannelHandle(
+            client,
+            ctx,
+            resolveRoute,
+            broker,
+            createClient,
+            listPeers ? () => listPeers(ctx.channelId) : undefined,
         );
-        bot.on("session:restored", () => broker.setState(ctx.channelId, "connected"));
-        bot.on("error", (e: unknown) => {
-            const message = e instanceof Error ? e.message : String(e);
-            log.error(`bot error: ${message}`);
-            broker.setState(ctx.channelId, "error", { message });
-        });
-
-        // A picture and the words sent with it are separate platform messages
-        // with no guaranteed order between them, and the poller does not wait
-        // for one batch before emitting the next. One prompt per message starts
-        // a run on whichever arrives first and demotes the other to a follow-up
-        // the model only sees after it has answered. Hold each chat's messages
-        // for a short quiet window and submit them as one prompt instead.
-        const batcher = new InboundBatcher<PreparedInbound | undefined>({
-            quietMs: this.options.mergeWindowMs ?? DEFAULT_MERGE_WINDOW_MS,
-            maxWaitMs: this.options.mergeMaxWaitMs ?? DEFAULT_MERGE_MAX_WAIT_MS,
-            flush: (_key, items) => {
-                // A dropped message (failed download) leaves a hole, not text.
-                const ready = items.filter((item): item is PreparedInbound => item !== undefined);
-                if (ready.length > 0) void submitPreparedBatch(ctx, log, ready);
-            },
-        });
-
-        bot.onMessage((msg) => {
-            markHealthy();
-            // chatId groups a conversation: a group shares one session, a 1:1
-            // chat falls back to the peer's own id.
-            //
-            // iLink sends group_id as an EMPTY STRING for 1:1 chats, not
-            // undefined, so `??` would let "" through — and an empty chatId
-            // produces a workspace key that parseImCwd cannot parse, which
-            // silently breaks the reply path (no peer resolves for the session).
-            const peerId = msg.userId;
-            const chatId = msg.raw.group_id?.trim() || msg.userId;
-            // The sender is part of the key as well as the chat: two people
-            // writing in a group are two turns, not one.
-            batcher.push(
-                `${peerId}\u0000${chatId}`,
-                prepareInbound(ctx, log, bot, msg, peerId, chatId),
-            );
-        });
 
         // Only auto-start when credentials already exist; a fresh install must
         // wait for an explicit bind rather than printing a QR nobody asked for.
-        if (await storage.has(CREDENTIALS_KEY)) {
+        if (ctx.config.get(CREDENTIALS_KEY) !== undefined) {
             broker.setState(ctx.channelId, "connecting");
-            void bot
+            void handle
                 // Credentials exist, so this resolves without a QR; callbacks
                 // are still passed in case they turn out to be stale.
-                .login({ callbacks })
-                .then(() => bot.start())
+                .login()
                 .catch((e: unknown) => {
+                    if (client.controller.signal.aborted) return;
                     const message = e instanceof Error ? e.message : String(e);
                     log.error(`auto-login failed: ${message}`);
                     broker.setState(ctx.channelId, "error", { message });
@@ -395,28 +463,30 @@ export class WeChatChannel implements Channel {
             broker.setState(ctx.channelId, "unbound");
         }
 
-        return new WeChatChannelHandle(
-            bot,
-            ctx,
-            resolveRoute,
-            broker,
-            callbacks,
-            () => batcher.dispose(),
-            listPeers ? () => listPeers(ctx.channelId) : undefined,
-        );
+        return handle;
     }
 }
 
 class WeChatChannelHandle implements ChannelHandle {
+    private generation = 0;
+    private loginStarted = false;
+
     constructor(
-        private readonly bot: WeChatBotLike,
+        private client: WeChatClient,
         private readonly ctx: ChannelContext,
         private readonly resolveRoute: ChannelRouteResolver,
         private readonly broker: ChannelBindBroker,
-        private readonly callbacks: SdkLoginCallbacks,
-        private readonly onClose: () => void,
+        private readonly createClient: () => Promise<WeChatClient>,
         readonly listPeers?: () => string[],
     ) {}
+
+    private get bot(): WeChatBotLike {
+        return this.client.bot;
+    }
+
+    getDeliveryBinding(): string | undefined {
+        return this.client.binding.value;
+    }
 
     async push(frame: ServerPush): Promise<void> {
         // A workspace-dimensioned interrupt notice (no session) can't be routed
@@ -460,13 +530,51 @@ class WeChatChannelHandle implements ChannelHandle {
     /** Runs the QR flow, then enters the long-poll loop. Callers must not await
      *  this in a request path: a human has to scan the code first. */
     async login(force?: boolean): Promise<void> {
+        // The SDK can start QR recovery internally, outside this handle's login.
+        if (this.loginStarted) this.cancelBinding();
+        this.loginStarted = true;
+        const generation = this.generation;
+        if (this.client.controller.signal.aborted) {
+            // A cancelled write may already be committing inside the config store.
+            await this.client.drainStorage();
+            if (generation !== this.generation) throw new Error("channel binding cancelled");
+            const replacement = await this.createClient();
+            if (generation !== this.generation) {
+                replacement.controller.abort();
+                replacement.bot.stop();
+                replacement.dispose();
+                throw new Error("channel binding cancelled");
+            }
+            this.client = replacement;
+        }
+        const client = this.client;
+        client.controller.signal.throwIfAborted();
         this.broker.setState(this.ctx.channelId, "connecting");
-        await this.bot.login({ force, callbacks: this.callbacks });
-        if (!this.bot.isRunning) await this.bot.start();
+        await client.bot.login({ force, callbacks: client.callbacks });
+        client.controller.signal.throwIfAborted();
+        client.binding.value = this.ctx.config.getDeliveryBinding?.();
+        // SDK start resolves when polling ends; auth must release the send queue.
+        if (!client.bot.isRunning)
+            void client.bot.start().catch((error: unknown) => {
+                if (client.controller.signal.aborted) return;
+                this.broker.setState(this.ctx.channelId, "error", {
+                    message: error instanceof Error ? error.message : String(error),
+                });
+            });
+    }
+
+    cancelBinding(): void {
+        this.generation++;
+        this.client.controller.abort(new Error("channel binding cancelled"));
+        this.client.binding.value = undefined;
+        this.broker.cancel(this.ctx.channelId, "channel binding cancelled");
+        this.client.bot.stop();
+        this.client.dispose();
     }
 
     async logout(): Promise<void> {
-        this.bot.stop();
+        this.cancelBinding();
+        await this.client.drainStorage();
         // Wipe the whole store, not just credentials: the SDK persists cursor /
         // context_tokens / typing_tickets here too. Leaving context_tokens would
         // keep a roster of every peer who ever messaged the bot, plus per-peer
@@ -476,8 +584,8 @@ class WeChatChannelHandle implements ChannelHandle {
 
     async close(): Promise<void> {
         this.broker.cancel(this.ctx.channelId, "channel closing");
-        this.bot.stop();
-        this.onClose();
+        this.cancelBinding();
+        await this.client.drainStorage();
     }
 }
 
@@ -486,17 +594,44 @@ class WeChatChannelHandle implements ChannelHandle {
 const CURSOR_KEY = "cursor";
 
 /** Bridges the SDK's async Storage onto the synchronous ChannelConfigStore. */
-function createStorageAdapter(ctx: ChannelContext, onSet: (key: string) => void): SdkStorage {
+function createStorageAdapter(
+    ctx: ChannelContext,
+    signal: AbortSignal,
+    onSet: (key: string) => void,
+): SdkStorage & { drain(): Promise<void> } {
+    let writes: Promise<void> = Promise.resolve();
+    const mutate = (write: () => Promise<void>, after?: () => void): Promise<void> => {
+        const operation = (async () => {
+            signal.throwIfAborted();
+            await write();
+            signal.throwIfAborted();
+            after?.();
+        })();
+        const settled = operation.then(
+            () => {},
+            () => {},
+        );
+        writes = Promise.all([writes, settled]).then(() => {});
+        return operation;
+    };
     return {
-        get: async <T>(key: string) => ctx.config.get<T>(key),
-        set: async <T>(key: string, value: T) => {
-            await ctx.config.set(key, value);
-            onSet(key);
+        drain: () => writes,
+        get: async <T>(key: string) => {
+            signal.throwIfAborted();
+            return ctx.config.get<T>(key);
         },
-        delete: async (key: string) => ctx.config.set(key, undefined),
-        has: async (key: string) => ctx.config.get(key) !== undefined,
+        set: <T>(key: string, value: T) =>
+            mutate(
+                () => ctx.config.set(key, value),
+                () => onSet(key),
+            ),
+        delete: (key: string) => mutate(() => ctx.config.set(key, undefined)),
+        has: async (key: string) => {
+            signal.throwIfAborted();
+            return ctx.config.get(key) !== undefined;
+        },
         // SDK contract: clear() wipes everything, not just credentials.
-        clear: async () => ctx.config.clear(),
+        clear: () => mutate(() => ctx.config.clear()),
     };
 }
 

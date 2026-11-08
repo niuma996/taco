@@ -56,8 +56,6 @@ export const PARENT_REPLY_MAX_WAIT_MS = 15 * 60_000;
 export interface NoticeCapture {
     /** A notice run for this Work is still writing its message. */
     isCapturing(workId: string): boolean;
-    /** The template is being frozen: stop holding that run's text from the channel. */
-    stopCapturing(workId: string): void;
 }
 
 /** How many deliveries `resume()` sends at once. */
@@ -67,7 +65,12 @@ const RESUME_CONCURRENCY = 8;
 const JITTER_RATIO = 0.2;
 
 export interface DeliverySender {
-    sendText(channelId: string, route: ImRoute, text: string): Promise<SendOutboundResult>;
+    sendText(
+        channelId: string,
+        route: ImRoute,
+        text: string,
+        expected?: { bindingId: string },
+    ): Promise<SendOutboundResult>;
 }
 
 export interface DeliveryClock {
@@ -245,6 +248,11 @@ export class WorkDeliverer {
             const delivery = work?.delivery;
             if (!work || !isOpen(delivery)) return;
 
+            if (!delivery.target.bindingId) {
+                await this.finish(workId, "permanentFailure", "binding_unverified");
+                return;
+            }
+
             const now = this.clock.now();
             if (!delivery.chunks) {
                 // The parent model is still expected to write the notice. Wait
@@ -262,9 +270,8 @@ export class WorkDeliverer {
                     this.arm(workId, longest - now);
                     return;
                 }
-                // Past that bound the reply cannot become the message any more;
-                // let it reach the channel live rather than vanish.
-                this.capture?.stopCapturing(workId);
+                // The deadline ends template deferral, not channel suppression:
+                // the same notice run must not send a second copy after fallback.
                 await this.freezeTemplate(work);
                 continue;
             }
@@ -287,8 +294,13 @@ export class WorkDeliverer {
             if (next === undefined) return;
             const result = await this.sender.sendText(
                 delivery.target.channelId,
-                { ...delivery.target },
+                {
+                    channelId: delivery.target.channelId,
+                    peerId: delivery.target.peerId,
+                    chatId: delivery.target.chatId,
+                },
                 next,
+                { bindingId: delivery.target.bindingId },
             );
             if (await this.apply(workId, result)) continue;
 

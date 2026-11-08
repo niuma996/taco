@@ -11,6 +11,13 @@ import type {
 
 const log = createLogger("channel");
 
+/** Superseded interactive binding is normal control flow, not a channel failure. */
+export class ChannelBindingCancelled extends Error {
+    constructor() {
+        super("channel binding was cancelled");
+    }
+}
+
 export interface ChannelConfig {
     /** Runtime-unique id; corresponds to the key in taco.json. Allocated by the registry — channels must not self-report. */
     readonly channelId: string;
@@ -24,6 +31,9 @@ interface LoadedChannel {
     handle: ChannelHandle;
     /** Serialized push chain; new pushes append to it and are awaited in stop(). */
     chain: Promise<void>;
+    bindingEpoch: number;
+    bindingChange?: AbortController;
+    closing?: boolean;
 }
 
 /** Validates the channelId format on ChannelConfig (static contract, no Channel instance involved; resolved by the factory). */
@@ -54,6 +64,7 @@ export class ChannelRegistry {
                 if (validationError) throw new Error(validationError);
                 const channel = await resolver(cfg.manifest.name);
                 const ctx = ctxFactory(cfg.channelId, cfg.config);
+                await ctx.config.ensureDeliveryBinding?.();
                 const handle = await channel.start(ctx);
                 this.register(cfg.channelId, channel, handle);
                 started.push(cfg.channelId);
@@ -73,6 +84,7 @@ export class ChannelRegistry {
             channel,
             handle,
             chain: Promise.resolve(),
+            bindingEpoch: 0,
         });
     }
 
@@ -89,14 +101,61 @@ export class ChannelRegistry {
         const entry = this.loaded.get(channelId);
         if (!entry) throw new Error(`channel not running: ${channelId}`);
         if (!entry.handle.login) throw new Error(`channel does not support binding: ${channelId}`);
-        await entry.handle.login(force, creds);
+        this.cancelBinding(entry);
+        await this.changeBinding(channelId, entry, () => entry.handle.login?.(force, creds));
     }
 
     /** Discards a channel's credentials. No-op when unbindable. */
     async logout(channelId: string): Promise<void> {
         const entry = this.loaded.get(channelId);
         if (!entry) throw new Error(`channel not running: ${channelId}`);
-        await entry.handle.logout?.();
+        this.cancelBinding(entry);
+        await this.changeBinding(channelId, entry, () => entry.handle.logout?.());
+    }
+
+    private async changeBinding(
+        channelId: string,
+        entry: LoadedChannel,
+        change: () => Promise<void> | undefined,
+    ): Promise<void> {
+        const epoch = entry.bindingEpoch;
+        const result = entry.chain.then(async () => {
+            if (
+                this.loaded.get(channelId) !== entry ||
+                entry.closing ||
+                epoch !== entry.bindingEpoch
+            )
+                throw new ChannelBindingCancelled();
+            const controller = new AbortController();
+            entry.bindingChange = controller;
+            let cancelled!: () => void;
+            const cancellation = new Promise<never>((_resolve, reject) => {
+                cancelled = () => reject(new ChannelBindingCancelled());
+                controller.signal.addEventListener("abort", cancelled, { once: true });
+            });
+            try {
+                await Promise.race([change(), cancellation]);
+            } finally {
+                controller.signal.removeEventListener("abort", cancelled);
+                if (entry.bindingChange === controller) entry.bindingChange = undefined;
+            }
+        });
+        entry.chain = result.catch(() => undefined);
+        await result;
+    }
+
+    private cancelBinding(entry: LoadedChannel): void {
+        entry.bindingEpoch++;
+        if (!entry.bindingChange) return;
+        entry.bindingChange.abort();
+        entry.handle.cancelBinding?.();
+    }
+
+    getDeliveryBinding(channelId: string): string | undefined {
+        const entry = this.loaded.get(channelId);
+        return entry?.closing || entry?.bindingChange
+            ? undefined
+            : entry?.handle.getDeliveryBinding?.();
     }
 
     /** Reconnect using the channel's already-stored credentials. No-op when
@@ -114,9 +173,11 @@ export class ChannelRegistry {
     async stop(channelId: string): Promise<void> {
         const entry = this.loaded.get(channelId);
         if (!entry) return;
+        entry.closing = true;
+        this.cancelBinding(entry);
         await entry.chain;
         await entry.handle.close();
-        this.loaded.delete(channelId);
+        if (this.loaded.get(channelId) === entry) this.loaded.delete(channelId);
         this.channelWorkspaces.delete(channelId);
     }
 
@@ -166,11 +227,24 @@ export class ChannelRegistry {
      * per-channel chain as `push`, so a Work notice never interleaves with a
      * streaming reply mid-sentence.
      */
-    async sendText(channelId: string, route: ImRoute, text: string): Promise<SendOutboundResult> {
+    async sendText(
+        channelId: string,
+        route: ImRoute,
+        text: string,
+        expected?: { bindingId: string },
+    ): Promise<SendOutboundResult> {
         const entry = this.loaded.get(channelId);
         if (!entry?.handle.sendText) return { kind: "unavailable", code: "channel_unavailable" };
         const send = entry.handle.sendText.bind(entry.handle);
         const result = entry.chain.then(async (): Promise<SendOutboundResult> => {
+            if (this.loaded.get(channelId) !== entry || entry.closing)
+                return { kind: "unavailable", code: "channel_replaced" };
+            if (expected) {
+                const binding = entry.handle.getDeliveryBinding?.();
+                if (!binding) return { kind: "unavailable", code: "binding_unavailable" };
+                if (binding !== expected.bindingId)
+                    return { kind: "permanentFailure", code: "binding_changed" };
+            }
             try {
                 return await send(route, text);
             } catch (e) {
@@ -199,7 +273,14 @@ export class ChannelRegistry {
     push(channelId: string, frame: ServerPush): void {
         const entry = this.loaded.get(channelId);
         if (!entry) return;
+        const binding = entry.handle.getDeliveryBinding?.();
         entry.chain = entry.chain.then(async () => {
+            if (
+                this.loaded.get(channelId) !== entry ||
+                entry.closing ||
+                entry.handle.getDeliveryBinding?.() !== binding
+            )
+                return;
             try {
                 await entry.handle.push(frame);
             } catch (e) {

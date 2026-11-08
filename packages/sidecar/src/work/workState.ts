@@ -165,6 +165,7 @@ export function resumeAttempt(
     return {
         ...record,
         status: "running",
+        parentNotice: undefined,
         waiting: undefined,
         waitingSince: undefined,
         expiresAt: undefined,

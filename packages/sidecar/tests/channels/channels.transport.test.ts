@@ -211,7 +211,7 @@ describe("registry", () => {
             const result = await registry.loadAndStart(
                 [{ channelId: "mock-1", manifest: mockManifest, config: {} }],
                 () => new MockChannel(),
-                () => ({}) as ChannelContext,
+                () => ({ channelId: "mock-1", config: {} }) as ChannelContext,
             );
             assert.deepEqual(result.started, ["mock-1"]);
             assert.deepEqual(result.failed, []);
@@ -226,7 +226,7 @@ describe("registry", () => {
                 () => new MockChannel(),
                 (channelId, config) => {
                     seen.push({ channelId, config });
-                    return {} as ChannelContext;
+                    return { channelId, config: {} } as ChannelContext;
                 },
             );
             assert.deepEqual(seen, [{ channelId: "mock-1", config: { appId: "a1" } }]);

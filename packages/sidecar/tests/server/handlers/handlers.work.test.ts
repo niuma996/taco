@@ -111,7 +111,7 @@ describe("work.* handlers", () => {
             { outcome: "deleted" },
         );
         assert.equal((await service.get(work.workId)).work, null);
-        assert.equal(await service.noticeSettled(work.workId), true);
+        assert.deepEqual(await service.beginParentNotice(work.workId), { mode: "skip" });
     });
 
     describe("work.list", () => {
@@ -335,7 +335,12 @@ describe("work.* handlers", () => {
                 ...w,
                 delivery: {
                     deliveryId: "d",
-                    target: { channelId: "c1", peerId: "p", chatId: "p" },
+                    target: {
+                        channelId: "c1",
+                        peerId: "p",
+                        chatId: "p",
+                        bindingId: "test-binding",
+                    },
                     status: "retryExhausted",
                     chunks: ["hello"],
                     source: "template",

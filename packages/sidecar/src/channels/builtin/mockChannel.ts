@@ -18,14 +18,20 @@ export const mockChannelManifest: ChannelManifest = {
 
 export class MockChannel implements Channel {
     readonly manifest = mockChannelManifest;
-    async start(_ctx: ChannelContext): Promise<ChannelHandle> {
-        return new MockChannelHandle();
+    async start(ctx: ChannelContext): Promise<ChannelHandle> {
+        return new MockChannelHandle(`mock:${ctx.channelId}`);
     }
 }
 
 export class MockChannelHandle implements ChannelHandle {
     private readonly _receivedFrames: ServerPush[] = [];
     private waiters: { target: number; resolve: () => void }[] = [];
+
+    constructor(private readonly deliveryBinding = "mock:default") {}
+
+    getDeliveryBinding(): string {
+        return this.deliveryBinding;
+    }
 
     /** Read-only view of received frames (for test assertions; replaces private field access). */
     get receivedFrames(): readonly ServerPush[] {

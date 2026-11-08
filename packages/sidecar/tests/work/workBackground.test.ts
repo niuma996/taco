@@ -38,9 +38,12 @@ const agents: AgentDefinition[] = [
     } as unknown as AgentDefinition,
 ];
 
-const route: ImRoute = { channelId: "chan-1", peerId: "peer", chatId: "chat" };
+const route = { channelId: "chan-1", peerId: "peer", chatId: "chat", bindingId: "test-binding" };
 
 class FakeChannelHandle implements ChannelHandle {
+    getDeliveryBinding(): string {
+        return "test-binding";
+    }
     readonly sent: { route: ImRoute; text: string }[] = [];
     results: SendOutboundResult[] = [];
     async push(): Promise<void> {}
@@ -126,6 +129,7 @@ describe("work × background subagent", () => {
     /** A parent whose prompt/enqueue behaviour the test controls. */
     function stubParent(behaviour: {
         prompt?: (text: string) => Promise<unknown>;
+        enqueue?: () => void;
         busy?: boolean;
         absent?: boolean;
     }) {
@@ -142,7 +146,10 @@ describe("work × background subagent", () => {
                     }
                     return behaviour.prompt?.(text);
                 },
-                enqueue: async () => ({ mode: "queued" }),
+                enqueue: async () => {
+                    behaviour.enqueue?.();
+                    return { mode: "queued" };
+                },
             };
         };
         return () => {
@@ -250,7 +257,11 @@ describe("work × background subagent", () => {
                     handle.sent.map((s) => s.text),
                     ["The leak is in cache.ts."],
                 );
-                assert.deepEqual(handle.sent[0]?.route, route);
+                assert.deepEqual(handle.sent[0]?.route, {
+                    channelId: route.channelId,
+                    peerId: route.peerId,
+                    chatId: route.chatId,
+                });
                 assert.equal((await service.store.get(workId))?.delivery?.source, "parentReply");
                 assert.equal(
                     service.controller.isHoldingReplies("p-idle"),
@@ -318,7 +329,7 @@ describe("work × background subagent", () => {
             }
         });
 
-        it("a late notice for an already-delivered Work does not hold the parent's reply", async () => {
+        it("a late notice preserves model awareness but suppresses a second channel reply", async () => {
             const restoreRun = stubRun("answer");
             const restoreParent = stubParent({ absent: true });
             let workId = "";
@@ -345,17 +356,18 @@ describe("work × background subagent", () => {
                 await spawner.deliverNotice(asSessionId("p-late"), "notice", workId);
                 assert.equal(
                     heldDuringLateRun,
-                    false,
-                    "nothing is captured once a message is frozen",
+                    true,
+                    "the user already received the template, so the late reply must stay held",
                 );
                 assert.equal((await service.store.get(workId))?.delivery?.source, "template");
+                assert.equal(handle.sent.length, 1);
             } finally {
                 restoreRun();
                 restoreLate();
             }
         });
 
-        it("does not prompt the parent again when the notice already landed", async () => {
+        it("flushes parent awareness after template delivery without sending another notification", async () => {
             const restoreRun = stubRun("answer");
             let workId = "";
             let toolCallId = "";
@@ -392,7 +404,10 @@ describe("work × background subagent", () => {
                     flushPendingSubagentResults(p: SessionId): Promise<void>;
                 };
                 await spawner.flushPendingSubagentResults(asSessionId("p-flushed"));
-                assert.equal(prompts, 0, "the user was already told through the deliverer");
+                assert.equal(prompts, 1, "delivery to the user does not update the parent model");
+                await spawner.flushPendingSubagentResults(asSessionId("p-flushed"));
+                assert.equal(prompts, 1, "a repeated flush must not prompt twice");
+                assert.equal(handle.sent.length, 1);
                 const pending = await ws.sessionRegistry.withSession(
                     asSessionId("p-flushed"),
                     (session) => readPendingSubagentResults(session),
@@ -420,6 +435,46 @@ describe("work × background subagent", () => {
                     /^Background task finished: Find the leak/,
                 );
                 assert.match(handle.sent[0]?.text ?? "", /the answer text/);
+                assert.equal((await service.store.get(workId))?.delivery?.source, "template");
+            } finally {
+                restoreRun();
+                restoreParent();
+            }
+        });
+
+        it("keeps the reply held when template fallback wins during a parent run", async () => {
+            const restoreRun = stubRun("the answer text");
+            const parent = asSessionId("p-fallback-race");
+            const toolCallId = "tc-fallback-race";
+            const workId = service.workIdFor(parent, toolCallId);
+            let heldAfterFallback = false;
+            const restoreParent = stubParent({
+                prompt: async () => {
+                    assert.equal(service.controller.isHoldingReplies(parent), true);
+                    await service.controller.replyFailed(workId);
+                    await until(
+                        async () =>
+                            (await service.store.get(workId))?.delivery?.status === "confirmed",
+                        "fallback delivery while parent still runs",
+                    );
+                    heldAfterFallback = service.controller.isHoldingReplies(parent);
+                    return { role: "assistant", content: [{ type: "text", text: "late words" }] };
+                },
+            });
+            try {
+                await seed(parent);
+                routes.set(parent, route);
+                await ws.agentSpawner.spawnSubagent({
+                    parentSessionId: parent,
+                    parentToolCallId: toolCallId,
+                    agentType: "explorer",
+                    prompt: "look",
+                    background: true,
+                });
+                await ws.agentSpawner.whenBackgroundRunsSettle();
+                assert.equal(heldAfterFallback, true);
+                assert.equal(service.controller.isHoldingReplies(parent), false);
+                assert.equal(handle.sent.length, 1);
                 assert.equal((await service.store.get(workId))?.delivery?.source, "template");
             } finally {
                 restoreRun();
@@ -511,17 +566,88 @@ describe("work × background subagent", () => {
     });
 
     describe("IM parent, busy", () => {
-        it("hands off to the parent's own reply and sends no second copy", async () => {
+        it("replays an idle wake received while a busy claim release is writing", async () => {
             const restoreRun = stubRun("answer");
-            const restoreParent = stubParent({ busy: true });
+            const parent = asSessionId("p-deferred-idle");
+            const restoreAbsent = stubParent({ absent: true });
+            let workId: string;
+            let toolCallId: string;
             try {
-                const { workId } = await launch("p-busy", route);
+                ({ workId, toolCallId } = await launch(parent, route));
+            } finally {
+                restoreAbsent();
+            }
+            let unblock!: () => void;
+            const gate = new Promise<void>((resolve) => {
+                unblock = resolve;
+            });
+            let blocked = false;
+            let busy = true;
+            let prompts = 0;
+            const originalEnd = service.endParentNotice;
+            service.endParentNotice = async (...args) => {
+                if (args[2].status === "not_run") {
+                    blocked = true;
+                    await gate;
+                }
+                return originalEnd.apply(service, args);
+            };
+            const restoreParent = stubParent({
+                prompt: async () => {
+                    prompts++;
+                    if (busy) throw Object.assign(new Error("busy"), { _tag: "LaneBusy" });
+                    ws.sessionRegistry.emit("session.idle", { sessionId: parent });
+                    return { role: "assistant", content: [{ type: "text", text: "found it" }] };
+                },
+            });
+            const spawner = ws.agentSpawner as unknown as {
+                flushingParents: Set<SessionId>;
+                flushPendingSubagentResults(id: SessionId, trackedOnly: boolean): Promise<void>;
+            };
+            const flushing = spawner.flushPendingSubagentResults(parent, true);
+            try {
+                await until(() => blocked, "busy release to reach its write");
+                assert.equal(spawner.flushingParents.has(parent), true);
+                busy = false;
+                ws.sessionRegistry.emit("session.idle", { sessionId: parent });
+                ws.sessionRegistry.emit("session.idle", { sessionId: parent });
+                unblock();
+                await flushing;
+                await until(async () => {
+                    const pending = await ws.sessionRegistry.withSession(
+                        parent,
+                        readPendingSubagentResults,
+                    );
+                    return !(toolCallId in pending) && !spawner.flushingParents.has(parent);
+                }, "deferred idle flush to clear the pending notice");
+                assert.equal(prompts, 2, "one busy attempt and one accepted prompt");
+                assert.equal((await service.store.get(workId))?.parentNotice?.state, "completed");
+            } finally {
+                unblock();
+                await flushing;
+                service.endParentNotice = originalEnd;
+                restoreRun();
+                restoreParent();
+            }
+        });
+
+        it("retries busy notices on session.idle without duplicate prompts or channel sends", async () => {
+            const restoreRun = stubRun("answer");
+            let queued = 0;
+            const restoreParent = stubParent({ busy: true, enqueue: () => queued++ });
+            try {
+                const { workId, toolCallId } = await launch("p-busy", route);
                 await until(
-                    async () => (await service.store.get(workId))?.delivery?.status === "handedOff",
-                    "handoff",
+                    async () => (await service.store.get(workId))?.delivery?.status === "confirmed",
+                    "template fallback",
                 );
-                await new Promise((r) => setTimeout(r, 30));
-                assert.equal(handle.sent.length, 0);
+                assert.equal(queued, 0);
+                assert.equal(handle.sent.length, 1);
+                const pending = await ws.sessionRegistry.withSession(
+                    asSessionId("p-busy"),
+                    readPendingSubagentResults,
+                );
+                assert.equal(toolCallId in pending, true);
                 // Regression: a rejected attempt used to leave the hold in place, so
                 // every later reply from this session was swallowed.
                 assert.equal(
@@ -529,6 +655,36 @@ describe("work × background subagent", () => {
                     false,
                     "a busy rejection must not keep holding the session's replies",
                 );
+                restoreParent();
+                let prompts = 0;
+                const restoreIdle = stubParent({
+                    prompt: async () => {
+                        prompts++;
+                        assert.equal(service.controller.isHoldingReplies("p-busy"), true);
+                        ws.sessionRegistry.emit("session.idle", {
+                            sessionId: asSessionId("p-busy"),
+                        });
+                        return {
+                            role: "assistant",
+                            content: [{ type: "text", text: "late words" }],
+                        };
+                    },
+                });
+                try {
+                    ws.sessionRegistry.emit("session.idle", { sessionId: asSessionId("p-busy") });
+                    ws.sessionRegistry.emit("session.idle", { sessionId: asSessionId("p-busy") });
+                    await until(async () => {
+                        const pending = await ws.sessionRegistry.withSession(
+                            asSessionId("p-busy"),
+                            readPendingSubagentResults,
+                        );
+                        return !(toolCallId in pending);
+                    }, "idle flush to clear the pending notice");
+                    assert.equal(prompts, 1);
+                    assert.equal(handle.sent.length, 1);
+                } finally {
+                    restoreIdle();
+                }
             } finally {
                 restoreRun();
                 restoreParent();
@@ -587,6 +743,33 @@ describe("work × background subagent", () => {
             assert.equal(res.background, true, "the launch receipt still came back");
         } finally {
             service.store.createIfAbsent = original;
+            restoreRun();
+            restoreParent();
+        }
+    });
+
+    it("does not replay a live legacy notice when its prompt emits session.idle", async () => {
+        const restoreRun = stubRun("legacy result");
+        const originalCreate = service.store.createIfAbsent;
+        service.store.createIfAbsent = async () => {
+            throw new Error("disk full");
+        };
+        let prompts = 0;
+        const parent = asSessionId("p-legacy-idle");
+        const restoreParent = stubParent({
+            prompt: async () => {
+                prompts++;
+                ws.sessionRegistry.emit("session.idle", { sessionId: parent });
+                return { role: "assistant", content: [{ type: "text", text: "legacy reply" }] };
+            },
+        });
+        try {
+            await launch(parent);
+            const spawner = ws.agentSpawner as unknown as { flushingParents: Set<SessionId> };
+            await until(() => !spawner.flushingParents.has(parent), "idle flush to finish");
+            assert.equal(prompts, 1);
+        } finally {
+            service.store.createIfAbsent = originalCreate;
             restoreRun();
             restoreParent();
         }

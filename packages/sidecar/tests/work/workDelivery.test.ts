@@ -66,7 +66,12 @@ class FakeClock implements DeliveryClock {
 class FakeSender implements DeliverySender {
     readonly calls: { channelId: string; route: ImRoute; text: string }[] = [];
     readonly script: SendOutboundResult[] = [];
-    async sendText(channelId: string, route: ImRoute, text: string): Promise<SendOutboundResult> {
+    async sendText(
+        channelId: string,
+        route: ImRoute,
+        text: string,
+        _expected?: { bindingId: string },
+    ): Promise<SendOutboundResult> {
         this.calls.push({ channelId, route, text });
         return this.script.shift() ?? { kind: "confirmed" };
     }
@@ -133,7 +138,12 @@ describe("work.delivery", () => {
             attempt: { attemptId: "a", startedAt: clock.time, endedAt: clock.time },
             delivery: {
                 deliveryId: "d-1",
-                target: { channelId: "wechat-1", peerId: "peer", chatId: "chat" },
+                target: {
+                    channelId: "wechat-1",
+                    peerId: "peer",
+                    chatId: "chat",
+                    bindingId: "test-binding",
+                },
                 status: "pending",
                 chunks: ["one"],
                 source: "template",
@@ -151,6 +161,40 @@ describe("work.delivery", () => {
 
     const deliveryOf = async (store: WorkStore, id: string) => (await store.get(id))?.delivery;
 
+    it("does not adopt the current account for a legacy delivery without frozen identity", async () => {
+        const { clock, sender, store, deliverer } = rig();
+        const id = await seed(store, clock, {
+            target: { channelId: "wechat-1", peerId: "peer", chatId: "chat" },
+        });
+        await deliverer.deliver(id);
+        assert.equal(sender.calls.length, 0);
+        assert.equal((await deliveryOf(store, id))?.status, "permanentFailure");
+        assert.equal((await deliveryOf(store, id))?.lastError, "binding_unverified");
+    });
+
+    it("sends each chunk with the immutable launch binding", async () => {
+        const { clock, sender, store, deliverer } = rig();
+        const expected: Array<unknown> = [];
+        sender.sendText = async (_channel, _route, _text, binding) => {
+            expected.push(binding);
+            return { kind: "confirmed" };
+        };
+        const id = await seed(store, clock, {
+            target: {
+                channelId: "wechat-1",
+                peerId: "peer",
+                chatId: "chat",
+                bindingId: "launch-binding",
+            },
+            chunks: ["one", "two"],
+        });
+        await deliverer.deliver(id);
+        assert.deepEqual(expected, [
+            { bindingId: "launch-binding" },
+            { bindingId: "launch-binding" },
+        ]);
+    });
+
     it("confirms after the platform accepts every chunk, in order", async () => {
         const { clock, sender, store, deliverer } = rig();
         const id = await seed(store, clock, { chunks: ["a", "b", "c"] });
@@ -167,7 +211,7 @@ describe("work.delivery", () => {
     it("sends to the frozen target, not whatever the session maps to now", async () => {
         const { clock, sender, store, deliverer } = rig();
         const id = await seed(store, clock, {
-            target: { channelId: "wecom-9", peerId: "p9", chatId: "c9" },
+            target: { channelId: "wecom-9", peerId: "p9", chatId: "c9", bindingId: "test-binding" },
         });
         await deliverer.deliver(id);
         assert.equal(sender.calls[0]?.channelId, "wecom-9");
@@ -375,7 +419,6 @@ describe("work.delivery", () => {
             const capturing = new Set<string>();
             const deliverer = new WorkDeliverer(store, sender, clock, undefined, {
                 isCapturing: (id) => capturing.has(id),
-                stopCapturing: (id) => capturing.delete(id),
             });
             const id = await seed(store, clock, {
                 chunks: undefined,
@@ -398,7 +441,11 @@ describe("work.delivery", () => {
                 sender.calls.map((c) => c.text),
                 ["template"],
             );
-            assert.equal(capturing.has(id), false, "the late reply now reaches the channel live");
+            assert.equal(
+                capturing.has(id),
+                true,
+                "the late notice reply remains suppressed until its run ends",
+            );
         });
 
         it("a reply frozen in time wins over the template", async () => {

@@ -146,6 +146,35 @@ current turn. An open operation from a previous process retains durable cancel
 intent; the unified session attach recovery applies it before driving. Work
 reconciliation itself never starts a recovery driver.
 
+### Work delivery identity and notification replay
+
+Durable IM notices capture an opaque channel binding generation when the Work is
+launched. Credential refresh for the same known account and normal reconnects
+preserve that generation; account replacement or clearing credentials changes it.
+Each chunk validates the frozen generation inside the channel send queue against
+the actual client used to send. Neither settlement nor manual retry adopts the
+current channel account. `binding_changed` and `binding_unverified` are existing
+`permanentFailure` delivery results: the execution result remains readable. Old
+Work records without a binding are never upgraded by guessing the current account.
+Channels without identity support can still handle ordinary chat, but cannot send
+tracked durable notices. These are internal optional fields; no wire version or
+status vocabulary changes are required. Older daemons do not enforce this identity
+check, so downgrade against the new Work directory is not supported.
+
+Parent-model awareness is tracked separately from platform delivery. A persisted,
+attempt-scoped notice claim prevents simultaneous completion and attach replay
+from prompting twice. Tracked notices retry when the parent is idle, rather than
+entering its shared follow-up queue. The notice's streamed reply is suppressed on
+IM even after the template fallback has been sent. A claim left ambiguous by a
+crash or failed claim completion is not replayed automatically; this is at-most-once model notification, with
+the result retained in Work. Truly legacy pending notices with no associated Work
+keep their original fallback, while unreadable tracked snapshots fail closed.
+
+Platform delivery remains at-least-once: if a platform accepts a chunk before the
+daemon persists its confirmation, that chunk may be resent after restart. The
+SDKs currently offer no idempotency token for these sends. Already accepted
+messages cannot be recalled by deleting a Work or changing accounts.
+
 After a successful initialize, every other RPC is accepted. `initialize` is idempotent
 and outside `commandRecords` dedup. In-process self-RPC callers (e.g. the memory tool)
 are not gated.

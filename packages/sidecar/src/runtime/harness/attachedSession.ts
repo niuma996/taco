@@ -74,7 +74,7 @@ import { findBranchEntries, MAIN_BRANCH } from "../session/sessionBranch.ts";
 import { type RecoveryOutcome, resumeOpenOperations } from "../session/sessionRecovery.ts";
 import { TitleSummarizer } from "../session/titleSummarizer.ts";
 import type { DeferredToolRegistry } from "./deferredToolRegistry.ts";
-import { toHarnessError, toTerminalError } from "./harnessErrors.ts";
+import { isBusyError, toHarnessError, toTerminalError } from "./harnessErrors.ts";
 import { wireHarnessHooks } from "./hookWiring.ts";
 import {
     type CancelQueuedKind,
@@ -965,6 +965,24 @@ export class AttachedSession extends EventEmitter {
      * Non-assistant tips without `terminate: true` remain invariant violations.
      */
     async prompt(
+        text: string,
+        images?: ImageContent[],
+        uiLocale?: SupportedLocale,
+        signal?: AbortSignal,
+        operation?: PromptOperation,
+    ): Promise<ProtocolAgentMessage> {
+        let admitted = true;
+        try {
+            return await this.executePrompt(text, images, uiLocale, signal, operation);
+        } catch (error) {
+            admitted = !isBusyError(error);
+            throw error;
+        } finally {
+            if (admitted) this.emit("prompt.settled");
+        }
+    }
+
+    private async executePrompt(
         text: string,
         images?: ImageContent[],
         uiLocale?: SupportedLocale,

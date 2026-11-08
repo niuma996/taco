@@ -39,7 +39,27 @@ export interface WorkWaiting {
     readonly description?: string;
 }
 
+export type ParentNoticeDecision =
+    | { readonly mode: "legacy"; readonly claimId?: never }
+    | { readonly mode: "skip"; readonly claimId?: never; readonly retry?: true }
+    | { readonly mode: "capture" | "silent"; readonly claimId: string };
+
+export interface ParentNoticeOutcome {
+    readonly status: "not_run" | "completed";
+    readonly reply?: string;
+}
+
 export interface BackgroundWorkHooks {
+    /** Claim parent-model awareness independently of whether an IM message was delivered. */
+    beginParentNotice(workId: string, tracked?: boolean): Promise<ParentNoticeDecision>;
+    /** Release only unadmitted prompts; admitted prompts remain closed even on failure. */
+    endParentNotice(workId: string, claimId: string, outcome: ParentNoticeOutcome): Promise<void>;
+    runParentNotice?<T>(
+        workId: string,
+        claimId: string,
+        sessionId: string,
+        run: () => Promise<T>,
+    ): Promise<T>;
     cancellationRequested?(
         workspace: string,
         sessionId: string,
@@ -59,12 +79,6 @@ export interface BackgroundWorkHooks {
     /** Park a background Work until its child session receives an answer. */
     onWaiting?(workId: string, waiting: WorkWaiting, attemptId?: string): Promise<void>;
     /**
-     * Whether a notice run's reply should be captured for this Work: only while
-     * its delivery still waits for one. Once a message is frozen, a later run
-     * (a late flush, say) is an ordinary turn and must reach the channel live.
-     */
-    wantsNoticeReply(workId: string): Promise<boolean>;
-    /**
      * A run is about to answer the notice. Until the matching
      * `onNoticeRunRelease`, the channel must not forward that session's
      * assistant text — the reply is being captured as the message, and sending
@@ -76,10 +90,6 @@ export interface BackgroundWorkHooks {
      * start, whatever the outcome, and decides nothing about what is sent.
      */
     onNoticeRunRelease(workId: string, parentSessionId: SessionId): void;
-    /** The run answered. `reply` is its final assistant text, if any. */
-    onNoticeRunEnd(workId: string, reply: string | undefined): Promise<void>;
-    /** The notice never produced a run: queued behind a busy parent, or no parent attached. */
-    onNoticeNotRun(workId: string, reason: "queued" | "unreachable"): Promise<void>;
     /**
      * A resumed run is about to start for a child session. Reopens an
      * interrupted Work so its result can be recorded when the run ends.
@@ -97,13 +107,6 @@ export interface BackgroundWorkHooks {
         settle: WorkSettle,
         handle?: WorkAttemptHandle,
     ): Promise<void>;
-    /**
-     * Whether this Work's outcome already reached the user another way: the
-     * deliverer confirmed it, the parent's own reply carried it, or a resume
-     * made the queued notice stale. A pending record from before a restart must
-     * not prompt the parent again in those cases — that reports it twice.
-     */
-    noticeSettled(workId: string): Promise<boolean>;
 }
 
 export interface ScheduledFire {

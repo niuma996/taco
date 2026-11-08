@@ -18,6 +18,8 @@ import { value } from "../pi/values.ts";
 
 /** A background subagent result whose notice has not reached the parent yet. */
 export interface PendingSubagentResult {
+    /** Explicit provenance for newly tracked notices; older records derive it from the tool call. */
+    readonly workId?: string;
     readonly subSessionId: SessionId;
     readonly parentToolCallId: string;
     readonly agentType: string;

@@ -47,6 +47,8 @@ export async function deliverSubagentResultDetailed(
     parentSessionId: Parameters<SessionRegistry["getAttached"]>[0],
     notificationText: string,
     hooks?: {
+        /** Tracked notices retry from pending when idle, never through a shared turn. */
+        enqueueWhenBusy?: boolean;
         beforePrompt?: () => void;
         /** `ran` is false when the attempt was rejected before any run started. */
         afterPrompt?: (reply: string | undefined, ran: boolean) => void;
@@ -67,6 +69,7 @@ export async function deliverSubagentResultDetailed(
         // Rejected at admission: no run started, so there is no reply to wait for.
         hooks?.afterPrompt?.(undefined, false);
     }
+    if (hooks?.enqueueWhenBusy === false) return "unreachable";
     const queued = await attached.enqueue("followUp", notificationText);
     if (queued.mode !== "idle") return "queued";
     // The run ended between the busy rejection and the enqueue — the

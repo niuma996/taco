@@ -45,6 +45,8 @@ export interface DeliveryTarget {
     readonly channelId: string;
     readonly peerId: string;
     readonly chatId: string;
+    /** Opaque channel binding generation captured at launch; missing legacy identities cannot be inferred. */
+    readonly bindingId?: string;
 }
 
 export interface WorkDelivery {
@@ -101,6 +103,16 @@ export interface WorkResultRef {
     readonly path?: string;
 }
 
+/** A crash closes a claimed model notification to replay; platform delivery is independent. */
+export interface ParentNoticeClaim {
+    readonly attemptId: string;
+    readonly claimId: string;
+    readonly ownerInstanceId: string;
+    readonly state: "claimed" | "completed";
+    readonly claimedAt: number;
+    readonly completedAt?: number;
+}
+
 /** Persisted identity of an expired question, so a late answer cannot run untracked. */
 export interface ExpiredWorkInteraction {
     readonly workspace?: string;
@@ -114,6 +126,7 @@ export interface ExpiredWorkInteraction {
 }
 
 export interface WorkRecord {
+    readonly parentNotice?: ParentNoticeClaim;
     readonly invalidatedInteraction?: { readonly sessionId: string; readonly toolCallId: string };
     readonly schemaVersion: typeof WORK_SCHEMA_VERSION;
     readonly workId: string;

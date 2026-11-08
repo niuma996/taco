@@ -23,12 +23,15 @@ import {
 } from "@taco-ai/protocol";
 import type { ChannelRegistry } from "../channels/registry.ts";
 import { createLogger } from "../lib/logger.ts";
+import { withManagedOperation } from "../runtime/harness/operationExecution.ts";
 import type { WaitingInteraction } from "../runtime/session/waitingInteraction.ts";
 import { type SettleWorkArgs, WorkController } from "./workController.ts";
 import { type DeliveryClock, systemClock, WorkDeliverer } from "./workDelivery.ts";
 import { WorkExecution } from "./workExecution.ts";
 import type {
     BackgroundWorkHooks,
+    ParentNoticeDecision,
+    ParentNoticeOutcome,
     ScheduledFire,
     ScheduledFireSettle,
     ScheduledWorkHooks,
@@ -41,10 +44,11 @@ import type {
     WorkAttemptHandle,
     WorkOperationRuntime,
 } from "./workOperationTypes.ts";
+import { WorkParentNotice } from "./workParentNotice.ts";
 import { WorkPermissionProjection } from "./workPermissionProjection.ts";
-
 import { WorkReconciler } from "./workReconciler.ts";
 import { isSafeWorkId, WorkStore, workIdForSource } from "./workStore.ts";
+import { isTerminal } from "./workTypes.ts";
 import { buildList, toSummary, type WorkListArgs } from "./workView.ts";
 
 const log = createLogger("sidecar.work.service");
@@ -53,7 +57,8 @@ export interface WorkServiceOptions {
     readonly operations?: WorkOperationRuntime;
     readonly root: string;
     readonly instanceId: string;
-    readonly channels: Pick<ChannelRegistry, "sendText" | "maxMessageLength">;
+    readonly channels: Pick<ChannelRegistry, "sendText" | "maxMessageLength"> &
+        Partial<Pick<ChannelRegistry, "getDeliveryBinding">>;
     /** Session → IM route, or undefined when the session is not an IM conversation. */
     readonly resolveRoute: (sessionId: string) => ImRoute | undefined;
     readonly clock?: DeliveryClock;
@@ -90,6 +95,7 @@ export class WorkService implements BackgroundWorkHooks, ScheduledWorkHooks, Wor
     private maintenanceStopped = false;
     private readonly reconciler: WorkReconciler;
     private readonly permissions: WorkPermissionProjection;
+    private readonly parentNotices: WorkParentNotice;
     private readonly execution: WorkExecution;
     private readonly launchAttempts = new Map<string, string>();
 
@@ -100,7 +106,6 @@ export class WorkService implements BackgroundWorkHooks, ScheduledWorkHooks, Wor
         // deliverer to exist first; the closures resolve `controller` at call time.
         this.deliverer = new WorkDeliverer(this.store, options.channels, clock, options.onChange, {
             isCapturing: (workId) => this.controller.isCapturing(workId),
-            stopCapturing: (workId) => this.controller.stopCapturing(workId),
         });
         this.controller = new WorkController({
             store: this.store,
@@ -109,6 +114,9 @@ export class WorkService implements BackgroundWorkHooks, ScheduledWorkHooks, Wor
             now: () => clock.now(),
             onChange: options.onChange,
         });
+        this.parentNotices = new WorkParentNotice(this.store, options.instanceId, () =>
+            clock.now(),
+        );
         this.execution = new WorkExecution(
             this.store,
             this.controller,
@@ -293,7 +301,12 @@ export class WorkService implements BackgroundWorkHooks, ScheduledWorkHooks, Wor
                 ...(launch.workspace !== undefined ? { workspace: launch.workspace } : {}),
                 ...(route
                     ? {
-                          deliverTo: route,
+                          deliverTo: {
+                              ...route,
+                              bindingId: this.options.channels.getDeliveryBinding?.(
+                                  route.channelId,
+                              ),
+                          },
                           maxMessageLength: this.options.channels.maxMessageLength(route.channelId),
                       }
                     : {}),
@@ -325,12 +338,6 @@ export class WorkService implements BackgroundWorkHooks, ScheduledWorkHooks, Wor
                 resultText: settle.resultText,
                 partial: settle.partial,
                 path: settle.path,
-                ...(route
-                    ? {
-                          deliverTo: route,
-                          maxMessageLength: this.options.channels.maxMessageLength(route.channelId),
-                      }
-                    : {}),
                 parentWillReply: route !== undefined,
             });
         } catch (e) {
@@ -456,23 +463,90 @@ export class WorkService implements BackgroundWorkHooks, ScheduledWorkHooks, Wor
         }
     }
 
-    async noticeSettled(workId: string): Promise<boolean> {
+    async beginParentNotice(workId: string, tracked = true): Promise<ParentNoticeDecision> {
         try {
-            if (await this.store.isDeleted(workId)) return true;
-            return await this.controller.isNoticeSettled(workId);
-        } catch (e) {
-            log.error("work notice check failed", { workId, error: String(e) });
-            return false;
+            const work = await this.store.get(workId);
+            const target = work?.delivery?.target ?? work?.deliveryTarget;
+            if (target) {
+                if (!target.bindingId) return { mode: "skip" };
+                const current = this.options.channels.getDeliveryBinding?.(target.channelId);
+                if (!current) return { mode: "skip", retry: true };
+                if (current !== target.bindingId) return { mode: "skip" };
+            }
+            return await this.parentNotices.begin(workId, tracked);
+        } catch (error) {
+            log.error("could not claim parent notification", { workId, error: String(error) });
+            return { mode: "skip", retry: true };
         }
     }
 
-    async wantsNoticeReply(workId: string): Promise<boolean> {
-        try {
-            return await this.controller.awaitsReply(workId);
-        } catch (e) {
-            log.error("work notice lookup failed", { workId, error: String(e) });
-            return false;
-        }
+    async endParentNotice(
+        workId: string,
+        claimId: string,
+        outcome: ParentNoticeOutcome,
+    ): Promise<void> {
+        const before = await this.store.get(workId);
+        if (before?.parentNotice?.claimId !== claimId) return;
+        const attemptId = before.parentNotice.attemptId;
+        const changed = await this.parentNotices.end(workId, claimId, outcome);
+        if (!changed) return;
+        if (outcome.status === "completed" && outcome.reply !== undefined)
+            await this.controller.completeWithReply(workId, outcome.reply, attemptId);
+        else await this.controller.replyFailed(workId, attemptId);
+    }
+
+    async runParentNotice<T>(
+        workId: string,
+        claimId: string,
+        sessionId: string,
+        run: () => Promise<T>,
+    ): Promise<T> {
+        const validate = async () => {
+            const work = await this.store.get(workId);
+            const claim = work?.parentNotice;
+            if (
+                !work ||
+                !isTerminal(work.status) ||
+                claim?.claimId !== claimId ||
+                claim.attemptId !== work.attempt.attemptId ||
+                claim.ownerInstanceId !== this.options.instanceId ||
+                claim.state !== "claimed"
+            )
+                throw new Error("parent notice was superseded");
+            const target = work?.delivery?.target ?? work?.deliveryTarget;
+            if (
+                target &&
+                (!target.bindingId ||
+                    this.options.channels.getDeliveryBinding?.(target.channelId) !==
+                        target.bindingId)
+            )
+                throw new Error("parent notice channel binding changed");
+            return work;
+        };
+        const snapshot = await validate();
+        return withManagedOperation(
+            {
+                operationId: claimId,
+                sessionId,
+                beforeAccept: async () => {
+                    await validate();
+                },
+                afterAccept: async () => {
+                    try {
+                        await validate();
+                    } catch (error) {
+                        if (!snapshot.workspace || !this.options.operations) throw error;
+                        await this.options.operations.abort({
+                            workspace: snapshot.workspace,
+                            sessionId,
+                            lane: "main",
+                            operationId: claimId,
+                        });
+                    }
+                },
+            },
+            run,
+        );
     }
 
     onNoticeRunStart(workId: string, parentSessionId: SessionId): void {
@@ -481,24 +555,6 @@ export class WorkService implements BackgroundWorkHooks, ScheduledWorkHooks, Wor
 
     onNoticeRunRelease(workId: string, _parentSessionId: SessionId): void {
         this.controller.releaseReplies(workId);
-    }
-
-    async onNoticeRunEnd(workId: string, reply: string | undefined): Promise<void> {
-        try {
-            if (reply === undefined) await this.controller.replyFailed(workId);
-            else await this.controller.completeWithReply(workId, reply);
-        } catch (e) {
-            log.error("work notice capture failed", { workId, error: String(e) });
-        }
-    }
-
-    async onNoticeNotRun(workId: string, reason: "queued" | "unreachable"): Promise<void> {
-        try {
-            if (reason === "queued") await this.controller.handOff(workId);
-            else await this.controller.replyFailed(workId);
-        } catch (e) {
-            log.error("work notice handoff failed", { workId, error: String(e) });
-        }
     }
 }
 

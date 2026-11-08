@@ -42,7 +42,7 @@ it("tombstones before waiting for an in-flight send and cannot be resurrected by
         childSessionId: "c",
         agentType: "e",
         title: "delete",
-        deliverTo: { channelId: "mock", peerId: "p", chatId: "c" },
+        deliverTo: { channelId: "mock", peerId: "p", chatId: "c", bindingId: "test-binding" },
     });
     await service.controller.settle({
         workId: work.workId,

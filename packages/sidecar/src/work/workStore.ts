@@ -88,6 +88,17 @@ export class WorkStore {
         return this.readSnapshot(workId);
     }
 
+    /** Distinguish absent legacy sources from existing snapshots that could not be decoded. */
+    async hasSnapshot(workId: string): Promise<boolean> {
+        try {
+            await stat(join(this.dir(workId), "work.json"));
+            return true;
+        } catch (error) {
+            if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+            throw error;
+        }
+    }
+
     /**
      * Serialized read-modify-write. Returning `undefined` from the update leaves
      * the record as it is.

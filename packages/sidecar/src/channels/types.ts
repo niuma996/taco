@@ -38,6 +38,10 @@ export interface ChannelIngress {
 export interface ChannelConfigStore {
     get<T>(name: string): T | undefined;
     set<T>(name: string, value: T): Promise<void>;
+    /** Opaque credential generation, stable across same-account token refresh. */
+    getDeliveryBinding?(): string | undefined;
+    /** Persist a generation for credentials written before binding tracking existed. */
+    ensureDeliveryBinding?(): Promise<void>;
     /** Wipe the whole store — used by unbind to drop credentials and the
      *  SDK's other runtime state (cursor, context tokens). */
     clear(): Promise<void>;
@@ -62,6 +66,8 @@ export type SendOutboundResult =
 
 export interface ChannelHandle {
     push(frame: ServerPush): Promise<void>;
+    /** Binding of the client's account, including while disconnected or reconnecting. */
+    getDeliveryBinding?(): string | undefined;
     /**
      * Send one already-chunked text to a peer and report what happened.
      *
@@ -79,6 +85,8 @@ export interface ChannelHandle {
      * no binding (mock).
      */
     login?(force?: boolean, creds?: ChannelsBindCreds): Promise<void>;
+    /** Invalidate interactive login immediately, without waiting for the send queue. */
+    cancelBinding?(): void;
     /** Discards stored credentials and disconnects. Absent when unbindable. */
     logout?(): Promise<void>;
     /**

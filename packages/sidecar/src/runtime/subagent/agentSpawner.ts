@@ -345,15 +345,21 @@ export class AgentSpawner extends EventEmitter {
         this.backgroundInFlight = new Set();
         this.settledEmitted = new Set();
         this.flushingParents = new Set();
+        this.deferredIdleFlushes = new Set();
         this.pendingWriteQueues = new Map();
         this.backgroundRuns = new Set();
         this.subagentControllers = new Map();
         this.controllerWaiters = new Map();
-        // Attach is the moment a previously unreachable parent becomes
-        // reachable, which is exactly what a stranded notice was waiting for.
-        // Fire-and-forget: a flush must never delay or fail an attach.
-        this.sessionRegistry.on("session.attached", ({ sessionId }: { sessionId: SessionId }) => {
+        // Detached parents retry on attach; busy parents retry after their lane
+        // has settled. Neither signal may wait for a model notification to finish.
+        const flushPending = ({ sessionId }: { sessionId: SessionId }): void => {
             void this.flushPendingSubagentResults(sessionId);
+        };
+        this.sessionRegistry.on("session.attached", flushPending);
+        this.sessionRegistry.on("session.idle", ({ sessionId }: { sessionId: SessionId }) => {
+            if (!this.workHooks?.beginParentNotice) return;
+            if (this.flushingParents.has(sessionId)) this.deferredIdleFlushes.add(sessionId);
+            else void this.flushPendingSubagentResults(sessionId, true);
         });
     }
 
@@ -430,6 +436,9 @@ export class AgentSpawner extends EventEmitter {
      * pending record and deliver every notice twice.
      */
     private readonly flushingParents: Set<SessionId>;
+
+    /** Idle wakes arriving during pending/claim writes must survive the current flush. */
+    private readonly deferredIdleFlushes: Set<SessionId>;
 
     /**
      * Tail of the serialized pending-record queue for each parent session.
@@ -1230,6 +1239,7 @@ export class AgentSpawner extends EventEmitter {
                 // (process killed mid-flight) still leaves a trace for the next
                 // attach to flush. Cleared only once delivery actually lands.
                 await this.recordPending({
+                    workId,
                     parentSessionId,
                     parentToolCallId,
                     subSessionId: childSessionId,
@@ -1311,6 +1321,7 @@ export class AgentSpawner extends EventEmitter {
                 // parentToolCallId — that record, if it exists, is always
                 // at least as good as this fallback.
                 await this.recordPendingIfAbsent({
+                    workId,
                     parentSessionId,
                     parentToolCallId,
                     subSessionId: childSessionId,
@@ -1392,7 +1403,10 @@ export class AgentSpawner extends EventEmitter {
      * flush (the parent goes busy halfway through) leaves the rest pending for
      * the next attach rather than dropping them.
      */
-    private async flushPendingSubagentResults(parentSessionId: SessionId): Promise<void> {
+    private async flushPendingSubagentResults(
+        parentSessionId: SessionId,
+        trackedOnly = false,
+    ): Promise<void> {
         if (this.flushingParents.has(parentSessionId)) return;
         this.flushingParents.add(parentSessionId);
         try {
@@ -1411,18 +1425,9 @@ export class AgentSpawner extends EventEmitter {
                 count: entries.length,
             });
             for (const entry of entries) {
-                const workId = this.workHooks?.workIdFor(parentSessionId, entry.parentToolCallId);
-                // The deliverer may have caught up while this session was
-                // detached (it retries at startup and on reconnect). Prompting
-                // the parent now would report the same outcome a second time.
-                if (workId !== undefined && (await this.workHooks?.noticeSettled(workId))) {
-                    log.info("pending subagent notice already delivered", {
-                        parentSessionId,
-                        parentToolCallId: entry.parentToolCallId,
-                    });
-                    await this.dropPending(parentSessionId, entry.parentToolCallId);
-                    continue;
-                }
+                const workId =
+                    entry.workId ??
+                    this.workHooks?.workIdFor(parentSessionId, entry.parentToolCallId);
                 const notification = this.formatBackgroundNotification(entry.agentType, {
                     subSessionId: entry.subSessionId,
                     resultText: "",
@@ -1433,7 +1438,13 @@ export class AgentSpawner extends EventEmitter {
                 });
                 let delivered: boolean;
                 try {
-                    delivered = await this.deliverNotice(parentSessionId, notification, workId);
+                    delivered = await this.deliverNotice(
+                        parentSessionId,
+                        notification,
+                        workId,
+                        trackedOnly,
+                        entry.workId !== undefined,
+                    );
                 } catch (e) {
                     // Still unreachable. Keep the entry and stop: the remaining
                     // ones would fail the same way, and a tight retry loop
@@ -1450,6 +1461,9 @@ export class AgentSpawner extends EventEmitter {
                 // as the caught-exception branch above, just via the normal
                 // return path instead of an error.
                 if (!delivered) {
+                    // Idle retries must not replay a legacy live notice whose
+                    // pending entry is still waiting for dropPending to run.
+                    if (trackedOnly) continue;
                     log.warn("pending subagent result still undeliverable: parent not attached", {
                         parentSessionId,
                         parentToolCallId: entry.parentToolCallId,
@@ -1465,6 +1479,8 @@ export class AgentSpawner extends EventEmitter {
             });
         } finally {
             this.flushingParents.delete(parentSessionId);
+            if (this.deferredIdleFlushes.delete(parentSessionId))
+                void this.flushPendingSubagentResults(parentSessionId, true);
         }
     }
 
@@ -1506,6 +1522,7 @@ export class AgentSpawner extends EventEmitter {
      * path, and this only exists to make the retry possible if it fails.
      */
     private async recordPending(entry: {
+        workId?: string;
         parentSessionId: SessionId;
         parentToolCallId: string;
         subSessionId: SessionId;
@@ -1542,6 +1559,7 @@ export class AgentSpawner extends EventEmitter {
      * parent.
      */
     private async recordPendingIfAbsent(entry: {
+        workId?: string;
         parentSessionId: SessionId;
         parentToolCallId: string;
         subSessionId: SessionId;
@@ -1652,64 +1670,55 @@ export class AgentSpawner extends EventEmitter {
         parentSessionId: SessionId,
         notification: string,
         workId: string | undefined,
+        trackedOnly = false,
+        tracked = true,
     ): Promise<boolean> {
         const hooks = this.workHooks;
-        // No Work, or one whose message is already frozen (a late flush after
-        // the template went out): the parent still has to learn the result, but
-        // its reply is an ordinary turn and reaches the channel live.
-        if (!hooks || workId === undefined || !(await hooks.wantsNoticeReply(workId))) {
+        if (!hooks || workId === undefined)
+            return deliverSubagentResult(this.sessionRegistry, parentSessionId, notification);
+        const decision = await hooks.beginParentNotice(workId, tracked);
+        if (decision.mode === "skip") return !decision.retry;
+        if (decision.mode === "legacy") {
+            if (trackedOnly) return false;
             return deliverSubagentResult(this.sessionRegistry, parentSessionId, notification);
         }
-        // One flag, one release: `onNoticeRunRelease` runs exactly once per
-        // `onNoticeRunStart`, so a second notice run for the same parent keeps
-        // its own hold when this one ends.
+
         let held = false;
-        let captured: string | undefined;
+        let ran = false;
+        let reply: string | undefined;
         const release = (): void => {
             if (!held) return;
             held = false;
             hooks.onNoticeRunRelease(workId, parentSessionId);
         };
-        let outcome: Awaited<ReturnType<typeof deliverSubagentResultDetailed>>;
-        let ran = false;
         try {
-            outcome = await deliverSubagentResultDetailed(
-                this.sessionRegistry,
-                parentSessionId,
-                notification,
-                {
+            const run = () =>
+                deliverSubagentResultDetailed(this.sessionRegistry, parentSessionId, notification, {
+                    enqueueWhenBusy: false,
                     beforePrompt: () => {
-                        if (held) return;
-                        held = true;
                         hooks.onNoticeRunStart(workId, parentSessionId);
+                        held = true;
                     },
-                    // A busy lane rejects the prompt before any run starts, so
-                    // there is nothing to capture. Release now: if the delivery
-                    // then queues the notice, the parent's own reply carries it.
-                    afterPrompt: (reply, didRun) => {
-                        if (!didRun) {
-                            release();
-                            return;
-                        }
-                        ran = true;
-                        captured = reply;
+                    afterPrompt: (text, didRun) => {
+                        ran = didRun;
+                        reply = text;
+                        if (!didRun) release();
                     },
-                },
-            );
-        } catch (e) {
-            release();
-            // A throw from inside a started run is a failed notice run, not an
-            // unreached one: the template is the right fallback.
-            if (ran) await hooks.onNoticeRunEnd(workId, undefined);
-            throw e;
+                });
+            const outcome = hooks.runParentNotice
+                ? await hooks.runParentNotice(workId, decision.claimId, parentSessionId, run)
+                : await run();
+            return outcome === "replied";
+        } finally {
+            try {
+                await hooks.endParentNotice(workId, decision.claimId, {
+                    status: ran ? "completed" : "not_run",
+                    ...(reply === undefined ? {} : { reply }),
+                });
+            } finally {
+                release();
+            }
         }
-        release();
-        if (outcome === "replied") {
-            await hooks.onNoticeRunEnd(workId, captured);
-        } else {
-            await hooks.onNoticeNotRun(workId, outcome === "queued" ? "queued" : "unreachable");
-        }
-        return outcome !== "unreachable";
     }
 
     /**
