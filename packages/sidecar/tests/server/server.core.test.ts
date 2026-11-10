@@ -70,6 +70,7 @@ import { normalizeError, redactUpstreamMessage } from "../../src/server/rpcRespo
 import { SidecarServer } from "../../src/server/server.ts";
 import { parseJsonPointer } from "../../src/server/validation.ts";
 import { WorkspaceRegistry } from "../../src/server/workspaceRegistry.ts";
+import { createWorkspaceScope } from "../../src/workspace/workspaceScope.ts";
 import { InMemoryTransport } from "../_helpers/inMemoryTransport.ts";
 import { useTempTacoHome } from "../_helpers/tempTacoHome.ts";
 
@@ -144,7 +145,7 @@ describe("initialize", () => {
             assert.equal(result.serverCapabilities.pushes.includes("sidecar.hello"), false);
             assert.deepEqual(result.protocolVersion, SIDECAR_PROTOCOL_VERSION);
             // Pinned separately: a bump must be a deliberate edit here too.
-            assert.deepEqual(SIDECAR_PROTOCOL_VERSION, { major: 2, minor: 15 });
+            assert.deepEqual(SIDECAR_PROTOCOL_VERSION, { major: 2, minor: 17 });
             assert.equal(typeof result.instanceId, "string");
             assert.equal(typeof result.pid, "number");
         });
@@ -193,8 +194,8 @@ describe("initialize", () => {
             if (!resp.ok) assert.equal(resp.error.code, "incompatible_protocol");
         });
 
-        it("a 2.15 client refuses a 2.14 daemon without peer associations", () => {
-            // Scoped catalog reads must not silently fall back to a same-named override.
+        it("a 2.17 client refuses a 2.16 daemon without layered memory", () => {
+            // Layered Memory reads and the IM memory policy must not degrade silently.
             assert.equal(isCompatibleSidecarProtocol({ major: 2, minor: 5 }), false);
             assert.equal(isCompatibleSidecarProtocol({ major: 2, minor: 6 }), false);
             assert.equal(isCompatibleSidecarProtocol({ major: 2, minor: 7 }), false);
@@ -203,7 +204,9 @@ describe("initialize", () => {
             assert.equal(isCompatibleSidecarProtocol({ major: 2, minor: 10 }), false);
             assert.equal(isCompatibleSidecarProtocol({ major: 2, minor: 12 }), false);
             assert.equal(isCompatibleSidecarProtocol({ major: 2, minor: 14 }), false);
-            assert.equal(isCompatibleSidecarProtocol({ major: 2, minor: 15 }), true);
+            assert.equal(isCompatibleSidecarProtocol({ major: 2, minor: 15 }), false);
+            assert.equal(isCompatibleSidecarProtocol({ major: 2, minor: 16 }), false);
+            assert.equal(isCompatibleSidecarProtocol({ major: 2, minor: 17 }), true);
             // A newer sidecar is additive; the client ignores methods it lacks.
             assert.equal(isCompatibleSidecarProtocol({ major: 2, minor: 11 }), false);
         });
@@ -1029,6 +1032,29 @@ describe("invalidateCompactionCaches.chain", () => {
             workspaces.publish(asWorkspaceId(key), ws as unknown as WorkspaceRuntime);
         }
     }
+
+    it("offers only registered filesystem identities as system memory sources", () => {
+        const workspaces = new WorkspaceRegistry(async () => {
+            throw new Error("unexpected build");
+        });
+        const server = new SidecarServer({
+            providerKeyStore: new ProviderKeyStore({}),
+            workspaceRegistry: workspaces,
+        });
+        injectWorkspaces(workspaces, [
+            ["/project/one", { scope: createWorkspaceScope(asWorkspaceId("/project/one")) }],
+            [
+                "im://mock-1/peer/chat",
+                {
+                    scope: createWorkspaceScope(
+                        asWorkspaceId("im://mock-1/peer/chat"),
+                        "/im/scratch",
+                    ),
+                },
+            ],
+        ]);
+        assert.deepEqual(server.managedGlobalMemoryRoots(), ["/project/one"]);
+    });
 
     interface FakeWorkspaceRuntime {
         invalidateCompactionCache: () => void;

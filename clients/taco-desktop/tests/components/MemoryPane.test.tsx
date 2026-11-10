@@ -217,7 +217,7 @@ describe("MemoryPane", () => {
         assert.equal(textarea.value, "from-disk");
     });
 
-    it("filters the list by type and groups topics by recency", () => {
+    it("filters the list by type and keeps current topics under their source", () => {
         const now = new Date().toISOString();
         render(
             <MemoryPane
@@ -252,8 +252,9 @@ describe("MemoryPane", () => {
                 saving={false}
             />,
         );
-        expect(screen.getByText("memory.group.recent")).toBeTruthy();
-        expect(screen.getByText("memory.group.earlier")).toBeTruthy();
+        expect(screen.getByRole("tab", { name: "memory.layer.currentWorkspace" })).toBeTruthy();
+        expect(screen.getByText("Recent project")).toBeTruthy();
+        expect(screen.getByText("Old user")).toBeTruthy();
 
         fireEvent.click(screen.getByRole("radio", { name: "memory.type.project" }));
         expect(screen.getByText("Recent project")).toBeTruthy();
@@ -438,5 +439,194 @@ describe("MemoryPane", () => {
             />,
         );
         expect(screen.queryByText("memory.updatedLabel")).toBeNull();
+    });
+
+    it("shows channel memory, associated workspace memory, and the disabled Taco layer", () => {
+        render(
+            <MemoryPane
+                data={{
+                    ...sampleData,
+                    memorySources: {
+                        target: "channel",
+                        associatedWorkspaces: ["/repo/taco"],
+                        managedGlobal: { enabled: false },
+                    },
+                    topics: [
+                        {
+                            ...sampleData.topics[0],
+                            memoryLayer: "current",
+                            memoryLayerKey: "im://wechat/peer/chat",
+                            readOnly: false,
+                        },
+                        {
+                            id: "workspace_role",
+                            name: "Workspace role",
+                            description: "Workspace memory",
+                            type: "project" as const,
+                            content: "Inherited from the associated workspace.",
+                            createdAt: "2026-07-29T00:00:00.000Z",
+                            memoryLayer: "workspace",
+                            memoryLayerKey: "/repo/taco",
+                            readOnly: true,
+                        },
+                    ],
+                }}
+                loading={false}
+                error={null}
+                selectedId={MEMORY_ROOT_ID}
+                onSelect={() => {}}
+                onSaveMemory={async () => ({ ok: true })}
+                onDeleteTopic={async () => true}
+                onRefresh={() => {}}
+                saving={false}
+            />,
+        );
+
+        expect(screen.getByRole("tab", { name: "memory.layer.currentChannel" })).toBeTruthy();
+        expect(screen.getByRole("tab", { name: "memory.layer.associated" })).toBeTruthy();
+        fireEvent.click(screen.getByRole("tab", { name: "memory.layer.associated" }));
+        expect(screen.getByText("Workspace role")).toBeTruthy();
+        expect(screen.queryByText("memory.delete")).toBeNull();
+
+        fireEvent.click(screen.getByRole("tab", { name: "memory.layer.managedGlobal" }));
+        expect(screen.getByText("memory.managedDisabled")).toBeTruthy();
+    });
+
+    it.each([undefined, "current"] as const)(
+        "uses the writable topic name in dream previews when its layer is %s and inherited ids collide",
+        (memoryLayer) => {
+            render(
+                <MemoryPane
+                    data={{
+                        ...sampleData,
+                        topics: [
+                            { ...sampleData.topics[0], memoryLayer },
+                            {
+                                ...sampleData.topics[0],
+                                name: "Inherited workspace topic",
+                                memoryLayer: "workspace",
+                                memoryLayerKey: "/repo/taco",
+                                readOnly: true,
+                            },
+                            {
+                                ...sampleData.topics[0],
+                                name: "Inherited global topic",
+                                memoryLayer: "managed-global",
+                                readOnly: true,
+                            },
+                        ],
+                        dream: {
+                            confirmed: false,
+                            reports: [],
+                            archived: [],
+                            pending: {
+                                id: "preview-1",
+                                createdAt: "2026-11-01T00:00:00.000Z",
+                                actions: [
+                                    {
+                                        action: "rewrite",
+                                        id: "user_role",
+                                        content: "User prefers pnpm.",
+                                    },
+                                ],
+                                snapshot: { user_role: "topic-hash" },
+                                topicCount: 1,
+                                counts: { merged: 0, mergedInto: 0, rewritten: 1, archived: 0 },
+                            },
+                        },
+                    }}
+                    loading={false}
+                    error={null}
+                    selectedId={MEMORY_ROOT_ID}
+                    onSelect={() => {}}
+                    onSaveMemory={async () => ({ ok: true })}
+                    onDeleteTopic={async () => true}
+                    onRefresh={() => {}}
+                    saving={false}
+                    dream={{
+                        busy: null,
+                        onRun: vi.fn(),
+                        onApply: vi.fn(),
+                        onDiscard: vi.fn(),
+                        onUndo: vi.fn(),
+                        onRestoreTopic: async () => true,
+                        onScheduleToggle: vi.fn(),
+                        dreamConfig: null,
+                        onSaveConfig: async () => true,
+                    }}
+                />,
+            );
+
+            const preview = screen.getByRole("region", { name: "memory.dream.pendingTitle" });
+            expect(preview.querySelector("summary")?.textContent).toBe("User uses pnpm");
+            expect(within(preview).queryByText("Inherited workspace topic")).toBeNull();
+            expect(within(preview).queryByText("Inherited global topic")).toBeNull();
+        },
+    );
+
+    it("keeps associated memory read-only while current memory remains editable", () => {
+        const onSelect = vi.fn();
+        const data = {
+            ...sampleData,
+            memorySources: {
+                target: "channel" as const,
+                associatedWorkspaces: ["/repo/taco"],
+                managedGlobal: { enabled: true },
+            },
+            topics: [
+                {
+                    ...sampleData.topics[0],
+                    memoryLayer: "current" as const,
+                    memoryLayerKey: "im://wechat/peer/chat",
+                    readOnly: false,
+                },
+                {
+                    id: "workspace_role",
+                    name: "Workspace role",
+                    description: "Workspace memory",
+                    type: "project" as const,
+                    content: "Inherited from the associated workspace.",
+                    createdAt: "2026-07-29T00:00:00.000Z",
+                    memoryLayer: "workspace" as const,
+                    memoryLayerKey: "/repo/taco",
+                    readOnly: true,
+                },
+            ],
+        };
+        const { rerender } = render(
+            <MemoryPane
+                data={data}
+                loading={false}
+                error={null}
+                selectedId={MEMORY_ROOT_ID}
+                onSelect={onSelect}
+                onSaveMemory={async () => ({ ok: true })}
+                onDeleteTopic={async () => true}
+                onRefresh={() => {}}
+                saving={false}
+            />,
+        );
+
+        fireEvent.click(screen.getByRole("tab", { name: "memory.layer.associated" }));
+        fireEvent.click(screen.getByRole("button", { name: /Workspace role/ }));
+        expect(onSelect).toHaveBeenCalledWith("workspace:/repo/taco:workspace_role");
+
+        rerender(
+            <MemoryPane
+                data={data}
+                loading={false}
+                error={null}
+                selectedId="workspace:/repo/taco:workspace_role"
+                onSelect={onSelect}
+                onSaveMemory={async () => ({ ok: true })}
+                onDeleteTopic={async () => true}
+                onRefresh={() => {}}
+                saving={false}
+            />,
+        );
+        fireEvent.click(screen.getByRole("tab", { name: "memory.layer.associated" }));
+        fireEvent.click(screen.getByRole("button", { name: /Workspace role/ }));
+        expect(screen.getByText("memory.inheritedReadOnly")).toBeTruthy();
+        expect(screen.queryByText("memory.delete")).toBeNull();
     });
 });

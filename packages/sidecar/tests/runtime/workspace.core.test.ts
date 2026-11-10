@@ -15,6 +15,7 @@ import { activateExtensions } from "../../src/extensions/activation.ts";
 import { createExtensionApi } from "../../src/extensions/extensionApi.ts";
 import { ExtensionRegistry } from "../../src/extensions/registry.ts";
 import { harnessContext } from "../../src/lib/harnessContext.ts";
+import { LocalMemoryStore } from "../../src/memory/local/store.ts";
 import { buildSystemPrompt } from "../../src/prompts/buildSystemPrompt.ts";
 import { ProviderKeyStore } from "../../src/runtime/models/providerKeyStore.ts";
 import { WorkspaceRuntime, type WorkspaceRuntimeOptions } from "../../src/runtime/workspace.ts";
@@ -263,13 +264,12 @@ describe("WorkspaceRuntime sessionCwd / executionCwd split", () => {
         );
     });
 
-    it("memory stays partitioned by sessionCwd, not executionCwd", () => {
+    it("IM memory uses its route identity regardless of executionCwd", () => {
         const exec = mkdtempSync(join(tmpdir(), "ws-cwd-exec2-"));
         const ws = makeRuntime({ executionCwd: exec });
-        // memoryStore.initialize already ran with sessionCwd; a second call with
-        // a different id must be a no-op (initialized flag guards it).
+        // Shared scratch and custom execution paths must not define chat identity.
         const probe = (ws as unknown as { memoryStore: { _workspaceId: string } }).memoryStore;
-        assert.equal(probe._workspaceId, ws.sessionCwd);
+        assert.equal(probe._workspaceId, ws.workspaceKey);
     });
 });
 
@@ -439,6 +439,129 @@ describe("IM workspace withholds the path from parent and children alike", () =>
         assert.ok(!local.systemPrompt.includes("<channel_safety>"));
         assert.ok(local.systemPrompt.includes(ABSOLUTE_PATH_EXAMPLE));
         assert.ok(!inheritedHideWorkspacePath(local), "local workspace must not set the IM flag");
+    });
+});
+
+describe("IM memory context", () => {
+    useTempTacoHome("im-memory-context");
+
+    it("isolates chats sharing one channel scratch directory and ignores ambiguous legacy topics", async () => {
+        const shared = mkdtempSync(join(tmpdir(), "taco-memory-shared-scratch-"));
+        const topic = {
+            id: "private-note",
+            name: "Private note",
+            description: "Private preference",
+            type: "user" as const,
+            content: "Only for Alice",
+            createdAt: "2026-11-10T00:00:00.000Z",
+        };
+        const legacy = new LocalMemoryStore();
+        legacy.initialize(shared);
+        await legacy.appendEntry({ ...topic, id: "ambiguous-legacy-note" });
+        const create = (route: string) =>
+            new WorkspaceRuntime({
+                providerKeyStore: new ProviderKeyStore({}),
+                scope: createWorkspaceScope(asWorkspaceId(route), shared),
+                sessionsRoot: shared,
+            });
+        const alice = create("im://mock-1/alice/chat");
+        const bob = create("im://mock-1/bob/chat");
+        const otherChat = create("im://mock-1/alice/other-chat");
+        try {
+            await alice.memoryStore.appendEntry(topic);
+            assert.equal(bob.memoryStore.getTopic(topic.id), undefined);
+            assert.equal(otherChat.memoryStore.getTopic(topic.id), undefined);
+            assert.doesNotMatch(
+                bob.memoryContextStore.buildMemoryBlock(),
+                /private-note|ambiguous-legacy-note/,
+            );
+            assert.doesNotMatch(
+                alice.memoryContextStore.buildMemoryBlock(),
+                /ambiguous-legacy-note/,
+            );
+            assert.equal(legacy.getTopic("ambiguous-legacy-note")?.content, topic.content);
+            const reopened = create("im://mock-1/alice/chat");
+            try {
+                assert.equal(reopened.memoryStore.getTopic(topic.id)?.content, topic.content);
+            } finally {
+                await reopened.dispose();
+            }
+        } finally {
+            await Promise.all([alice.dispose(), bob.dispose(), otherChat.dispose()]);
+            rmSync(shared, { recursive: true, force: true });
+        }
+    });
+
+    it("resolves opted-in system memory from the live workspace registry", async () => {
+        const sessionsRoot = mkdtempSync(join(tmpdir(), "taco-im-memory-sessions-"));
+        const projectRoot = mkdtempSync(join(tmpdir(), "taco-memory-project-"));
+        const otherChannelRoot = join(sessionsRoot, "channel-b", "scratch");
+        const topic = {
+            id: "registered-note",
+            name: "Registered note",
+            description: "Project memory",
+            type: "project" as const,
+            content: "Shared",
+            createdAt: "2026-11-10T00:00:00.000Z",
+        };
+        const project = new LocalMemoryStore();
+        project.initialize(projectRoot);
+        await project.appendEntry(topic);
+        const otherChannel = new LocalMemoryStore();
+        otherChannel.initialize(otherChannelRoot);
+        await otherChannel.appendEntry({ ...topic, id: "private-channel-note" });
+        let roots = [projectRoot];
+        const workspace = new WorkspaceRuntime({
+            providerKeyStore: new ProviderKeyStore({}),
+            scope: createWorkspaceScope(asWorkspaceId("im://mock-1/u1/c1"), sessionsRoot),
+            sessionsRoot,
+            imPolicy: { ...DEFAULT_POLICY, memory: { inheritManagedGlobal: true } },
+            resolveManagedGlobalMemoryRoots: () => roots,
+        });
+        try {
+            const block = workspace.memoryContextStore.buildMemoryBlock();
+            assert.match(block, /registered-note/);
+            assert.doesNotMatch(block, /private-channel-note/);
+            roots = [];
+            assert.doesNotMatch(workspace.memoryContextStore.buildMemoryBlock(), /registered-note/);
+        } finally {
+            await workspace.dispose();
+            rmSync(sessionsRoot, { recursive: true, force: true });
+            rmSync(projectRoot, { recursive: true, force: true });
+        }
+    });
+
+    it("injects associated workspace memory without changing the current store", async () => {
+        const sessionsRoot = mkdtempSync(join(tmpdir(), "taco-im-memory-sessions-"));
+        const workspaceRoot = mkdtempSync(join(tmpdir(), "taco-im-memory-workspace-"));
+        const associatedEntry = {
+            id: "linked-decision",
+            name: "Linked decision",
+            description: "A decision from the associated workspace",
+            type: "project" as const,
+            content: "Use the linked workspace convention.",
+            createdAt: "2026-11-10T00:00:00.000Z",
+        };
+        const associated = new LocalMemoryStore();
+        associated.initialize(workspaceRoot);
+        await associated.appendEntry(associatedEntry);
+
+        const workspace = new WorkspaceRuntime({
+            providerKeyStore: new ProviderKeyStore({}),
+            scope: createWorkspaceScope(asWorkspaceId("im://mock-1/u1/c1"), sessionsRoot),
+            sessionsRoot,
+            resolveAssociatedRoots: () => [workspaceRoot],
+        });
+        try {
+            const block = workspace.memoryContextStore.buildMemoryBlock();
+            assert.match(block, /Associated workspace memory/);
+            assert.match(block, /linked-decision/);
+            assert.equal(workspace.memoryStore.getTopic("linked-decision"), undefined);
+        } finally {
+            await workspace.dispose();
+            rmSync(sessionsRoot, { recursive: true, force: true });
+            rmSync(workspaceRoot, { recursive: true, force: true });
+        }
     });
 });
 

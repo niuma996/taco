@@ -184,7 +184,9 @@ export interface AttachedSessionOptions {
     getAssociatedRoots?: () => readonly string[];
     /** User-level memory store — drives extraction + context injection. */
     memoryStore?: MemoryStore;
-    /** True for IM workspaces; disables memory extraction and title summarization. */
+    /** Read-through store for inherited context; defaults to `memoryStore`. */
+    memoryContextStore?: Pick<MemoryStore, "buildMemoryBlock">;
+    /** True for IM workspaces; disables title summarization and channel-unsafe path hints. */
     isIm?: boolean;
     /**
      * Resolves the optional lightweight model for one bounded auxiliary
@@ -789,7 +791,7 @@ export class AttachedSession extends EventEmitter {
                 extensionToolCallHooks: args.extensionToolCallHooks,
                 extensionToolResultHooks: args.extensionToolResultHooks,
                 getSkills: args.getSkills,
-                memoryStore: args.memoryStore,
+                memoryStore: args.memoryContextStore ?? args.memoryStore,
                 getActiveTasksState: () => ({
                     store: attached.taskStore,
                     planActive: attached.planState.active,
@@ -839,9 +841,11 @@ export class AttachedSession extends EventEmitter {
         attached.skillReinjector = skillReinjector;
 
         // Main sessions only: subagents share the injected memory context, but
-        // their task-specific transcripts must not create workspace memories.
+        // their task-specific transcripts must not create target memories.
+        // IM extraction writes to that channel's own partition; inherited layers
+        // remain read-only through the current store.
         attached.memoryExtractor =
-            args.memoryStore?.enabled && args.model && args.sessionKind === "main" && !args.isIm
+            args.memoryStore?.enabled && args.model && args.sessionKind === "main"
                 ? new MemoryExtractorImpl(
                       args.models,
                       args.model,

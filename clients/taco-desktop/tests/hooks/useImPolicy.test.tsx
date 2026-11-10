@@ -41,6 +41,11 @@ function makeClient(overrides: Partial<TacoClient> = {}): TacoClient {
                         source: "default",
                         inherited: { value: { mode: "shared" }, source: "default" },
                     },
+                    inheritManagedGlobal: {
+                        value: false,
+                        source: "default",
+                        inherited: { value: false, source: "default" },
+                    },
                 },
                 rules: { allow: [], deny: [] },
             };

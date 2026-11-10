@@ -112,11 +112,58 @@ because a registered system-service daemon can outlive a desktop upgrade.
 | 2.13 | `work.cancel` targets the displayed `attemptId`; `work.delete` removes terminal records through a durable tombstone. Optional `attemptId` / `canCancel` fields support method-gated controls. |
 | 2.14 | Optional Agent layer selectors for `agents.list` / `agents.content` / `agents.delete`, `previousScope` for shadowed edits, and optional Skill provenance. Calls without these fields retain the effective-catalog behavior. |
 | 2.15 | `peer` scope for IM directory associations (most specific conversation → peer → channel); optional `name` / `updatedAt` on `channels.listConversations` entries; optional `execution` on `session.attach` results; `channels.conversations_changed` also fires on IM session rename and on route removal. |
+| 2.16 | Optional `scope: global / workspace / builtin` on `skills.list` and `skills.content`; `builtin` source selection on `agents.list` and `agents.content`. Explicit sources expose original definitions before cross-layer overrides; omitted scope preserves the effective catalog. Agent write/delete scopes remain `global / workspace`. |
+| 2.17 | Layered `memory.list`: optional `memoryLayer` / `memoryLayerKey` / `readOnly` on topics and `memorySources` on the result. `memory.deleteTopic` accepts an optional current-layer selector. IM policy accepts optional `memory.inheritManagedGlobal`; absent means off. New clients read associated workspace memory automatically and expose Taco system memory only when the resolved channel policy opts in. |
 
 Adding a value to an existing response enum is potentially breaking: older clients
 may index exhaustive maps with it. Such values require connection-scoped capability
 negotiation with a defined projection, or a major version change. Optional fields
 and new methods do not by themselves authorize new enum values on old connections.
+
+Configuration panes default to the main chat's workspace or IM routing key and
+show the effective catalog. The top workspace/channel category filters target
+choices without switching the open chat. Each category remembers its selected
+configuration target when the main chat belongs to the other category.
+Source tabs are independent of this target: `global`
+reads `$TACO_HOME/skills` or `$TACO_HOME/agents`, `builtin` reads bundled
+definitions (including enabled extension skills), and `workspace` reads the
+selected execution directory's `.taco` definitions. Associated directories are
+not additional configuration roots. IM Agent layer reads retain the existing
+rule that there is no editable workspace Agent layer. Effective catalogs still
+include compatible user sources such as `~/.claude` and `~/.pi` according to
+runtime precedence; these are not part of the `.taco` global source tab.
+
+A layered `skills.content` call must carry the same `scope` used by `skills.list`;
+the file must belong to that scanned layer. This allows reading a shadowed skill
+without opening arbitrary filesystem paths. Memory follows the same connection
+rule: the current target remains writable; associated workspace memory is read
+only and automatically inherited; Taco system memory is read only and available
+to an IM chat only after `memory.inheritManagedGlobal`. Its sources are the local
+filesystem workspaces currently registered with the daemon, excluding the current
+and associated partitions. Closed or unregistered workspaces and IM conversation
+partitions are never discovered by scanning memory directories. Context labels
+use directory names (disambiguated when needed), without exposing absolute paths.
+Topic summaries share a total budget of 100 entries and 32 KiB across all layers,
+prioritizing current, associated, then system memory; omitted entries remain
+available through `memory.list`. Inherited stores reuse file-signature caches and
+revoked sources disappear on the next read. Human-maintained
+`MEMORY.md` remains unconditional. Automatic extraction and the memory tool write
+only to the current workspace or channel partition.
+
+The IM memory field is optional in stored policy documents. Missing
+`memory.inheritManagedGlobal` resolves to `false`, so existing policy files need
+no policy migration. Memory topics, Work records and session history keep their
+existing storage shapes. IM topic partitions now use the complete routing key
+(`im://channel/peer/chat`) rather than the shared channel scratch path. Old
+scratch-keyed topics remain on disk but are not imported automatically: their
+ownership cannot be safely assigned to one chat. Local workspace partitions and
+human `MEMORY.md` are unchanged. Downgrading to a daemon using scratch-keyed IM
+memory does not expose newly route-partitioned topics. New desktop clients require
+protocol 2.17, while older clients may continue making unscoped requests to newer
+daemons. Layered Memory responses
+require `initialize.clientCapabilities.memoryLayers: true`; clients without that
+capability receive current-target topics only, preventing inherited duplicate ids
+from becoming editable entries in legacy interfaces.
 
 Work execution references and answer receipts are internal persistence contracts;
 the wire version and `sessionFormatVersion` do not substitute for their validation.

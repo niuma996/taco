@@ -393,6 +393,10 @@ export default function App() {
         | "settings"
     >("chat");
 
+    const [conversationMode, setConversationMode] = useState<WorkspaceMode>(() =>
+        activeCwd.startsWith(IM_CWD_PREFIX) ? "im" : "workspace",
+    );
+
     // Fallback chain mirrors activeLevel:
     //   1. per-session override (already shown)
     //   2. the attached session's real model, as the sidecar reports it
@@ -425,6 +429,7 @@ export default function App() {
     // dialogs are mounted deep in ChannelsPane and the ref indirection would
     // still need lifecycle plumbing to wire/unwire the listener.
     const loadMemoryRef = useRef<(() => void) | null>(null);
+    const memoryTargetRef = useRef<string | undefined>(activeCwd);
 
     const { clearCursors } = useSidecarStream(client, {
         onAction: dispatch,
@@ -450,7 +455,7 @@ export default function App() {
             }
         },
         onMemoryChanged: (cwd) => {
-            if (cwd === activeCwd) loadMemoryRef.current?.();
+            if (cwd === memoryTargetRef.current) loadMemoryRef.current?.();
         },
         // Indirected through a ref: useChannelsPane is declared further down,
         // so naming applyChannelStatus here would read it before init.
@@ -532,18 +537,34 @@ export default function App() {
         refreshConversations,
     } = useConversationsPane(
         client,
-        mainView === "chat" || ["channels", "agents", "skills", "tools"].includes(mainView),
+        conversationMode === "im" || mainView === "channels",
         activeCwd,
     );
     onConversationsChangedRef.current = onConversationsChanged;
-    const catalogConfig = useConfigurationScope({
-        variant: "catalog",
+    const agentsConfig = useConfigurationScope({
+        active: mainView === "agents",
+        mode: conversationMode,
+        activeCwd,
+        workspaces,
+        conversations,
+    });
+    const skillsConfig = useConfigurationScope({
+        active: mainView === "skills",
+        mode: conversationMode,
         activeCwd,
         workspaces,
         conversations,
     });
     const runtimeConfig = useConfigurationScope({
-        variant: "runtime",
+        active: mainView === "tools",
+        mode: conversationMode,
+        activeCwd,
+        workspaces,
+        conversations,
+    });
+    const memoryConfig = useConfigurationScope({
+        active: mainView === "memory",
+        mode: conversationMode,
         activeCwd,
         workspaces,
         conversations,
@@ -565,7 +586,7 @@ export default function App() {
         skillContent,
         skillContentLoading,
         skillContentError,
-    } = useSkillsPane(client, mainView === "skills", catalogConfig.targetCwd, catalogConfig.scope);
+    } = useSkillsPane(client, mainView === "skills", skillsConfig.targetCwd, skillsConfig.scope);
     const {
         agents,
         globalAgentTypes,
@@ -579,7 +600,7 @@ export default function App() {
         agentSaving,
         saveAgent,
         deleteAgent,
-    } = useAgentsPane(client, mainView === "agents", catalogConfig.targetCwd, catalogConfig.scope);
+    } = useAgentsPane(client, mainView === "agents", agentsConfig.targetCwd, agentsConfig.scope);
     const {
         extensionStatus,
         extensionLoading,
@@ -609,12 +630,11 @@ export default function App() {
     } = useChannelsPane(client, mainView === "channels", activeCwd, restartSidecar);
     applyChannelStatusRef.current = applyChannelStatus;
     const workOverview = useWorkOverview(client, mainView === "work", activeCwd);
-    // The top scope switch filters both navigation surfaces without selecting
-    // a target. Navigation updates it so the top bar follows the open chat.
-    const [conversationMode, setConversationMode] = useState<WorkspaceMode>(() =>
-        activeCwd.startsWith(IM_CWD_PREFIX) ? "im" : "workspace",
-    );
     const sessionOpenRequestGuardRef = useRef(createLatestRequestGuard());
+    const selectConversationMode = useCallback((mode: WorkspaceMode) => {
+        sessionOpenRequestGuardRef.current.invalidate();
+        setConversationMode(mode);
+    }, []);
     useEffect(() => {
         setConversationMode(activeCwd.startsWith(IM_CWD_PREFIX) ? "im" : "workspace");
     }, [activeCwd]);
@@ -632,6 +652,7 @@ export default function App() {
      */
     const openSessionTarget = useCallback(
         ({ workspace, sessionId }: SessionTarget): void => {
+            setConversationMode(workspace.startsWith(IM_CWD_PREFIX) ? "im" : "workspace");
             if (workspace.startsWith(IM_CWD_PREFIX)) {
                 openImConversationFromUi(workspace, sessionId);
             } else {
@@ -655,11 +676,6 @@ export default function App() {
         (workspace: string, sessionId: string) => openSessionTarget({ workspace, sessionId }),
         [openSessionTarget],
     );
-    // The conversation pane only fetches while it is open; the IM picker
-    // needs the list too. Pushes keep it fresh once loaded.
-    useEffect(() => {
-        if (conversationMode === "im" && conversations === null) void refreshConversations();
-    }, [conversationMode, conversations, refreshConversations]);
     /** channelId whose bind dialog is open; null closes it. */
     const [bindingChannelId, setBindingChannelId] = useState<string | null>(null);
     /** Filesystem workspace or exact IM chat whose associations dialog is open. */
@@ -688,8 +704,9 @@ export default function App() {
         handleDreamScheduleToggle,
         dreamConfig,
         handleDreamConfigSave,
-    } = useMemoryPane(client, mainView === "memory", activeCwd, t, pushNotification);
+    } = useMemoryPane(client, mainView === "memory", memoryConfig.targetCwd, t, pushNotification);
     loadMemoryRef.current = loadMemory;
+    memoryTargetRef.current = memoryConfig.targetCwd;
 
     const checkpoints = useCheckpointsPane(
         client,
@@ -783,7 +800,7 @@ export default function App() {
                     <div className="topbar-picker-group">
                         <WorkspaceModeTabs
                             mode={conversationMode}
-                            onModeChange={setConversationMode}
+                            onModeChange={selectConversationMode}
                         />
                     </div>
                     {/* ContextIndicator moved to ChatPane input-controls */}
@@ -1032,6 +1049,13 @@ export default function App() {
                                 {...runtimeConfig}
                                 onScopeChange={runtimeConfig.setScope}
                                 onTargetChange={runtimeConfig.setTargetCwd}
+                                targetsLoading={
+                                    conversationMode === "im" &&
+                                    (conversationsLoading ||
+                                        (conversations === null && !conversationsError))
+                                }
+                                targetsError={conversationMode === "im" ? conversationsError : null}
+                                onRetryTargets={() => void refreshConversations()}
                             />
                             <div className="configuration-pane-body">
                                 <ToolsPane tools={tools} error={toolsError} />
@@ -1041,22 +1065,31 @@ export default function App() {
                         <div className="configuration-pane">
                             <ConfigurationScopeBar
                                 variant="catalog"
-                                {...catalogConfig}
-                                onScopeChange={catalogConfig.setScope}
-                                onTargetChange={catalogConfig.setTargetCwd}
+                                {...agentsConfig}
+                                onScopeChange={agentsConfig.setScope}
+                                onTargetChange={agentsConfig.setTargetCwd}
+                                targetsLoading={
+                                    conversationMode === "im" &&
+                                    (conversationsLoading ||
+                                        (conversations === null && !conversationsError))
+                                }
+                                targetsError={conversationMode === "im" ? conversationsError : null}
+                                onRetryTargets={() => void refreshConversations()}
                             />
                             <div className="configuration-pane-body">
                                 <AgentsPane
-                                    key={catalogConfig.scope}
+                                    key={`${agentsConfig.targetCwd}:${agentsConfig.scope}`}
                                     agents={agents}
                                     globalAgentTypes={globalAgentTypes}
                                     editorScope={
-                                        !catalogConfig.hasTarget
+                                        !agentsConfig.hasTarget
                                             ? undefined
-                                            : catalogConfig.scope === "global" ||
-                                                catalogConfig.scope === "workspace"
-                                              ? catalogConfig.scope
-                                              : undefined
+                                            : agentsConfig.scope === "global"
+                                              ? "global"
+                                              : agentsConfig.scope === "workspace" &&
+                                                  !agentsConfig.targetCwd?.startsWith(IM_CWD_PREFIX)
+                                                ? "workspace"
+                                                : undefined
                                     }
                                     error={agentsError}
                                     selectedAgentType={
@@ -1068,8 +1101,8 @@ export default function App() {
                                     contentError={agentContentError}
                                     saving={agentSaving}
                                     hasProjectDir={
-                                        catalogConfig.targetCwd !== undefined &&
-                                        !catalogConfig.targetCwd.startsWith(IM_CWD_PREFIX)
+                                        agentsConfig.targetCwd !== undefined &&
+                                        !agentsConfig.targetCwd.startsWith(IM_CWD_PREFIX)
                                     }
                                     cwdChoices={agentCwdChoices}
                                     onSaveAgent={saveAgent}
@@ -1135,28 +1168,46 @@ export default function App() {
                             onOpenSession={openSessionTarget}
                         />
                     ) : mainView === "memory" ? (
-                        <MemoryPane
-                            data={memoryData}
-                            loading={memoryLoading}
-                            error={memoryError}
-                            selectedId={memorySelectedId}
-                            onSelect={setMemorySelectedId}
-                            onSaveMemory={handleSaveMemory}
-                            onDeleteTopic={handleDeleteTopic}
-                            onRefresh={loadMemory}
-                            saving={memorySaving}
-                            dream={{
-                                busy: dreamBusy,
-                                onRun: handleDreamRun,
-                                onApply: handleDreamApply,
-                                onDiscard: handleDreamDiscard,
-                                onUndo: handleDreamUndo,
-                                onRestoreTopic: handleRestoreTopic,
-                                onScheduleToggle: handleDreamScheduleToggle,
-                                dreamConfig,
-                                onSaveConfig: handleDreamConfigSave,
-                            }}
-                        />
+                        <div className="configuration-pane">
+                            <ConfigurationScopeBar
+                                variant="target"
+                                {...memoryConfig}
+                                onScopeChange={memoryConfig.setScope}
+                                onTargetChange={memoryConfig.setTargetCwd}
+                                targetsLoading={
+                                    conversationMode === "im" &&
+                                    (conversationsLoading ||
+                                        (conversations === null && !conversationsError))
+                                }
+                                targetsError={conversationMode === "im" ? conversationsError : null}
+                                onRetryTargets={() => void refreshConversations()}
+                            />
+                            <div className="configuration-pane-body">
+                                <MemoryPane
+                                    data={memoryData}
+                                    loading={memoryLoading}
+                                    error={memoryError}
+                                    selectedId={memorySelectedId}
+                                    onSelect={setMemorySelectedId}
+                                    onSaveMemory={handleSaveMemory}
+                                    onDeleteTopic={handleDeleteTopic}
+                                    onRefresh={loadMemory}
+                                    saving={memorySaving}
+                                    target={memoryConfig.targetCwd}
+                                    dream={{
+                                        busy: dreamBusy,
+                                        onRun: handleDreamRun,
+                                        onApply: handleDreamApply,
+                                        onDiscard: handleDreamDiscard,
+                                        onUndo: handleDreamUndo,
+                                        onRestoreTopic: handleRestoreTopic,
+                                        onScheduleToggle: handleDreamScheduleToggle,
+                                        dreamConfig,
+                                        onSaveConfig: handleDreamConfigSave,
+                                    }}
+                                />
+                            </div>
+                        </div>
                     ) : mainView === "checkpoints" ? (
                         <CheckpointsPane
                             data={checkpoints.data}
@@ -1209,9 +1260,16 @@ export default function App() {
                         <div className="configuration-pane">
                             <ConfigurationScopeBar
                                 variant="catalog"
-                                {...catalogConfig}
-                                onScopeChange={catalogConfig.setScope}
-                                onTargetChange={catalogConfig.setTargetCwd}
+                                {...skillsConfig}
+                                onScopeChange={skillsConfig.setScope}
+                                onTargetChange={skillsConfig.setTargetCwd}
+                                targetsLoading={
+                                    conversationMode === "im" &&
+                                    (conversationsLoading ||
+                                        (conversations === null && !conversationsError))
+                                }
+                                targetsError={conversationMode === "im" ? conversationsError : null}
+                                onRetryTargets={() => void refreshConversations()}
                             />
                             <div className="configuration-pane-body">
                                 <SkillsPane

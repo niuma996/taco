@@ -149,7 +149,7 @@ export interface HookWiringOptions {
      */
     getInstructionsConfig?: () => InstructionsConfig | undefined;
     /** User-level memory store — injects `<memory>` tag on every context build. */
-    memoryStore?: MemoryStore;
+    memoryStore?: Pick<MemoryStore, "buildMemoryBlock">;
     /** Thunk returning the current session's task / plan state, used by the active_tasks hook. */
     getActiveTasksState?: () => ActiveTasksState;
     /**

@@ -47,6 +47,7 @@ import type { WorkspaceExtensionSet } from "../extensions/index.ts";
 import { createLogger } from "../lib/logger.ts";
 import type { MemoryStore } from "../memory/index.ts";
 import { LocalMemoryStore, NoOpMemoryStore } from "../memory/index.ts";
+import { buildLayeredMemoryBlock, resolveMemorySources } from "../memory/sources.ts";
 import { PermissionBroker } from "../permissions/permissionBroker.ts";
 import {
     NoopPlanPushAdapter,
@@ -280,6 +281,8 @@ interface WorkspaceRuntimeConfig {
      * configuration.
      */
     resolveAssociatedRoots?: () => readonly string[];
+    /** Live filesystem identities from the server registry; never IM scratch paths. */
+    resolveManagedGlobalMemoryRoots?: () => readonly string[];
     /** Whether a client can answer command approvals now. See PermissionBrokerOptions.hasApprover. */
     hasApprover?: () => boolean;
     /**
@@ -382,6 +385,7 @@ export class WorkspaceRuntime extends EventEmitter {
      * `WorkspaceRuntimeOptions.resolveAssociatedRoots`.
      */
     private readonly resolveAssociatedRoots: () => readonly string[];
+    private readonly resolveManagedGlobalMemoryRoots: () => readonly string[];
     /** Per-session tool builder, retained so `refreshToolset()` can re-run the
      *  same assembly a turn is about to use. */
     private readonly toolsBuilder: (
@@ -442,6 +446,8 @@ export class WorkspaceRuntime extends EventEmitter {
     private agentCatalog: ReadonlyArray<AgentDefinition>;
     /** User-level memory store. */
     readonly memoryStore: MemoryStore;
+    /** Context-hook view; IM workspaces may read current + inherited layers. */
+    readonly memoryContextStore: Pick<MemoryStore, "buildMemoryBlock">;
     /** Pre-write snapshots for this workspace; undefined when FS tools are off. */
     readonly checkpointStore: CheckpointStore | undefined;
     readonly permissionBroker: PermissionBroker;
@@ -498,9 +504,20 @@ export class WorkspaceRuntime extends EventEmitter {
         return this.resolveAssociatedRoots();
     }
 
+    /** Explicit filesystem sources shared by context builds and memory.list. */
+    managedGlobalMemoryRoots(): readonly string[] {
+        return this.resolveManagedGlobalMemoryRoots();
+    }
+
     /** IM conversation identity, resolved with the workspace scope. */
     get imRouting(): { channelId: string; peerId: string; chatId: string } | undefined {
         return this.scope.kind === "im" ? this.scope.route : undefined;
+    }
+
+    /** Channels opt in through policy; filesystem workspaces never inherit it here. */
+    inheritsManagedGlobalMemory(): boolean {
+        if (this.scope.kind !== "im") return false;
+        return this.resolveImPolicy()?.memory?.inheritManagedGlobal ?? false;
     }
 
     constructor(options: WorkspaceRuntimeOptions) {
@@ -566,6 +583,8 @@ export class WorkspaceRuntime extends EventEmitter {
         // workspace and every test wants.
         this.resolveImPolicy = options.resolveImPolicy ?? (() => imPolicy);
         this.resolveAssociatedRoots = options.resolveAssociatedRoots ?? (() => []);
+        this.resolveManagedGlobalMemoryRoots =
+            options.resolveManagedGlobalMemoryRoots ?? (() => []);
         this.permissionBroker = new PermissionBroker(
             () => {
                 const base = validateCommandPermissions(
@@ -634,9 +653,25 @@ export class WorkspaceRuntime extends EventEmitter {
         // one extra hook invocation per context build that short-circuits.
         this.memoryStore =
             options.memoryEnabled !== false ? new LocalMemoryStore() : new NoOpMemoryStore();
-        // Memory stays partitioned by session identity: two IM chats bound to the
-        // same local workspace must not merge long-term memory.
-        this.memoryStore.initialize(this.sessionCwd);
+        // IM scratch directories are shared by a channel. Only the full route
+        // identifies a private memory partition; execution/binding changes must
+        // never merge one chat's memories into another's.
+        this.memoryStore.initialize(isIm ? this.workspaceKey : this.sessionCwd);
+        this.memoryContextStore =
+            isIm && this.memoryStore.enabled
+                ? {
+                      buildMemoryBlock: () =>
+                          buildLayeredMemoryBlock(
+                              resolveMemorySources({
+                                  store: this.memoryStore,
+                                  target: "channel",
+                                  associatedRoots: this.resolveAssociatedRoots(),
+                                  inheritManagedGlobal: this.inheritsManagedGlobalMemory(),
+                                  managedGlobalRoots: this.managedGlobalMemoryRoots(),
+                              }),
+                          ),
+                  }
+                : this.memoryStore;
 
         // One store per workspace, shared by every session in it, so a restore
         // can reach snapshots an earlier session took. Files are written under
@@ -692,6 +727,7 @@ export class WorkspaceRuntime extends EventEmitter {
             })),
             skills,
             memoryStore: this.memoryStore,
+            memoryContextStore: this.memoryContextStore,
             isIm,
             getLiteModel: (scenario) => resolveLiteModel(this.models, scenario),
             checkpointStore: this.checkpointStore,

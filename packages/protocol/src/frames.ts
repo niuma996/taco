@@ -99,8 +99,10 @@ export type CompactionFailureReason =
  *  2.12 adds managed Work waiting interactions and live permission projections.
  *  2.13 adds attempt-scoped Work cancellation and terminal-record deletion.
  *  2.14 adds layer-scoped Agent catalog reads/mutations and Skill provenance.
- *  2.15 adds peer-scoped IM directory associations. */
-export const SIDECAR_PROTOCOL_VERSION = { major: 2, minor: 15 } as const;
+ *  2.15 adds peer-scoped IM directory associations.
+ *  2.16 adds source-layer Skill reads and original builtin Agent reads.
+ *  2.17 adds layered Memory reads and the IM Taco-system-memory opt-in. */
+export const SIDECAR_PROTOCOL_VERSION = { major: 2, minor: 17 } as const;
 
 /**
  * Client-side gate for a sidecar's advertised protocol version. Semver-ish but
@@ -144,6 +146,8 @@ export interface ClientCapabilities {
     uiLocale?: SupportedLocale;
     /** Client can render the 2.12 waiting Work state and interaction details. */
     workWaiting?: boolean;
+    /** Client distinguishes inherited read-only memory layers and duplicate topic ids. */
+    memoryLayers?: boolean;
     [extension: string]: unknown;
 }
 

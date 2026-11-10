@@ -44,6 +44,7 @@ import {
     readLastDreamAt,
 } from "../../memory/dream/dreamState.ts";
 import { hashOf, LocalMemoryStore } from "../../memory/local/store.ts";
+import { resolveMemorySources } from "../../memory/sources.ts";
 import type { MemoryStore } from "../../memory/types.ts";
 import { MemoryConflictError, normalizeMemoryTopicId } from "../../memory/types.ts";
 import { currentMemoryWriteOrigin } from "../../memory/writeOrigin.ts";
@@ -68,6 +69,9 @@ function toWireTopic(entry: {
     archivedAt?: string;
     explicitlyRequested?: boolean;
     sources?: MemoryTopicEntry["sources"];
+    memoryLayer?: MemoryTopicEntry["memoryLayer"];
+    memoryLayerKey?: string;
+    readOnly?: boolean;
 }): MemoryTopicEntry {
     return {
         id: entry.id,
@@ -82,6 +86,9 @@ function toWireTopic(entry: {
             ? {}
             : { explicitlyRequested: entry.explicitlyRequested }),
         ...(entry.sources ? { sources: entry.sources } : {}),
+        ...(entry.memoryLayer ? { memoryLayer: entry.memoryLayer } : {}),
+        ...(entry.memoryLayerKey ? { memoryLayerKey: entry.memoryLayerKey } : {}),
+        ...(entry.readOnly === undefined ? {} : { readOnly: entry.readOnly }),
     };
 }
 
@@ -151,7 +158,9 @@ function readDreamState(store: LocalMemoryStore): MemoryDreamState {
             .map((id) => readDreamReport<DreamReport>(topicDir, id))
             .filter((r): r is DreamReport => r !== undefined)
             .map(toReportSummary),
-        archived: store.listArchivedTopics().map(toWireTopic),
+        archived: store
+            .listArchivedTopics()
+            .map((entry) => toWireTopic({ ...entry, memoryLayer: "current", readOnly: false })),
     };
 }
 
@@ -167,17 +176,74 @@ function asConflict(error: unknown): RpcHandlerError {
 export function registerMemoryHandlers(): void {
     registerMethod("memoryList", true, async ({ workspace, server }): Promise<MemoryListResult> => {
         const store = workspace.memoryStore;
-        const content = store.readMemory();
+        const target = workspace.imRouting ? "channel" : "workspace";
+        const layered = server.supportsClientCapability?.("memoryLayers") ?? true;
+        const associatedRoots =
+            layered && typeof workspace.associatedRoots === "function"
+                ? workspace.associatedRoots()
+                : [];
+        const inheritManagedGlobal =
+            layered && typeof workspace.inheritsManagedGlobalMemory === "function"
+                ? workspace.inheritsManagedGlobalMemory()
+                : false;
+        const sources = resolveMemorySources({
+            store,
+            target,
+            associatedRoots,
+            inheritManagedGlobal,
+            managedGlobalRoots: inheritManagedGlobal ? workspace.managedGlobalMemoryRoots() : [],
+        });
         const dreamJob = server.jobs ? await server.jobs.get(MEMORY_DREAM_JOB_ID) : null;
+        const topics: MemoryTopicEntry[] = [
+            ...sources.current.map((entry) =>
+                toWireTopic({
+                    ...entry,
+                    memoryLayer: "current",
+                    memoryLayerKey: workspace.workspaceKey,
+                    readOnly: false,
+                }),
+            ),
+            ...sources.associatedWorkspaces.flatMap((layer) =>
+                layer.entries.map((entry) =>
+                    toWireTopic({
+                        ...entry,
+                        memoryLayer: "workspace",
+                        memoryLayerKey: layer.key,
+                        readOnly: true,
+                    }),
+                ),
+            ),
+            ...sources.managedGlobal.flatMap((layer) =>
+                layer.entries.map((entry) =>
+                    toWireTopic({
+                        ...entry,
+                        memoryLayer: "managed-global",
+                        memoryLayerKey: layer.key,
+                        readOnly: true,
+                    }),
+                ),
+            ),
+        ];
         return {
-            memoryContent: content,
-            memoryHash: hashOf(content),
-            topics: store.listTopics().map(toWireTopic),
+            memoryContent: sources.memoryContent,
+            memoryHash: hashOf(sources.memoryContent),
+            topics,
             enabled: store.enabled,
             ...(store instanceof LocalMemoryStore ? { dream: readDreamState(store) } : {}),
             ...(dreamJob ? { dreamScheduled: dreamJob.enabled } : {}),
             ...(dreamJob && !dreamJob.enabled && dreamJob.disabled_reason
                 ? { dreamPausedReason: dreamJob.disabled_reason }
+                : {}),
+            ...(layered
+                ? {
+                      memorySources: {
+                          target,
+                          associatedWorkspaces: sources.associatedWorkspaces.map(
+                              (layer) => layer.key,
+                          ),
+                          managedGlobal: { enabled: inheritManagedGlobal },
+                      },
+                  }
                 : {}),
         };
     });
@@ -287,6 +353,12 @@ export function registerMemoryHandlers(): void {
         "memoryDeleteTopic",
         true,
         async ({ workspace, params }): Promise<MemoryDeleteTopicResult> => {
+            if (params.memoryLayer !== undefined && params.memoryLayer !== "current") {
+                throw new RpcHandlerError(
+                    ErrorCodes.InvalidParams,
+                    "inherited memory is read-only",
+                );
+            }
             const expected = params.expectedContent;
             try {
                 await deleteTopic(workspace.memoryStore, params.id, expected);

@@ -9,10 +9,10 @@ import type { SkillDiagnosticEntry } from "@taco-ai/protocol";
 import { harnessContext } from "../../../src/lib/harnessContext.ts";
 import { SlashNormalizedExecutionEnv } from "../../../src/runtime/harness/slashNormalizedEnv.ts";
 import type { WorkspaceRuntime } from "../../../src/runtime/workspace.ts";
-import { skillScopeOf } from "../../../src/server/handlers/skills.ts";
 import { getRegisteredMethod } from "../../../src/server/methodRegistry.ts";
 import { registerBuiltinMethods } from "../../../src/server/methods.ts";
 import { dedupeSkillsByNameWithDuplicates } from "../../../src/skills/dedupeSkills.ts";
+import { skillScopeOf } from "../../../src/skills/skillCatalog.ts";
 import {
     mapDuplicateDiagnostics,
     mapLoaderDiagnostics,

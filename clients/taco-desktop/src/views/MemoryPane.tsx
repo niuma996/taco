@@ -12,7 +12,17 @@
  * on the trigger so the state is still visible from the reading view.
  */
 
-import { ChevronRight, Pencil, RefreshCw, Save, Sparkles, Trash } from "lucide-react";
+import {
+    ChevronRight,
+    FolderKanban,
+    Globe2,
+    Layers3,
+    Pencil,
+    RefreshCw,
+    Save,
+    Sparkles,
+    Trash,
+} from "lucide-react";
 import { type KeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
 import { AssistantMarkdown } from "../components/AssistantMarkdown";
 import { ConfirmModal } from "../components/ConfirmModal";
@@ -27,7 +37,7 @@ import type {
     MemoryListResult,
     MemoryTopicEntry,
 } from "../lib/memoryPaneTypes";
-import { MEMORY_ARCHIVE_PREFIX, MEMORY_ROOT_ID } from "../lib/memoryPaneTypes";
+import { MEMORY_ARCHIVE_PREFIX, MEMORY_ROOT_ID, memoryTopicRowId } from "../lib/memoryPaneTypes";
 import { formatRelativeTime } from "../lib/relativeTime";
 
 const TOPIC_TYPES = ["user", "feedback", "project", "reference"] as const;
@@ -35,10 +45,8 @@ type TopicType = (typeof TOPIC_TYPES)[number];
 type TypeFilter = "all" | TopicType;
 const FILTERS: readonly TypeFilter[] = ["all", ...TOPIC_TYPES];
 
-/** Topics touched inside this window are "recent"; the rest group under "earlier". */
-const RECENT_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
-
 type PaneView = "detail" | "dream";
+type MemoryTab = "effective" | "human" | "current" | "associated" | "managed-global";
 
 export interface MemoryPaneProps {
     data: MemoryListResult | null;
@@ -53,10 +61,15 @@ export interface MemoryPaneProps {
         baseHash: string,
     ) => Promise<{ ok: true } | { ok: false; conflict: MemoryConflictPayload }>;
     /** Resolves false when the delete failed (already notified by the host). */
-    onDeleteTopic: (id: string) => Promise<boolean | undefined>;
+    onDeleteTopic: (
+        id: string,
+        memoryLayer?: "current" | "workspace" | "managed-global",
+    ) => Promise<boolean | undefined>;
     onRefresh: () => void;
     /** Held by App.tsx to prevent duplicate submits. */
     saving: boolean;
+    /** Current target identity; changing it resets pane-local source selection. */
+    target?: string;
     /** Consolidation controls; absent in hosts that do not expose dream RPCs. */
     dream?: MemoryDreamActions & {
         dreamConfig: import("../hooks/useMemoryPane").MemoryDreamConfig | null;
@@ -64,6 +77,15 @@ export interface MemoryPaneProps {
             config: import("../hooks/useMemoryPane").MemoryDreamConfig,
         ) => Promise<boolean>;
     };
+}
+
+function lastSegment(value: string): string {
+    return (
+        value
+            .replace(/[\\/]+$/, "")
+            .split(/[\\/]/)
+            .pop() || value
+    );
 }
 
 function lastActivityMs(topic: MemoryTopicEntry): number {
@@ -117,6 +139,7 @@ export function MemoryPane(props: MemoryPaneProps) {
         onRefresh,
         saving,
         dream,
+        target,
     } = props;
     const { t } = useT();
     const lng = useUiLanguage();
@@ -129,6 +152,7 @@ export function MemoryPane(props: MemoryPaneProps) {
     const [confirmDiscard, setConfirmDiscard] = useState(false);
     const [query, setQuery] = useState("");
     const [typeFilter, setTypeFilter] = useState<TypeFilter>("all");
+    const [memoryTab, setMemoryTab] = useState<MemoryTab>("effective");
     const [archivedExpanded, setArchivedExpanded] = useState(false);
     const listRef = useRef<HTMLDivElement>(null);
     const pendingId = data?.dream?.pending?.id;
@@ -152,10 +176,17 @@ export function MemoryPane(props: MemoryPaneProps) {
         }
     }, [pendingId]);
 
+    useEffect(() => {
+        if (target === undefined) return;
+        setMemoryTab("effective");
+        setArchivedExpanded(false);
+        setQuery("");
+    }, [target]);
+
     const isMemorySelected = selectedId === MEMORY_ROOT_ID;
     const archivedTopics = data?.dream?.archived ?? [];
     const selectedTopic: MemoryTopicEntry | undefined = data?.topics.find(
-        (topic) => topic.id === selectedId,
+        (topic) => memoryTopicRowId(topic) === selectedId,
     );
     const selectedArchivedTopic = selectedId.startsWith(MEMORY_ARCHIVE_PREFIX)
         ? archivedTopics.find((topic) => `${MEMORY_ARCHIVE_PREFIX}${topic.id}` === selectedId)
@@ -166,10 +197,19 @@ export function MemoryPane(props: MemoryPaneProps) {
     const visibleTopics = useMemo(() => {
         const topics = data?.topics ?? [];
         return topics
+            .filter((topic) => {
+                if (memoryTab === "effective") return true;
+                if (memoryTab === "current") {
+                    return topic.memoryLayer === undefined || topic.memoryLayer === "current";
+                }
+                if (memoryTab === "associated") return topic.memoryLayer === "workspace";
+                if (memoryTab === "managed-global") return topic.memoryLayer === "managed-global";
+                return false;
+            })
             .filter((topic) => typeFilter === "all" || topic.type === typeFilter)
             .filter((topic) => topicMatches(topic, terms))
             .sort((a, b) => lastActivityMs(b) - lastActivityMs(a));
-    }, [data?.topics, typeFilter, terms]);
+    }, [data?.topics, memoryTab, typeFilter, terms]);
 
     const visibleArchived = useMemo(
         () =>
@@ -180,16 +220,30 @@ export function MemoryPane(props: MemoryPaneProps) {
         [archivedTopics, typeFilter, terms],
     );
 
-    const groups = useMemo(() => {
-        const recent: MemoryTopicEntry[] = [];
-        const earlier: MemoryTopicEntry[] = [];
+    const layerGroups = useMemo(() => {
+        const groups = new Map<
+            string,
+            {
+                key: string;
+                layer: NonNullable<MemoryTopicEntry["memoryLayer"]>;
+                layerKey?: string;
+                topics: MemoryTopicEntry[];
+            }
+        >();
         for (const topic of visibleTopics) {
-            const activity = lastActivityMs(topic);
-            const isRecent = activity > 0 && nowMs - activity <= RECENT_WINDOW_MS;
-            (isRecent ? recent : earlier).push(topic);
+            const layer = topic.memoryLayer ?? "current";
+            const key = `${layer}:${topic.memoryLayerKey ?? ""}`;
+            const group = groups.get(key) ?? {
+                key,
+                layer,
+                ...(topic.memoryLayerKey ? { layerKey: topic.memoryLayerKey } : {}),
+                topics: [],
+            };
+            group.topics.push(topic);
+            groups.set(key, group);
         }
-        return { recent, earlier };
-    }, [visibleTopics, nowMs]);
+        return [...groups.values()];
+    }, [visibleTopics]);
 
     // While editing, ignore external refreshes that would clobber the draft.
     useEffect(() => {
@@ -241,6 +295,39 @@ export function MemoryPane(props: MemoryPaneProps) {
         data.memoryContent.trim() === "# Memory" &&
         data.topics.length === 0 &&
         archivedTopics.length === 0;
+    const targetKind = data.memorySources?.target ?? "workspace";
+    const memoryTabs: MemoryTab[] = [
+        "effective",
+        "human",
+        "current",
+        ...(targetKind === "channel" ? (["associated", "managed-global"] as const) : []),
+    ];
+    const tabLabel = (tab: MemoryTab): string =>
+        tab === "current"
+            ? t(
+                  targetKind === "channel"
+                      ? "memory.layer.currentChannel"
+                      : "memory.layer.currentWorkspace",
+              )
+            : tab === "managed-global"
+              ? t("memory.layer.managedGlobal")
+              : t(`memory.layer.${tab}`);
+    const tabCount = (tab: MemoryTab): number | undefined => {
+        if (tab === "human") return undefined;
+        if (tab === "associated") {
+            return (data.topics ?? []).filter((topic) => topic.memoryLayer === "workspace").length;
+        }
+        if (tab === "managed-global") {
+            return (data.topics ?? []).filter((topic) => topic.memoryLayer === "managed-global")
+                .length;
+        }
+        if (tab === "current") {
+            return (data.topics ?? []).filter(
+                (topic) => topic.memoryLayer === undefined || topic.memoryLayer === "current",
+            ).length;
+        }
+        return data.topics.length;
+    };
     const showArchived =
         archivedExpanded || terms.length > 0 || selectedArchivedTopic !== undefined;
 
@@ -296,7 +383,8 @@ export function MemoryPane(props: MemoryPaneProps) {
 
     const handleDelete = async () => {
         if (!confirmDeleteId) return;
-        const deleted = await onDeleteTopic(confirmDeleteId);
+        const selected = data.topics.find((topic) => memoryTopicRowId(topic) === confirmDeleteId);
+        const deleted = await onDeleteTopic(confirmDeleteId, selected?.memoryLayer ?? "current");
         setConfirmDeleteId(null);
         // A failed delete keeps the user on the topic they were reading.
         if (deleted !== false) onSelect(MEMORY_ROOT_ID);
@@ -365,7 +453,7 @@ export function MemoryPane(props: MemoryPaneProps) {
     };
 
     const renderTopicRow = (topic: MemoryTopicEntry, archived: boolean) => {
-        const rowId = archived ? `${MEMORY_ARCHIVE_PREFIX}${topic.id}` : topic.id;
+        const rowId = archived ? `${MEMORY_ARCHIVE_PREFIX}${topic.id}` : memoryTopicRowId(topic);
         return (
             <button
                 key={rowId}
@@ -383,6 +471,11 @@ export function MemoryPane(props: MemoryPaneProps) {
                 </span>
                 <span className="memory-card-meta">
                     <span className="memory-card-type">{typeLabel(topic.type)}</span>
+                    {topic.readOnly ? (
+                        <span className="memory-card-read-only">
+                            {t("memory.inheritedReadOnlyShort")}
+                        </span>
+                    ) : null}
                     <span>
                         {formatRelativeTime(topic.updatedAt ?? topic.createdAt, lng, nowMs)}
                     </span>
@@ -433,6 +526,48 @@ export function MemoryPane(props: MemoryPaneProps) {
                 </PaneHeader>
 
                 <div
+                    className="memory-source-tabs"
+                    role="tablist"
+                    aria-label={t("memory.layer.label")}
+                >
+                    {memoryTabs.map((tab) => {
+                        const Icon =
+                            tab === "human"
+                                ? Globe2
+                                : tab === "associated"
+                                  ? FolderKanban
+                                  : tab === "managed-global"
+                                    ? Globe2
+                                    : Layers3;
+                        const count = tabCount(tab);
+                        const active = tab === memoryTab;
+                        return (
+                            <button
+                                key={tab}
+                                type="button"
+                                role="tab"
+                                aria-label={tabLabel(tab)}
+                                aria-selected={active}
+                                tabIndex={active ? 0 : -1}
+                                className={`memory-source-tab${active ? " active" : ""}`}
+                                onClick={() => {
+                                    setMemoryTab(tab);
+                                    onSelect(MEMORY_ROOT_ID);
+                                }}
+                            >
+                                <Icon size={13} aria-hidden="true" />
+                                <span>{tabLabel(tab)}</span>
+                                {count !== undefined ? (
+                                    <span className="memory-source-tab-count" aria-hidden="true">
+                                        {count}
+                                    </span>
+                                ) : null}
+                            </button>
+                        );
+                    })}
+                </div>
+
+                <div
                     className="memory-filter-bar"
                     role="radiogroup"
                     aria-label={t("memory.typeLabel")}
@@ -458,62 +593,84 @@ export function MemoryPane(props: MemoryPaneProps) {
                 </div>
 
                 <div className="memory-list-body" ref={listRef} onKeyDown={handleListKeyDown}>
-                    <div className="memory-list-section-label">{t("memory.globalLabel")}</div>
-                    <button
-                        type="button"
-                        data-memory-row={MEMORY_ROOT_ID}
-                        aria-label={t("memory.globalName")}
-                        aria-current={isMemorySelected && view === "detail" ? "true" : undefined}
-                        className={`memory-global-card${
-                            isMemorySelected && view === "detail" ? " active" : ""
-                        }`}
-                        onClick={() => handleSelect(MEMORY_ROOT_ID)}
-                    >
-                        <span className="memory-global-card-heading">
-                            <span className="memory-card-title">{t("memory.globalName")}</span>
-                            <span className="memory-global-card-mark">md</span>
-                        </span>
-                        {data.memoryContent.trim() ? (
-                            <span className="memory-card-description">
-                                {data.memoryContent.trim()}
-                            </span>
-                        ) : null}
-                        <span className="memory-global-card-footer">{t("memory.globalLabel")}</span>
-                    </button>
+                    {(memoryTab === "effective" || memoryTab === "human") && (
+                        <>
+                            <div className="memory-list-section-label">
+                                {t("memory.globalLabel")}
+                            </div>
+                            <button
+                                type="button"
+                                data-memory-row={MEMORY_ROOT_ID}
+                                aria-label={t("memory.globalName")}
+                                aria-current={
+                                    isMemorySelected && view === "detail" ? "true" : undefined
+                                }
+                                className={`memory-global-card${
+                                    isMemorySelected && view === "detail" ? " active" : ""
+                                }`}
+                                onClick={() => handleSelect(MEMORY_ROOT_ID)}
+                            >
+                                <span className="memory-global-card-heading">
+                                    <span className="memory-card-title">
+                                        {t("memory.globalName")}
+                                    </span>
+                                    <span className="memory-global-card-mark">md</span>
+                                </span>
+                                {data.memoryContent.trim() ? (
+                                    <span className="memory-card-description">
+                                        {data.memoryContent.trim()}
+                                    </span>
+                                ) : null}
+                                <span className="memory-global-card-footer">
+                                    {t("memory.humanAlwaysInherited")}
+                                </span>
+                            </button>
+                        </>
+                    )}
 
-                    {visibleTopics.length === 0 ? (
+                    {memoryTab === "associated" &&
+                    data.memorySources?.associatedWorkspaces.length === 0 ? (
+                        <div className="ui-empty memory-layer-empty">
+                            {t("memory.noAssociated")}
+                        </div>
+                    ) : memoryTab === "managed-global" &&
+                      data.memorySources?.managedGlobal.enabled === false ? (
+                        <div className="ui-empty memory-layer-empty">
+                            {t("memory.managedDisabled")}
+                        </div>
+                    ) : visibleTopics.length === 0 && memoryTab !== "human" ? (
                         <div className="ui-empty">
                             {terms.length > 0
                                 ? t("pane.noMatch")
-                                : data.topics.length > 0
-                                  ? t("memory.noMatchFilter")
-                                  : t("memory.noTopics")}
+                                : memoryTab === "associated"
+                                  ? t("memory.associatedEmpty")
+                                  : memoryTab === "managed-global"
+                                    ? t("memory.managedEmpty")
+                                    : data.topics.length > 0
+                                      ? t("memory.noMatchFilter")
+                                      : t("memory.noTopics")}
                         </div>
                     ) : (
-                        <>
-                            {groups.recent.length > 0 ? (
-                                <>
-                                    <div className="memory-list-section-label">
-                                        {t("memory.group.recent")}
-                                    </div>
+                        layerGroups.map((group) => {
+                            const sectionLabel =
+                                group.layer === "current"
+                                    ? targetKind === "channel"
+                                        ? t("memory.layer.currentChannel")
+                                        : t("memory.layer.currentWorkspace")
+                                    : group.layer === "workspace"
+                                      ? t("memory.layer.associatedItem", {
+                                            workspace: lastSegment(group.layerKey ?? ""),
+                                        })
+                                      : t("memory.layer.managedItem");
+                            return (
+                                <section key={group.key} className="memory-source-group">
+                                    <div className="memory-list-section-label">{sectionLabel}</div>
                                     <div className="memory-card-grid">
-                                        {groups.recent.map((topic) => renderTopicRow(topic, false))}
+                                        {group.topics.map((topic) => renderTopicRow(topic, false))}
                                     </div>
-                                </>
-                            ) : null}
-                            {groups.earlier.length > 0 ? (
-                                <>
-                                    <div className="memory-list-section-label">
-                                        {t("memory.group.earlier")}
-                                    </div>
-                                    <div className="memory-card-grid">
-                                        {groups.earlier.map((topic) =>
-                                            renderTopicRow(topic, false),
-                                        )}
-                                    </div>
-                                </>
-                            ) : null}
-                        </>
+                                </section>
+                            );
+                        })
                     )}
 
                     {archivedTopics.length > 0 ? (
@@ -552,7 +709,12 @@ export function MemoryPane(props: MemoryPaneProps) {
                         state={data.dream}
                         scheduled={data.dreamScheduled}
                         pausedReason={data.dreamPausedReason}
-                        topics={data.topics}
+                        topics={data.topics.filter(
+                            (topic) =>
+                                (topic.memoryLayer === undefined ||
+                                    topic.memoryLayer === "current") &&
+                                !topic.readOnly,
+                        )}
                         busy={dream.busy}
                         onRun={dream.onRun}
                         onApply={dream.onApply}
@@ -563,11 +725,14 @@ export function MemoryPane(props: MemoryPaneProps) {
                         onSaveConfig={dream.onSaveConfig}
                         onClose={() => setView("detail")}
                     />
-                ) : isMemoryEmpty && !isEditing && !selectedArchivedTopic ? (
+                ) : isMemoryEmpty &&
+                  (memoryTab === "effective" || memoryTab === "human") &&
+                  !isEditing &&
+                  !selectedArchivedTopic ? (
                     <div className="memory-detail-placeholder">
                         <p>{t("memory.emptyState")}</p>
                     </div>
-                ) : isMemorySelected ? (
+                ) : isMemorySelected && (memoryTab === "effective" || memoryTab === "human") ? (
                     isEditing ? (
                         <div className="memory-edit">
                             <textarea
@@ -692,6 +857,11 @@ export function MemoryPane(props: MemoryPaneProps) {
                             text={selectedTopic.content}
                         />
                         <MemorySources topic={selectedTopic} />
+                        {selectedTopic.readOnly ? (
+                            <div className="memory-read-only-note">
+                                {t("memory.inheritedReadOnly")}
+                            </div>
+                        ) : null}
                         <div className="memory-view-meta">
                             <code>{selectedTopic.id}</code>
                             <span className="memory-view-meta-time">
@@ -709,14 +879,18 @@ export function MemoryPane(props: MemoryPaneProps) {
                                 </span>
                             </span>
                             <span className="memory-view-meta-spacer" />
-                            <Button
-                                size="sm"
-                                variant="danger"
-                                onClick={() => setConfirmDeleteId(selectedTopic.id)}
-                            >
-                                <Trash size={14} aria-hidden="true" />
-                                {t("memory.delete")}
-                            </Button>
+                            {selectedTopic.readOnly ? null : (
+                                <Button
+                                    size="sm"
+                                    variant="danger"
+                                    onClick={() =>
+                                        setConfirmDeleteId(memoryTopicRowId(selectedTopic))
+                                    }
+                                >
+                                    <Trash size={14} aria-hidden="true" />
+                                    {t("memory.delete")}
+                                </Button>
+                            )}
                         </div>
                     </div>
                 ) : (

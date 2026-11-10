@@ -47,7 +47,11 @@ describe("attachedSession.modelIdentity", () => {
         models: ReturnType<typeof createModels>,
         model: unknown,
         session: unknown,
-        options: { memoryStore?: MemoryStore; sessionKind?: "main" | "subagent" } = {},
+        options: {
+            memoryStore?: MemoryStore;
+            sessionKind?: "main" | "subagent";
+            isIm?: boolean;
+        } = {},
     ): Promise<AttachedSession> {
         const env = new NodeExecutionEnv({ cwd: tmp });
         return await AttachedSession.create({
@@ -66,6 +70,7 @@ describe("attachedSession.modelIdentity", () => {
             sessionCwd: tmp as never,
             getToolContext: () => ({ env, workspace: tmp as never }) as never,
             memoryStore: options.memoryStore,
+            isIm: options.isIm,
             sessionKind: options.sessionKind ?? "main",
         } as never);
     }
@@ -173,7 +178,7 @@ describe("attachedSession.modelIdentity", () => {
             }
         });
 
-        it("enables memory extraction for main sessions but not subagents", async () => {
+        it("enables current-target memory extraction for local and IM main sessions", async () => {
             const env = new NodeExecutionEnv({ cwd: tmp });
             const repo = new JsonlSessionRepo({
                 fileSystem: env,
@@ -201,10 +206,20 @@ describe("attachedSession.modelIdentity", () => {
             });
             assert.equal(extractorOf(child), undefined);
 
+            const imSession = await repo.create({ cwd: tmp }, harnessContext);
+            const imMain = await attach(models, faux.getModel(), imSession, {
+                memoryStore,
+                sessionKind: "main",
+                isIm: true,
+            });
+            assert.ok(extractorOf(imMain));
+
             await main.dispose();
             await child.dispose();
+            await imMain.dispose();
             await mainSession.close(harnessContext);
             await childSession.close(harnessContext);
+            await imSession.close(harnessContext);
         });
     });
 });

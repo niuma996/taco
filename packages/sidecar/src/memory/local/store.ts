@@ -20,6 +20,7 @@ import {
 import { dirname, isAbsolute, join, relative, resolve as resolveTacoHome } from "node:path";
 import { MEMORY_CONTENT_MAX_CHARS } from "@taco-ai/protocol";
 import { tacoHome } from "../../config/config.ts";
+import { buildMemoryContextBlock } from "../contextBlock.ts";
 import {
     type ArchiveCleanupCandidate,
     type ArchiveCleanupResult,
@@ -334,41 +335,20 @@ export class LocalMemoryStore implements MemoryStore {
         const note = this.readMemory();
         const noteBody = note.trim() === MEMORY_INDEX_HEADER.trim() ? "" : note;
 
-        // Aggregate per-workspace topic summaries. The directory is printed once
-        // and each row carries only its id to keep the resident prompt small.
-        const MAX_TOPIC_NOTES = 100;
-        const sortedTopics = this.listTopics()
-            .slice()
-            .sort((a, b) => (b.updatedAt ?? b.createdAt).localeCompare(a.updatedAt ?? a.createdAt));
-        const topics = sortedTopics.slice(0, MAX_TOPIC_NOTES);
-
-        if (!noteBody && topics.length === 0) return "";
-
-        const parts: string[] = [];
-        if (noteBody) parts.push(noteBody);
-        if (topics.length > 0) {
-            if (parts.length > 0) parts.push("\n---\n");
-            parts.push(
-                `Workspace memory notes (newest first; use the read tool to fetch <id>.md from ${this.workspaceDir}):`,
-            );
-            for (const t of topics) {
-                // Collapse any embedded newlines so a multiline name/description
-                // can't split the list item or smuggle extra lines into <memory>.
-                const name = t.name.replace(/[\r\n]+/g, " ").trim();
-                const desc = t.description
-                    .replace(/[\r\n]+/g, " ")
-                    .trim()
-                    .slice(0, 80);
-                parts.push(`- [${t.type}] ${name} — ${desc} — ${t.id}`);
-            }
-            const omitted = sortedTopics.length - topics.length;
-            if (omitted > 0) {
-                parts.push(
-                    `${omitted} additional topics not listed; their files remain in the topic directory.`,
-                );
-            }
-        }
-        return parts.join("\n");
+        return buildMemoryContextBlock(
+            noteBody,
+            [
+                {
+                    heading: `Workspace memory notes (newest first; use the read tool to fetch <id>.md from ${this.workspaceDir}):`,
+                    entries: this.listTopics(),
+                },
+            ],
+            {
+                omittedNotice: (count) =>
+                    `${count} additional topics not listed; their files remain in the topic directory.`,
+                omittedSeparator: "\n",
+            },
+        );
     }
 
     /**

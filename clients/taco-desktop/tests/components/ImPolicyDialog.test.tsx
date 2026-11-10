@@ -42,6 +42,11 @@ const DEFAULT_SOURCES: ImPolicyGetResult["sources"] = {
         source: "default",
         inherited: { value: { mode: "shared" }, source: "default" },
     },
+    inheritManagedGlobal: {
+        value: false,
+        source: "default",
+        inherited: { value: false, source: "default" },
+    },
 };
 
 /** Opens a field's dropdown and picks an option by its accessible name. */
@@ -71,6 +76,7 @@ function makeResult(overrides: Partial<ImPolicyGetResult> = {}): ImPolicyGetResu
             tools: { fsTools: "deny", shell: "deny" },
             commands: { mode: "ask" },
             executionDir: { mode: "shared" },
+            memory: { inheritManagedGlobal: false },
         },
         chatOverride: null,
         hasOverride: false,
@@ -154,6 +160,27 @@ describe("ImPolicyDialog — one dropdown per field", () => {
 });
 
 describe("ImPolicyDialog — saving overrides", () => {
+    it("persists the Taco system memory opt-in as a boolean policy field", async () => {
+        const client = makeClient(makeResult({ rules: GLOBAL_RULES }));
+        renderDialog(client);
+        const user = userEvent.setup({ pointerEventsCheck: 0, delay: null });
+
+        await screen.findByText("imPolicy.sourceGlobal");
+        const toggle = screen.getByRole("switch", {
+            name: "imPolicy.inheritManagedGlobal",
+        });
+        expect(toggle.getAttribute("aria-checked")).toBe("false");
+        await user.click(toggle);
+        await saveAndConfirm(user);
+
+        await waitFor(() => {
+            expect(client.imPolicySetChannelDefault).toHaveBeenCalledWith({
+                channelId: "wechat",
+                patch: { memory: { inheritManagedGlobal: true } },
+            });
+        });
+    });
+
     it("sends the chosen value when a non-parent option is picked", async () => {
         const client = makeClient(makeResult({ rules: GLOBAL_RULES }));
         renderDialog(client);

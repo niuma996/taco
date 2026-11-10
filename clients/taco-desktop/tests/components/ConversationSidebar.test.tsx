@@ -414,4 +414,19 @@ describe("Sidebar conversation groups", () => {
         rerender(<Sidebar {...input} activeCwd={makeImCwd("wecom", "alice", "chat-1")} />);
         expect(labels()).toEqual(["chat-2", "chat-1"]);
     });
+    it("keeps cached channel chats visible when a refresh fails and offers retry", () => {
+        render(<Sidebar {...props({ mode: "im", conversationsError: "offline" })} />);
+        expect(screen.getByRole("button", { name: "chat-1" })).toBeTruthy();
+        expect(screen.getByRole("button", { name: "conversationNav.retry" })).toBeTruthy();
+    });
+
+    it("shows loading rather than an empty state before the first channel result", () => {
+        render(
+            <Sidebar
+                {...props({ mode: "im", conversations: null, conversationsLoading: false })}
+            />,
+        );
+        expect(screen.getByText("conversationNav.loading")).toBeTruthy();
+        expect(screen.queryByText("conversationNav.noConversations")).toBeNull();
+    });
 });

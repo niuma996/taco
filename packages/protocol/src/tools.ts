@@ -179,6 +179,9 @@ export type AgentRuntime = "standard" | "claude-code";
  */
 export type AgentScope = "global" | "workspace";
 
+/** Read-only source selection; builtins are never editable scopes. */
+export type CatalogScope = AgentScope | "builtin";
+
 /**
  * Claude Code permission mode of a `claude-code` agent. `inherit` = pass none
  * and let Claude Code pick its own. Absent = "auto".

@@ -30,6 +30,7 @@ function makeClient(runResult: unknown = { status: "previewed", preview: { id: "
         report: { id: "report-1", appliedAt: "now", counts: {}, skipped: 0 },
     }));
     const memoryDreamUndo = vi.fn(async () => ({ conflicts: ["edited-topic"] }));
+    const memoryDeleteTopic = vi.fn(async () => ({ ok: true }));
     const callProcess = vi.fn(async (method: string, params: Record<string, unknown>) => {
         if (method === "jobs.get") return { job: dreamJob };
         if (method === "jobs.update") return { job: params.job };
@@ -41,12 +42,14 @@ function makeClient(runResult: unknown = { status: "previewed", preview: { id: "
             memoryDreamRun,
             memoryDreamApply,
             memoryDreamUndo,
+            memoryDeleteTopic,
             callProcess,
         },
         memoryList,
         memoryDreamRun,
         memoryDreamApply,
         memoryDreamUndo,
+        memoryDeleteTopic,
         callProcess,
     };
 }
@@ -56,6 +59,23 @@ function renderMemory(client: ReturnType<typeof makeClient>["client"], notify = 
 }
 
 describe("useMemoryPane dream actions", () => {
+    it("deletes only the current layer so inherited ids cannot be redirected", async () => {
+        const fake = makeClient();
+        const { result } = renderMemory(fake.client);
+        await waitFor(() => expect(fake.memoryList).toHaveBeenCalledTimes(1));
+
+        await act(async () => {
+            await result.current.handleDeleteTopic("user-role", "current");
+        });
+
+        expect(fake.memoryDeleteTopic).toHaveBeenCalledWith({
+            workspace: "/ws",
+            id: "user-role",
+            expectedContent: undefined,
+            memoryLayer: "current",
+        });
+    });
+
     it("runs a preview for the active workspace and refreshes the list", async () => {
         const fake = makeClient();
         const { result } = renderMemory(fake.client);

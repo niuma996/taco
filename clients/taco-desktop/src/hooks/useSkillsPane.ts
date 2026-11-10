@@ -73,7 +73,10 @@ export function useSkillsPane(
         if (!activeCwd) return;
         let cancelled = false;
         void client
-            .skillsList({ workspace: asWorkspaceId(activeCwd) })
+            .skillsList({
+                workspace: asWorkspaceId(activeCwd),
+                ...(viewScope === "effective" ? {} : { scope: viewScope }),
+            })
             .then((r) => {
                 if (cancelled) return;
                 setAllSkills(r.skills);
@@ -105,13 +108,18 @@ export function useSkillsPane(
         let cancelled = false;
         setSkillContent("");
         clearSkillContentError();
-        if (!selectedSkillName || !activeCwd) return;
+        setSkillContentLoading(false);
+        if (!active || !selectedSkillName || !activeCwd) return;
         const target = selectedSkillName;
         const known = allSkills.find((s) => s.name === target);
         if (!known) return;
         setSkillContentLoading(true);
         void client
-            .skillContent({ workspace: asWorkspaceId(activeCwd), filePath: known.filePath })
+            .skillContent({
+                workspace: asWorkspaceId(activeCwd),
+                filePath: known.filePath,
+                ...(viewScope === "effective" ? {} : { scope: viewScope }),
+            })
             .then((r) => {
                 if (cancelled) return;
                 setSkillContent(r.content);
@@ -127,7 +135,16 @@ export function useSkillsPane(
         return () => {
             cancelled = true;
         };
-    }, [selectedSkillName, activeCwd, allSkills, client, clearSkillContentError, failSkillContent]);
+    }, [
+        active,
+        selectedSkillName,
+        activeCwd,
+        allSkills,
+        client,
+        viewScope,
+        clearSkillContentError,
+        failSkillContent,
+    ]);
 
     return {
         skills,

@@ -220,15 +220,26 @@ export function ConversationSidebar(props: ConversationSidebarProps) {
     };
 
     const renderChannelList = () => {
-        if (props.conversationsLoading && !props.conversations)
-            return <div className="conversation-group-empty">{t("conversationNav.loading")}</div>;
-        if (props.conversationsError)
+        const refreshError = props.conversationsError ? (
+            <div className="conversation-group-empty conversation-group-error" role="status">
+                <span title={props.conversationsError}>{t("conversationNav.loadFailed")}</span>
+                <button
+                    type="button"
+                    disabled={props.conversationsLoading}
+                    onClick={props.onRetryConversations}
+                >
+                    {t("conversationNav.retry")}
+                </button>
+            </div>
+        ) : null;
+        if (refreshError && !props.conversations?.length) return refreshError;
+        if (
+            props.conversations === null ||
+            (props.conversationsLoading && props.conversations.length === 0)
+        )
             return (
-                <div className="conversation-group-empty conversation-group-error">
-                    <span>{t("conversationNav.loadFailed")}</span>
-                    <button type="button" onClick={props.onRetryConversations}>
-                        {t("conversationNav.retry")}
-                    </button>
+                <div className="conversation-group-empty" role="status">
+                    {t("conversationNav.loading")}
                 </div>
             );
         if (!props.conversationsLoading && props.conversations?.length === 0)
@@ -245,41 +256,44 @@ export function ConversationSidebar(props: ConversationSidebarProps) {
             );
         const byKey = new Map(visibleChannelItems.map((item) => [item.cwd, item]));
         return (
-            <SessionList
-                className="sidebar-list conversation-channel-list"
-                items={visibleChannelItems.map((item) => ({
-                    key: item.cwd,
-                    id: item.sessionId,
-                    label: item.label,
-                    title: `${item.channelId} / ${item.peerId} / ${item.chatId}`,
-                    tag: item.channelId,
-                    updatedAt: item.updatedAt,
-                    running: item.pending,
-                    active: item.cwd === props.activeCwd,
-                }))}
-                onOpen={(row) => {
-                    const item = byKey.get(row.key);
-                    if (item)
-                        props.onOpenSession({ workspace: item.cwd, sessionId: item.sessionId });
-                }}
-                onRename={(row) => {
-                    const item = byKey.get(row.key);
-                    if (item)
-                        props.onRename({
-                            cwd: item.cwd,
-                            sessionId: item.sessionId,
-                            currentName: item.label,
-                        });
-                }}
-                onDelete={(row) => {
-                    const item = byKey.get(row.key);
-                    if (item) props.onDelete({ cwd: item.cwd, sessionId: item.sessionId });
-                }}
-                onManageAssociations={(row) => {
-                    const item = byKey.get(row.key);
-                    if (item) props.onManageAssociations?.({ workspace: item.cwd });
-                }}
-            />
+            <>
+                {refreshError}
+                <SessionList
+                    className="sidebar-list conversation-channel-list"
+                    items={visibleChannelItems.map((item) => ({
+                        key: item.cwd,
+                        id: item.sessionId,
+                        label: item.label,
+                        title: `${item.channelId} / ${item.peerId} / ${item.chatId}`,
+                        tag: item.channelId,
+                        updatedAt: item.updatedAt,
+                        running: item.pending,
+                        active: item.cwd === props.activeCwd,
+                    }))}
+                    onOpen={(row) => {
+                        const item = byKey.get(row.key);
+                        if (item)
+                            props.onOpenSession({ workspace: item.cwd, sessionId: item.sessionId });
+                    }}
+                    onRename={(row) => {
+                        const item = byKey.get(row.key);
+                        if (item)
+                            props.onRename({
+                                cwd: item.cwd,
+                                sessionId: item.sessionId,
+                                currentName: item.label,
+                            });
+                    }}
+                    onDelete={(row) => {
+                        const item = byKey.get(row.key);
+                        if (item) props.onDelete({ cwd: item.cwd, sessionId: item.sessionId });
+                    }}
+                    onManageAssociations={(row) => {
+                        const item = byKey.get(row.key);
+                        if (item) props.onManageAssociations?.({ workspace: item.cwd });
+                    }}
+                />
+            </>
         );
     };
 

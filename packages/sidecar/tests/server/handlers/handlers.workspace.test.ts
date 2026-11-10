@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, before, beforeEach, describe, it } from "node:test";
 import type { RpcResponse } from "@taco-ai/protocol";
-import { MEMORY_CONTENT_MAX_CHARS } from "@taco-ai/protocol";
+import { asWorkspaceId, MEMORY_CONTENT_MAX_CHARS } from "@taco-ai/protocol";
 import { hashOf, LocalMemoryStore, NoOpMemoryStore } from "../../../src/memory/index.ts";
 import type { MemoryEntry } from "../../../src/memory/types.ts";
 import { ProviderKeyStore } from "../../../src/runtime/models/providerKeyStore.ts";
@@ -609,6 +609,117 @@ describe("memory", () => {
             assert.equal(result.memoryContent, "");
             assert.deepEqual(result.topics, []);
         });
+
+        it("keeps legacy clients on writable current topics when inherited ids collide", async () => {
+            const current = new LocalMemoryStore();
+            current.initialize(join(tmpRoot, "im", "channel-a", "scratch"));
+            await current.appendEntry(sampleTopic);
+            const root = join(tmpRoot, "associated-project");
+            const associated = new LocalMemoryStore();
+            associated.initialize(root);
+            await associated.appendEntry({ ...sampleTopic, name: "Inherited topic" });
+            const handler = getRegisteredMethod("memory.list");
+            assert.ok(handler);
+            const ctx = makeCtx({
+                memoryStore: current,
+                imRouting: { channelId: "wechat", peerId: "peer", chatId: "chat" },
+                associatedRoots: () => [root],
+            });
+            const result = (await handler.handler({
+                ...ctx,
+                server: { ...ctx.server, supportsClientCapability: () => false },
+            })) as { topics: Array<{ id: string; name: string }>; memorySources?: unknown };
+            assert.equal(result.topics.length, 1);
+            assert.equal(result.topics[0]?.name, sampleTopic.name);
+            assert.equal(result.memorySources, undefined);
+        });
+
+        it("lists system memory only from registered workspace sources", async () => {
+            const current = new LocalMemoryStore();
+            current.initialize(join(tmpRoot, "im", "channel-a", "scratch"));
+            const root = join(tmpRoot, "registered-project");
+            const registered = new LocalMemoryStore();
+            registered.initialize(root);
+            await registered.appendEntry(sampleTopic);
+            const privateChannel = new LocalMemoryStore();
+            privateChannel.initialize(join(tmpRoot, "im", "channel-b", "scratch"));
+            await privateChannel.appendEntry({ ...sampleTopic, id: "private-channel-note" });
+            const handler = getRegisteredMethod("memory.list");
+            assert.ok(handler);
+            const result = (await handler.handler(
+                makeCtx({
+                    memoryStore: current,
+                    imRouting: { channelId: "wechat", peerId: "peer", chatId: "chat" },
+                    inheritsManagedGlobalMemory: () => true,
+                    managedGlobalMemoryRoots: () => [root],
+                }),
+            )) as {
+                topics: Array<{
+                    id: string;
+                    memoryLayer: string;
+                    memoryLayerKey: string;
+                    readOnly: boolean;
+                }>;
+            };
+            assert.deepEqual(
+                result.topics.map(({ id, memoryLayer, memoryLayerKey, readOnly }) => [
+                    id,
+                    memoryLayer,
+                    memoryLayerKey,
+                    readOnly,
+                ]),
+                [["user-role", "managed-global", root, true]],
+            );
+        });
+
+        it("marks current and associated workspace memory as separate layers", async () => {
+            const current = new LocalMemoryStore();
+            current.initialize("im://wechat/peer/chat");
+            await current.appendEntry(sampleTopic);
+
+            const associatedRoot = join(tmpRoot, "associated-project");
+            const associated = new LocalMemoryStore();
+            associated.initialize(associatedRoot);
+            await associated.appendEntry({
+                ...sampleTopic,
+                id: "workspace-role",
+                name: "Workspace role",
+            });
+
+            const handler = getRegisteredMethod("memory.list");
+            assert.ok(handler);
+            const result = (await handler.handler(
+                makeCtx({
+                    memoryStore: current,
+                    workspaceKey: asWorkspaceId("im://wechat/peer/chat"),
+                    imRouting: { channelId: "wechat", peerId: "peer", chatId: "chat" },
+                    associatedRoots: () => [associatedRoot],
+                    inheritsManagedGlobalMemory: () => false,
+                }),
+            )) as {
+                memorySources: {
+                    target: string;
+                    associatedWorkspaces: string[];
+                    managedGlobal: { enabled: boolean };
+                };
+                topics: Array<{ id: string; memoryLayer: string; readOnly?: boolean }>;
+            };
+
+            assert.equal(result.memorySources.target, "channel");
+            assert.deepEqual(result.memorySources.associatedWorkspaces, [associatedRoot]);
+            assert.equal(result.memorySources.managedGlobal.enabled, false);
+            assert.deepEqual(
+                result.topics.map((topic) => [
+                    topic.id,
+                    topic.memoryLayer,
+                    topic.readOnly ?? false,
+                ]),
+                [
+                    ["user-role", "current", false],
+                    ["workspace-role", "workspace", true],
+                ],
+            );
+        });
     });
 
     describe("memory.write", () => {
@@ -807,6 +918,30 @@ describe("memory", () => {
                 ),
             );
             assert.equal(store.getTopic("user-role"), undefined);
+        });
+
+        it("deleteTopic refuses inherited memory even if its id matches a current topic", async () => {
+            const store = new LocalMemoryStore();
+            store.initialize("ws-test");
+            await store.appendEntry(sampleTopic);
+            const handler = getRegisteredMethod("memory.deleteTopic");
+            assert.ok(handler);
+
+            await assert.rejects(
+                () =>
+                    handler.handler(
+                        makeCtx(
+                            { memoryStore: store },
+                            {
+                                workspace: "/tmp/ws",
+                                id: "user-role",
+                                memoryLayer: "workspace",
+                            },
+                        ),
+                    ),
+                /read-only/,
+            );
+            assert.ok(store.getTopic("user-role"));
         });
 
         it("replace writes updatedAt so listTopics wire response includes it", async () => {

@@ -41,10 +41,10 @@ describe("configuration scope filtering", () => {
         );
     });
 
-    it("keeps the complete effective catalog in channel and effective views", () => {
-        assert.equal(filterAgentScope(agents, "channel").length, 3);
+    it("keeps the effective catalog and filters the builtin source", () => {
+        assert.equal(filterAgentScope(agents, "builtin").length, 1);
         assert.equal(filterAgentScope(agents, "effective").length, 3);
-        assert.equal(filterSkillScope(skills, "channel").length, 3);
+        assert.equal(filterSkillScope(skills, "builtin").length, 1);
         assert.equal(filterSkillScope(skills, "effective").length, 3);
     });
 });

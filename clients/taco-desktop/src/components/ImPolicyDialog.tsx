@@ -38,6 +38,7 @@ import { PolicyValueCard } from "./imPolicy/PolicyValueCard.tsx";
 import { Button } from "./ui/Button.tsx";
 import { Modal } from "./ui/Modal.tsx";
 import { Select } from "./ui/Select.tsx";
+import { Switch } from "./ui/Switch.tsx";
 
 export interface ImPolicyDialogProps {
     open: boolean;
@@ -128,6 +129,7 @@ export function ImPolicyDialog(props: ImPolicyDialogProps): React.ReactElement |
     const [shell, setShell] = useState<"deny" | "allow" | null>(null);
     const [mode, setMode] = useState<"ask" | "auto" | null>(null);
     const [execDir, setExecDir] = useState<ImExecutionDir | null>(null);
+    const [inheritManagedGlobal, setInheritManagedGlobal] = useState<boolean | null>(null);
     const [allowDraft, setAllowDraft] = useState<string[]>([]);
     const [denyDraft, setDenyDraft] = useState<string[]>([]);
 
@@ -152,6 +154,7 @@ export function ImPolicyDialog(props: ImPolicyDialogProps): React.ReactElement |
         setShell(editingPatch.tools?.shell ?? null);
         setMode(editingPatch.commands?.mode ?? null);
         setExecDir(editingPatch.executionDir ?? null);
+        setInheritManagedGlobal(editingPatch.memory?.inheritManagedGlobal ?? null);
         setAllowDraft(editingPatch.commands?.allow ?? []);
         setDenyDraft(editingPatch.commands?.deny ?? []);
         setClientError(null);
@@ -164,6 +167,7 @@ export function ImPolicyDialog(props: ImPolicyDialogProps): React.ReactElement |
         editingPatch.commands?.allow,
         editingPatch.commands?.deny,
         editingPatch.executionDir,
+        editingPatch.memory?.inheritManagedGlobal,
     ]);
 
     const fallbackField = <T,>(value: T): ImPolicyField<T> => ({
@@ -204,6 +208,11 @@ export function ImPolicyDialog(props: ImPolicyDialogProps): React.ReactElement |
             rawSources?.executionDir,
             resolved?.executionDir ?? { mode: "shared" },
             { mode: "shared" },
+        ),
+        inheritManagedGlobal: withInherited(
+            rawSources?.inheritManagedGlobal,
+            resolved?.memory?.inheritManagedGlobal ?? false,
+            false,
         ),
     };
 
@@ -314,18 +323,29 @@ export function ImPolicyDialog(props: ImPolicyDialogProps): React.ReactElement |
             }
         }
 
+        const originalInheritManagedGlobal = editingPatch.memory?.inheritManagedGlobal;
+        if (inheritManagedGlobal === null) {
+            if (originalInheritManagedGlobal !== undefined) {
+                patch.memory = { inheritManagedGlobal: null };
+            }
+        } else if (inheritManagedGlobal !== originalInheritManagedGlobal) {
+            patch.memory = { inheritManagedGlobal };
+        }
+
         return patch;
     }, [
         editingPatch.commands?.allow,
         editingPatch.commands?.deny,
         editingPatch.commands?.mode,
         editingPatch.executionDir,
+        editingPatch.memory?.inheritManagedGlobal,
         editingPatch.tools?.fsTools,
         editingPatch.tools?.shell,
         allowDraft,
         denyDraft,
         execDir,
         fsTools,
+        inheritManagedGlobal,
         mode,
         shell,
         t,
@@ -544,6 +564,36 @@ export function ImPolicyDialog(props: ImPolicyDialogProps): React.ReactElement |
                                 pathPlaceholder: t("imPolicy.executionCwdPlaceholder"),
                             }}
                         />
+                    </PolicyValueCard>
+
+                    <PolicyValueCard
+                        label={t("imPolicy.inheritManagedGlobal")}
+                        className="im-policy-field-wide"
+                        overridden={inheritManagedGlobal !== null}
+                    >
+                        <div className="im-policy-memory-toggle">
+                            <Switch
+                                checked={sources.inheritManagedGlobal.value}
+                                onChange={(next) => {
+                                    markDirty();
+                                    setInheritManagedGlobal(
+                                        next === sources.inheritManagedGlobal.inherited.value
+                                            ? null
+                                            : next,
+                                    );
+                                }}
+                                disabled={formDisabled}
+                                label={t("imPolicy.inheritManagedGlobal")}
+                            />
+                            <div className="im-policy-memory-copy">
+                                <span>{t("imPolicy.inheritManagedGlobalHint")}</span>
+                                <span className="im-policy-memory-source">
+                                    {t("imPolicy.sourceCurrent", {
+                                        source: sourceLabel(sources.inheritManagedGlobal.source),
+                                    })}
+                                </span>
+                            </div>
+                        </div>
                     </PolicyValueCard>
                 </div>
 

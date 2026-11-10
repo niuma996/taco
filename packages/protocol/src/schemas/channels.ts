@@ -78,6 +78,11 @@ const policyPatch = Type.Object({
     tools: Type.Optional(toolsPatch),
     commands: Type.Optional(commandsPatch),
     executionDir: Type.Optional(Type.Union([executionDir, Type.Null()])),
+    memory: Type.Optional(
+        Type.Object({
+            inheritManagedGlobal: Type.Optional(Type.Union([Type.Boolean(), Type.Null()])),
+        }),
+    ),
     // Legacy fields, still read from existing policy files.
     binding: Type.Optional(Type.Union([Type.Object({ executionCwd: Type.String() }), Type.Null()])),
     perChatScratch: Type.Optional(Type.Union([Type.Boolean(), Type.Null()])),

@@ -2,7 +2,7 @@ import { asWorkspaceId, type MemoryListResult } from "@taco-ai/protocol";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createJobsClient } from "../lib/clients/jobsClient.ts";
 import type { TacoClient } from "../lib/clients/tacoClient.ts";
-import { MEMORY_ROOT_ID } from "../lib/memoryPaneTypes.js";
+import { MEMORY_ROOT_ID, memoryTopicRowId } from "../lib/memoryPaneTypes.js";
 
 export interface MemoryConflict {
     currentContent: string;
@@ -21,7 +21,10 @@ export interface UseMemoryPaneResult {
     loadMemory: () => void;
     handleSaveMemory: (content: string, baseHash: string) => Promise<SaveMemoryResult>;
     /** Resolves true when the topic was deleted; failures are already notified. */
-    handleDeleteTopic: (id: string) => Promise<boolean>;
+    handleDeleteTopic: (
+        id: string,
+        memoryLayer?: "current" | "workspace" | "managed-global",
+    ) => Promise<boolean>;
     /** Which dream action is in flight, so the pane can disable its controls. */
     dreamBusy: DreamBusy | null;
     handleDreamRun: () => Promise<boolean>;
@@ -149,7 +152,9 @@ export function useMemoryPane(
     // merged by consolidation) falls back to the global entry.
     useEffect(() => {
         if (!memoryData || memorySelectedId === MEMORY_ROOT_ID) return;
-        const live = memoryData.topics.some((topic) => topic.id === memorySelectedId);
+        const live = memoryData.topics.some(
+            (topic) => memoryTopicRowId(topic) === memorySelectedId,
+        );
         const archived = (memoryData.dream?.archived ?? []).some(
             (topic) => `archive:${topic.id}` === memorySelectedId,
         );
@@ -192,7 +197,10 @@ export function useMemoryPane(
     );
 
     const handleDeleteTopic = useCallback(
-        async (id: string): Promise<boolean> => {
+        async (
+            id: string,
+            memoryLayer: "current" | "workspace" | "managed-global" = "current",
+        ): Promise<boolean> => {
             if (!activeCwd) return false;
             const cwd = activeCwd;
             // Compare-and-delete against what the pane showed: a topic the
@@ -203,6 +211,7 @@ export function useMemoryPane(
                     workspace: asWorkspaceId(cwd),
                     id,
                     expectedContent: shown,
+                    memoryLayer,
                 });
                 // No success toast: the topic drops out of the refreshed list.
                 reloadIfCurrent(cwd);

@@ -11,6 +11,12 @@ const workspace = workspaceIdSchema;
 
 export const toolsListSchema = Type.Object({ workspace });
 
+const catalogScope = Type.Union([
+    Type.Literal("global"),
+    Type.Literal("workspace"),
+    Type.Literal("builtin"),
+]);
+
 const editableAgentScope = Type.Union([Type.Literal("global"), Type.Literal("workspace")]);
 
 /** Shared with the desktop editor and sidecar's semantic validator. */
@@ -19,14 +25,14 @@ export const AGENT_TOOL_NAME_PATTERN = /^[A-Za-z][A-Za-z0-9_-]{0,127}$/;
 
 export const agentsListSchema = Type.Object({
     workspace,
-    scope: Type.Optional(editableAgentScope),
+    scope: Type.Optional(catalogScope),
 });
 
 export const agentsContentSchema = Type.Object({
     workspace,
     agentType: Type.String({ minLength: 1 }),
     // Select a specific layer when a workspace definition shadows a global one.
-    scope: Type.Optional(editableAgentScope),
+    scope: Type.Optional(catalogScope),
 });
 
 const agentType = Type.String({
@@ -88,9 +94,10 @@ export const agentsDeleteSchema = Type.Object({
     scope: Type.Optional(editableAgentScope),
 });
 
-export const skillsListSchema = Type.Object({ workspace });
+export const skillsListSchema = Type.Object({ workspace, scope: Type.Optional(catalogScope) });
 
 export const skillContentSchema = Type.Object({
     workspace,
     filePath: Type.String({ minLength: 1 }),
+    scope: Type.Optional(catalogScope),
 });

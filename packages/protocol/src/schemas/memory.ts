@@ -71,6 +71,17 @@ export const memoryDeleteTopicSchema = Type.Object({
     workspace,
     id: Type.String({ minLength: 1, maxLength: 128 }),
     expectedContent: Type.Optional(Type.String()),
+    /**
+     * Optional for compatibility with pre-2.17 clients. Omission means the
+     * writable current target.
+     */
+    memoryLayer: Type.Optional(
+        Type.Union([
+            Type.Literal("current"),
+            Type.Literal("workspace"),
+            Type.Literal("managed-global"),
+        ]),
+    ),
 });
 
 export const memoryUpsertSchema = Type.Object({

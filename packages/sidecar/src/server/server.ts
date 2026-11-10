@@ -69,29 +69,24 @@ import { makeImSessionsRoot } from "../channels/virtualWorkspace.ts";
 import { defaultAgentDirs } from "../config/agentDirs.ts";
 import {
     defaultSkillDirs,
-    extensionSkillDirInputs,
     type ResolvedCompaction,
     type ResolvedTacoConfig,
     readGlobalConfig,
     resolveConfig,
-    type SkillDirInput,
     validateCommandPermissions,
 } from "../config/config.ts";
 import { tacoHome } from "../config/tacoHome.ts";
 import { activateExtensions } from "../extensions/activation.ts";
 import type { ExtensionRegistry, WorkspaceExtensionSet } from "../extensions/index.ts";
-import { harnessContext } from "../lib/harnessContext.ts";
 import { createLogger } from "../lib/logger.ts";
 import { createPrivateMcpLease, McpScope } from "../mcp/mcpScope.ts";
 import { workspaceKey } from "../memory/local/store.ts";
 import { PlanPushAdapter } from "../plan/planPushAdapter.ts";
 import { DefaultDeferredToolRegistry } from "../runtime/harness/deferredToolRegistry.ts";
 import { createQueuedWatch, type QueuedWatch } from "../runtime/harness/queuedWatch.ts";
-import { SlashNormalizedExecutionEnv } from "../runtime/harness/slashNormalizedEnv.ts";
 import { resolveProvider, resolveProviderEndpoint } from "../runtime/models/modelRegistry.ts";
 import type { ProviderKeyStore } from "../runtime/models/providerKeyStore.ts";
 import type { ImageContent, TextContent, ThinkingLevel } from "../runtime/pi/types.ts";
-import { loadSourcedSkills } from "../runtime/pi/values.ts";
 import { resourceRoot } from "../runtime/runtimeResources.ts";
 import type {
     ChannelControl,
@@ -101,18 +96,7 @@ import type {
     WorkspaceAssociationsControl,
 } from "../runtime/serverRpcSurface.ts";
 import { WorkspaceRuntime } from "../runtime/workspace.ts";
-import { dedupeSkillsByNameWithDuplicates } from "../skills/dedupeSkills.ts";
-import {
-    checkSkillFrontmatter,
-    logSkillDiagnostics,
-    mapDuplicateDiagnostics,
-    mapLoaderDiagnostics,
-} from "../skills/skillDiagnostics.ts";
-import {
-    clearSkillFrontmatterCache,
-    preloadSkillFrontmatter,
-    readSkillFrontmatter,
-} from "../skills/skillFrontmatter.ts";
+import { loadSkillCatalog } from "../skills/skillCatalog.ts";
 import type { TacoSkill } from "../skills/tacoSkill.ts";
 import { TaskPushAdapter } from "../tasks/taskPushAdapter.ts";
 import { builtinToolCandidates } from "../tools/builtinCandidates.ts";
@@ -605,6 +589,15 @@ export class SidecarServer implements ServerRpcSurface {
         return this.workspaces.keys();
     }
 
+    /** Resolve source identities from local runtimes, never from hashed memory directories. */
+    managedGlobalMemoryRoots(): string[] {
+        return this.workspaces
+            .list()
+            .flatMap((workspace) =>
+                workspace.scope.kind === "local" ? [workspace.scope.sessionCwd] : [],
+            );
+    }
+
     /** Invalidate the memory pane for a scheduled consolidation workspace. */
     broadcastMemoryChanged(dirKey: string): void {
         for (const cwd of this.workspaces.keys()) {
@@ -908,84 +901,7 @@ export class SidecarServer implements ServerRpcSurface {
     private async loadSkills(
         fsCwd: string,
     ): Promise<{ skills: TacoSkill[]; diagnostics: SkillDiagnosticEntry[] }> {
-        // Clear first, not after: an edited SKILL.md's frontmatter
-        // (runAs/inlineOnly/allowedTools/model) must not keep serving a
-        // pre-edit value from a previous call's cache. Clearing an empty
-        // map (the cold-start case) is a no-op, so cold start and reload
-        // run the identical sequence rather than diverging.
-        clearSkillFrontmatterCache();
-
-        // SlashNormalizedExecutionEnv wraps NodeExecutionEnv so listDir /
-        // fileInfo / canonicalPath return forward-slash paths even on
-        // Windows. pi-agent-core's `relativeEnvPath` compares with
-        // `path.startsWith(root + "/")` and falls back to the unchanged
-        // absolute path when separators don't match — on Windows that
-        // makes `ignore` throw "path should be a path.relative()'d
-        // string". Combined with `defaultSkillDirs` (also forward-slash
-        // normalized) both sides of the comparison agree.
-        const skillEnv = new SlashNormalizedExecutionEnv({ cwd: fsCwd });
-        // Enabled builtins may ship their own skill dirs (BuiltinManifest
-        // .skillDirs). They are appended after defaultSkillDirs so a user skill
-        // of the same name still wins by first-wins, and a disabled builtin
-        // contributes nothing — its dirs are never collected (see
-        // registerBuiltinExtensions).
-        const skillDirs: SkillDirInput[] = [
-            ...defaultSkillDirs(fsCwd),
-            ...extensionSkillDirInputs(this.extensionRegistry?.extensionSkillDirs() ?? []),
-        ];
-        const loaded = await loadSourcedSkills<TacoSkill["source"], TacoSkill>(
-            skillEnv,
-            skillDirs,
-            (skill, source): TacoSkill => ({ ...skill, source }),
-            harnessContext,
-        );
-        // pi's loadSourcedSkills does not dedupe internally; defaultSkillDirs
-        // places .taco/skills first and builtin last, so dedupeSkillsByName
-        // gives ".taco wins, builtin falls back" first-match semantics.
-        const deduped = dedupeSkillsByNameWithDuplicates(loaded.skills.map((entry) => entry.skill));
-        const skills = deduped.kept;
-        preloadSkillFrontmatter(skills);
-        // Stamp frontmatter-only fields (currently: inlineOnly, whenToUse) onto
-        // each TacoSkill so skills.list can surface them. preloadSkillFrontmatter
-        // must run first — readSkillFrontmatter returns from the cache. The
-        // same pass lints the taco-private keys pi ignores, so a malformed
-        // runAs/inlineOnly/allowedTools/whenToUse surfaces as a diagnostic here
-        // rather than as a tool error at call time.
-        const frontmatterDiagnostics: SkillDiagnosticEntry[] = [];
-        for (const s of skills) {
-            const fm = readSkillFrontmatter(s.filePath);
-            if (fm.inlineOnly === true) {
-                (s as TacoSkill).inlineOnly = true;
-            }
-            // typeof guard, not `!== undefined`: raw YAML yields null for an
-            // empty `whenToUse:` and numbers/booleans for unquoted values —
-            // `.trim()` on any of them would throw and abort the whole loop.
-            if (typeof fm.whenToUse === "string" && fm.whenToUse.trim().length > 0) {
-                (s as TacoSkill).whenToUse = fm.whenToUse.trim();
-            }
-            frontmatterDiagnostics.push(...checkSkillFrontmatter(fm, s.filePath));
-        }
-        // Logs stay: they are the only channel for headless / IM runs with no
-        // client to read `skills.list`. The returned copy is additional, not a
-        // replacement. The level contract — never warn, always info — lives in
-        // logSkillDiagnostics so a single test can guard the toast-surfacing
-        // contract: warn lines become desktop toasts on every boot and every
-        // hot reload, which we don't want for known-shape skill hygiene
-        // problems. Users still see them by opening the skills pane.
-        const diagnostics = [
-            ...mapLoaderDiagnostics(loaded.diagnostics),
-            ...mapDuplicateDiagnostics(deduped.duplicates),
-            ...frontmatterDiagnostics,
-        ];
-        logSkillDiagnostics(
-            {
-                loader: diagnostics,
-                frontmatter: frontmatterDiagnostics,
-                duplicates: mapDuplicateDiagnostics(deduped.duplicates),
-            },
-            log,
-        );
-        return { skills, diagnostics };
+        return loadSkillCatalog(fsCwd, this.extensionRegistry?.extensionSkillDirs() ?? []);
     }
 
     /**
@@ -1173,6 +1089,7 @@ export class SidecarServer implements ServerRpcSurface {
                 // added or removed reaches a live conversation on its next
                 // message without rebuilding the workspace.
                 resolveAssociatedRoots: () => this.associationStore.resolve(scope.key).roots,
+                resolveManagedGlobalMemoryRoots: () => this.managedGlobalMemoryRoots(),
                 toolRegistry,
                 // Shared workspace approvals, including scheduler runs, reach every
                 // initialized desktop. Headless runs deny asks immediately.
@@ -1767,25 +1684,10 @@ export class SidecarServer implements ServerRpcSurface {
     }
 
     /**
-     * Announce that an association set changed.
-     *
-     * The push is workspace-dimensioned, so it fans out over the live
-     * workspaces whose effective set could have moved:
-     *  - a workspace-scope change touches exactly that workspace;
-     *  - a channel-scope change touches every IM conversation on the
-     *    channel, plus the fs workspaces that could inherit it — none
-     *    today, since only IM workspaces fall back to a channel.
-     *
-     * The frame's `workspace` field names the affected workspace, so a
-     * client can refresh the panel it is showing without re-pulling every
-     * workspace. The `key` in the params says which set moved, for a
-     * client that shows a channel-level and a conversation-level editor
-     * side by side.
-     *
-     * The pushed key keeps the caller's spelling — the wire contract is
-     * raw strings, and the client matches what it sent. Which workspaces
-     * the push reaches is decided by `associationAffectsWorkspace`, which
-     * normalizes both sides.
+     * Fan out association changes only to workspaces whose effective roots may change.
+     * The frame names the affected workspace; the key retains the caller's spelling
+     * so editors can match their request. associationAffectsWorkspace normalizes both
+     * sides for routing, including channel and peer inheritance.
      */
     broadcastAssociationsChanged(key: WorkspaceAssociationKey): void {
         for (const cwd of this.workspaces.keys()) {

@@ -360,6 +360,27 @@
 .im-policy-field-control {
     min-inline-size: 0;
 }
+.im-policy-memory-toggle {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: start;
+    gap: var(--space-3);
+}
+.im-policy-memory-toggle .ui-switch {
+    margin-top: 2px;
+}
+.im-policy-memory-copy {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    color: var(--fg-dim);
+    font-size: var(--text-xs);
+    line-height: var(--leading-normal);
+}
+.im-policy-memory-source {
+    color: var(--fg-dim);
+    font-size: var(--text-2xs);
+}
 /* Option text stays a step below the field label (base 0.85rem → sm 0.8rem),
    in the trigger and in the open list. */
 .ui-select-trigger.im-policy-select {

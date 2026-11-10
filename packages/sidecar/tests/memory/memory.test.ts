@@ -196,6 +196,46 @@ describe("store", () => {
             assert.ok(block.indexOf("— older") < block.indexOf("— newer"));
         });
 
+        for (const withHumanMemory of [false, true]) {
+            it(`buildMemoryBlock bounds multibyte summaries to 32 KiB with human memory ${withHumanMemory}`, async () => {
+                const s = mkStore();
+                const manual = withHumanMemory
+                    ? `  # Memory\n\n${"人工指引".repeat(4000)}\n\n`
+                    : "";
+                if (manual) await s.writeMemory(manual, hashOf(s.readMemory()));
+                for (let i = 0; i < 100; i++) {
+                    await s.appendEntry(
+                        entry({
+                            id: `topic-${i}`,
+                            name: "界".repeat(160),
+                            description: "述".repeat(80),
+                            createdAt: new Date(2026, 0, 1, 0, 0, i).toISOString(),
+                        }),
+                    );
+                }
+
+                const block = s.buildMemoryBlock();
+                assert.ok(block.startsWith(manual));
+                const topicBytes = Buffer.byteLength(block) - Buffer.byteLength(manual);
+                assert.ok(topicBytes <= 32 * 1024, `topic context used ${topicBytes} bytes`);
+                const count = block.match(/^- \[/gm)?.length ?? 0;
+                assert.ok(count > 0 && count < 100);
+                assert.ok(block.includes(`fetch <id>.md from ${s.topicDir}`));
+                assert.ok(block.includes(`${100 - count} additional topics not listed`));
+                assert.match(block, /— topic-99\n/);
+                assert.doesNotMatch(block, /— topic-0(?:\n|$)/);
+            });
+        }
+
+        it("buildMemoryBlock preserves legacy names and description truncation", async () => {
+            const s = mkStore();
+            const name = "Legacy ".repeat(30).trim();
+            await s.appendEntry(entry({ name, description: "d".repeat(90) }));
+            const block = s.buildMemoryBlock();
+            assert.ok(block.includes(`- [user] ${name} — ${"d".repeat(80)} — user_role`));
+            assert.doesNotMatch(block, /additional topics/);
+        });
+
         it("buildMemoryBlock lists newest topics first, capped at 100", async () => {
             const s = mkStore();
             for (let i = 0; i < 105; i++) {

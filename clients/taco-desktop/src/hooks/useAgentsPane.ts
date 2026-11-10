@@ -65,12 +65,14 @@ export function useAgentsPane(
     const [agentContentError, setAgentContentError] = useState<string | null>(null);
     const [agentSaving, setAgentSaving] = useState(false);
     const requestCounter = useRef(0);
+    // A mutation must not revive an earlier target/layer, even after navigating back to it.
+    const paneGeneration = useRef(0);
     const agents = useMemo(() => filterAgentScope(catalog, viewScope), [catalog, viewScope]);
 
     const reload = useCallback(async () => {
         if (!activeCwd) return;
         const request = ++requestCounter.current;
-        const layer = viewScope === "global" || viewScope === "workspace" ? viewScope : undefined;
+        const layer = viewScope === "effective" ? undefined : viewScope;
         const workspace = asWorkspaceId(activeCwd);
         const [result, globalResult] = await Promise.all([
             client.agentsList({ workspace, ...(layer ? { scope: layer } : {}) }),
@@ -95,18 +97,24 @@ export function useAgentsPane(
     }, [activeCwd, client, viewScope]);
 
     useEffect(() => {
-        if (!active) return;
-        setCatalog([]);
-        if (!activeCwd) return;
-        setSelectedAgentType(null);
-        setAgentContent(null);
-        setAgentContentError(null);
-        clearAgentsError();
-        reload().catch((error: unknown) => {
-            console.error("[useAgentsPane] agentsList failed:", error);
-            failAgentsList(error);
-        });
+        const generation = ++paneGeneration.current;
+        setAgentSaving(false);
+        if (active) {
+            setCatalog([]);
+            setSelectedAgentType(null);
+            setAgentContent(null);
+            setAgentContentError(null);
+            clearAgentsError();
+            if (activeCwd) {
+                reload().catch((error: unknown) => {
+                    if (generation !== paneGeneration.current) return;
+                    console.error("[useAgentsPane] agentsList failed:", error);
+                    failAgentsList(error);
+                });
+            }
+        }
         return () => {
+            paneGeneration.current += 1;
             requestCounter.current += 1;
         };
     }, [active, activeCwd, reload, clearAgentsError, failAgentsList]);
@@ -115,14 +123,19 @@ export function useAgentsPane(
         let cancelled = false;
         setAgentContent(null);
         setAgentContentError(null);
+        setAgentContentLoading(false);
         const selected = agents.find((agent) => agent.agentType === selectedAgentType);
-        if (!selected || !activeCwd) return;
+        if (!active || !selected || !activeCwd) return;
         setAgentContentLoading(true);
         void client
             .agentsContent({
                 workspace: asWorkspaceId(activeCwd),
                 agentType: selected.agentType,
-                ...(selected.scope ? { scope: selected.scope } : {}),
+                ...(viewScope === "builtin"
+                    ? { scope: "builtin" as const }
+                    : selected.scope
+                      ? { scope: selected.scope }
+                      : {}),
             })
             .then((result) => {
                 if (!cancelled) setAgentContent(result);
@@ -139,11 +152,12 @@ export function useAgentsPane(
         return () => {
             cancelled = true;
         };
-    }, [selectedAgentType, agents, activeCwd, client]);
+    }, [active, selectedAgentType, agents, activeCwd, client, viewScope]);
 
     const saveAgent = useCallback(
         async (input: AgentSaveInput, previousAgentType?: string, previousScope?: AgentScope) => {
             if (!activeCwd) return;
+            const generation = paneGeneration.current;
             setAgentSaving(true);
             try {
                 await client.agentsWrite({
@@ -152,10 +166,11 @@ export function useAgentsPane(
                     ...(previousAgentType !== undefined ? { previousAgentType } : {}),
                     ...(previousScope !== undefined ? { previousScope } : {}),
                 });
+                if (generation !== paneGeneration.current) return;
                 await reload();
-                setSelectedAgentType(input.agentType);
+                if (generation === paneGeneration.current) setSelectedAgentType(input.agentType);
             } finally {
-                setAgentSaving(false);
+                if (generation === paneGeneration.current) setAgentSaving(false);
             }
         },
         [activeCwd, client, reload],
@@ -164,6 +179,7 @@ export function useAgentsPane(
     const deleteAgent = useCallback(
         async (agentType: string, scope?: AgentScope) => {
             if (!activeCwd) return;
+            const generation = paneGeneration.current;
             setAgentSaving(true);
             try {
                 await client.agentsDelete({
@@ -171,9 +187,10 @@ export function useAgentsPane(
                     agentType,
                     ...(scope ? { scope } : {}),
                 });
+                if (generation !== paneGeneration.current) return;
                 await reload();
             } finally {
-                setAgentSaving(false);
+                if (generation === paneGeneration.current) setAgentSaving(false);
             }
         },
         [activeCwd, client, reload],

@@ -1,94 +1,102 @@
-import { type ImConversationEntry, makeImCwd } from "@taco-ai/protocol";
-import { useEffect, useMemo, useState } from "react";
-import type { ConfigurationScope, ConfigurationScopeVariant } from "../lib/configurationScope";
+import { type ImConversationEntry, makeImCwd, parseImCwd } from "@taco-ai/protocol";
+import { useMemo, useState } from "react";
+import type { WorkspaceMode } from "../components/WorkspaceModeTabs";
+import type { ConfigurationScope } from "../lib/configurationScope";
+import { lastSegment } from "../lib/workspaceStorage";
 
 export interface ConfigurationTargetOption {
     value: string;
     label: string;
-    detail?: string;
-}
-
-function workspaceLabel(cwd: string): string {
-    return (
-        cwd
-            .replace(/[\\/]+$/, "")
-            .split(/[\\/]/)
-            .pop() || cwd
-    );
+    detail: string;
+    kind: "workspace" | "channel";
+    channelId?: string;
 }
 
 export interface UseConfigurationScopeInput {
-    variant: ConfigurationScopeVariant;
+    active: boolean;
+    mode: WorkspaceMode;
     activeCwd: string | undefined;
     workspaces: Record<string, unknown>;
     conversations: readonly ImConversationEntry[] | null;
 }
 
-/** Owns configuration-pane targets independently from the chat's active workspace. */
+/** Starts on the main chat target; manual configuration choices never switch chats. */
 export function useConfigurationScope({
-    variant,
+    active,
+    mode,
     activeCwd,
     workspaces,
     conversations,
 }: UseConfigurationScopeInput) {
-    const workspaceOptions = useMemo<ConfigurationTargetOption[]>(
-        () =>
-            Object.keys(workspaces)
-                .filter((cwd) => !cwd.startsWith("im://"))
-                .map((cwd) => ({ value: cwd, label: workspaceLabel(cwd), detail: cwd })),
-        [workspaces],
-    );
-    const channelOptions = useMemo<ConfigurationTargetOption[]>(
-        () =>
-            (conversations ?? []).map((conversation) => {
-                const value = makeImCwd(
-                    conversation.channelId,
-                    conversation.peerId,
-                    conversation.chatId,
-                );
-                return {
-                    value,
-                    label: conversation.peerId,
-                    detail: `${conversation.channelId} · ${conversation.chatId}`,
-                };
-            }),
-        [conversations],
-    );
-    const initialWorkspace =
-        activeCwd && !activeCwd.startsWith("im://")
-            ? activeCwd
-            : (workspaceOptions[0]?.value ?? "");
-    const [scope, setScope] = useState<ConfigurationScope>(
-        variant === "catalog" ? "global" : "workspace",
-    );
-    const [workspaceCwd, setWorkspaceCwd] = useState(initialWorkspace);
-    const [channelCwd, setChannelCwd] = useState("");
-
-    useEffect(() => {
-        if (workspaceCwd && workspaceOptions.some((option) => option.value === workspaceCwd))
-            return;
-        setWorkspaceCwd(initialWorkspace);
-    }, [initialWorkspace, workspaceCwd, workspaceOptions]);
-
-    useEffect(() => {
-        if (channelCwd && channelOptions.some((option) => option.value === channelCwd)) return;
-        setChannelCwd(channelOptions[0]?.value ?? "");
-    }, [channelCwd, channelOptions]);
-
-    const targetCwd =
-        scope === "channel" ? channelCwd || undefined : workspaceCwd || channelCwd || undefined;
-    const targetOptions = scope === "channel" ? channelOptions : workspaceOptions;
-    const setTargetCwd = (cwd: string) => {
-        if (scope === "channel") setChannelCwd(cwd);
-        else setWorkspaceCwd(cwd);
-    };
-
+    const targetOptions = useMemo<ConfigurationTargetOption[]>(() => {
+        const options = new Map<string, ConfigurationTargetOption>();
+        for (const cwd of [...Object.keys(workspaces), ...(activeCwd ? [activeCwd] : [])]) {
+            const route = parseImCwd(cwd);
+            options.set(cwd, {
+                value: cwd,
+                label: route ? route.chatId : lastSegment(cwd),
+                detail: cwd,
+                kind: route ? "channel" : "workspace",
+                ...(route ? { channelId: route.channelId } : {}),
+            });
+        }
+        for (const conversation of conversations ?? []) {
+            const cwd = makeImCwd(conversation.channelId, conversation.peerId, conversation.chatId);
+            options.set(cwd, {
+                value: cwd,
+                label: conversation.name || conversation.chatId,
+                detail: cwd,
+                kind: "channel",
+                channelId: conversation.channelId,
+            });
+        }
+        return [...options.values()].filter(
+            (option) => option.kind === (mode === "im" ? "channel" : "workspace"),
+        );
+    }, [activeCwd, workspaces, conversations, mode]);
+    const chatTarget = targetOptions.find((option) => option.value === activeCwd)?.value;
+    const initialTarget = chatTarget ?? targetOptions[0]?.value;
+    const [selection, setSelection] = useState({
+        active,
+        activeCwd,
+        mode,
+        targets: { [mode]: initialTarget } as Partial<Record<WorkspaceMode, string>>,
+        scope: "effective" as ConfigurationScope,
+    });
+    const remembered = targetOptions.find(
+        (option) => option.value === selection.targets[mode],
+    )?.value;
+    const targetCwd = remembered ?? initialTarget;
+    // A category change keeps its last configuration target; pane entry follows the open chat.
+    if (
+        selection.active !== active ||
+        selection.activeCwd !== activeCwd ||
+        selection.mode !== mode
+    ) {
+        const followsChat = (!selection.active && active) || selection.activeCwd !== activeCwd;
+        const target = (followsChat ? chatTarget : undefined) ?? remembered ?? initialTarget;
+        setSelection({
+            active,
+            activeCwd,
+            mode,
+            scope: "effective",
+            targets: { ...selection.targets, [mode]: target },
+        });
+    } else if (selection.targets[mode] !== targetCwd) {
+        // Pin an asynchronously discovered default before later activity reorders the list.
+        setSelection({ ...selection, targets: { ...selection.targets, [mode]: targetCwd } });
+    }
     return {
-        scope,
-        setScope,
+        mode,
+        scope: selection.scope,
+        setScope: (scope: ConfigurationScope) => setSelection((current) => ({ ...current, scope })),
         targetCwd,
         targetOptions,
-        setTargetCwd,
+        setTargetCwd: (targetCwd: string) =>
+            setSelection((current) => ({
+                ...current,
+                targets: { ...current.targets, [mode]: targetCwd },
+            })),
         hasTarget: targetCwd !== undefined,
     };
 }

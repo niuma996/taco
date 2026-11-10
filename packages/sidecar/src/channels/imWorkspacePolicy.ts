@@ -58,6 +58,7 @@ export const DEFAULT_IM_WORKSPACE_POLICY: ImWorkspacePolicy = {
     tools: { fsTools: "deny", shell: "deny" },
     commands: { mode: "ask" },
     executionDir: { mode: "shared" },
+    memory: { inheritManagedGlobal: false },
 };
 
 const TOOL_VERDICTS = ["deny", "allow"] as const;
@@ -168,6 +169,23 @@ export function validatePartial(raw: unknown, source: string): ImWorkspacePolicy
         }
     }
 
+    let memory: { inheritManagedGlobal?: boolean | null } | undefined;
+    if (raw.memory !== undefined) {
+        if (!isRecord(raw.memory)) invalid(source, "memory", raw.memory);
+        const inheritManagedGlobal = raw.memory.inheritManagedGlobal;
+        if (
+            inheritManagedGlobal !== undefined &&
+            inheritManagedGlobal !== null &&
+            typeof inheritManagedGlobal !== "boolean"
+        ) {
+            invalid(source, "memory.inheritManagedGlobal", inheritManagedGlobal);
+        }
+        memory =
+            inheritManagedGlobal === undefined
+                ? {}
+                : { inheritManagedGlobal: inheritManagedGlobal as boolean | null };
+    }
+
     let binding: { executionCwd: string } | null | undefined;
     if (raw.binding === null) {
         binding = null;
@@ -196,6 +214,7 @@ export function validatePartial(raw: unknown, source: string): ImWorkspacePolicy
     if (Object.keys(tools).length > 0) out.tools = tools;
     if (Object.keys(commands).length > 0) out.commands = commands;
     if (executionDir !== undefined) out.executionDir = executionDir;
+    if (memory !== undefined && Object.keys(memory).length > 0) out.memory = memory;
     if (binding !== undefined) out.binding = binding;
     if (perChatScratch !== undefined) out.perChatScratch = perChatScratch;
     return out;
@@ -210,8 +229,8 @@ export function validateImWorkspacePolicy(raw: unknown, source: string): ImWorks
 /**
  * Merge one patch over another, preserving fields the new patch does not
  * mention. Used by the store's setters so editing one field does not silently
- * revoke unrelated grants. `tools`/`commands` merge field-wise; `binding` and
- * `perChatScratch` replace wholesale when present.
+ * revoke unrelated grants. `tools`/`commands`/`memory` merge field-wise;
+ * `binding` and `perChatScratch` replace wholesale when present.
  */
 export function mergeImWorkspacePolicyPatch(
     base: ImWorkspacePolicyPatch,
@@ -239,6 +258,16 @@ export function mergeImWorkspacePolicyPatch(
         else commands[field] = value;
     }
     if (Object.keys(commands).length > 0) out.commands = commands;
+
+    const memory = { ...base.memory };
+    if (patch.memory?.inheritManagedGlobal !== undefined) {
+        if (patch.memory.inheritManagedGlobal === null) {
+            delete memory.inheritManagedGlobal;
+        } else {
+            memory.inheritManagedGlobal = patch.memory.inheritManagedGlobal;
+        }
+    }
+    if (Object.keys(memory).length > 0) out.memory = memory;
 
     // The canonical field supersedes the legacy pair: writing it replaces the
     // layer's working-directory choice outright, clearing it hands the choice
@@ -270,8 +299,8 @@ export function mergeImWorkspacePolicyPatch(
     return out;
 }
 
-/** Deep-merge a patch over a base. `tools`/`commands` merge field-wise;
- *  `binding` and `perChatScratch` replace wholesale. */
+/** Deep-merge a patch over a base. `tools`/`commands`/`memory` merge
+ *  field-wise; `binding` and `perChatScratch` replace wholesale. */
 export function mergeImWorkspacePolicy(
     base: ImWorkspacePolicy,
     patch: ImWorkspacePolicyPatch,
@@ -290,6 +319,11 @@ export function mergeImWorkspacePolicy(
         patch.commands?.mode === undefined || patch.commands.mode === null
             ? base.commands.mode
             : patch.commands.mode;
+    const inheritManagedGlobal =
+        patch.memory?.inheritManagedGlobal === undefined ||
+        patch.memory.inheritManagedGlobal === null
+            ? (base.memory?.inheritManagedGlobal ?? false)
+            : patch.memory.inheritManagedGlobal;
     return {
         tools: { fsTools, shell },
         commands: {
@@ -301,6 +335,7 @@ export function mergeImWorkspacePolicy(
             patch.executionDir !== undefined && patch.executionDir !== null
                 ? patch.executionDir
                 : base.executionDir,
+        memory: { inheritManagedGlobal },
     };
 }
 
@@ -478,6 +513,11 @@ export function describeImPolicySources(raw: unknown, route: ImRoute | null): Im
             source: dir.source,
             inherited: route === null ? defaultDir : channelDir,
         },
+        inheritManagedGlobal: pick(
+            chat?.memory?.inheritManagedGlobal,
+            channel.memory?.inheritManagedGlobal,
+            false,
+        ),
     };
 }
 

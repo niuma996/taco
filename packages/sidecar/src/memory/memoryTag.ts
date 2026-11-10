@@ -31,7 +31,7 @@ const log = createLogger("memory:hook");
  * Returns an empty function when MEMORY.md is empty or unreadable.
  */
 export function buildMemoryContextHook(
-    store: MemoryStore,
+    store: Pick<MemoryStore, "buildMemoryBlock">,
 ): (event: ContextEvent) => Promise<ContextResult | undefined> {
     return async (event: ContextEvent): Promise<ContextResult | undefined> => {
         let content: string;

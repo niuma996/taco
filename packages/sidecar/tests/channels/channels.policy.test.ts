@@ -29,6 +29,7 @@ describe("imWorkspacePolicy", () => {
 
     describe("imWorkspacePolicy", () => {
         it("resolves to defaults for an empty or absent document", () => {
+            assert.equal(DEFAULT_IM_WORKSPACE_POLICY.memory?.inheritManagedGlobal, false);
             assert.deepEqual(
                 resolveImWorkspacePolicyFromDocument(undefined, ROUTE),
                 DEFAULT_IM_WORKSPACE_POLICY,
@@ -117,6 +118,34 @@ describe("imWorkspacePolicy", () => {
             assert.throws(
                 () => validateImWorkspacePolicy({ commands: { mode: "yolo" } }, "t"),
                 /mode/,
+            );
+        });
+
+        it("lets a chat opt into Taco system memory without changing older policies", () => {
+            const legacy = resolveImWorkspacePolicyFromDocument({}, ROUTE);
+            assert.equal(legacy.memory?.inheritManagedGlobal, false);
+
+            const doc = {
+                default: { memory: { inheritManagedGlobal: false as const } },
+                chats: {
+                    [chatPolicyKey(ROUTE)]: {
+                        memory: { inheritManagedGlobal: true as const },
+                    },
+                },
+            };
+            const resolved = resolveImWorkspacePolicyFromDocument(doc, ROUTE);
+            assert.equal(resolved.memory?.inheritManagedGlobal, true);
+            assert.deepEqual(describeImPolicySources(doc, ROUTE).inheritManagedGlobal, {
+                value: true,
+                source: "chat",
+                inherited: { value: false, source: "channel" },
+            });
+        });
+
+        it("rejects a non-boolean Taco system memory flag", () => {
+            assert.throws(
+                () => validateImWorkspacePolicy({ memory: { inheritManagedGlobal: "yes" } }, "t"),
+                /memory\.inheritManagedGlobal/,
             );
         });
 
@@ -290,6 +319,23 @@ describe("imWorkspacePolicy", () => {
                 { binding: null },
             );
             assert.deepEqual(merged, {});
+        });
+
+        it("merges and clears the Taco system memory flag independently", () => {
+            const enabled = mergeImWorkspacePolicyPatch(
+                { tools: { shell: "allow" } },
+                { memory: { inheritManagedGlobal: true } },
+            );
+            assert.deepEqual(enabled, {
+                tools: { shell: "allow" },
+                memory: { inheritManagedGlobal: true },
+            });
+            assert.deepEqual(
+                mergeImWorkspacePolicyPatch(enabled, {
+                    memory: { inheritManagedGlobal: null },
+                }),
+                { tools: { shell: "allow" } },
+            );
         });
 
         it("describes the winning layer for each single-value field", () => {

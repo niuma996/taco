@@ -19,12 +19,89 @@
     background: var(--pane-list-bg);
 }
 
+.memory-source-tabs {
+    display: flex;
+    flex: 0 0 auto;
+    gap: var(--space-1);
+    padding: 0 var(--space-3);
+    overflow-x: auto;
+    border-bottom: 1px solid var(--divider-section);
+    scrollbar-width: none;
+}
+
+.memory-source-tabs::-webkit-scrollbar {
+    display: none;
+}
+
+.memory-source-tab {
+    position: relative;
+    display: inline-flex;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: var(--space-1);
+    min-height: var(--control-height-md);
+    padding: 0 var(--space-1);
+    border: 0;
+    background: transparent;
+    color: var(--fg-dim);
+    font-family: inherit;
+    font-size: var(--text-xs);
+    white-space: nowrap;
+    cursor: pointer;
+}
+
+.memory-source-tab::after {
+    position: absolute;
+    right: 0;
+    bottom: -1px;
+    left: 0;
+    height: 2px;
+    background: transparent;
+    content: "";
+}
+
+.memory-source-tab:hover {
+    color: var(--fg);
+}
+
+.memory-source-tab.active {
+    color: var(--accent);
+}
+
+.memory-source-tab.active::after {
+    background: var(--accent);
+}
+
+.memory-source-tab:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
+}
+
+.memory-source-tab-count {
+    min-width: 1.25rem;
+    padding: 0 var(--space-1);
+    border-radius: var(--radius-pill);
+    background: var(--hover-overlay);
+    color: var(--fg-dim);
+    font-size: var(--text-2xs);
+    text-align: center;
+}
+
+.memory-source-group + .memory-source-group {
+    border-top: 1px solid var(--divider-section);
+}
+
+.memory-layer-empty {
+    margin-top: var(--space-3);
+    padding: var(--space-4);
+}
+
 /* Type filter: single-choice chips under the header, pinned above the list. */
 .memory-filter-bar {
     display: flex;
     flex: 0 0 auto;
     gap: var(--space-1);
-    padding: 0 var(--space-3) var(--space-2);
+    padding: var(--space-2) var(--space-3);
     overflow-x: auto;
     scrollbar-width: none;
 }
@@ -195,6 +272,21 @@
     border-radius: var(--radius-pill);
     color: var(--fg-dim);
     font-size: var(--text-2xs);
+}
+
+.memory-card-read-only {
+    color: var(--fg-dim);
+    font-size: var(--text-2xs);
+}
+
+.memory-read-only-note {
+    margin-top: var(--space-3);
+    padding: var(--space-2) var(--space-3);
+    border: 1px solid var(--divider-section);
+    border-radius: var(--radius-sm);
+    background: var(--pane-list-bg);
+    color: var(--fg-dim);
+    font-size: var(--text-xs);
 }
 
 .memory-global-card-mark {

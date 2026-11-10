@@ -7,6 +7,7 @@
  * agents.delete  — remove one editable definition
  */
 
+import { join } from "node:path";
 import type {
     AgentsContentResult,
     AgentsDeleteResult,
@@ -16,6 +17,7 @@ import type {
 import { loadAgentDir } from "../../agents/loadAgents.ts";
 import type { AgentDefinition } from "../../agents/types.ts";
 import { createLogger } from "../../lib/logger.ts";
+import { resourceRoot } from "../../runtime/runtimeResources.ts";
 import type { ServerRpcSurface } from "../../runtime/serverRpcSurface.ts";
 import type { WorkspaceRuntime } from "../../runtime/workspace.ts";
 import { registerMethod } from "../methodRegistry.ts";
@@ -55,13 +57,15 @@ export function registerAgentsHandlers(): void {
     registerMethod("agentsList", true, async ({ workspace, params }): Promise<AgentsListResult> => {
         const ctx = scopeContext(workspace);
         const scopedAgents =
-            params.scope === "global"
-                ? await loadAgentDir(userAgentsDir(), "user")
-                : params.scope === "workspace"
-                  ? ctx.workspaceDir
-                      ? await loadAgentDir(agentsDirFor("workspace", ctx), "user")
-                      : []
-                  : workspace.agents;
+            params.scope === "builtin"
+                ? await loadAgentDir(join(resourceRoot(), "agents", "builtin"), "builtin")
+                : params.scope === "global"
+                  ? await loadAgentDir(userAgentsDir(), "user")
+                  : params.scope === "workspace"
+                    ? ctx.workspaceDir
+                        ? await loadAgentDir(agentsDirFor("workspace", ctx), "user")
+                        : []
+                    : workspace.agents;
         const agents = scopedAgents.map((a: AgentDefinition) => {
             const scope = agentScopeOf(a, ctx);
             return {
@@ -82,9 +86,14 @@ export function registerAgentsHandlers(): void {
         "agentsContent",
         true,
         async ({ workspace, params }): Promise<AgentsContentResult> => {
-            const def = params.scope
-                ? await readUserAgent(params.agentType, params.scope, scopeContext(workspace))
-                : workspace.findAgent(params.agentType);
+            const def =
+                params.scope === "builtin"
+                    ? (
+                          await loadAgentDir(join(resourceRoot(), "agents", "builtin"), "builtin")
+                      ).find((agent) => agent.agentType === params.agentType)
+                    : params.scope
+                      ? await readUserAgent(params.agentType, params.scope, scopeContext(workspace))
+                      : workspace.findAgent(params.agentType);
             if (!def) {
                 throw new Error(`agent not found: ${params.agentType}`);
             }

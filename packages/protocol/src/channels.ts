@@ -246,11 +246,21 @@ export interface ImExecutionDir {
     path?: string;
 }
 
+export interface ImMemoryPolicy {
+    /**
+     * Include memory from other registered filesystem workspaces. Human-maintained
+     * `MEMORY.md` and associated workspace memory are governed separately.
+     */
+    inheritManagedGlobal: boolean;
+}
+
 export interface ImWorkspacePolicy {
     tools: ImToolPolicy;
     commands: ImCommandPolicy;
     /** Effective working directory for the resolved scope. */
     executionDir: ImExecutionDir;
+    /** Optional for policy payloads produced before 2.17; absent means off. */
+    memory?: ImMemoryPolicy;
 }
 
 /**
@@ -283,6 +293,10 @@ export interface ImWorkspacePolicyPatch {
      * the parent layer decides again.
      */
     executionDir?: ImExecutionDir | null;
+    memory?: {
+        /** Null clears this layer so the parent decides. */
+        inheritManagedGlobal?: boolean | null;
+    };
     /**
      * Legacy: absolute cwd binding. Still read from existing policy files;
      * superseded by `executionDir` and dropped when that field is written.
@@ -322,6 +336,7 @@ export interface ImPolicySources {
     shell: ImPolicyField<ImToolPolicy["shell"]>;
     commandMode: ImPolicyField<ImCommandPolicy["mode"]>;
     executionDir: ImPolicyField<ImExecutionDir>;
+    inheritManagedGlobal: ImPolicyField<boolean>;
 }
 
 export interface ImPolicyRulesView {

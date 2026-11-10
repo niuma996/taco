@@ -38,6 +38,9 @@ export interface MemorySource {
 /** `memory.list` / `memory.write` / `memory.deleteTopic` — workspace-scoped. */
 export type MemoryListParams = ParamsOf<typeof memoryListSchema>;
 
+/** Which source layer supplied a topic in `memory.list`. */
+export type MemoryTopicLayer = "current" | "workspace" | "managed-global";
+
 /** One topic entry in `memory.list` (corresponds to `projects/{cwd}/{id}.md`).
  *  Field names align with the sidecar `MemoryEntry`. */
 export interface MemoryTopicEntry {
@@ -58,6 +61,12 @@ export interface MemoryTopicEntry {
     sources?: readonly MemorySource[];
     explicitlyRequested?: boolean;
     archivedAt?: string;
+    /** Source layer; absent means `current` from a pre-2.17 daemon. */
+    memoryLayer?: MemoryTopicLayer;
+    /** Stable source identity when ids may collide across workspaces. */
+    memoryLayerKey?: string;
+    /** Inherited layers cannot be edited, deleted, or consolidated here. */
+    readOnly?: boolean;
 }
 
 // ─── dream (memory consolidation) ─────────────────────────────────────────────
@@ -186,6 +195,19 @@ export interface MemoryListResult {
     /** Why the scheduler turned the job off by itself (repeated failures);
      *  absent when it is on, or when the user turned it off. */
     dreamPausedReason?: string;
+    /**
+     * Effective memory layers. Absent from pre-2.17 daemons; clients then
+     * treat every topic as the current target and expose no inherited tabs.
+     */
+    memorySources?: {
+        target: "workspace" | "channel";
+        /** Association roots whose memory is automatically inherited. */
+        associatedWorkspaces: string[];
+        managedGlobal: {
+            /** The channel policy opted into Taco system memory. */
+            enabled: boolean;
+        };
+    };
 }
 
 /** `memory.write` params — overwrites MEMORY.md wholesale. `baseHash` provides optimistic concurrency. */

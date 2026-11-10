@@ -194,9 +194,11 @@ export interface SessionRegistryOptions {
      * should crash if it does) — `createSkillTool` treats falsy as "omit".
      */
     readonly skillAuthoringGuidance?: string;
-    /** User-level memory store — drives extraction + context injection. */
+    /** Current-target memory store — drives extraction and writable operations. */
     readonly memoryStore?: MemoryStore;
-    /** True for IM workspaces; disables memory extraction there. */
+    /** Read-through store used only by the context hook; may include inherited layers. */
+    readonly memoryContextStore?: Pick<MemoryStore, "buildMemoryBlock">;
+    /** True for IM workspaces; disables turn title summaries there. */
     readonly isIm?: boolean;
     /**
      * Resolves the optional lightweight model for a bounded auxiliary scenario.
@@ -408,6 +410,7 @@ export class SessionRegistry extends EventEmitter {
     private skills: readonly TacoSkill[];
     private readonly skillAuthoringGuidance?: string;
     private readonly memoryStore?: MemoryStore;
+    private readonly memoryContextStore?: Pick<MemoryStore, "buildMemoryBlock">;
     private readonly isIm?: boolean;
     private readonly getLiteModel?: (scenario: LiteScenario) => Model<Api> | undefined;
 
@@ -442,6 +445,7 @@ export class SessionRegistry extends EventEmitter {
         this.skills = options.skills;
         this.skillAuthoringGuidance = options.skillAuthoringGuidance;
         this.memoryStore = options.memoryStore;
+        this.memoryContextStore = options.memoryContextStore;
         this.isIm = options.isIm;
         this.getLiteModel = options.getLiteModel;
         this.toolsBuilder = options.toolsBuilder;
@@ -1037,6 +1041,7 @@ export class SessionRegistry extends EventEmitter {
                     defaultUiLocale: this.defaultUiLocale,
                     getSkills: () => this.skills,
                     memoryStore: this.memoryStore,
+                    memoryContextStore: this.memoryContextStore,
                     isIm: this.isIm,
                     setSummaryTitle: (id, name) => this.setSummaryTitle(id, name),
                     getLiteModel: this.getLiteModel,
