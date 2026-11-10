@@ -12,14 +12,6 @@
     width: 100%;
     min-width: 0;
 }
-
-/* The scroll container spans the window so its scrollbar stays at the far
-   right; the reading measure is applied to the content blocks instead. */
-.plugins-pane > * {
-    width: 100%;
-    max-width: var(--settings-content-width);
-    margin-inline: auto;
-}
 .plugins-config-hint-label {
     padding: var(--space-px) var(--space-1-5);
     border-radius: var(--radius-sm);
@@ -49,12 +41,29 @@
     border-radius: var(--radius-sm);
     background: var(--surface-tint);
     color: var(--fg-dim);
+    /* Metadata never gives way to the name — only the name truncates. */
+    flex-shrink: 0;
+    white-space: nowrap;
 }
-.plugins-card-when,
+.plugins-card-desc {
+    color: var(--fg);
+}
 .plugins-card-reason {
     font-size: var(--text-base);
     margin: 0;
     color: var(--fg-dim);
+}
+/* Clamp the usage note so cards in a row keep one height; the full text
+   stays reachable through the hover tooltip. */
+.plugins-card-when {
+    font-size: var(--text-base);
+    margin: 0;
+    color: var(--fg-dim);
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
 }
 .plugins-perm-chips {
     display: flex;
@@ -71,16 +80,12 @@
     cursor: help;
 }
 
-/* ── Section grid — 2-column tiles on wide panes, single-column below ~640px ── */
+/* ── Section grid — the column count follows the pane width so the cards
+      always fill it instead of leaving a centred measure with dead space. ── */
 .plugins-grid {
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 26rem), 1fr));
     gap: var(--space-2);
-}
-@media (max-width: 640px) {
-    .plugins-grid {
-        grid-template-columns: 1fr;
-    }
 }
 
 .plugins-section {

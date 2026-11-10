@@ -211,9 +211,17 @@ function EnabledCard(props: {
                     label={`Disable ${entry.name}`}
                 />
             </div>
-            <p className="pane-card-desc">{entry.description ?? t("plugins.noDescription")}</p>
+            <p
+                className="pane-card-desc plugins-card-desc"
+                title={entry.description ?? t("plugins.noDescription")}
+            >
+                {entry.description ?? t("plugins.noDescription")}
+            </p>
             {entry.whenToUse && (
-                <p className="plugins-card-when">
+                <p
+                    className="plugins-card-when"
+                    title={`${t("plugins.whenToUsePrefix")}${entry.whenToUse}`}
+                >
                     {t("plugins.whenToUsePrefix")}
                     {entry.whenToUse}
                 </p>

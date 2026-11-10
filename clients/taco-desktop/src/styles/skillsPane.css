@@ -30,14 +30,21 @@
     margin-bottom: var(--space-1-5);
 }
 
-/* Same-name overrides are expected behavior, not a failure — neutral/info
-   styling instead of the warning color used for real load errors. */
+/* Same-name overrides are expected behavior, not a failure — a quiet note
+   instead of the warning box used for real load errors. No frame, no fill:
+   the notice sits on the same footing as the list below it. */
 .skills-diagnostics--info {
-    border-color: var(--info);
+    border: none;
+    padding: 0;
+    background: transparent;
 }
 
 .skills-diagnostics--info .skills-diagnostics-title {
-    color: var(--info);
+    margin-bottom: 0;
+    color: var(--fg-dim);
+    font-weight: var(--weight-medium);
+    text-transform: none;
+    letter-spacing: 0;
 }
 
 .skills-diagnostic-item {
