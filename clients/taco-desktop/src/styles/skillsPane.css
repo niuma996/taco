@@ -2,23 +2,6 @@
 
 /* ── Skills pane ──────────────────────────────────────────────── */
 
-.skills-pane {
-    display: flex;
-    flex: 1;
-    min-width: 0;
-    overflow: hidden;
-}
-
-.skills-list {
-    flex: 0 0 60%;
-    min-width: 0;
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-    border-right: 1px solid var(--divider-panel);
-    background: var(--pane-list-bg);
-}
-
 /* The list rows scroll; the PaneHeader above stays pinned. */
 .skills-list-body {
     flex: 1;
@@ -34,17 +17,17 @@
     margin: 0 0 var(--space-2);
     border: 1px solid var(--warning);
     border-radius: var(--radius-md);
-    padding: 0.5rem 0.6rem;
+    padding: var(--space-2) var(--space-2-5);
     background: var(--accent-bg-hover);
 }
 
 .skills-diagnostics-title {
-    font-size: 0.72rem;
-    font-weight: 600;
+    font-size: var(--text-2xs);
+    font-weight: var(--weight-semibold);
     color: var(--warning);
     text-transform: uppercase;
     letter-spacing: 0.05em;
-    margin-bottom: 0.4rem;
+    margin-bottom: var(--space-1-5);
 }
 
 /* Same-name overrides are expected behavior, not a failure — neutral/info
@@ -58,7 +41,7 @@
 }
 
 .skills-diagnostic-item {
-    padding: 0.3rem 0;
+    padding: var(--space-1) 0;
 }
 
 .skills-diagnostic-item + .skills-diagnostic-item {
@@ -66,9 +49,9 @@
 }
 
 .skills-diagnostic-message {
-    font-size: 0.75rem;
+    font-size: var(--text-xs);
     color: var(--fg);
-    line-height: 1.4;
+    line-height: var(--leading-normal);
 }
 
 .skills-diagnostic-path {
@@ -76,13 +59,7 @@
     font-family: var(--mono);
     color: var(--fg-dim);
     word-break: break-all;
-    margin-top: 0.15rem;
-}
-
-.skills-card-grid {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: var(--space-2);
+    margin-top: var(--space-0-5);
 }
 
 .skills-list-item {
@@ -132,7 +109,7 @@
     -webkit-box-orient: vertical;
     -webkit-line-clamp: 2;
     text-align: left;
-    font-weight: 600;
+    font-weight: var(--weight-semibold);
     line-height: var(--leading-tight);
     overflow-wrap: anywhere;
 }
@@ -162,84 +139,44 @@
     border-radius: var(--radius-pill);
     border: 1px solid var(--border);
     color: var(--fg-dim);
-    line-height: 1.3;
-}
-
-.skills-detail {
-    flex: 0 0 40%;
-    min-width: 0;
-    overflow-y: auto;
-    padding: 1.2rem;
+    line-height: var(--leading-tight);
 }
 
 .skills-detail-name {
-    margin: 0 0 0.4rem 0;
-    font-size: 1.2rem;
-    font-weight: 600;
+    margin: 0 0 var(--space-1-5) 0;
+    font-size: var(--text-lg);
+    font-weight: var(--weight-semibold);
     overflow-wrap: anywhere;
 }
 
-@media (max-width: 1100px) {
-    .skills-card-grid {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
-}
-
-@media (max-width: 760px) {
-    .skills-pane {
-        flex-direction: column;
-        overflow-y: auto;
-    }
-
-    .skills-list,
-    .skills-detail {
-        flex: 0 0 auto;
-        width: 100%;
-    }
-
-    .skills-list {
-        max-height: 58vh;
-        border-right: none;
-        border-bottom: 1px solid var(--divider-panel);
-    }
-
-    .skills-detail {
-        min-height: 42vh;
-    }
-
-    .skills-card-grid {
-        grid-template-columns: 1fr;
-    }
-}
-
 .skills-detail-description {
-    margin: 0 0 1rem 0;
-    font-size: 0.9rem;
+    margin: 0 0 var(--space-4) 0;
+    font-size: var(--text-base);
     color: var(--fg-dim);
-    line-height: 1.5;
+    line-height: var(--leading-normal);
 }
 
 .skills-detail-meta {
-    margin: 0 0 0.8rem 0;
-    font-size: 0.78rem;
+    margin: 0 0 var(--space-3) 0;
+    font-size: var(--text-sm);
     color: var(--fg-dim);
 }
 
 .skills-detail-tag {
     display: inline-block;
-    padding: 0.1rem 0.5rem;
+    padding: var(--space-0-5) var(--space-2);
     border-radius: var(--radius-pill);
     border: 1px solid var(--border);
-    font-size: 0.7rem;
+    font-size: var(--text-2xs);
 }
 
 .skills-detail-path-label {
-    font-size: 0.75rem;
+    font-size: var(--text-xs);
     text-transform: uppercase;
     letter-spacing: 0.06em;
     color: var(--fg-dim);
-    margin: 0 0 0.4rem 0;
-    font-weight: 600;
+    margin: 0 0 var(--space-1-5) 0;
+    font-weight: var(--weight-semibold);
 }
 
 .skills-detail-path {
@@ -254,7 +191,7 @@
     color: var(--code-fg);
     border-radius: var(--radius-xs);
     padding: 0.1em 0.4em;
-    font-size: 0.8rem;
+    font-size: var(--text-sm);
     font-family: var(--mono);
     word-break: break-all;
 }
@@ -265,29 +202,29 @@
     justify-content: center;
     height: 100%;
     color: var(--fg-dim);
-    font-size: 0.85rem;
+    font-size: var(--text-base);
     font-style: italic;
 }
 
 .skills-detail-content-label {
-    font-size: 0.75rem;
+    font-size: var(--text-xs);
     text-transform: uppercase;
     letter-spacing: 0.06em;
     color: var(--fg-dim);
-    margin: 1rem 0 0.4rem 0;
-    font-weight: 600;
+    margin: var(--space-4) 0 var(--space-1-5) 0;
+    font-weight: var(--weight-semibold);
 }
 
 .skills-detail-loading {
     color: var(--fg-dim);
-    font-size: 0.8rem;
+    font-size: var(--text-sm);
     font-style: italic;
     margin: 0;
 }
 
 .skills-detail-content-error {
     color: var(--error);
-    font-size: 0.8rem;
+    font-size: var(--text-sm);
     margin: 0;
 }
 
@@ -295,6 +232,6 @@
    the .skills-detail column scrolls the whole page. md-assistant styles come from
    chatMarkdown.css via the className passed to AssistantMarkdown. */
 .skills-detail-content {
-    font-size: 0.85rem;
+    font-size: var(--text-base);
     margin: 0;
 }

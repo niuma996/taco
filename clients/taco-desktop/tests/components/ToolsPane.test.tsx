@@ -10,7 +10,7 @@ vi.mock("react-i18next", () => ({
 afterEach(cleanup);
 
 describe("ToolsPane", () => {
-    it("renders tools as cards while preserving the selected schema detail", () => {
+    it("keeps tool selection and source filtering available in the compact list", () => {
         const { container } = render(
             <ToolsPane
                 error={null}
@@ -33,7 +33,6 @@ describe("ToolsPane", () => {
             />,
         );
 
-        assert.equal(container.querySelectorAll(".tools-card-grid .tools-list-item").length, 2);
         assert.ok(container.querySelector(".tools-list > .pane-header .pane-search"));
         assert.equal(container.querySelectorAll(".tools-filter-chips").length, 3);
         assert.equal(
@@ -46,6 +45,13 @@ describe("ToolsPane", () => {
         assert.equal(
             container.querySelector(".tools-list-item-description")?.textContent,
             "Read a workspace file.",
+        );
+
+        fireEvent.click(screen.getByRole("button", { name: /Web search/ }));
+        assert.ok(screen.getByRole("heading", { name: "web_search" }));
+        assert.equal(
+            screen.getByRole("button", { name: /Web search/ }).getAttribute("aria-current"),
+            "true",
         );
 
         const sourceFilter = screen.getByRole("radiogroup", { name: "tools.filterSource" });

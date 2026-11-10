@@ -144,7 +144,6 @@ export function DebugTab(props: DebugTabProps) {
                 <div className="settings-row">
                     <Button
                         variant="primary"
-                        className="debug-restart-btn"
                         onClick={() => void applyAndRestart()}
                         disabled={restarting}
                     >

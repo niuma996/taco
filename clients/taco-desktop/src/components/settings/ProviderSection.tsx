@@ -8,6 +8,7 @@
  * After any save, refresh the providers list and model list via
  * `useProviders.refresh` + `onKeysChanged`.
  */
+
 import type {
     CustomModelEntry,
     CustomProviderConfig,
@@ -22,6 +23,7 @@ import { useProviders } from "../../hooks/useProviders.ts";
 import { useT } from "../../i18n/useI18n.ts";
 import type { TacoClient } from "../../lib/clients/tacoClient.ts";
 import { getGlobalConfig } from "../../lib/globalConfig.ts";
+import { Button } from "../ui/Button";
 import { Tag } from "../ui/Tag.tsx";
 import { ProviderDetailModal } from "./ProviderDetailModal.tsx";
 import { ProviderIcon } from "./ProviderIcon.tsx";
@@ -155,14 +157,9 @@ export function ProviderSection(props: ProviderSectionProps) {
         <section className="settings-tab-subsection">
             <div className="provider-section-head">
                 <h3>{t("settings.providersTitle")}</h3>
-                <button
-                    type="button"
-                    className="prompt-button"
-                    disabled={saving}
-                    onClick={() => setDetail({ kind: "add" })}
-                >
+                <Button type="button" disabled={saving} onClick={() => setDetail({ kind: "add" })}>
                     {t("settings.customProviderAddBtn")}
-                </button>
+                </Button>
             </div>
             <p className="settings-tab-desc">{t("settings.providersDesc")}</p>
             <div className="provider-list">

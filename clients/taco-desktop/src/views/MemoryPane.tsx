@@ -2,7 +2,7 @@
  * MemoryPane — memory panel view (shown when mainView = 'memory').
  *
  * Pure view: data is held by App.tsx and passed via props (mirrors SkillsPane).
- * Left column: a type filter, the global MEMORY.md, live topics grouped by
+ * Page header: source navigation and consolidation. Left column: a type filter, the global MEMORY.md, live topics grouped by
  * recency, and a collapsed archive. Right column: the selected entry, or the
  * consolidation view the header's sparkle button opens.
  *
@@ -26,10 +26,12 @@ import {
 import { type KeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
 import { AssistantMarkdown } from "../components/AssistantMarkdown";
 import { ConfirmModal } from "../components/ConfirmModal";
+import { ContentHeader } from "../components/ContentHeader";
 import { type MemoryDreamActions, MemoryDreamPanel } from "../components/memory/MemoryDreamPanel";
 import { PaneHeader } from "../components/PaneHeader";
 import { Button } from "../components/ui/Button";
 import { IconButton } from "../components/ui/IconButton";
+import { TabList } from "../components/ui/TabList";
 import { useNow } from "../hooks/useNow";
 import { useT, useUiLanguage } from "../i18n/useI18n";
 import type {
@@ -254,23 +256,23 @@ export function MemoryPane(props: MemoryPaneProps) {
     if (!data) {
         if (loading) {
             return (
-                <div className="memory-pane">
-                    <div className="memory-list">
+                <div className="memory-pane catalog-pane">
+                    <div className="memory-list catalog-list">
                         <div className="pane-header">{t("memory.title")}</div>
                         <div className="ui-empty">{t("memory.loading")}</div>
                     </div>
-                    <div className="memory-detail memory-detail-placeholder">
+                    <div className="memory-detail catalog-detail memory-detail-placeholder">
                         {t("memory.loading")}
                     </div>
                 </div>
             );
         }
         return (
-            <div className="memory-pane">
-                <div className="memory-list">
+            <div className="memory-pane catalog-pane">
+                <div className="memory-list catalog-list">
                     <div className="pane-header">{t("memory.title")}</div>
                 </div>
-                <div className="memory-detail memory-detail-error" role="alert">
+                <div className="memory-detail catalog-detail memory-detail-error" role="alert">
                     {error ?? t("memory.errorLoad")}
                 </div>
             </div>
@@ -279,11 +281,11 @@ export function MemoryPane(props: MemoryPaneProps) {
 
     if (!data.enabled) {
         return (
-            <div className="memory-pane">
-                <div className="memory-list">
+            <div className="memory-pane catalog-pane">
+                <div className="memory-list catalog-list">
                     <div className="pane-header">{t("memory.title")}</div>
                 </div>
-                <div className="memory-detail memory-detail-disabled">
+                <div className="memory-detail catalog-detail memory-detail-disabled">
                     <h2>{t("memory.disabledState")}</h2>
                     <p>{t("memory.disabledHint")}</p>
                 </div>
@@ -488,416 +490,418 @@ export function MemoryPane(props: MemoryPaneProps) {
     const archivedLastUpdated = selectedArchivedTopic?.updatedAt;
 
     return (
-        <div className="memory-pane">
-            <div className="memory-list">
-                {/* Counts cover topics only. The global MEMORY.md row is pinned and
+        <div className="memory-page">
+            <div className="memory-page-heading">
+                <ContentHeader
+                    title={t("memory.title")}
+                    actions={
+                        dream ? (
+                            <Button
+                                size="sm"
+                                variant={view === "dream" ? "default" : "ghost"}
+                                className="memory-dream-trigger"
+                                aria-pressed={view === "dream"}
+                                onClick={() => setView(view === "dream" ? "detail" : "dream")}
+                            >
+                                <Sparkles size={14} aria-hidden="true" />
+                                {t("memory.dream.open")}
+                                {pendingId ? (
+                                    <span className="memory-dream-dot" aria-hidden="true" />
+                                ) : null}
+                            </Button>
+                        ) : null
+                    }
+                />
+            </div>
+            <TabList
+                className="memory-source-tabs"
+                label={t("memory.layer.label")}
+                value={memoryTab}
+                onValueChange={(tab) => {
+                    setMemoryTab(tab);
+                    onSelect(MEMORY_ROOT_ID);
+                }}
+                items={memoryTabs.map((value) => {
+                    const Icon =
+                        value === "human" || value === "managed-global"
+                            ? Globe2
+                            : value === "associated"
+                              ? FolderKanban
+                              : Layers3;
+                    const count = tabCount(value);
+                    return {
+                        value,
+                        label: tabLabel(value),
+                        icon: <Icon size={14} aria-hidden="true" />,
+                        trailing:
+                            count !== undefined ? (
+                                <span className="memory-source-tab-count" aria-hidden="true">
+                                    {count}
+                                </span>
+                            ) : undefined,
+                    };
+                })}
+            />
+            <div className="memory-pane catalog-pane">
+                <div className="memory-list catalog-list">
+                    {/* Counts cover topics only. The global MEMORY.md row is pinned and
                     never filtered, so including it would report "1/3" on a query
                     that actually matched no topics. */}
-                <PaneHeader
-                    title={t("memory.title")}
-                    count={data.topics.length}
-                    shownCount={visibleTopics.length}
-                    query={query}
-                    onQueryChange={setQuery}
-                >
-                    {dream ? (
-                        <Button
-                            size="sm"
-                            variant={view === "dream" ? "default" : "ghost"}
-                            className="memory-dream-trigger"
-                            aria-pressed={view === "dream"}
-                            onClick={() => setView(view === "dream" ? "detail" : "dream")}
-                        >
-                            <Sparkles size={14} aria-hidden="true" />
-                            {t("memory.dream.open")}
-                            {pendingId ? (
-                                <span className="memory-dream-dot" aria-hidden="true" />
-                            ) : null}
-                        </Button>
-                    ) : null}
-                    <IconButton
-                        onClick={onRefresh}
-                        title={t("memory.refresh")}
-                        aria-label={t("memory.refresh")}
-                        disabled={loading}
+                    <PaneHeader
+                        title={t("memory.topicsTitle")}
+                        count={data.topics.length}
+                        shownCount={visibleTopics.length}
+                        query={query}
+                        onQueryChange={setQuery}
                     >
-                        <RefreshCw size={14} aria-hidden="true" />
-                    </IconButton>
-                </PaneHeader>
+                        <IconButton
+                            onClick={onRefresh}
+                            title={t("memory.refresh")}
+                            aria-label={t("memory.refresh")}
+                            disabled={loading}
+                        >
+                            <RefreshCw size={14} aria-hidden="true" />
+                        </IconButton>
+                    </PaneHeader>
 
-                <div
-                    className="memory-source-tabs"
-                    role="tablist"
-                    aria-label={t("memory.layer.label")}
-                >
-                    {memoryTabs.map((tab) => {
-                        const Icon =
-                            tab === "human"
-                                ? Globe2
-                                : tab === "associated"
-                                  ? FolderKanban
-                                  : tab === "managed-global"
-                                    ? Globe2
-                                    : Layers3;
-                        const count = tabCount(tab);
-                        const active = tab === memoryTab;
-                        return (
-                            <button
-                                key={tab}
-                                type="button"
-                                role="tab"
-                                aria-label={tabLabel(tab)}
-                                aria-selected={active}
-                                tabIndex={active ? 0 : -1}
-                                className={`memory-source-tab${active ? " active" : ""}`}
-                                onClick={() => {
-                                    setMemoryTab(tab);
-                                    onSelect(MEMORY_ROOT_ID);
-                                }}
-                            >
-                                <Icon size={13} aria-hidden="true" />
-                                <span>{tabLabel(tab)}</span>
-                                {count !== undefined ? (
-                                    <span className="memory-source-tab-count" aria-hidden="true">
-                                        {count}
-                                    </span>
-                                ) : null}
-                            </button>
-                        );
-                    })}
-                </div>
-
-                <div
-                    className="memory-filter-bar"
-                    role="radiogroup"
-                    aria-label={t("memory.typeLabel")}
-                    onKeyDown={handleFilterKeyDown}
-                >
-                    {FILTERS.map((filter) => {
-                        const checked = typeFilter === filter;
-                        return (
-                            // biome-ignore lint/a11y/useSemanticElements: chips styled as pills; native radio inputs cannot carry the chip styling
-                            <button
-                                key={filter}
-                                type="button"
-                                role="radio"
-                                aria-checked={checked}
-                                tabIndex={checked ? 0 : -1}
-                                className="memory-filter-chip"
-                                onClick={() => setTypeFilter(filter)}
-                            >
-                                {filter === "all" ? t("memory.filter.all") : typeLabel(filter)}
-                            </button>
-                        );
-                    })}
-                </div>
-
-                <div className="memory-list-body" ref={listRef} onKeyDown={handleListKeyDown}>
-                    {(memoryTab === "effective" || memoryTab === "human") && (
-                        <>
-                            <div className="memory-list-section-label">
-                                {t("memory.globalLabel")}
-                            </div>
-                            <button
-                                type="button"
-                                data-memory-row={MEMORY_ROOT_ID}
-                                aria-label={t("memory.globalName")}
-                                aria-current={
-                                    isMemorySelected && view === "detail" ? "true" : undefined
-                                }
-                                className={`memory-global-card${
-                                    isMemorySelected && view === "detail" ? " active" : ""
-                                }`}
-                                onClick={() => handleSelect(MEMORY_ROOT_ID)}
-                            >
-                                <span className="memory-global-card-heading">
-                                    <span className="memory-card-title">
-                                        {t("memory.globalName")}
-                                    </span>
-                                    <span className="memory-global-card-mark">md</span>
-                                </span>
-                                {data.memoryContent.trim() ? (
-                                    <span className="memory-card-description">
-                                        {data.memoryContent.trim()}
-                                    </span>
-                                ) : null}
-                                <span className="memory-global-card-footer">
-                                    {t("memory.humanAlwaysInherited")}
-                                </span>
-                            </button>
-                        </>
-                    )}
-
-                    {memoryTab === "associated" &&
-                    data.memorySources?.associatedWorkspaces.length === 0 ? (
-                        <div className="ui-empty memory-layer-empty">
-                            {t("memory.noAssociated")}
-                        </div>
-                    ) : memoryTab === "managed-global" &&
-                      data.memorySources?.managedGlobal.enabled === false ? (
-                        <div className="ui-empty memory-layer-empty">
-                            {t("memory.managedDisabled")}
-                        </div>
-                    ) : visibleTopics.length === 0 && memoryTab !== "human" ? (
-                        <div className="ui-empty">
-                            {terms.length > 0
-                                ? t("pane.noMatch")
-                                : memoryTab === "associated"
-                                  ? t("memory.associatedEmpty")
-                                  : memoryTab === "managed-global"
-                                    ? t("memory.managedEmpty")
-                                    : data.topics.length > 0
-                                      ? t("memory.noMatchFilter")
-                                      : t("memory.noTopics")}
-                        </div>
-                    ) : (
-                        layerGroups.map((group) => {
-                            const sectionLabel =
-                                group.layer === "current"
-                                    ? targetKind === "channel"
-                                        ? t("memory.layer.currentChannel")
-                                        : t("memory.layer.currentWorkspace")
-                                    : group.layer === "workspace"
-                                      ? t("memory.layer.associatedItem", {
-                                            workspace: lastSegment(group.layerKey ?? ""),
-                                        })
-                                      : t("memory.layer.managedItem");
+                    <div
+                        className="memory-filter-bar"
+                        role="radiogroup"
+                        aria-label={t("memory.typeLabel")}
+                        onKeyDown={handleFilterKeyDown}
+                    >
+                        {FILTERS.map((filter) => {
+                            const checked = typeFilter === filter;
                             return (
-                                <section key={group.key} className="memory-source-group">
-                                    <div className="memory-list-section-label">{sectionLabel}</div>
-                                    <div className="memory-card-grid">
-                                        {group.topics.map((topic) => renderTopicRow(topic, false))}
-                                    </div>
-                                </section>
+                                // biome-ignore lint/a11y/useSemanticElements: chips styled as pills; native radio inputs cannot carry the chip styling
+                                <button
+                                    key={filter}
+                                    type="button"
+                                    role="radio"
+                                    aria-checked={checked}
+                                    tabIndex={checked ? 0 : -1}
+                                    className="memory-filter-chip"
+                                    onClick={() => setTypeFilter(filter)}
+                                >
+                                    {filter === "all" ? t("memory.filter.all") : typeLabel(filter)}
+                                </button>
                             );
-                        })
-                    )}
-
-                    {archivedTopics.length > 0 ? (
-                        <div className="memory-archive-section">
-                            <button
-                                type="button"
-                                className="memory-archive-toggle"
-                                aria-expanded={showArchived}
-                                onClick={() => setArchivedExpanded(!showArchived)}
-                            >
-                                <ChevronRight
-                                    size={12}
-                                    aria-hidden="true"
-                                    className={`memory-archive-chevron${
-                                        showArchived ? " open" : ""
-                                    }`}
-                                />
-                                {t("memory.dream.archivedLabel")}
-                                <span className="memory-archive-count">
-                                    {visibleArchived.length}
-                                </span>
-                            </button>
-                            {showArchived ? (
-                                <div className="memory-card-grid memory-card-grid-archived">
-                                    {visibleArchived.map((topic) => renderTopicRow(topic, true))}
-                                </div>
-                            ) : null}
-                        </div>
-                    ) : null}
-                </div>
-            </div>
-
-            <div className="memory-detail" key={view}>
-                {view === "dream" && dream ? (
-                    <MemoryDreamPanel
-                        state={data.dream}
-                        scheduled={data.dreamScheduled}
-                        pausedReason={data.dreamPausedReason}
-                        topics={data.topics.filter(
-                            (topic) =>
-                                (topic.memoryLayer === undefined ||
-                                    topic.memoryLayer === "current") &&
-                                !topic.readOnly,
-                        )}
-                        busy={dream.busy}
-                        onRun={dream.onRun}
-                        onApply={dream.onApply}
-                        onDiscard={dream.onDiscard}
-                        onUndo={dream.onUndo}
-                        onScheduleToggle={dream.onScheduleToggle}
-                        dreamConfig={dream.dreamConfig}
-                        onSaveConfig={dream.onSaveConfig}
-                        onClose={() => setView("detail")}
-                    />
-                ) : isMemoryEmpty &&
-                  (memoryTab === "effective" || memoryTab === "human") &&
-                  !isEditing &&
-                  !selectedArchivedTopic ? (
-                    <div className="memory-detail-placeholder">
-                        <p>{t("memory.emptyState")}</p>
+                        })}
                     </div>
-                ) : isMemorySelected && (memoryTab === "effective" || memoryTab === "human") ? (
-                    isEditing ? (
-                        <div className="memory-edit">
-                            <textarea
-                                className="memory-edit-textarea"
-                                value={draft}
-                                onChange={(e) => setDraft(e.target.value)}
-                                disabled={saving}
-                            />
-                            <div className="memory-edit-actions">
-                                <Button
-                                    size="sm"
-                                    variant="ghost"
-                                    onClick={handleCancelEdit}
-                                    disabled={saving}
+
+                    <div className="memory-list-body" ref={listRef} onKeyDown={handleListKeyDown}>
+                        {(memoryTab === "effective" || memoryTab === "human") && (
+                            <>
+                                <div className="memory-list-section-label">
+                                    {t("memory.globalLabel")}
+                                </div>
+                                <button
+                                    type="button"
+                                    data-memory-row={MEMORY_ROOT_ID}
+                                    aria-label={t("memory.globalName")}
+                                    aria-current={
+                                        isMemorySelected && view === "detail" ? "true" : undefined
+                                    }
+                                    className={`memory-global-card${
+                                        isMemorySelected && view === "detail" ? " active" : ""
+                                    }`}
+                                    onClick={() => handleSelect(MEMORY_ROOT_ID)}
                                 >
-                                    {t("memory.cancel")}
-                                </Button>
-                                <Button
-                                    size="sm"
-                                    variant="primary"
-                                    onClick={handleSave}
-                                    disabled={saving || draft === data.memoryContent}
-                                >
-                                    <Save size={14} aria-hidden="true" />
-                                    {t("memory.save")}
-                                </Button>
+                                    <span className="memory-global-card-heading">
+                                        <span className="memory-card-title">
+                                            {t("memory.globalName")}
+                                        </span>
+                                        <span className="memory-global-card-mark">md</span>
+                                    </span>
+                                    {data.memoryContent.trim() ? (
+                                        <span className="memory-card-description">
+                                            {data.memoryContent.trim()}
+                                        </span>
+                                    ) : null}
+                                    <span className="memory-global-card-footer">
+                                        {t("memory.humanAlwaysInherited")}
+                                    </span>
+                                </button>
+                            </>
+                        )}
+
+                        {memoryTab === "associated" &&
+                        data.memorySources?.associatedWorkspaces.length === 0 ? (
+                            <div className="ui-empty memory-layer-empty">
+                                {t("memory.noAssociated")}
                             </div>
+                        ) : memoryTab === "managed-global" &&
+                          data.memorySources?.managedGlobal.enabled === false ? (
+                            <div className="ui-empty memory-layer-empty">
+                                {t("memory.managedDisabled")}
+                            </div>
+                        ) : visibleTopics.length === 0 && memoryTab !== "human" ? (
+                            <div className="ui-empty">
+                                {terms.length > 0
+                                    ? t("pane.noMatch")
+                                    : memoryTab === "associated"
+                                      ? t("memory.associatedEmpty")
+                                      : memoryTab === "managed-global"
+                                        ? t("memory.managedEmpty")
+                                        : data.topics.length > 0
+                                          ? t("memory.noMatchFilter")
+                                          : t("memory.noTopics")}
+                            </div>
+                        ) : (
+                            layerGroups.map((group) => {
+                                const sectionLabel =
+                                    group.layer === "current"
+                                        ? targetKind === "channel"
+                                            ? t("memory.layer.currentChannel")
+                                            : t("memory.layer.currentWorkspace")
+                                        : group.layer === "workspace"
+                                          ? t("memory.layer.associatedItem", {
+                                                workspace: lastSegment(group.layerKey ?? ""),
+                                            })
+                                          : t("memory.layer.managedItem");
+                                return (
+                                    <section key={group.key} className="memory-source-group">
+                                        <div className="memory-list-section-label">
+                                            {sectionLabel}
+                                        </div>
+                                        <div className="memory-card-grid catalog-grid">
+                                            {group.topics.map((topic) =>
+                                                renderTopicRow(topic, false),
+                                            )}
+                                        </div>
+                                    </section>
+                                );
+                            })
+                        )}
+
+                        {archivedTopics.length > 0 ? (
+                            <div className="memory-archive-section">
+                                <button
+                                    type="button"
+                                    className="memory-archive-toggle"
+                                    aria-expanded={showArchived}
+                                    onClick={() => setArchivedExpanded(!showArchived)}
+                                >
+                                    <ChevronRight
+                                        size={12}
+                                        aria-hidden="true"
+                                        className={`memory-archive-chevron${
+                                            showArchived ? " open" : ""
+                                        }`}
+                                    />
+                                    {t("memory.dream.archivedLabel")}
+                                    <span className="memory-archive-count">
+                                        {visibleArchived.length}
+                                    </span>
+                                </button>
+                                {showArchived ? (
+                                    <div className="memory-card-grid catalog-grid memory-card-grid-archived">
+                                        {visibleArchived.map((topic) =>
+                                            renderTopicRow(topic, true),
+                                        )}
+                                    </div>
+                                ) : null}
+                            </div>
+                        ) : null}
+                    </div>
+                </div>
+
+                <div className="memory-detail catalog-detail" key={view}>
+                    {view === "dream" && dream ? (
+                        <MemoryDreamPanel
+                            state={data.dream}
+                            scheduled={data.dreamScheduled}
+                            pausedReason={data.dreamPausedReason}
+                            topics={data.topics.filter(
+                                (topic) =>
+                                    (topic.memoryLayer === undefined ||
+                                        topic.memoryLayer === "current") &&
+                                    !topic.readOnly,
+                            )}
+                            busy={dream.busy}
+                            onRun={dream.onRun}
+                            onApply={dream.onApply}
+                            onDiscard={dream.onDiscard}
+                            onUndo={dream.onUndo}
+                            onScheduleToggle={dream.onScheduleToggle}
+                            dreamConfig={dream.dreamConfig}
+                            onSaveConfig={dream.onSaveConfig}
+                            onClose={() => setView("detail")}
+                        />
+                    ) : isMemoryEmpty &&
+                      (memoryTab === "effective" || memoryTab === "human") &&
+                      !isEditing &&
+                      !selectedArchivedTopic ? (
+                        <div className="memory-detail-placeholder">
+                            <p>{t("memory.emptyState")}</p>
                         </div>
-                    ) : (
+                    ) : isMemorySelected && (memoryTab === "effective" || memoryTab === "human") ? (
+                        isEditing ? (
+                            <div className="memory-edit">
+                                <textarea
+                                    className="memory-edit-textarea"
+                                    value={draft}
+                                    onChange={(e) => setDraft(e.target.value)}
+                                    disabled={saving}
+                                />
+                                <div className="memory-edit-actions">
+                                    <Button
+                                        size="sm"
+                                        variant="ghost"
+                                        onClick={handleCancelEdit}
+                                        disabled={saving}
+                                    >
+                                        {t("memory.cancel")}
+                                    </Button>
+                                    <Button
+                                        size="sm"
+                                        variant="primary"
+                                        onClick={handleSave}
+                                        disabled={saving || draft === data.memoryContent}
+                                    >
+                                        <Save size={14} aria-hidden="true" />
+                                        {t("memory.save")}
+                                    </Button>
+                                </div>
+                            </div>
+                        ) : (
+                            <div className="memory-view">
+                                <div className="memory-view-header">
+                                    <h2 className="memory-view-name">{t("memory.globalName")}</h2>
+                                    <Button size="sm" variant="ghost" onClick={handleStartEdit}>
+                                        <Pencil size={14} aria-hidden="true" />
+                                        {t("memory.edit")}
+                                    </Button>
+                                </div>
+                                <AssistantMarkdown
+                                    className="md-assistant memory-view-markdown"
+                                    text={data.memoryContent}
+                                />
+                            </div>
+                        )
+                    ) : selectedArchivedTopic ? (
                         <div className="memory-view">
                             <div className="memory-view-header">
-                                <h2 className="memory-view-name">{t("memory.globalName")}</h2>
-                                <Button size="sm" variant="ghost" onClick={handleStartEdit}>
-                                    <Pencil size={14} aria-hidden="true" />
-                                    {t("memory.edit")}
+                                <h2 className="memory-view-name">{selectedArchivedTopic.name}</h2>
+                                <span className="memory-type-chip">
+                                    {typeLabel(selectedArchivedTopic.type)}
+                                </span>
+                                <span className="memory-type-chip memory-type-chip-muted">
+                                    {t("memory.dream.archivedBadge")}
+                                </span>
+                                <Button
+                                    size="sm"
+                                    variant="default"
+                                    disabled={!dream || dream.busy !== null}
+                                    onClick={() => {
+                                        void handleRestore(selectedArchivedTopic.id);
+                                    }}
+                                >
+                                    {dream?.busy === "restore"
+                                        ? t("memory.dream.restoring")
+                                        : t("memory.dream.restore")}
                                 </Button>
                             </div>
+                            {selectedArchivedTopic.description ? (
+                                <p className="memory-view-desc">
+                                    {selectedArchivedTopic.description}
+                                </p>
+                            ) : null}
                             <AssistantMarkdown
                                 className="md-assistant memory-view-markdown"
-                                text={data.memoryContent}
+                                text={selectedArchivedTopic.content}
                             />
-                        </div>
-                    )
-                ) : selectedArchivedTopic ? (
-                    <div className="memory-view">
-                        <div className="memory-view-header">
-                            <h2 className="memory-view-name">{selectedArchivedTopic.name}</h2>
-                            <span className="memory-type-chip">
-                                {typeLabel(selectedArchivedTopic.type)}
-                            </span>
-                            <span className="memory-type-chip memory-type-chip-muted">
-                                {t("memory.dream.archivedBadge")}
-                            </span>
-                        </div>
-                        {selectedArchivedTopic.description ? (
-                            <p className="memory-view-desc">{selectedArchivedTopic.description}</p>
-                        ) : null}
-                        <AssistantMarkdown
-                            className="md-assistant memory-view-markdown"
-                            text={selectedArchivedTopic.content}
-                        />
-                        <MemorySources topic={selectedArchivedTopic} />
-                        <div className="memory-view-meta">
-                            <code>{selectedArchivedTopic.id}</code>
-                            <span className="memory-view-meta-time">
-                                <span className="memory-view-meta-label">
-                                    {archivedLastUpdated
-                                        ? t("memory.updatedLabel")
-                                        : t("memory.createdLabel")}
-                                </span>
-                                <span>
-                                    {formatRelativeTime(
-                                        archivedLastUpdated ?? selectedArchivedTopic.createdAt,
-                                        lng,
-                                        nowMs,
-                                    )}
-                                </span>
-                            </span>
-                            {"archivedAt" in selectedArchivedTopic &&
-                            typeof selectedArchivedTopic.archivedAt === "string" ? (
+                            <MemorySources topic={selectedArchivedTopic} />
+                            <div className="memory-view-meta">
+                                <code>{selectedArchivedTopic.id}</code>
                                 <span className="memory-view-meta-time">
                                     <span className="memory-view-meta-label">
-                                        {t("memory.dream.archivedAt", "Archived")}
+                                        {archivedLastUpdated
+                                            ? t("memory.updatedLabel")
+                                            : t("memory.createdLabel")}
                                     </span>
-                                    <time dateTime={selectedArchivedTopic.archivedAt}>
+                                    <span>
                                         {formatRelativeTime(
-                                            selectedArchivedTopic.archivedAt,
+                                            archivedLastUpdated ?? selectedArchivedTopic.createdAt,
                                             lng,
                                             nowMs,
                                         )}
-                                    </time>
+                                    </span>
                                 </span>
-                            ) : null}
-                            <span className="memory-view-meta-spacer" />
-                            <Button
-                                size="sm"
-                                variant="default"
-                                disabled={!dream || dream.busy !== null}
-                                onClick={() => {
-                                    void handleRestore(selectedArchivedTopic.id);
-                                }}
-                            >
-                                {dream?.busy === "restore"
-                                    ? t("memory.dream.restoring")
-                                    : t("memory.dream.restore")}
-                            </Button>
-                        </div>
-                    </div>
-                ) : selectedTopic ? (
-                    <div className="memory-view">
-                        <div className="memory-view-header">
-                            <h2 className="memory-view-name">{selectedTopic.name}</h2>
-                            <span className="memory-type-chip">
-                                {typeLabel(selectedTopic.type)}
-                            </span>
-                        </div>
-                        {selectedTopic.description ? (
-                            <p className="memory-view-desc">{selectedTopic.description}</p>
-                        ) : null}
-                        <AssistantMarkdown
-                            className="md-assistant memory-view-markdown"
-                            text={selectedTopic.content}
-                        />
-                        <MemorySources topic={selectedTopic} />
-                        {selectedTopic.readOnly ? (
-                            <div className="memory-read-only-note">
-                                {t("memory.inheritedReadOnly")}
+                                {"archivedAt" in selectedArchivedTopic &&
+                                typeof selectedArchivedTopic.archivedAt === "string" ? (
+                                    <span className="memory-view-meta-time">
+                                        <span className="memory-view-meta-label">
+                                            {t("memory.dream.archivedAt", "Archived")}
+                                        </span>
+                                        <time dateTime={selectedArchivedTopic.archivedAt}>
+                                            {formatRelativeTime(
+                                                selectedArchivedTopic.archivedAt,
+                                                lng,
+                                                nowMs,
+                                            )}
+                                        </time>
+                                    </span>
+                                ) : null}
                             </div>
-                        ) : null}
-                        <div className="memory-view-meta">
-                            <code>{selectedTopic.id}</code>
-                            <span className="memory-view-meta-time">
-                                <span className="memory-view-meta-label">
-                                    {lastUpdated
-                                        ? t("memory.updatedLabel")
-                                        : t("memory.createdLabel")}
-                                </span>
-                                <span>
-                                    {formatRelativeTime(
-                                        lastUpdated ?? selectedTopic.createdAt,
-                                        lng,
-                                        nowMs,
-                                    )}
-                                </span>
-                            </span>
-                            <span className="memory-view-meta-spacer" />
-                            {selectedTopic.readOnly ? null : (
-                                <Button
-                                    size="sm"
-                                    variant="danger"
-                                    onClick={() =>
-                                        setConfirmDeleteId(memoryTopicRowId(selectedTopic))
-                                    }
-                                >
-                                    <Trash size={14} aria-hidden="true" />
-                                    {t("memory.delete")}
-                                </Button>
-                            )}
                         </div>
-                    </div>
-                ) : (
-                    <div className="memory-detail-placeholder">
-                        <p>{t("memory.selectHint")}</p>
-                    </div>
-                )}
+                    ) : selectedTopic ? (
+                        <div className="memory-view">
+                            <div className="memory-view-header">
+                                <h2 className="memory-view-name">{selectedTopic.name}</h2>
+                                <span className="memory-type-chip">
+                                    {typeLabel(selectedTopic.type)}
+                                </span>
+                                {selectedTopic.readOnly ? null : (
+                                    <Button
+                                        size="sm"
+                                        variant="danger"
+                                        onClick={() =>
+                                            setConfirmDeleteId(memoryTopicRowId(selectedTopic))
+                                        }
+                                    >
+                                        <Trash size={14} aria-hidden="true" />
+                                        {t("memory.delete")}
+                                    </Button>
+                                )}
+                            </div>
+                            {selectedTopic.description ? (
+                                <p className="memory-view-desc">{selectedTopic.description}</p>
+                            ) : null}
+                            <AssistantMarkdown
+                                className="md-assistant memory-view-markdown"
+                                text={selectedTopic.content}
+                            />
+                            <MemorySources topic={selectedTopic} />
+                            {selectedTopic.readOnly ? (
+                                <div className="memory-read-only-note">
+                                    {t("memory.inheritedReadOnly")}
+                                </div>
+                            ) : null}
+                            <div className="memory-view-meta">
+                                <code>{selectedTopic.id}</code>
+                                <span className="memory-view-meta-time">
+                                    <span className="memory-view-meta-label">
+                                        {lastUpdated
+                                            ? t("memory.updatedLabel")
+                                            : t("memory.createdLabel")}
+                                    </span>
+                                    <span>
+                                        {formatRelativeTime(
+                                            lastUpdated ?? selectedTopic.createdAt,
+                                            lng,
+                                            nowMs,
+                                        )}
+                                    </span>
+                                </span>
+                            </div>
+                        </div>
+                    ) : (
+                        <div className="memory-detail-placeholder">
+                            <p>{t("memory.selectHint")}</p>
+                        </div>
+                    )}
+                </div>
             </div>
 
             <ConfirmModal

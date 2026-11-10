@@ -24,6 +24,8 @@ import { useT } from "../../i18n/useI18n.ts";
 import type { TacoClient } from "../../lib/clients/tacoClient.ts";
 import { applyGlobalConfig, getGlobalConfig } from "../../lib/globalConfig.ts";
 import { ConfirmModal } from "../ConfirmModal.tsx";
+import { ContentHeader } from "../ContentHeader.tsx";
+import { Button } from "../ui/Button";
 import { McpServerCard } from "./McpServerCard.tsx";
 import { McpServerForm } from "./McpServerForm.tsx";
 
@@ -189,50 +191,32 @@ export function McpSection(props: McpSectionProps) {
 
     return (
         <section className="settings-tab">
-            <div className="mcp-section-head">
-                <div>
-                    <h3>{t("settings.mcpServersTitle")}</h3>
-                    <p className="settings-tab-desc">{t("settings.mcpServersDesc")}</p>
-                    <p className="settings-tab-desc mcp-restart-hint">
-                        {t("settings.mcpServersRestartHint")}
-                    </p>
-                </div>
-                <div className="mcp-section-actions">
-                    <button
-                        type="button"
-                        className="settings-btn"
-                        onClick={(e) => void refresh(e.shiftKey)}
-                        disabled={refreshing || mutating || restarting}
-                        title={t("settings.mcpServersRefreshHint")}
-                    >
-                        <RefreshCw
-                            size={14}
-                            aria-hidden="true"
-                            className={refreshing ? "spin" : ""}
-                        />
-                        {t("settings.mcpServersRefresh")}
-                    </button>
-                    <button
-                        type="button"
-                        className="settings-btn"
-                        onClick={() => setPanel({ kind: "add" })}
-                        disabled={mutating || restarting}
-                    >
-                        {t("settings.mcpServerAddBtn")}
-                    </button>
-                    <button
-                        type="button"
-                        className="settings-btn mcp-restart-btn"
-                        onClick={() => void applyAndRestart()}
-                        disabled={mutating || restarting}
-                        title={t("settings.mcpServersApplyAndRestartHint")}
-                    >
-                        <Power size={14} aria-hidden="true" />
-                        {restarting
-                            ? t("settings.mcpServersRestarting")
-                            : t("settings.mcpServersApplyAndRestart")}
-                    </button>
-                </div>
+            <div className="mcp-section-header">
+                <ContentHeader
+                    title={t("settings.mcpServersTitle")}
+                    description={t("settings.mcpServersDesc")}
+                    actions={
+                        <Button
+                            type="button"
+                            onClick={() => setPanel({ kind: "add" })}
+                            disabled={mutating || restarting}
+                        >
+                            {t("settings.mcpServerAddBtn")}
+                        </Button>
+                    }
+                />
+            </div>
+
+            <div className="mcp-list-toolbar">
+                <Button
+                    type="button"
+                    onClick={(e) => void refresh(e.shiftKey)}
+                    disabled={refreshing || mutating || restarting}
+                    title={t("settings.mcpServersRefreshHint")}
+                >
+                    <RefreshCw size={14} aria-hidden="true" className={refreshing ? "spin" : ""} />
+                    {t("settings.mcpServersRefresh")}
+                </Button>
             </div>
 
             {probeError && (
@@ -267,6 +251,24 @@ export function McpSection(props: McpSectionProps) {
                     ))}
                 </div>
             )}
+
+            <footer className="mcp-commit-actions">
+                <p className="settings-tab-desc mcp-restart-hint">
+                    {t("settings.mcpServersRestartHint")}
+                </p>
+                <Button
+                    type="button"
+                    variant="primary"
+                    onClick={() => void applyAndRestart()}
+                    disabled={mutating || restarting}
+                    title={t("settings.mcpServersApplyAndRestartHint")}
+                >
+                    <Power size={14} aria-hidden="true" />
+                    {restarting
+                        ? t("settings.mcpServersRestarting")
+                        : t("settings.mcpServersApplyAndRestart")}
+                </Button>
+            </footer>
 
             {panel.kind === "add" && (
                 <McpServerForm

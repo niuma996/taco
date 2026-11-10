@@ -1,31 +1,14 @@
 /* toolsPane.css — tools pane (list + detail); split from panes.css */
 
 /* ── Tools pane ── */
-.tools-pane {
-    display: flex;
-    flex: 1;
-    min-width: 0;
-    overflow: hidden;
-}
-
-.tools-list {
-    flex: 0 0 60%;
-    min-width: 0;
-    display: flex;
-    flex-direction: column;
-    border-right: 1px solid var(--divider-panel);
-    background: var(--pane-list-bg);
-    overflow: hidden;
-}
-
-/* Filter groups stay pinned under the header while cards scroll. */
+/* Filter groups stay pinned under the header while tool rows scroll. */
 .tools-list-controls {
     display: flex;
     flex-direction: column;
     gap: var(--space-1);
     padding: 0 var(--space-3) var(--space-2-5);
     border-bottom: 1px solid var(--divider-section);
-    margin-bottom: 0.35rem;
+    margin-bottom: var(--space-1-5);
 }
 
 /* The list rows scroll; header + controls stay pinned. */
@@ -50,14 +33,12 @@
 }
 
 .tools-filter-label {
-    flex: 0 0 3.25rem;
+    flex: 0 0 4.5rem;
     color: var(--fg-dim);
     font-size: var(--text-2xs);
     text-align: left;
     line-height: var(--leading-normal);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    overflow-wrap: anywhere;
 }
 
 .tools-filter-chips {
@@ -89,7 +70,7 @@
 .tools-filter-chip[aria-checked="true"] {
     background: var(--accent-bg-active);
     color: var(--accent);
-    font-weight: 600;
+    font-weight: var(--weight-semibold);
 }
 
 .tools-filter-chip:focus-visible {
@@ -97,10 +78,10 @@
     outline-offset: 1px;
 }
 
-.tools-card-grid {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: var(--space-2);
+.tools-rows {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1-5);
 }
 
 .tools-list-item {
@@ -109,7 +90,7 @@
     align-items: stretch;
     gap: var(--space-1);
     width: 100%;
-    min-height: 138px;
+    min-width: 0;
     padding: var(--space-2-5);
     background: var(--bg-elevated);
     border: 1px solid var(--border);
@@ -122,6 +103,7 @@
         background-color var(--motion-duration-fast) var(--motion-ease-standard),
         border-color var(--motion-duration-fast) var(--motion-ease-standard),
         color var(--motion-duration-fast) var(--motion-ease-standard);
+    font-family: inherit;
 }
 
 .tools-list-item:hover {
@@ -142,7 +124,7 @@
     display: -webkit-box;
     -webkit-box-orient: vertical;
     -webkit-line-clamp: 2;
-    font-weight: 600;
+    font-weight: var(--weight-semibold);
     line-height: var(--leading-tight);
     word-break: break-word;
 }
@@ -151,7 +133,7 @@
     overflow: hidden;
     display: -webkit-box;
     -webkit-box-orient: vertical;
-    -webkit-line-clamp: 3;
+    -webkit-line-clamp: 2;
     color: var(--fg-dim);
     font-size: var(--text-xs);
     line-height: var(--leading-normal);
@@ -168,11 +150,11 @@
 .tools-list-tag {
     flex: 0 0 auto;
     font-size: var(--text-2xs);
-    padding: 0.05rem 0.4rem;
+    padding: 0.05rem var(--space-1-5);
     border-radius: var(--radius-pill);
     border: 1px solid var(--border);
     color: var(--fg-dim);
-    line-height: 1.3;
+    line-height: var(--leading-tight);
 }
 .tools-list-tag.tag-builtin {
     color: var(--accent);
@@ -210,66 +192,32 @@
 }
 
 .tools-detail {
-    flex: 0 0 40%;
     display: flex;
     flex-direction: column;
-    overflow-y: auto;
-    padding: 1.2rem;
-}
-
-@media (max-width: 1100px) {
-    .tools-card-grid {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
-}
-
-@media (max-width: 760px) {
-    .tools-pane {
-        flex-direction: column;
-        overflow-y: auto;
-    }
-
-    .tools-list,
-    .tools-detail {
-        flex: 0 0 auto;
-        width: 100%;
-    }
-
-    .tools-list {
-        max-height: 58vh;
-        border-right: none;
-        border-bottom: 1px solid var(--divider-panel);
-    }
-
-    .tools-detail {
-        min-height: 42vh;
-    }
-
-    .tools-card-grid {
-        grid-template-columns: 1fr;
-    }
+    padding: var(--content-gutter);
 }
 
 .tools-detail-name {
-    margin: 0 0 0.4rem 0;
-    font-size: 1.2rem;
-    font-weight: 600;
+    margin: 0 0 var(--space-1-5) 0;
+    font-size: var(--text-lg);
+    font-weight: var(--weight-semibold);
+    overflow-wrap: anywhere;
 }
 
 .tools-detail-meta {
     display: flex;
     flex-wrap: wrap;
-    gap: 0.4rem;
-    margin: 0 0 0.8rem 0;
-    font-size: 0.78rem;
+    gap: var(--space-1-5);
+    margin: 0 0 var(--space-3) 0;
+    font-size: var(--text-sm);
     color: var(--fg-dim);
 }
 
 .tools-detail-description {
-    margin: 0 0 1rem 0;
-    font-size: 0.9rem;
+    margin: 0 0 var(--space-4) 0;
+    font-size: var(--text-base);
     color: var(--fg-dim);
-    line-height: 1.5;
+    line-height: var(--leading-normal);
     /* Clamp to 3 lines so long descriptions don't push the schema frame down;
        the full text stays reachable via the hover tooltip (title attr). */
     display: -webkit-box;
@@ -279,12 +227,12 @@
 }
 
 .tools-detail-schema-label {
-    font-size: 0.75rem;
+    font-size: var(--text-xs);
     text-transform: uppercase;
     letter-spacing: 0.06em;
     color: var(--fg-dim);
-    margin: 0 0 0.4rem 0;
-    font-weight: 600;
+    margin: 0 0 var(--space-1-5) 0;
+    font-weight: var(--weight-semibold);
 }
 
 .tools-detail-schema {
@@ -298,14 +246,6 @@
     min-height: 0;
     max-height: none;
     margin: 0;
-}
-
-@media (max-width: 760px) {
-    .tools-detail-schema--fill {
-        flex: 0 0 auto;
-        height: 42vh;
-        min-height: 12rem;
-    }
 }
 
 /* JSON is a reading surface: wrap long keys, URLs, and descriptions in the
@@ -324,7 +264,7 @@
 
 .tools-detail-empty {
     color: var(--fg-dim);
-    font-size: 0.85rem;
+    font-size: var(--text-base);
     font-style: italic;
 }
 
@@ -334,6 +274,6 @@
     justify-content: center;
     height: 100%;
     color: var(--fg-dim);
-    font-size: 0.85rem;
+    font-size: var(--text-base);
     font-style: italic;
 }

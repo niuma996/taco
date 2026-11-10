@@ -36,6 +36,40 @@ const sampleData = {
 describe("MemoryPane", () => {
     afterEach(cleanup);
 
+    it("navigates source tabs with arrows and Home/End while preserving selection semantics", () => {
+        const onSelect = vi.fn();
+        render(
+            <MemoryPane
+                data={sampleData}
+                loading={false}
+                error={null}
+                selectedId={MEMORY_ROOT_ID}
+                onSelect={onSelect}
+                onSaveMemory={async () => ({ ok: true })}
+                onDeleteTopic={async () => {}}
+                onRefresh={() => {}}
+                saving={false}
+            />,
+        );
+        const tabs = screen.getAllByRole("tab");
+        const first = screen.getByRole("tab", { name: "memory.layer.effective" });
+        const second = screen.getByRole("tab", { name: "memory.layer.human" });
+        const last = tabs.at(-1);
+        assert.ok(last);
+        first.focus();
+        fireEvent.keyDown(first, { key: "ArrowRight" });
+        expect(document.activeElement).toBe(tabs[1]);
+        expect(tabs[1]?.getAttribute("aria-selected")).toBe("true");
+        expect(onSelect).toHaveBeenLastCalledWith(MEMORY_ROOT_ID);
+        fireEvent.keyDown(second, { key: "End" });
+        expect(document.activeElement).toBe(tabs.at(-1));
+        fireEvent.keyDown(last, { key: "Home" });
+        expect(document.activeElement).toBe(tabs[0]);
+        fireEvent.keyDown(first, { key: "ArrowLeft" });
+        expect(document.activeElement).toBe(tabs.at(-1));
+        expect(screen.getAllByRole("tab").filter((tab) => tab.tabIndex === 0)).toHaveLength(1);
+    });
+
     it("shows disabled state when enabled=false", () => {
         const { container } = render(
             <MemoryPane

@@ -65,6 +65,55 @@ function candidateList() {
 }
 
 describe("ProviderDetailModal — create-custom model discovery", () => {
+    it("names compound model and connection groups and describes connection requirements", () => {
+        renderCreate(vi.fn());
+        expect(screen.getByRole("group", { name: "settings.providerDetailModels" })).toBe(
+            modelList(),
+        );
+        const testGroup = screen.getByRole("group", { name: "settings.providerTestTitle" });
+        expect(testGroup.classList.contains("provider-detail-test-row")).toBe(true);
+        expect(
+            document.getElementById(testGroup.getAttribute("aria-describedby") ?? "")?.textContent,
+        ).toBe("settings.providerTestNeedModel");
+        expect(
+            within(testGroup).getByRole("combobox", { name: "settings.providerTestModel" }),
+        ).toBeTruthy();
+        expect(
+            within(testGroup).getByRole("button", { name: "settings.providerTestButton" }),
+        ).toBeTruthy();
+        expect(fetchButton().classList.contains("ui-btn--sm")).toBe(true);
+        for (const label of document.querySelectorAll<HTMLLabelElement>("label[for]")) {
+            expect(document.getElementById(label.htmlFor)?.tagName).not.toBe("DIV");
+        }
+    });
+
+    it("describes a model discovery failure on the model group", async () => {
+        const user = userEvent.setup({ delay: null });
+        renderCreate(
+            vi.fn().mockResolvedValue({ ok: false, reason: "http-error", message: "HTTP 401" }),
+        );
+        await fillPrerequisites(user);
+        await user.click(fetchButton());
+        await screen.findByText("HTTP 401");
+        const group = screen.getByRole("group", { name: "settings.providerDetailModels" });
+        expect(group.getAttribute("aria-invalid")).toBe("true");
+        const ids = group.getAttribute("aria-describedby")?.split(/\s+/);
+        expect(ids?.map((id) => document.getElementById(id)?.textContent)).toContain("HTTP 401");
+    });
+
+    it("puts the API feature class on the trigger and portalled list", async () => {
+        const user = userEvent.setup({ delay: null });
+        renderCreate(vi.fn());
+        const dialog = screen.getByRole("dialog");
+        const trigger = screen.getByRole("combobox", { name: "settings.customProviderApi" });
+        expect(trigger.classList.contains("provider-api-select")).toBe(true);
+        await user.click(trigger);
+        const list = await screen.findByRole("listbox");
+        expect(list.matches(".provider-api-select.ui-select-content")).toBe(true);
+        expect(list.querySelectorAll(".ui-select-item").length).toBeGreaterThan(1);
+        expect(dialog.contains(list)).toBe(false);
+    });
+
     it("disables the fetch button until baseUrl and apiKey are filled", async () => {
         const user = userEvent.setup({ delay: null });
         renderCreate(vi.fn());
@@ -241,6 +290,27 @@ describe("ProviderDetailModal — built-in provider", () => {
         );
         return { onSaveBuiltin };
     }
+
+    it("switches the saved key group to a labelled input when replacing the key", async () => {
+        const user = userEvent.setup({ delay: null });
+        renderBuiltin();
+        const group = screen.getByRole("group", { name: "settings.providerDetailKey" });
+        expect(group.classList.contains("provider-detail-key-view")).toBe(true);
+        expect(
+            within(group).getByRole("button", { name: "settings.providerDetailReveal" }),
+        ).toBeTruthy();
+        await user.click(
+            within(group).getByRole("button", { name: "settings.providerReplaceKey" }),
+        );
+        expect(screen.queryByRole("group", { name: "settings.providerDetailKey" })).toBeNull();
+        const input = screen.getByLabelText("settings.providerDetailKey");
+        expect(input.tagName).toBe("INPUT");
+        expect(
+            document.getElementById(input.getAttribute("aria-describedby") ?? "")?.textContent,
+        ).toBe("settings.providerDetailKeepKey");
+        await user.click(screen.getByText("settings.providerDetailKey"));
+        expect(document.activeElement).toBe(input);
+    });
 
     it("shows the masked key and reveals plaintext via providers.revealKey", async () => {
         const user = userEvent.setup({ delay: null });

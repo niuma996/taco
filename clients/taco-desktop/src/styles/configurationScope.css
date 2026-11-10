@@ -6,6 +6,7 @@
     min-width: 0;
     min-height: 0;
     overflow: hidden;
+    container: configuration / inline-size;
 }
 
 .configuration-pane-body {
@@ -17,59 +18,8 @@
 
 .configuration-scope {
     flex: 0 0 auto;
-    padding: 0 var(--space-4);
     border-bottom: 1px solid var(--divider-panel);
-    background: var(--pane-list-bg);
-}
-
-.configuration-scope-tabs {
-    display: flex;
-    gap: var(--space-4);
-    min-width: 0;
-    overflow-x: auto;
-}
-
-.configuration-scope-tab {
-    position: relative;
-    flex: 0 0 auto;
-    display: inline-flex;
-    white-space: nowrap;
-    align-items: center;
-    gap: var(--space-1-5);
-    min-height: calc(var(--control-height-md) + var(--space-2));
-    padding: 0 var(--space-1);
-    border: 0;
-    background: transparent;
-    color: var(--fg-dim);
-    font-size: var(--text-sm);
-    cursor: pointer;
-}
-
-.configuration-scope-tab::after {
-    position: absolute;
-    right: 0;
-    bottom: -1px;
-    left: 0;
-    height: 2px;
-    background: transparent;
-    content: "";
-}
-
-.configuration-scope-tab:hover {
-    color: var(--fg);
-}
-
-.configuration-scope-tab.active {
-    color: var(--accent);
-}
-
-.configuration-scope-tab.active::after {
-    background: var(--accent);
-}
-
-.configuration-scope-tab:focus-visible {
-    outline: 2px solid var(--accent);
-    outline-offset: -3px;
+    background: var(--chat-panel-bg);
 }
 
 .configuration-scope-context {
@@ -77,9 +27,15 @@
     align-items: center;
     gap: var(--space-3);
     min-height: calc(var(--control-height-md) + var(--space-4));
-    padding: var(--space-2) 0;
+    padding: var(--space-3) var(--content-gutter);
     color: var(--fg-dim);
     font-size: var(--text-xs);
+}
+
+.configuration-scope-source {
+    padding: 0 var(--content-gutter);
+    border-top: 1px solid var(--divider-section);
+    background: var(--pane-list-bg);
 }
 
 .configuration-scope-description {
@@ -89,6 +45,7 @@
     padding: var(--space-2) 0 var(--space-3);
     color: var(--fg-dim);
     font-size: var(--text-xs);
+    line-height: var(--leading-normal);
 }
 
 .configuration-scope-context > svg {
@@ -132,18 +89,10 @@
     color: var(--warning);
 }
 
-@media (max-width: 760px) {
-    .configuration-scope {
-        padding: 0 var(--space-3);
-    }
-
+@container configuration (max-width: 44rem) {
     .configuration-scope-tabs {
         gap: var(--space-2);
         overflow-x: auto;
-    }
-
-    .configuration-scope-tab {
-        flex: 0 0 auto;
     }
 
     .configuration-scope-path {

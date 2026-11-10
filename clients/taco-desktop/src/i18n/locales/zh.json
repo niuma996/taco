@@ -764,6 +764,7 @@
     "grantAccess": "授权并打开"
   },
   "memory": {
+    "topicsTitle": "记忆条目",
     "sources": "来源会话",
     "title": "记忆",
     "globalLabel": "全局",

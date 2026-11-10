@@ -50,8 +50,8 @@ export function SkillsPane({
     const problemDiagnostics = diagnostics.filter((d) => d.code !== "duplicate_name");
 
     return (
-        <div className="skills-pane">
-            <div className="skills-list">
+        <div className="skills-pane catalog-pane">
+            <div className="skills-list catalog-list">
                 <PaneHeader
                     title={t("activity.skills")}
                     count={totalCount}
@@ -103,7 +103,7 @@ export function SkillsPane({
                             )}
                         </div>
                     ) : (
-                        <div className="skills-card-grid">
+                        <div className="skills-card-grid catalog-grid">
                             {skills.map((skill) => (
                                 <button
                                     key={skill.name}
@@ -134,7 +134,7 @@ export function SkillsPane({
                     )}
                 </div>
             </div>
-            <div className="skills-detail">
+            <div className="skills-detail catalog-detail">
                 {!selectedSkill ? (
                     <div className="skills-detail-placeholder">{t("tools.skillsSelectToView")}</div>
                 ) : (

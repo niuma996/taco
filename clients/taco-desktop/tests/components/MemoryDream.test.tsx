@@ -174,11 +174,25 @@ describe("MemoryPane dream controls", () => {
         const dream = actions();
         renderPane(dream);
         await user.click(screen.getByRole("button", { name: "memory.dream.settings" }));
-        const minHours = screen.getByLabelText("memory.dream.minHours") as HTMLInputElement;
-        await user.clear(minHours);
-        await user.type(minHours, "48");
+        for (const [name, value, min, max] of [
+            ["memory.dream.minHours", "48", "1", "720"],
+            ["memory.dream.staleDays", "120", "7", "3650"],
+            ["memory.dream.staleDaysDurable", "365", "7", "3650"],
+        ]) {
+            const input = screen.getByRole("spinbutton", { name });
+            expect(screen.getByLabelText(name)).toBe(input);
+            expect(input).toHaveProperty("min", min);
+            expect(input).toHaveProperty("max", max);
+            await user.clear(input);
+            await user.type(input, value);
+        }
         await user.click(screen.getByRole("button", { name: "memory.dream.saveSettings" }));
-        expect(dream.onSaveConfig).toHaveBeenCalledWith(expect.objectContaining({ minHours: 48 }));
+        expect(dream.onSaveConfig).toHaveBeenCalledWith({
+            ...dream.dreamConfig,
+            minHours: 48,
+            staleDays: 120,
+            staleDaysDurable: 365,
+        });
         expect(screen.queryByRole("button", { name: "memory.dream.saveSettings" })).toBeNull();
         expect(
             screen
@@ -187,35 +201,105 @@ describe("MemoryPane dream controls", () => {
         ).toBe("false");
     });
 
-    it("waits for saving to finish and retains the draft after a failed save", async () => {
+    it("retains the selected retention when cleanup is toggled and saves both settings", async () => {
         const user = userEvent.setup({ delay: null });
         const dream = actions();
-        let finish!: (saved: boolean) => void;
-        dream.onSaveConfig.mockImplementationOnce(
-            () =>
-                new Promise<boolean>((resolve) => {
-                    finish = resolve;
-                }),
-        );
         renderPane(dream);
+        expect(screen.queryByRole("spinbutton")).toBeNull();
         await user.click(screen.getByRole("button", { name: "memory.dream.settings" }));
-        const minHours = screen.getByLabelText("memory.dream.minHours") as HTMLInputElement;
-        await user.clear(minHours);
-        await user.type(minHours, "48");
-        await user.click(screen.getByRole("button", { name: "memory.dream.saveSettings" }));
-        const saving = screen.getByRole("button", { name: "app.saving" });
-        expect(saving).toHaveProperty("disabled", true);
-        await user.click(saving);
-        expect(dream.onSaveConfig).toHaveBeenCalledTimes(1);
-        await act(async () => finish(false));
-        expect(screen.getByRole("button", { name: "memory.dream.saveSettings" })).toHaveProperty(
-            "disabled",
-            false,
+        const cleanupSwitch = screen.getByRole("switch", { name: "memory.dream.archiveCleanup" });
+        const retention = screen.getByRole("combobox", { name: "memory.dream.archiveRetention" });
+        expect(screen.getByLabelText("memory.dream.archiveRetention")).toBe(retention);
+        expect(cleanupSwitch.getAttribute("aria-checked")).toBe("false");
+        expect(retention).toHaveProperty("disabled", true);
+
+        await user.click(screen.getByText("memory.dream.archiveCleanup"));
+        expect(cleanupSwitch.getAttribute("aria-checked")).toBe("true");
+        expect(retention).toHaveProperty("disabled", false);
+        await user.click(retention);
+        await user.click(
+            await screen.findByRole("option", { name: "memory.dream.archiveRetention30" }),
         );
-        expect(screen.getByLabelText("memory.dream.minHours")).toHaveProperty("value", "48");
+        await user.click(cleanupSwitch);
+        expect(retention).toHaveProperty("disabled", true);
+        expect(retention.textContent).toContain("memory.dream.archiveRetention30");
         await user.click(screen.getByRole("button", { name: "memory.dream.saveSettings" }));
-        expect(screen.queryByRole("button", { name: "memory.dream.saveSettings" })).toBeNull();
+        expect(dream.onSaveConfig).toHaveBeenLastCalledWith({
+            ...dream.dreamConfig,
+            archiveCleanupEnabled: false,
+            archiveRetentionDays: 30,
+        });
+
+        await user.click(screen.getByRole("button", { name: "memory.dream.settings" }));
+        expect(retention.textContent).toContain("memory.dream.archiveRetention30");
+        await user.click(cleanupSwitch);
+        expect(retention).toHaveProperty("disabled", false);
+        await user.click(screen.getByRole("button", { name: "memory.dream.saveSettings" }));
+        expect(dream.onSaveConfig).toHaveBeenLastCalledWith({
+            ...dream.dreamConfig,
+            archiveCleanupEnabled: true,
+            archiveRetentionDays: 30,
+        });
     });
+
+    it.each([false, true])(
+        "disables settings while saving and retains the failed draft with cleanup %s",
+        async (archiveCleanupEnabled) => {
+            const user = userEvent.setup({ delay: null });
+            const dream = actions();
+            dream.dreamConfig.archiveCleanupEnabled = archiveCleanupEnabled;
+            let finish!: (saved: boolean) => void;
+            dream.onSaveConfig.mockImplementationOnce(
+                () =>
+                    new Promise<boolean>((resolve) => {
+                        finish = resolve;
+                    }),
+            );
+            renderPane(dream);
+            await user.click(screen.getByRole("button", { name: "memory.dream.settings" }));
+            const minHours = screen.getByLabelText("memory.dream.minHours") as HTMLInputElement;
+            await user.clear(minHours);
+            await user.type(minHours, "48");
+            await user.click(screen.getByRole("button", { name: "memory.dream.saveSettings" }));
+            const saving = screen.getByRole("button", { name: "app.saving" });
+            expect(saving).toHaveProperty("disabled", true);
+            const cleanupSwitch = screen.getByLabelText("memory.dream.archiveCleanup");
+            const retention = screen.getByRole("combobox", {
+                name: "memory.dream.archiveRetention",
+            });
+            for (const control of [
+                ...screen.getAllByRole("spinbutton"),
+                cleanupSwitch,
+                retention,
+            ]) {
+                expect(control).toHaveProperty("disabled", true);
+            }
+            await user.type(minHours, "72");
+            await user.click(cleanupSwitch);
+            await user.click(retention);
+            expect(screen.queryByRole("option")).toBeNull();
+            expect(minHours.value).toBe("48");
+            expect(cleanupSwitch.getAttribute("aria-checked")).toBe(String(archiveCleanupEnabled));
+            await user.click(saving);
+            expect(dream.onSaveConfig).toHaveBeenCalledTimes(1);
+            await act(async () => finish(false));
+            expect(
+                screen.getByRole("button", { name: "memory.dream.saveSettings" }),
+            ).toHaveProperty("disabled", false);
+            expect(screen.getByRole("alert").textContent).toBe("memory.dream.error.settings");
+            for (const control of [...screen.getAllByRole("spinbutton"), cleanupSwitch]) {
+                expect(control).toHaveProperty("disabled", false);
+            }
+            expect(retention).toHaveProperty("disabled", !archiveCleanupEnabled);
+            expect(screen.getByLabelText("memory.dream.minHours")).toHaveProperty("value", "48");
+            await user.click(screen.getByRole("button", { name: "memory.dream.saveSettings" }));
+            expect(dream.onSaveConfig).toHaveBeenLastCalledWith({
+                ...dream.dreamConfig,
+                minHours: 48,
+            });
+            expect(screen.queryByRole("button", { name: "memory.dream.saveSettings" })).toBeNull();
+        },
+    );
 
     it("shows a rejected save and keeps settings open for retry", async () => {
         const user = userEvent.setup({ delay: null });

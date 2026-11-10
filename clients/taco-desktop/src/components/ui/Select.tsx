@@ -8,7 +8,7 @@
  */
 import * as SelectPrimitive from "@radix-ui/react-select";
 import { Check, ChevronDown } from "lucide-react";
-import type { ReactElement } from "react";
+import type { AriaAttributes, ReactElement } from "react";
 
 export type SelectOption = {
     value: string;
@@ -18,6 +18,9 @@ export type SelectOption = {
 };
 
 export interface SelectProps {
+    id?: string;
+    "aria-describedby"?: AriaAttributes["aria-describedby"];
+    "aria-invalid"?: AriaAttributes["aria-invalid"];
     value: string;
     onValueChange: (value: string) => void;
     options: ReadonlyArray<string | SelectOption>;
@@ -37,7 +40,15 @@ export function Select(props: SelectProps): ReactElement {
     const withClass = (base: string): string => (className ? `${base} ${className}` : base);
     return (
         <SelectPrimitive.Root value={value} onValueChange={onValueChange} disabled={disabled}>
-            <SelectPrimitive.Trigger className={withClass("ui-select-trigger")} aria-label={label}>
+            <SelectPrimitive.Trigger
+                id={props.id}
+                aria-describedby={props["aria-describedby"]}
+                aria-invalid={props["aria-invalid"]}
+                className={withClass(
+                    menu ? "ui-select-trigger ui-select-trigger--menu" : "ui-select-trigger",
+                )}
+                aria-label={label}
+            >
                 <SelectPrimitive.Value placeholder={placeholder} />
                 {!menu && (
                     <SelectPrimitive.Icon className="ui-select-caret" asChild>

@@ -8,6 +8,7 @@ import type { TacoClient } from "../../lib/clients/tacoClient.ts";
 import type { ClientRuleValidationError } from "../../lib/commandPermissionRuleClient.ts";
 import { validatePermissionRuleClient } from "../../lib/commandPermissionRuleClient.ts";
 import { ConfirmModal } from "../ConfirmModal.tsx";
+import { Button } from "../ui/Button";
 import { IconButton } from "../ui/IconButton.tsx";
 import { Select } from "../ui/Select.tsx";
 import { TextInput } from "../ui/TextInput.tsx";
@@ -129,14 +130,13 @@ export function PermissionsTab({ client }: PermissionsTabProps) {
                         if (e.key === "Enter") addRule();
                     }}
                 />
-                <button
+                <Button
                     type="button"
-                    className="settings-btn"
                     disabled={saving || newRule.trim().length === 0}
                     onClick={addRule}
                 >
                     {t("settings.permissionsAddRule")}
-                </button>
+                </Button>
             </div>
             {ruleError && (
                 <div className="error-banner" role="alert">

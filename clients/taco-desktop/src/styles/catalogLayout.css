@@ -1,0 +1,60 @@
+/* Lists stay bounded so the selected document gets the remaining reading space. */
+.catalog-pane {
+    display: grid;
+    grid-template-columns:
+        minmax(0, clamp(var(--catalog-list-min-width), 40%, var(--catalog-list-max-width)))
+        minmax(0, 1fr);
+    flex: 1;
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+}
+
+.catalog-list {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+    border-right: 1px solid var(--divider-panel);
+    background: var(--pane-list-bg);
+}
+
+.catalog-detail {
+    min-width: 0;
+    min-height: 0;
+    overflow-y: auto;
+    padding: var(--content-gutter);
+}
+
+.catalog-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, var(--catalog-card-min-width)), 1fr));
+    gap: var(--space-2);
+}
+
+/* Respond to the content column, including when a file panel narrows it. */
+@container configuration (max-width: 44rem) {
+    .catalog-pane {
+        grid-template-columns: minmax(0, 1fr);
+        grid-template-rows: minmax(0, 45%) minmax(0, 1fr);
+    }
+
+    .catalog-list {
+        border-right: none;
+        border-bottom: 1px solid var(--divider-panel);
+    }
+}
+
+/* Older macOS WebViews use a readable stacked layout without container queries. */
+@supports not (container-type: inline-size) {
+    .catalog-pane {
+        grid-template-columns: minmax(0, 1fr);
+        grid-template-rows: minmax(0, 45%) minmax(0, 1fr);
+    }
+
+    .catalog-list {
+        border-right: none;
+        border-bottom: 1px solid var(--divider-panel);
+    }
+}

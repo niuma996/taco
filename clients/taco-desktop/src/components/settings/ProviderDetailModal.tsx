@@ -452,6 +452,7 @@ export function ProviderDetailModal(props: ProviderDetailModalProps) {
         >
             <FormField
                 label={t("settings.providerDetailKey")}
+                group={keyMode === "view" && provider !== undefined}
                 hint={
                     keyMode === "edit" && provider?.configured
                         ? t("settings.providerDetailKeepKey")
@@ -531,6 +532,7 @@ export function ProviderDetailModal(props: ProviderDetailModalProps) {
                     </FormField>
                     <FormField label={t("settings.customProviderApi")}>
                         <Select
+                            className="provider-api-select"
                             value={api}
                             disabled={!isCreate}
                             onValueChange={(v) => setApi(v as CustomProviderApi)}
@@ -561,6 +563,7 @@ export function ProviderDetailModal(props: ProviderDetailModalProps) {
                         hint={t("settings.providerBuiltinEndpointHint")}
                     >
                         <Select
+                            className="provider-api-select"
                             value={provider?.api ?? "chatcomplete"}
                             disabled
                             onValueChange={() => {}}
@@ -579,17 +582,18 @@ export function ProviderDetailModal(props: ProviderDetailModalProps) {
 
             <FormField
                 label={t("settings.providerDetailModels")}
+                group
                 action={
-                    <button
+                    <Button
                         type="button"
-                        className="provider-detail-fetch-btn"
+                        size="sm"
                         disabled={!canFetch}
                         onClick={() => void fetchModels()}
                     >
                         {fetching
                             ? t("settings.customProviderFetching")
                             : t("settings.customProviderFetch")}
-                    </button>
+                    </Button>
                 }
                 error={fetchError ?? undefined}
                 hint={
@@ -803,6 +807,7 @@ export function ProviderDetailModal(props: ProviderDetailModalProps) {
 
             <FormField
                 label={t("settings.providerTestTitle")}
+                group
                 hint={
                     testableModels.length === 0
                         ? t("settings.providerTestNeedModel")

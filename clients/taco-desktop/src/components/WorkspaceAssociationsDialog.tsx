@@ -30,6 +30,7 @@ import type { TacoClient } from "../lib/clients/tacoClient.ts";
 import { subscribeWorkspaceAssociationsChanged } from "../lib/workspaceAssociationEvents.ts";
 import { lastSegment } from "../lib/workspaceStorage";
 import { Button } from "./ui/Button";
+import { FormField } from "./ui/FormField";
 import { IconButton } from "./ui/IconButton";
 import { Modal } from "./ui/Modal";
 import { Select } from "./ui/Select";
@@ -160,10 +161,10 @@ export function WorkspaceAssociationsDialog({
                 </div>
             )}
             {canChooseScope && (
-                <div className="workspace-associations-scope">
-                    <span className="workspace-associations-scope-label">
-                        {t("associations.scopeLabel")}
-                    </span>
+                <FormField
+                    className="workspace-associations-scope"
+                    label={t("associations.scopeLabel")}
+                >
                     <Select
                         value={scope}
                         onValueChange={(v) => setScope(v as WorkspaceAssociationScope)}
@@ -176,7 +177,7 @@ export function WorkspaceAssociationsDialog({
                             { value: "channel", label: t("associations.scopeChannel") },
                         ]}
                     />
-                </div>
+                </FormField>
             )}
             {loading ? (
                 <div className="workspace-associations-empty">{t("associations.loading")}</div>

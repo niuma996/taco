@@ -7,7 +7,7 @@
  */
 import type { ChannelStatusEntry, ChannelsBindCreds } from "@taco-ai/protocol";
 import { QRCodeSVG } from "qrcode.react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { CHANNEL_NAME_WECOM } from "../hooks/useChannelsPane";
 import { useT } from "../i18n/useI18n";
 import { Button } from "./ui/Button.tsx";
@@ -32,6 +32,7 @@ export function ChannelBindDialog(props: ChannelBindDialogProps) {
     const { open, channel, error, onSubmitVerifyCode, onBindCreds, onCancel } = props;
     const { t } = useT();
     const inputRef = useRef<HTMLInputElement>(null);
+    const formId = useId();
     const [code, setCode] = useState("");
     const [submitting, setSubmitting] = useState(false);
     const [wecomBotId, setWecomBotId] = useState("");
@@ -104,6 +105,29 @@ export function ChannelBindDialog(props: ChannelBindDialogProps) {
             onClose={onCancel}
             title={t("channels.bindTitle")}
             className="channel-bind-modal"
+            actions={
+                wecomCredsMode || state === "awaiting_verify_code" ? (
+                    <>
+                        <Button variant="ghost" onClick={onCancel}>
+                            {t("channels.cancel")}
+                        </Button>
+                        <Button
+                            type="submit"
+                            form={`${formId}-${wecomCredsMode ? "credentials" : "verify"}`}
+                            variant="primary"
+                            disabled={
+                                wecomCredsMode
+                                    ? !wecomBotId.trim() || !wecomSecret.trim()
+                                    : !canSubmit
+                            }
+                        >
+                            {t(wecomCredsMode ? "channels.connect" : "channels.submitCode")}
+                        </Button>
+                    </>
+                ) : (
+                    <Button onClick={onCancel}>{t("channels.close")}</Button>
+                )
+            }
             onOpenAutoFocus={(e) => {
                 e.preventDefault();
                 inputRef.current?.focus();
@@ -137,6 +161,7 @@ export function ChannelBindDialog(props: ChannelBindDialogProps) {
 
             {wecomCredsMode && (
                 <form
+                    id={`${formId}-credentials`}
                     className="channel-bind-form"
                     onSubmit={(e) => {
                         e.preventDefault();
@@ -159,23 +184,12 @@ export function ChannelBindDialog(props: ChannelBindDialogProps) {
                         aria-label={t("channels.wecomSecret")}
                         onChange={(e) => setWecomSecret(e.target.value)}
                     />
-                    <div className="ui-modal-actions">
-                        <Button variant="ghost" onClick={onCancel}>
-                            {t("channels.cancel")}
-                        </Button>
-                        <Button
-                            type="submit"
-                            variant="primary"
-                            disabled={!wecomBotId.trim() || !wecomSecret.trim()}
-                        >
-                            {t("channels.connect")}
-                        </Button>
-                    </div>
                 </form>
             )}
 
             {state === "awaiting_verify_code" && (
                 <form
+                    id={`${formId}-verify`}
                     className="channel-bind-form"
                     onSubmit={(e) => {
                         e.preventDefault();
@@ -193,16 +207,9 @@ export function ChannelBindDialog(props: ChannelBindDialogProps) {
                         value={code}
                         inputMode="numeric"
                         placeholder={t("channels.verifyCodePlaceholder")}
+                        aria-label={t("channels.verifyCodePlaceholder")}
                         onChange={(e) => setCode(e.target.value)}
                     />
-                    <div className="ui-modal-actions">
-                        <Button variant="ghost" onClick={onCancel}>
-                            {t("channels.cancel")}
-                        </Button>
-                        <Button type="submit" variant="primary" disabled={!canSubmit}>
-                            {t("channels.submitCode")}
-                        </Button>
-                    </div>
                 </form>
             )}
 
@@ -229,12 +236,6 @@ export function ChannelBindDialog(props: ChannelBindDialogProps) {
 
             {state === "connected" && (
                 <p className="channel-bind-hint">{t("channels.boundHint")}</p>
-            )}
-
-            {state !== "awaiting_verify_code" && (
-                <div className="ui-modal-actions">
-                    <Button onClick={onCancel}>{t("channels.close")}</Button>
-                </div>
             )}
         </Modal>
     );

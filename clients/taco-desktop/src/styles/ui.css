@@ -33,7 +33,7 @@
     display: block;
     width: 16px;
     height: 16px;
-    margin: 3px;
+    margin: var(--space-0-75);
     border-radius: 50%;
     background: var(--switch-thumb);
     /* Lift off the track instead of being outlined by it. */
@@ -48,13 +48,15 @@
 
 .ui-input {
     width: 100%;
-    padding: 0.35rem 0.5rem;
+    min-height: var(--control-height-md);
+    padding: var(--space-1) var(--space-2);
     background: var(--input-bg);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     color: var(--fg);
     font-family: inherit;
     font-size: var(--text-base);
+    line-height: var(--leading-normal);
     box-sizing: border-box;
     transition:
         border-color var(--motion-duration-fast) var(--motion-ease-standard),
@@ -83,10 +85,11 @@
 .ui-form-field {
     display: flex;
     flex-direction: column;
-    gap: 0.35rem;
-    margin-bottom: 0.9rem;
+    gap: var(--field-gap);
+    margin-bottom: var(--space-4);
 }
-.ui-form-field > label {
+.ui-form-field > label,
+.ui-form-field > .ui-form-group-label {
     font-size: var(--text-sm);
     color: var(--fg-dim);
 }
@@ -95,9 +98,10 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 0.6rem;
+    gap: var(--space-2-5);
 }
-.ui-form-label-row > label {
+.ui-form-label-row > label,
+.ui-form-label-row > .ui-form-group-label {
     font-size: var(--text-sm);
     color: var(--fg-dim);
 }
@@ -214,13 +218,15 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    gap: 0.4rem;
+    gap: var(--space-1-5);
     border-radius: var(--radius-sm);
     border: 1px solid var(--border);
     background: transparent;
     color: var(--fg);
     cursor: pointer;
     font-family: inherit;
+    font-weight: var(--weight-medium);
+    line-height: var(--leading-tight);
     white-space: nowrap;
     transition:
         background-color var(--motion-duration-fast) var(--motion-ease-standard),
@@ -249,17 +255,20 @@
 /* ── Button — sizes ── */
 /* Dense for pane rows and small actions; md for dialogs/drawers. */
 .ui-btn--sm {
-    padding: 4px 12px;
-    font-size: 12px;
+    min-height: var(--control-height-compact);
+    padding: var(--space-0-5) var(--space-2);
+    font-size: var(--text-xs);
 }
 .ui-btn--md {
-    padding: 0.4rem 0.9rem;
-    font-size: 0.85rem;
+    min-height: var(--control-height-md);
+    padding: var(--space-1) var(--space-3);
+    font-size: var(--text-base);
 }
 
 /* ── Button — variants ── */
 .ui-btn--ghost {
     background: transparent;
+    border-color: transparent;
 }
 .ui-btn--ghost:hover:not(:disabled) {
     background: var(--hover-overlay);
@@ -358,20 +367,26 @@
     display: inline-flex;
     align-items: center;
     justify-content: space-between;
-    gap: 0.5rem;
-    padding: 0.35rem 0.5rem;
+    gap: var(--space-2);
+    padding: var(--space-1) var(--space-2);
     background: var(--input-bg);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     color: var(--fg);
     font: inherit;
     font-size: var(--text-base);
+    min-height: var(--control-height-md);
+    line-height: var(--leading-normal);
     cursor: pointer;
     box-sizing: border-box;
     transition:
         border-color var(--motion-duration-fast) var(--motion-ease-standard),
         box-shadow var(--motion-duration-fast) var(--motion-ease-standard);
 }
+.ui-select-trigger--menu {
+    min-height: var(--composer-control-height);
+}
+
 .ui-select-trigger:focus-visible {
     outline: none;
     border-color: var(--accent);
@@ -403,7 +418,7 @@
     animation: ui-fade-out var(--motion-duration-fast) var(--motion-ease-out);
 }
 .ui-select-content [data-radix-select-viewport] {
-    padding: 4px 0;
+    padding: var(--space-1) 0;
     min-width: var(--radix-select-trigger-width);
     max-height: min(60vh, 320px);
 }
@@ -411,8 +426,8 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 0.6rem;
-    padding: 0.45rem 0.8rem;
+    gap: var(--space-2-5);
+    padding: var(--space-2) var(--space-3);
     background: transparent;
     color: var(--fg);
     font: inherit;
@@ -428,7 +443,7 @@
     background: var(--hover-overlay);
 }
 .ui-select-item[data-state="checked"] {
-    font-weight: 600;
+    font-weight: var(--weight-semibold);
 }
 .ui-select-item-check {
     display: inline-flex;
@@ -438,14 +453,14 @@
 }
 /* Tag after an option label — rendered inside ItemText, so it also appears in the trigger. */
 .ui-select-item-badge {
-    margin-left: 0.45rem;
-    padding: 0 0.4rem;
+    margin-left: var(--space-2);
+    padding: 0 var(--space-1-5);
     border-radius: var(--radius-pill);
     background: var(--surface-tint);
     color: var(--fg-dim);
     font-size: var(--text-xs);
-    font-weight: 500;
-    line-height: 1.5;
+    font-weight: var(--weight-medium);
+    line-height: var(--leading-normal);
     white-space: nowrap;
 }
 
@@ -456,7 +471,7 @@
    Select items and plain buttons alike. */
 .ui-menu {
     min-width: 148px;
-    padding: 4px;
+    padding: var(--space-1);
     background: var(--bg-elevated);
     color: var(--fg);
     border: 1px solid var(--border);
@@ -475,15 +490,15 @@
 .ui-menu-item {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
+    gap: var(--space-2);
     width: 100%;
     box-sizing: border-box;
-    padding: 0.4rem 0.5rem;
+    padding: var(--space-1-5) var(--space-2);
     background: transparent;
     border: 0;
     border-radius: var(--radius-xs);
     font: inherit;
-    font-size: 0.82rem;
+    font-size: var(--text-sm);
     color: var(--fg-dim);
     text-align: left;
     cursor: pointer;
@@ -608,7 +623,8 @@
     background: var(--bg);
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
-    padding: 1.2rem 1.4rem;
+    padding: var(--content-gutter);
+    gap: var(--space-4);
     min-width: 320px;
     max-width: 420px;
     box-shadow: 0 8px 24px var(--shadow-color-strong);
@@ -632,16 +648,17 @@
 }
 .ui-modal-title {
     flex-shrink: 0;
-    margin: 0 0 0.6rem 0;
-    font-size: 1rem;
-    font-weight: 600;
+    margin: 0;
+    font-size: var(--text-lg);
+    font-weight: var(--weight-semibold);
+    line-height: var(--leading-tight);
 }
 .ui-modal-message {
     flex-shrink: 0;
-    margin: 0 0 1.2rem 0;
-    font-size: 0.9rem;
+    margin: 0;
+    font-size: var(--text-base);
     color: var(--fg-dim);
-    line-height: 1.4;
+    line-height: var(--leading-normal);
 }
 .ui-modal-body {
     flex: 1 1 auto;
@@ -651,14 +668,15 @@
        to 4px outside an input (2px outline + 2px offset), so give the body 4px
        of padding for them and cancel the layout shift with a negative margin —
        the content box, and every spacing rhythm around it, stays put. */
-    padding: 4px;
+    padding: var(--space-1);
     margin: -4px;
 }
 .ui-modal-actions {
     flex-shrink: 0;
     display: flex;
     justify-content: flex-end;
-    gap: 0.5rem;
+    gap: var(--space-2);
+    flex-wrap: wrap;
 }
 
 /* ── Clamp (long text collapsed to N lines) ── */
@@ -723,7 +741,7 @@
     color: var(--fg-dim);
 }
 .ui-tag--md {
-    padding: 0.05rem 0.4rem;
+    padding: 0.05rem var(--space-1-5);
     font-size: var(--text-xs);
     text-transform: uppercase;
     letter-spacing: 0.04em;
@@ -772,7 +790,7 @@
     background: var(--tooltip-bg);
     color: var(--tooltip-fg);
     font-size: var(--text-xs);
-    line-height: 1.4;
+    line-height: var(--leading-normal);
     white-space: nowrap;
     box-shadow: 0 4px 12px var(--shadow-color);
     pointer-events: none;
@@ -798,7 +816,7 @@
     z-index: 100;
     width: 340px;
     max-width: calc(100vw - 16px);
-    padding: 4px 0;
+    padding: var(--space-1) 0;
 }
 
 .ui-popover-panel[data-state="open"] {
@@ -812,14 +830,14 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 6px 10px;
+    padding: var(--space-1-5) var(--space-2-5);
     border-bottom: 1px solid var(--divider-section);
 }
 
 .ui-popover-panel__title {
     color: var(--fg);
-    font-size: 0.8rem;
-    font-weight: 600;
+    font-size: var(--text-sm);
+    font-weight: var(--weight-semibold);
 }
 
 /* Trailing header control ("clear all") and the inline row action. */
@@ -827,9 +845,9 @@
     background: transparent;
     border: 0;
     border-radius: var(--radius-xs);
-    padding: 2px 4px;
+    padding: var(--space-0-5) var(--space-1);
     color: var(--fg-dim);
-    font-size: 0.75rem;
+    font-size: var(--text-xs);
     cursor: pointer;
     transition:
         background-color var(--motion-duration-fast) var(--motion-ease-standard),
@@ -847,9 +865,9 @@
 }
 
 .ui-popover-panel__empty {
-    padding: 14px 10px;
+    padding: var(--space-4) var(--space-2-5);
     color: var(--fg-dim);
-    font-size: 0.8rem;
+    font-size: var(--text-sm);
     text-align: center;
 }
 
@@ -858,4 +876,97 @@
 .ui-popover-panel__body {
     max-height: 60vh;
     overflow-y: auto;
+}
+
+.ui-btn > svg {
+    flex-shrink: 0;
+}
+
+.ui-input[aria-invalid="true"],
+.ui-select-trigger[aria-invalid="true"] {
+    border-color: var(--error);
+}
+
+.ui-modal-body > .ui-form-field:last-child {
+    margin-bottom: 0;
+}
+
+/* Shared navigation chrome; feature styles own only placement and surrounding gutters. */
+.ui-tabs {
+    display: flex;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: var(--space-4);
+    min-width: 0;
+    overflow-x: auto;
+}
+
+.ui-tabs__tab {
+    position: relative;
+    display: inline-flex;
+    flex: 0 0 auto;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-1-5);
+    min-height: var(--control-height-md);
+    padding: 0 var(--space-2);
+    border: 0;
+    background: transparent;
+    color: var(--fg-dim);
+    font-family: inherit;
+    font-size: var(--text-sm);
+    font-weight: var(--weight-medium);
+    line-height: var(--leading-tight);
+    white-space: nowrap;
+    cursor: pointer;
+}
+
+.ui-tabs__tab > svg {
+    flex-shrink: 0;
+}
+
+.ui-tabs__tab:hover {
+    color: var(--fg);
+}
+
+.ui-tabs__tab:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
+}
+
+.ui-tabs--underline .ui-tabs__tab[aria-selected="true"] {
+    color: var(--accent);
+}
+
+.ui-tabs--underline .ui-tabs__tab::after {
+    position: absolute;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    height: var(--space-0-5);
+    background: transparent;
+    content: "";
+}
+
+.ui-tabs--underline .ui-tabs__tab[aria-selected="true"]::after {
+    background: var(--accent);
+}
+
+.ui-tabs--segmented {
+    align-self: flex-start;
+    gap: var(--space-1);
+    padding: var(--space-1);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    background: var(--input-bg);
+    max-width: 100%;
+}
+
+.ui-tabs--segmented .ui-tabs__tab {
+    border-radius: var(--radius-sm);
+}
+
+.ui-tabs--segmented .ui-tabs__tab[aria-selected="true"] {
+    background: var(--segment-active-bg);
+    color: var(--fg);
 }

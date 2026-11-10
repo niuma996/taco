@@ -111,8 +111,8 @@ export function AgentsPane({
     };
 
     return (
-        <div className="agents-pane">
-            <div className="agents-list">
+        <div className="agents-pane catalog-pane">
+            <div className="agents-list catalog-list">
                 <PaneHeader
                     title={t("activity.agents")}
                     count={agents.length}
@@ -140,7 +140,7 @@ export function AgentsPane({
                             {query ? t("pane.noMatch") : t("activity.noAgents")}
                         </div>
                     ) : (
-                        <div className="agents-card-grid">
+                        <div className="agents-card-grid catalog-grid">
                             {filtered.map((a) => (
                                 <button
                                     key={a.agentType}
@@ -172,7 +172,7 @@ export function AgentsPane({
                     )}
                 </div>
             </div>
-            <div className="agents-detail">
+            <div className="agents-detail catalog-detail">
                 {selectedAgent ? (
                     <>
                         <div className="agents-detail-header">
@@ -192,7 +192,7 @@ export function AgentsPane({
                                             {t("agents.edit")}
                                         </Button>
                                         <Button
-                                            variant="ghost"
+                                            variant="danger"
                                             size="sm"
                                             disabled={saving}
                                             onClick={() => {

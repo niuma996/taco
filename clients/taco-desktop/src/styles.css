@@ -18,6 +18,7 @@
 @import "./styles/conversationSidebar.css";
 @import "./styles/paneShared.css";
 @import "./styles/configurationScope.css";
+@import "./styles/catalogLayout.css";
 @import "./styles/toolsPane.css";
 @import "./styles/skillsPane.css";
 @import "./styles/agentsPane.css";

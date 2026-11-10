@@ -2,79 +2,28 @@
 
 /* ── Memory pane ──────────────────────────────────────────────── */
 
-.memory-pane {
+.memory-page {
     display: flex;
     flex: 1;
+    flex-direction: column;
     min-width: 0;
+    min-height: 0;
     overflow: hidden;
 }
 
-.memory-list {
-    flex: 0 0 60%;
-    min-width: 0;
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-    border-right: 1px solid var(--divider-panel);
-    background: var(--pane-list-bg);
+.memory-page-heading {
+    padding: var(--space-3) var(--content-gutter);
 }
 
 .memory-source-tabs {
-    display: flex;
     flex: 0 0 auto;
-    gap: var(--space-1);
-    padding: 0 var(--space-3);
-    overflow-x: auto;
+    padding: 0 var(--content-gutter);
     border-bottom: 1px solid var(--divider-section);
     scrollbar-width: none;
 }
 
 .memory-source-tabs::-webkit-scrollbar {
     display: none;
-}
-
-.memory-source-tab {
-    position: relative;
-    display: inline-flex;
-    flex: 0 0 auto;
-    align-items: center;
-    gap: var(--space-1);
-    min-height: var(--control-height-md);
-    padding: 0 var(--space-1);
-    border: 0;
-    background: transparent;
-    color: var(--fg-dim);
-    font-family: inherit;
-    font-size: var(--text-xs);
-    white-space: nowrap;
-    cursor: pointer;
-}
-
-.memory-source-tab::after {
-    position: absolute;
-    right: 0;
-    bottom: -1px;
-    left: 0;
-    height: 2px;
-    background: transparent;
-    content: "";
-}
-
-.memory-source-tab:hover {
-    color: var(--fg);
-}
-
-.memory-source-tab.active {
-    color: var(--accent);
-}
-
-.memory-source-tab.active::after {
-    background: var(--accent);
-}
-
-.memory-source-tab:focus-visible {
-    outline: 2px solid var(--accent);
-    outline-offset: -2px;
 }
 
 .memory-source-tab-count {
@@ -134,7 +83,7 @@
 .memory-filter-chip[aria-checked="true"] {
     background: var(--accent-bg-active);
     color: var(--accent);
-    font-weight: 600;
+    font-weight: var(--weight-semibold);
 }
 
 .memory-filter-chip:focus-visible {
@@ -159,7 +108,7 @@
     background: var(--pane-list-bg);
     color: var(--fg-dim);
     font-size: var(--text-2xs);
-    font-weight: 600;
+    font-weight: var(--weight-semibold);
     letter-spacing: 0.04em;
     text-transform: uppercase;
 }
@@ -182,6 +131,7 @@
         background var(--motion-duration-fast) var(--motion-ease-standard),
         border-color var(--motion-duration-fast) var(--motion-ease-standard),
         box-shadow var(--motion-duration-fast) var(--motion-ease-standard);
+    font-family: inherit;
 }
 
 .memory-global-card {
@@ -234,7 +184,7 @@
     -webkit-line-clamp: 2;
     min-height: calc(2 * var(--leading-tight) * var(--text-base));
     font-size: var(--text-base);
-    font-weight: 600;
+    font-weight: var(--weight-semibold);
     text-align: left;
     line-height: var(--leading-tight);
     word-break: break-word;
@@ -299,7 +249,7 @@
    opacity on dim text in the light theme falls below a readable contrast. */
 .memory-topic-card.archived .memory-card-title {
     color: var(--fg-dim);
-    font-weight: 500;
+    font-weight: var(--weight-medium);
 }
 
 .memory-topic-card.archived:hover .memory-card-title,
@@ -309,12 +259,6 @@
 
 .memory-topic-card.archived.active .memory-card-title {
     color: var(--accent);
-}
-
-.memory-card-grid {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: var(--space-2);
 }
 
 .memory-card-grid .memory-topic-card {
@@ -344,7 +288,7 @@
     color: var(--fg-dim);
     font-family: inherit;
     font-size: var(--text-xs);
-    font-weight: 600;
+    font-weight: var(--weight-semibold);
     text-align: left;
     cursor: pointer;
 }
@@ -370,47 +314,9 @@
 /* ── Reading column ───────────────────────────────────────────── */
 
 .memory-detail {
-    flex: 0 0 40%;
-    width: 40%;
-    min-width: 0;
-    overflow-y: auto;
-    padding: var(--space-4);
     /* key={view} remounts per view, so this replays when switching
        between the reading view and the dream panel. */
     animation: ui-enter var(--motion-duration-base) var(--motion-ease-out);
-}
-
-@media (max-width: 1100px) {
-    .memory-card-grid {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
-}
-
-@media (max-width: 760px) {
-    .memory-pane {
-        overflow-y: auto;
-        flex-direction: column;
-    }
-
-    .memory-list,
-    .memory-detail {
-        flex: 0 0 auto;
-        width: 100%;
-    }
-
-    .memory-list {
-        max-height: 58vh;
-        border-right: none;
-        border-bottom: 1px solid var(--divider-panel);
-    }
-
-    .memory-detail {
-        min-height: 42vh;
-    }
-
-    .memory-card-grid {
-        grid-template-columns: 1fr;
-    }
 }
 
 .memory-detail-placeholder,
@@ -444,7 +350,7 @@
     color: var(--error);
 }
 
-/* One reading measure for every detail view; content height follows the text. */
+/* Every detail view fills the reading column; content height follows the text. */
 .memory-view {
     display: flex;
     flex-direction: column;
@@ -455,17 +361,24 @@
 
 .memory-view-header {
     display: flex;
-    align-items: flex-start;
+    align-items: center;
+    flex-wrap: wrap;
     gap: var(--space-2);
 }
 
 .memory-view-name {
-    flex: 0 1 auto;
+    flex: 1 1 auto;
+    min-width: 0;
     margin: 0;
     font-size: var(--text-lg);
-    font-weight: 600;
+    font-weight: var(--weight-semibold);
     line-height: var(--leading-tight);
     word-break: break-word;
+}
+
+.memory-view-header > .ui-btn {
+    flex: 0 0 auto;
+    margin-left: auto;
 }
 
 /* Neutral chip: the filter already carries the type distinction. */
@@ -490,7 +403,7 @@
 .memory-view-desc {
     margin: 0;
     color: var(--fg-dim);
-    font-size: var(--text-sm);
+    font-size: var(--text-base);
     line-height: var(--leading-normal);
 }
 
@@ -504,7 +417,7 @@
 
 .memory-dream-settings {
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, var(--form-field-min-width)), 1fr));
     gap: var(--space-3);
     padding: var(--space-3);
     border: 1px solid var(--border);
@@ -516,33 +429,19 @@
     display: none;
 }
 
-.memory-dream-settings > label,
-.memory-dream-settings > .memory-dream-settings-field {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-1);
-    color: var(--fg-dim);
-    font-size: var(--text-xs);
-}
-
-.memory-dream-settings input[type="number"] {
-    width: 100%;
-    min-height: var(--control-height-sm);
-    padding: 0 var(--space-2);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    background: var(--bg-elevated);
-    color: var(--fg);
-}
-
-.memory-dream-settings .ui-select-trigger {
-    width: 100%;
+.memory-dream-settings-field {
+    min-width: 0;
+    margin-bottom: 0;
 }
 
 .memory-dream-settings-check {
+    display: flex;
     grid-column: 1 / -1;
-    flex-direction: row !important;
     align-items: center;
+    gap: var(--space-2);
+    color: var(--fg-dim);
+    font-size: var(--text-sm);
+    line-height: var(--leading-normal);
 }
 
 .memory-dream-settings-actions {
@@ -578,10 +477,6 @@
 .memory-view-meta-time {
     display: inline-flex;
     gap: var(--space-1);
-}
-
-.memory-view-meta-spacer {
-    flex: 1;
 }
 
 .memory-edit {
@@ -674,7 +569,7 @@
 .memory-dream-header h2 {
     margin: 0;
     font-size: var(--text-lg);
-    font-weight: 600;
+    font-weight: var(--weight-semibold);
 }
 
 .memory-dream-subtitle {
@@ -767,7 +662,7 @@
 .memory-dream-group-label {
     color: var(--fg-dim);
     font-size: var(--text-2xs);
-    font-weight: 600;
+    font-weight: var(--weight-semibold);
     letter-spacing: 0.04em;
     text-transform: uppercase;
 }
@@ -891,7 +786,7 @@
 .memory-view-sources h3 {
     margin: 0 0 var(--space-2);
     font-size: inherit;
-    font-weight: 600;
+    font-weight: var(--weight-semibold);
 }
 
 .memory-view-sources ul {

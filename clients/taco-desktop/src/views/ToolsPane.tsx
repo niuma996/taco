@@ -1,7 +1,7 @@
 /**
  * ToolsPane — tool list panel (shown when mainView = 'tools').
  *
- * Left: searchable tool cards with source, subagent, and loading filters.
+ * Left: searchable tool rows with source, subagent, and loading filters.
  * Right: tool metadata and a wrapping, highlighted JSON schema that fills the
  * remaining detail height. Data is passed via props; the parent fetches it.
  */
@@ -188,8 +188,8 @@ export function ToolsPane({ tools, error }: ToolsPaneProps) {
     const selectedTool = tools.find((tool) => tool.name === selected) ?? null;
 
     return (
-        <div className="tools-pane">
-            <div className="tools-list">
+        <div className="tools-pane catalog-pane">
+            <div className="tools-list catalog-list">
                 <PaneHeader
                     title={t("activity.tools")}
                     count={tools.length}
@@ -242,12 +242,13 @@ export function ToolsPane({ tools, error }: ToolsPaneProps) {
                     {filtered.length === 0 ? (
                         <div className="ui-empty">{t("tools.noMatch")}</div>
                     ) : (
-                        <div className="tools-card-grid">
+                        <div className="tools-rows">
                             {filtered.map((tool) => (
                                 <button
                                     key={tool.name}
                                     type="button"
                                     className={`tools-list-item${selected === tool.name ? " active" : ""}`}
+                                    aria-current={selected === tool.name ? "true" : undefined}
                                     onClick={() => setUserPick(tool.name)}
                                     title={tool.name}
                                 >
@@ -269,7 +270,7 @@ export function ToolsPane({ tools, error }: ToolsPaneProps) {
                     )}
                 </div>
             </div>
-            <div className="tools-detail">
+            <div className="tools-detail catalog-detail">
                 {!selectedTool ? (
                     <div className="tools-detail-placeholder">{t("tools.selectToView")}</div>
                 ) : (

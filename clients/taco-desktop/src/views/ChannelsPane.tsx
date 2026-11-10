@@ -17,16 +17,11 @@ import type {
     ImConversationEntry,
 } from "@taco-ai/protocol";
 import { makeImCwd } from "@taco-ai/protocol";
-import {
-    type KeyboardEvent,
-    type ReactElement,
-    type ReactNode,
-    useEffect,
-    useRef,
-    useState,
-} from "react";
+import { type ReactElement, type ReactNode, useEffect, useRef, useState } from "react";
+import { ContentHeader } from "../components/ContentHeader";
 import { ImPolicyDialog } from "../components/ImPolicyDialog.tsx";
 import { Button } from "../components/ui/Button.tsx";
+import { TabList } from "../components/ui/TabList";
 import { CHANNEL_NAME_WECOM } from "../hooks/useChannelsPane.ts";
 import { useNow } from "../hooks/useNow.ts";
 import { useT, useUiLanguage } from "../i18n/useI18n";
@@ -121,24 +116,6 @@ export function ChannelsPane(props: ChannelsPaneProps): ReactElement {
     } = props;
     const { t } = useT();
     const [tab, setTab] = useState<Tab>("bindings");
-    // WAI-ARIA tabs: arrows/Home/End move between tabs and activate on focus;
-    // the active tab keeps tabIndex 0, the other -1 (roving tabindex).
-    const TAB_ORDER: readonly Tab[] = ["bindings", "conversations"];
-    const handleTabsKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
-        if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
-        event.preventDefault();
-        const current = TAB_ORDER.indexOf(tab);
-        const nextIndex =
-            event.key === "Home"
-                ? 0
-                : event.key === "End"
-                  ? TAB_ORDER.length - 1
-                  : (current + (event.key === "ArrowRight" ? 1 : -1) + TAB_ORDER.length) %
-                    TAB_ORDER.length;
-        const next = TAB_ORDER[nextIndex];
-        setTab(next);
-        document.getElementById(`channels-tab-${next}`)?.focus();
-    };
     /** Scope for the policy dialog. `peerId`+`chatId` selects chat-override
      *  mode; channelId-only selects channel-default mode. */
     const [policyScope, setPolicyScope] = useState<{
@@ -167,45 +144,39 @@ export function ChannelsPane(props: ChannelsPaneProps): ReactElement {
 
     return (
         <div className="channels-pane">
-            <div className="pane-header">
-                <span>{t("channels.title")}</span>
-                <span className="pane-subtitle">{t("channels.subtitle")}</span>
-            </div>
+            <ContentHeader title={t("channels.title")} description={t("channels.subtitle")} />
 
-            <div className="channels-tabs" role="tablist" onKeyDown={handleTabsKeyDown}>
-                <button
-                    type="button"
-                    role="tab"
-                    id="channels-tab-bindings"
-                    aria-selected={tab === "bindings"}
-                    aria-controls="channels-panel-bindings"
-                    tabIndex={tab === "bindings" ? 0 : -1}
-                    className={`channels-tab ${tab === "bindings" ? "channels-tab--active" : ""}`}
-                    onClick={() => setTab("bindings")}
-                >
-                    {t("channels.tabBindings")}
-                </button>
-                <button
-                    type="button"
-                    role="tab"
-                    id="channels-tab-conversations"
-                    aria-selected={tab === "conversations"}
-                    aria-controls="channels-panel-conversations"
-                    tabIndex={tab === "conversations" ? 0 : -1}
-                    className={`channels-tab ${tab === "conversations" ? "channels-tab--active" : ""}`}
-                    onClick={() => setTab("conversations")}
-                >
-                    {t("channels.tabConversations")}
-                    {conversationsUnread > 0 && (
-                        <span
-                            className="channels-tab-badge"
-                            aria-label={t("channels.unreadAria", { count: conversationsUnread })}
-                        >
-                            {conversationsUnread}
-                        </span>
-                    )}
-                </button>
-            </div>
+            <TabList
+                label={t("channels.title")}
+                value={tab}
+                onValueChange={setTab}
+                variant="segmented"
+                items={[
+                    {
+                        value: "bindings",
+                        label: t("channels.tabBindings"),
+                        id: "channels-tab-bindings",
+                        panelId: "channels-panel-bindings",
+                    },
+                    {
+                        value: "conversations",
+                        label: t("channels.tabConversations"),
+                        id: "channels-tab-conversations",
+                        panelId: "channels-panel-conversations",
+                        trailing:
+                            conversationsUnread > 0 ? (
+                                <span
+                                    className="channels-tab-badge"
+                                    aria-label={t("channels.unreadAria", {
+                                        count: conversationsUnread,
+                                    })}
+                                >
+                                    {conversationsUnread}
+                                </span>
+                            ) : undefined,
+                    },
+                ]}
+            />
 
             {tab === "bindings" ? (
                 <div

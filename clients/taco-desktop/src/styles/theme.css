@@ -166,12 +166,15 @@
     /* Spacing scale (4px base). Hairline borders stay literal 1px. */
     --space-px: 1px;
     --space-0-5: 0.125rem;
+    --space-0-75: 0.1875rem;
     --space-1: 0.25rem;
     --space-1-5: 0.375rem;
     --space-2: 0.5rem;
     --space-2-5: 0.625rem;
     --space-3: 0.75rem;
     --space-4: 1rem;
+    --space-5: 1.25rem;
+    --space-6: 1.5rem;
 
     /* Radius scale — macOS HIG continuous-corner inspired. Semantic tiers:
        xs < sm < md < lg; pill for badges/switches; circle for avatars/icons; line for hairline borders. */
@@ -184,6 +187,15 @@
     --composer-control-height: 1.5rem;
     /* One height for a dialog form row (input + icon button + text button). */
     --control-height-md: 2rem;
+    --control-height-compact: 1.5rem;
+    --content-gutter: var(--space-5);
+    --field-gap: var(--space-1-5);
+    --form-field-min-width: 12rem;
+    --catalog-list-min-width: 20rem;
+    --catalog-list-max-width: 30rem;
+    --catalog-card-min-width: 12rem;
+    --section-gap: var(--space-6);
+    --settings-content-width: 45rem;
     /* Brand mark on a provider card: the square the vendored SVG is painted in. */
     --provider-icon-size: 1.35rem;
     --provider-status-ready: #34d399;
@@ -201,7 +213,11 @@
     --text-md: 0.95rem;
     --text-lg: 1.15rem;
 
-    /* Line-heights: tight for headings, normal for secondary text, relaxed for reading prose. */
+    --weight-normal: 400;
+    --weight-medium: 500;
+    --weight-semibold: 600;
+
+    /* Tight headings, normal controls and metadata, relaxed reading prose. */
     --leading-tight: 1.3;
     --leading-normal: 1.5;
     --leading-relaxed: 1.7;
@@ -213,7 +229,6 @@
     --dot-size: 0.375rem;
     /* Comfortable reading measure for prose columns. */
     --reading-width: 42rem;
-    --reading-width-wide: 52rem;
 
     /* Mono font stack — consolidates scattered ui-monospace,... hardcoded values. */
     --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;

@@ -764,6 +764,7 @@
     "grantAccess": "Grant access and open"
   },
   "memory": {
+    "topicsTitle": "Memory entries",
     "sources": "Source conversations",
     "title": "Memory",
     "globalLabel": "Global",

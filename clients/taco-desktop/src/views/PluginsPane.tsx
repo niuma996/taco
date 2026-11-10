@@ -12,6 +12,7 @@ import type {
     ExtensionsStatusResult,
 } from "@taco-ai/protocol";
 import type { ReactElement } from "react";
+import { ContentHeader } from "../components/ContentHeader";
 import { Button } from "../components/ui/Button.tsx";
 import { Switch } from "../components/ui/Switch.tsx";
 import { useT } from "../i18n/useI18n";
@@ -44,10 +45,7 @@ export function PluginsPane(props: PluginsPaneProps): ReactElement {
 
     return (
         <div className="plugins-pane">
-            <div className="pane-header">
-                <span>{t("plugins.title")}</span>
-                <span className="pane-subtitle">{t("plugins.subtitle")}</span>
-            </div>
+            <ContentHeader title={t("plugins.title")} description={t("plugins.subtitle")} />
 
             <div className="pane-config-hint">
                 <span className="plugins-config-hint-label">taco.json</span>
