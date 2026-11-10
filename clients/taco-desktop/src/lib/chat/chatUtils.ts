@@ -524,7 +524,11 @@ export function historyToUiMessages(
         if (entryId && seenEntryIds.has(entryId)) continue;
         if (entryId) seenEntryIds.add(entryId);
 
-        const ts = parseEntryTimestamp(e.timestamp, Date.now());
+        // The entry is persisted after generation; its timestamp differs from the live message.
+        const ts = parseEntryTimestamp(
+            (m as MessageLike).timestamp,
+            parseEntryTimestamp(e.timestamp, Date.now()),
+        );
         // Pull role out of AgentMessage — AgentMessage is the union
         // Message | CustomAgentMessages[...]; we only need
         // user / assistant / toolResult here. Structural check, not a named
@@ -554,7 +558,7 @@ export function historyToUiMessages(
             const failed = failure !== null || stopReason === "aborted";
             if (!(failed && isEmptyAssistant(bubble))) out.push(bubble);
             if (failure !== null) {
-                out.splice(0, out.length, ...appendAssistantError(out, id, failure, ts));
+                out.splice(0, out.length, ...appendAssistantError(out, failure, ts));
             }
         } else if (role === "toolResult") {
             const tm = m as {
@@ -788,14 +792,9 @@ export function isEmptyAssistant(m: UiMessage): boolean {
  * inside one run and each attempt ends with its own message_end, with no user
  * row in between — so a trailing error row is replaced instead of stacked.
  */
-export function appendAssistantError(
-    messages: UiMessage[],
-    key: string,
-    text: string,
-    ts: number,
-): UiMessage[] {
+export function appendAssistantError(messages: UiMessage[], text: string, ts: number): UiMessage[] {
     const row: UiMessage = {
-        id: `${ASSISTANT_ERROR_ROW_PREFIX}${key}`,
+        id: `${ASSISTANT_ERROR_ROW_PREFIX}${ts}`,
         kind: "system",
         text: `⚠ ${text}`,
         ts,

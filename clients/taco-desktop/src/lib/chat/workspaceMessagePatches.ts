@@ -16,6 +16,7 @@ import {
     assistantFailureText,
     extractAssistantTextAndThinking,
     isEmptyAssistant,
+    parseEntryTimestamp,
     type UiMessage,
 } from "./chatUtils";
 
@@ -148,7 +149,12 @@ export function mergeAssistantFinal(messages: UiMessage[], reply: AgentMessage):
         // Shallow-clone before overwriting — the element shares its reference
         // with the input array, so direct assignment would pollute reducer input.
         const live = next[liveIdx] as AssistantMessage;
-        const merged: AssistantMessage = { ...live, text, thinking };
+        const merged: AssistantMessage = {
+            ...live,
+            text,
+            thinking,
+            ts: parseEntryTimestamp(m.timestamp, live.ts),
+        };
         if (errorText !== null && isEmptyAssistant(merged)) next.splice(liveIdx, 1);
         else next[liveIdx] = merged;
     } else {
@@ -156,14 +162,14 @@ export function mergeAssistantFinal(messages: UiMessage[], reply: AgentMessage):
             id,
             kind: "assistant",
             text,
-            ts: Date.now(),
+            ts: parseEntryTimestamp(m.timestamp, Date.now()),
             tools: [],
             thinking,
         };
         if (errorText === null || !isEmptyAssistant(bubble)) next.push(bubble);
     }
     if (errorText !== null) {
-        next = appendAssistantError(next, id, errorText, Date.now());
+        next = appendAssistantError(next, errorText, parseEntryTimestamp(m.timestamp, Date.now()));
     }
     return next;
 }

@@ -37,6 +37,7 @@ import {
     extractImageParts,
     findLastAssistant,
     isEmptyAssistant,
+    parseEntryTimestamp,
     stringifyResult,
     textFromMessage,
     toolResultIsError,
@@ -123,7 +124,14 @@ function handleMessageStart(
     return {
         messages: [
             ...messages,
-            { id, kind: "assistant", text: "", ts: opts.now, tools: [], thinking: [] },
+            {
+                id,
+                kind: "assistant",
+                text: "",
+                ts: parseEntryTimestamp(ev.message.timestamp, opts.now),
+                tools: [],
+                thinking: [],
+            },
         ],
     };
 }
@@ -196,7 +204,7 @@ function handleMessageEnd(
                 id,
                 kind: "user",
                 text,
-                ts: opts.now,
+                ts: parseEntryTimestamp(m.timestamp, opts.now),
                 ...(images.length > 0 ? { images } : {}),
                 ...(attachments.length > 0 ? { attachments } : {}),
             };
@@ -209,7 +217,7 @@ function handleMessageEnd(
                     id,
                     kind: "user",
                     text,
-                    ts: opts.now,
+                    ts: parseEntryTimestamp(m.timestamp, opts.now),
                     ...(images.length > 0 ? { images } : {}),
                     ...(attachments.length > 0 ? { attachments } : {}),
                 },
@@ -228,7 +236,7 @@ function handleMessageEnd(
                 id,
                 kind: "assistant",
                 text,
-                ts: opts.now,
+                ts: parseEntryTimestamp(m.timestamp, opts.now),
                 tools: [],
                 thinking,
             };
@@ -237,6 +245,7 @@ function handleMessageEnd(
         const target = messages[idx];
         if (target?.kind !== "assistant") return { messages };
         const cloned = cloneAssistant(target);
+        cloned.ts = parseEntryTimestamp(m.timestamp, cloned.ts);
         cloned.text = textFromMessage(m);
         for (let i = 0; i < (m.content?.length ?? 0); i++) {
             const c = (m.content as Array<{ type?: string; redacted?: boolean }>)[i];
@@ -267,7 +276,9 @@ function settleAssistant(
     const failure = assistantFailureText(m);
     const failed = failure !== null || m.stopReason === "aborted";
     const placed = failed && isEmptyAssistant(bubble) ? before : [...before, bubble];
-    return failure === null ? placed : appendAssistantError(placed, bubble.id, failure, now);
+    return failure === null
+        ? placed
+        : appendAssistantError(placed, failure, parseEntryTimestamp(m.timestamp, now));
 }
 
 function handleToolStart(
