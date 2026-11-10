@@ -16,6 +16,7 @@ import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { resolve as resolvePath } from "node:path";
 import type { InstructionsConfig } from "@taco-ai/protocol";
+import { escapeTagText } from "../tags/builder.ts";
 import { tacoHome } from "./tacoHome.ts";
 
 /** Canonical file names; order matches the section comment above. */
@@ -73,15 +74,21 @@ export interface InstructionBlock {
  * Render one resolved block to the `<instructions source="…">…</instructions>`
  * XML the context hook and the subagent system-prompt appendix both use.
  *
- * Content is NOT escaped: it is markdown that may legitimately contain `<`,
- * `>`, and code fences. The only structural risk is a literal `</instructions>`
- * inside the file, which would close the tag early — we accept this because
- * (a) instructions files are trusted project content, (b) full escaping would
- * break the prompt's markdown rendering. The attribute value is escapeAttr'd
- * by construction since `source` is a fixed literal union (no user input).
+ * The body is escaped so file content cannot close this tag early or forge a
+ * sibling context tag; the attribute value is escapeAttr'd by construction
+ * since `source` is a fixed literal union. A cloned repository's instruction
+ * file is attacker-influenced content, so the body is treated as data rather
+ * than trusted markup.
  */
 export function renderInstructionBlock(block: InstructionBlock): string {
-    return `<instructions source="${block.source}">\n${block.content}\n</instructions>`;
+    return `<instructions source="${block.source}">\n${instructionBody(block.content)}\n</instructions>`;
+}
+
+/** The escaped instruction body: the representation inside the tag and therefore
+ *  also the representation a dedup key must compare, since the hook reads keys
+ *  back out of an already-rendered window. */
+export function instructionBody(content: string): string {
+    return escapeTagText(content);
 }
 
 /** Result of resolving a workspace's instructions against a config. */

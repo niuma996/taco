@@ -21,6 +21,7 @@
 import type { InstructionsConfig } from "@taco-ai/protocol";
 import {
     type InstructionsResolution,
+    instructionBody,
     renderInstructionBlock,
     resolveInstructions,
 } from "../config/instructions.ts";
@@ -65,7 +66,10 @@ export function buildInstructionsContextHook(
         let appended = false;
         for (const block of resolution.blocks) {
             const rendered = renderInstructionBlock(block);
-            if (existing.has(instructionKey(block.source, block.content))) continue;
+            // Key on the rendered body: the window stores the escaped form, so a
+            // raw-content key would never match and the block would grow every turn.
+            if (existing.has(instructionKey(block.source, instructionBody(block.content))))
+                continue;
             appendUserTag(event.messages, rendered);
             appended = true;
         }
