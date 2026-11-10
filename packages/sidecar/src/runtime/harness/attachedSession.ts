@@ -1136,6 +1136,11 @@ export class AttachedSession extends EventEmitter {
         return this.thinkingLevel;
     }
 
+    /** Source recovery snapshot; the caller owns and must unsubscribe the watch. */
+    async watchSnapshot() {
+        return this.lane.watch(harnessContext);
+    }
+
     /** Current lane execution state, read from pi's live operation record. */
     async getExecutionState(): Promise<"idle" | "running"> {
         const info = await this.lane.inspectExecution(harnessContext);

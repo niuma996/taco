@@ -44,7 +44,11 @@
     "loadingMore": "Loading…",
     "status": {
       "idle": "idle",
-      "running": "running"
+      "running": "running",
+      "waiting": "Waiting for your input",
+      "error": "Error",
+      "incomplete": "State needs synchronization",
+      "unread": "Unread messages"
     },
     "createdAtLabel": "created",
     "openLog": "Open log file",

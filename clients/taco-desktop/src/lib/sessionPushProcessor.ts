@@ -92,6 +92,38 @@ export class SessionPushProcessor {
         );
     }
 
+    /** Explicit navigation shares the live/replay queue and snapshot watermark. */
+    async refresh(
+        workspace: string,
+        session: string,
+        sessionKind: "main" | "subagent" = "main",
+    ): Promise<boolean> {
+        return (
+            (await this.queue.run(workspace, session, async (isCurrent) => {
+                this.options.onSyncState?.(workspace, session, "recovering");
+                const afterSeq = this.cursor.last(workspace, session);
+                const snapshot = await this.recoverSnapshot(
+                    workspace,
+                    session,
+                    sessionKind,
+                    afterSeq,
+                    afterSeq,
+                    isCurrent,
+                );
+                if (!isCurrent() || !snapshot.recovered) {
+                    if (isCurrent()) {
+                        this.incompleteStreams.add(`${workspace}\u0000${session}`);
+                        this.options.onSyncState?.(workspace, session, "incomplete");
+                    }
+                    return false;
+                }
+                this.cursor.resetTo(workspace, session, snapshot.snapshotSeq);
+                await this.resync(workspace, session, sessionKind, isCurrent);
+                return isCurrent() && !this.incompleteStreams.has(`${workspace}\u0000${session}`);
+            })) ?? false
+        );
+    }
+
     /** Same-instance reconnects preserve watermarks but reject all old continuations. */
     invalidate(): void {
         this.queue.invalidate();

@@ -3,7 +3,12 @@
  * plus model choices owned by a workspace/draft pair before session creation.
  */
 
-import { asSessionId, asWorkspaceId, type ThinkingLevel } from "@taco-ai/protocol";
+import {
+    asSessionId,
+    asWorkspaceId,
+    type SessionTarget,
+    type ThinkingLevel,
+} from "@taco-ai/protocol";
 import { useCallback, useRef, useState } from "react";
 import type { ModelSelection } from "../components/settings/ModelPicker";
 import type { TacoClient } from "../lib/clients/tacoClient.ts";
@@ -16,10 +21,7 @@ export interface DraftTarget {
     draftId?: string;
 }
 
-export interface SessionTarget extends DraftTarget {
-    /** Undefined means the target is a draft rather than an attached session. */
-    sessionId?: string;
-}
+type SettingsTarget = SessionTarget | DraftTarget;
 
 function sessionKey(workspace: string, sessionId: string): string {
     return JSON.stringify([workspace, sessionId]);
@@ -82,8 +84,8 @@ export interface UseSessionSettingsApi {
     activeModel: ModelSelection | null;
     /** Defaults to the workspace captured by this render. */
     isThinkingSuppressed: (sid: string, workspace?: string) => boolean;
-    setSessionLevel: (next: ThinkingLevel, target?: SessionTarget) => Promise<void>;
-    setSessionModel: (next: ModelSelection, target?: SessionTarget) => Promise<void>;
+    setSessionLevel: (next: ThinkingLevel, target?: SettingsTarget) => Promise<void>;
+    setSessionModel: (next: ModelSelection, target?: SettingsTarget) => Promise<void>;
     /** Resolve the level + model a new session should be created with. */
     newSessionDefaults: (target?: DraftTarget) => NewSessionDefaults;
     /** Adopt defaults in their original workspace, consuming only the original staged pick. */
@@ -115,11 +117,9 @@ export function useSessionSettings({
     const levels = useVersionedMap<ThinkingLevel>();
     const models = useVersionedMap<ModelSelection>();
     const stagedModels = useVersionedMap<ModelSelection>();
-    const activeTarget: SessionTarget = {
-        workspace: activeCwd,
-        sessionId: activeSession,
-        draftId: activeDraftId,
-    };
+    const activeTarget: SettingsTarget = activeSession
+        ? { workspace: activeCwd, sessionId: activeSession }
+        : { workspace: activeCwd, draftId: activeDraftId };
 
     const isThinkingSuppressed = useCallback(
         (sid: string, workspace = activeCwd): boolean =>
@@ -128,8 +128,12 @@ export function useSessionSettings({
         [levels.values, activeCwd],
     );
 
-    async function setSessionLevel(next: ThinkingLevel, target = activeTarget): Promise<void> {
-        const { workspace, sessionId } = target;
+    async function setSessionLevel(
+        next: ThinkingLevel,
+        target: SettingsTarget = activeTarget,
+    ): Promise<void> {
+        const { workspace } = target;
+        const sessionId = "sessionId" in target ? target.sessionId : undefined;
         if (!sessionId) return;
         try {
             await levels.apply(
@@ -148,8 +152,12 @@ export function useSessionSettings({
         }
     }
 
-    async function setSessionModel(next: ModelSelection, target = activeTarget): Promise<void> {
-        const { workspace, sessionId } = target;
+    async function setSessionModel(
+        next: ModelSelection,
+        target: SettingsTarget = activeTarget,
+    ): Promise<void> {
+        const { workspace } = target;
+        const sessionId = "sessionId" in target ? target.sessionId : undefined;
         if (!sessionId) {
             stagedModels.write(draftKey(target), next);
             return;

@@ -30,10 +30,12 @@ import { getSessionState } from "../lib/chat/sessionState";
 import type { WorkspaceState } from "../lib/chat/workspaceReducer";
 import type { TacoClient } from "../lib/clients/tacoClient.ts";
 import { SessionPushProcessor, type SnapshotRecovery } from "../lib/sessionPushProcessor";
+import { bindSessionSynchronization } from "../lib/sessionSynchronization";
 import { bannerSeverity, formatForBanner, parseLogLine } from "../lib/sidecarLogLine";
 import { useStableCallback } from "./primitives/useStableCallback";
 
 export type SidecarAction =
+    | { type: "SESSION_OPERATION_FINISHED"; cwd: string; sid: string; kind: "compaction" }
     | { type: "SESSION_UNCERTAIN"; cwd: string; sid: string }
     | {
           type: "SET_SESSION_EXECUTION";
@@ -240,6 +242,13 @@ export function normalizePushFrame(p: ServerPush, dispatch: (a: SidecarAction) =
     if (!p.workspace || !p.session) return;
 
     switch (p.method) {
+        case PushMethods.CompactionFinished:
+            return void dispatch({
+                type: "SESSION_OPERATION_FINISHED",
+                cwd: p.workspace,
+                sid: p.session,
+                kind: "compaction",
+            });
         case PushMethods.Attached:
             return void dispatch({ type: "ATTACHED", cwd: p.workspace, sid: p.session });
         case PushMethods.SessionDeleted:
@@ -468,18 +477,16 @@ export function useSidecarStream(
                 onActionRef({ type: "SET_SESSION_SYNC", cwd, sid, sync }),
             recoverSnapshot: (workspace, session, sessionKind, _lastSeq, _targetSeq, isCurrent) =>
                 onSnapshotRequiredRef(workspace, session, sessionKind, isCurrent),
-            // `execution` is only exposed by session.attach, so recovery probes it
-            // through a full attach. That is deliberate and safe: attach is
-            // idempotent for an already-attached session (the event ring early-
-            // returns, the registry returns the existing attachment), and a
-            // running session is necessarily attached server-side. The extra
-            // result fields are ignored here.
+            // Snapshot reads are passive. They certify execution only for a
+            // session that is already attached; an unattached session remains
+            // unknown until the user explicitly opens it.
             probeExecution: async (workspace, session) => {
-                const attached = await clientRef.current.sessionAttach({
+                const snapshot = await clientRef.current.sessionSnapshotGet({
                     workspace: asWorkspaceId(workspace),
                     sessionId: asSessionId(session),
                 });
-                return attached.execution;
+                if (!snapshot.runtime) return undefined;
+                return snapshot.runtime.operation?.kind === "run" ? "running" : "idle";
             },
             onExecutionState: (cwd, sid, execution) =>
                 onActionRef({ type: "SET_SESSION_EXECUTION", cwd, sid, execution }),
@@ -493,6 +500,7 @@ export function useSidecarStream(
     useEffect(() => {
         const processor = processorRef.current;
         if (!processor) return;
+        const unbindSynchronization = bindSessionSynchronization(client, processor);
         const invalidate = (markUncertain = false) => {
             recoveryGenerationRef.current++;
             processor.invalidate();
@@ -630,6 +638,7 @@ export function useSidecarStream(
 
         return () => {
             cancelled = true;
+            unbindSynchronization();
             invalidate();
             unsubscribeReady();
             exitUnlisten?.();

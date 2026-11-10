@@ -478,6 +478,39 @@ interface SessionEventReplay {
 - `resetRequired: true` → ring no longer covers the requested range; reset
   state and reload from `firstSeq` (or, for deletes, treat as fresh session).
 
+**`session.snapshot.get` recovery.** A snapshot returns history, main-session
+task/plan state, and `snapshotSeq`. When `runtime` is present it replaces all
+client runtime state: `operation` (explicitly `null` when idle), optional
+`partialMessage`, `tools`, `queues`, `pendingCommandPermissions`,
+`inFlightAgentToolCallIds`, `settledBackgroundSubSessionIds`, and
+`pendingAskUserToolCallIds`. All arrays are required and an empty array clears
+stale state. Replay only frames whose sequence is greater than `snapshotSeq`.
+
+The runtime is projected from a short-lived harness lane watch, copied before
+related asynchronous reads. History retains entries before compaction, and
+pending questions are derived from the full raw history. Its partial assistant
+message retains the source
+`timestamp`, so later streaming deltas continue the same message. Operation
+`status` is the harness value (including `open` during active work); `kind`
+identifies runs, compaction and navigation. Tools include running output
+checkpoints and staged settled results. Queue entries preserve their entry ids.
+Approvals include requests displayed on the root session for child tools.
+Pending question ids cover both `askUser` and `planExit` and clear after later
+user input, including hidden answer submissions.
+
+Reading a snapshot is passive. It includes runtime state only for a session
+already attached in the daemon; it never attaches a session or resumes an open
+operation. Explicit `session.attach` remains the execution-recovery trigger and
+must be accompanied by a later snapshot install so display recovery and
+execution recovery stay separate.
+
+The server retries concurrent changes up to three times and returns
+`snapshot_unstable` if no consistent watermark is available; clients should
+retry recovery with backoff. Every temporary watch is unsubscribed. Unattached
+subagents remain history-only without `runtime`, avoiding main-session tool
+attachment; already attached children expose their source runtime. Older
+servers may omit `runtime`, so clients must retain the history fallback.
+
 **Not a wire guarantee.** This log is best-effort. Sequenced frames are
 additionally buffered to a per-stream disk tail
 (`$TACO_HOME/push-log/<sessionId>-<workspaceHash>.jsonl`, bounded and compacted

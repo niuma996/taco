@@ -46,6 +46,54 @@ function cached(state: State, sid: string, text = sid): State {
     );
 }
 
+test("selecting a recovered conversation preserves incomplete synchronization and live execution", () => {
+    let state = cached(initial(), "a");
+    state = reduce(state, { type: "SET_SESSION_SYNC", cwd: "/w", sid: "a", sync: "incomplete" });
+    state = reduce(state, { type: "SELECT_SESSION", cwd: "/w", sid: "a" });
+    assert.equal(state["/w"]?.activeSession, "a");
+    assert.equal(getSessionState(state["/w"], "a")?.sync, "incomplete");
+});
+
+test("completion clears recovered operation metadata without touching another operation kind", () => {
+    const ws = createEmptyWorkspace("/w");
+    ws.sessionStatesById = {
+        a: {
+            ...createSessionState(),
+            operation: { id: "compact", kind: "compaction", startedAt: 1, status: "running" },
+        },
+    };
+    let state: State = { "/w": ws };
+    state = reduce(state, { type: "SESSION_OPERATION_FINISHED", cwd: "/w", sid: "a", kind: "run" });
+    assert.equal(getSessionState(state["/w"], "a")?.operation?.id, "compact");
+    state = reduce(state, {
+        type: "SESSION_OPERATION_FINISHED",
+        cwd: "/w",
+        sid: "a",
+        kind: "compaction",
+    });
+    assert.equal(getSessionState(state["/w"], "a")?.operation, null);
+});
+
+test("navigation_end clears only the recovered navigation operation", () => {
+    const ws = createEmptyWorkspace("/w");
+    ws.sessionStatesById = {
+        a: {
+            ...createSessionState(),
+            operation: { id: "navigate", kind: "navigation", startedAt: 1, status: "running" },
+        },
+    };
+    let state: State = { "/w": ws };
+    state = reduce(state, {
+        type: "APPLY_EVENT",
+        cwd: "/w",
+        sid: "a",
+        suppressedThinking: false,
+        now: 2,
+        ev: { type: "navigation_end" },
+    });
+    assert.equal(getSessionState(state["/w"], "a")?.operation, null);
+});
+
 test("UPSERT_WORKSPACE is additive and preserves every existing reference", () => {
     const state = initial();
     assert.equal(workspacesReducer(state, { type: "UPSERT_WORKSPACE", cwd: "/w" }), state);

@@ -230,6 +230,56 @@
     opacity: 1;
     animation: session-pulse 1.2s ease-in-out infinite;
 }
+.session-status-dot.waiting {
+    background: var(--warning);
+    opacity: 1;
+}
+.session-status-dot.error {
+    background: var(--danger);
+    opacity: 1;
+}
+.session-status-dot.incomplete {
+    background: var(--text-muted);
+    opacity: 1;
+}
+.conversation-group-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    margin-inline-start: auto;
+}
+.conversation-group-status .session-status-dot {
+    width: 6px;
+    height: 6px;
+}
+.session-unread-dot {
+    flex: 0 0 auto;
+    width: 6px;
+    height: 6px;
+    border-radius: var(--radius-circle);
+    background: var(--accent);
+}
+.session-load-error {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-3);
+    color: var(--danger);
+    font-size: var(--text-xs);
+}
+.session-load-error button {
+    border: 0;
+    background: transparent;
+    color: var(--accent);
+    cursor: pointer;
+    font: inherit;
+}
+@media (prefers-reduced-motion: reduce) {
+    .session-status-dot.running {
+        animation: none;
+    }
+}
 @keyframes session-pulse {
     0%,
     100% {

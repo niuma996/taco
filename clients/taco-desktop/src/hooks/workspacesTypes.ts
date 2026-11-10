@@ -60,7 +60,7 @@ export interface UseWorkspacesApi {
     /** Called after sidecar restart: refetch every workspace's sessions and attach the first. */
     reloadAllWorkspaces: () => Promise<void>;
     /** Sidebar "load more" — appends the next page using the current cursor. */
-    loadMoreSessions: (cwd: string) => Promise<void>;
+    loadMoreSessions: (cwd: string) => Promise<boolean>;
     /** Load a non-active workspace's session list without navigating to it. */
     ensureWorkspaceSessions: (cwd: string) => Promise<void>;
     /**

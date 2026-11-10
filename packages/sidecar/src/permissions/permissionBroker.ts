@@ -327,6 +327,16 @@ export class PermissionBroker extends EventEmitter {
         return this.pending.get(requestId)?.request;
     }
 
+    /** Pending approvals owned by this session or displayed on its root tool cards. */
+    pendingForSession(sessionId: string): CommandPermissionRequest[] {
+        return [...this.pending.values()]
+            .filter(
+                ({ request }) =>
+                    request.sessionId === sessionId || request.displaySessionId === sessionId,
+            )
+            .map(({ request }) => structuredClone(request));
+    }
+
     /** Reject all pending requests for a session and remove its in-memory rules. */
     cleanupSession(sessionId: string): void {
         this.sessionRules.delete(sessionId);

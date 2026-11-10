@@ -25,6 +25,63 @@ function frame(seq: number): ServerPush {
 }
 
 describe("SessionPushProcessor", () => {
+    it("does not report a completed open when replay after its snapshot fails", async () => {
+        const processor = new SessionPushProcessor({
+            getEvents: async () => {
+                throw new Error("offline");
+            },
+            deliver: () => {},
+            recoverSnapshot: async () => ({ recovered: true, snapshotSeq: 5 }),
+            reportError: () => {},
+        });
+        assert.equal(await processor.refresh("/workspace", "session"), false);
+    });
+
+    it("retries an unsuccessful explicit snapshot when a contiguous push arrives", async () => {
+        let reads = 0;
+        const processor = new SessionPushProcessor({
+            getEvents: async () => {
+                reads++;
+                return { events: [frame(1)], firstSeq: 1, lastSeq: 1, resetRequired: false };
+            },
+            deliver: () => {},
+            recoverSnapshot: async () => ({ recovered: false }),
+            reportError: () => {},
+            snapshotRetryDelaysMs: [],
+        });
+        assert.equal(await processor.refresh("/workspace", "session"), false);
+        await processor.process(frame(1));
+        assert.equal(reads, 1);
+    });
+
+    it("serializes an explicit open with live pushes and adopts the snapshot watermark", async () => {
+        let finish!: (value: { recovered: true; snapshotSeq: number }) => void;
+        const snapshot = new Promise<{ recovered: true; snapshotSeq: number }>((resolve) => {
+            finish = resolve;
+        });
+        const delivered: number[] = [];
+        const processor = new SessionPushProcessor({
+            getEvents: async (_w, _s, afterSeq) => ({
+                events: [frame(6)].filter((p) => (p.seq ?? 0) > afterSeq),
+                firstSeq: 1,
+                lastSeq: 6,
+                resetRequired: false,
+            }),
+            deliver: (push) => {
+                delivered.push(push.seq ?? 0);
+            },
+            recoverSnapshot: () => snapshot,
+            reportError: (message) => assert.fail(message),
+        });
+        const opening = processor.refresh("/workspace", "session");
+        const pending = processor.process(frame(6));
+        finish({ recovered: true, snapshotSeq: 5 });
+        assert.equal(await opening, true);
+        await pending;
+        assert.deepEqual(delivered, [6]);
+        assert.equal(processor.last("/workspace", "session"), 6);
+    });
+
     it("replays a detected gap in sequence order and drops the redelivered frame", async () => {
         const delivered: number[] = [];
         const replays: number[] = [];

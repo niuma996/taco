@@ -13,7 +13,7 @@
  *
  * Hooks/views call a single API: `loadOpenedCwds`, `loadActiveCwd`,
  * `resolveActiveCwd` (pure), `persistCwds`, `persistActiveCwd`,
- * `pruneMissingCwds`.
+ * `persistExpandedWorkspaces`, `pruneMissingCwds`.
  */
 
 import { IM_CWD_PREFIX } from "@taco-ai/protocol";
@@ -305,6 +305,7 @@ export async function persistCwds(cwds: string[]): Promise<void> {
         const opened = cwds.filter(isValidWorkspaceCwd);
         await writeDesktopConfig({
             workspaces: {
+                ...current.workspaces,
                 opened: orderWorkspacesForActive(opened, active),
                 active,
             },
@@ -329,9 +330,31 @@ export async function persistActiveCwd(cwd: string): Promise<void> {
     const opened = current.workspaces?.opened ?? [];
     try {
         await writeDesktopConfig({
-            workspaces: { opened: orderWorkspacesForActive(opened, cwd), active: cwd },
+            workspaces: {
+                ...current.workspaces,
+                opened: orderWorkspacesForActive(opened, cwd),
+                active: cwd,
+            },
         });
     } catch (e) {
         console.warn("[taco] failed to persist active cwd", e);
+    }
+}
+
+/** Persist the explicit chat-sidebar expansion preference without dropping
+ * other clients' workspace fields. */
+export async function persistExpandedWorkspaces(expanded: readonly string[]): Promise<void> {
+    const current = await readDesktopConfig();
+    try {
+        await writeDesktopConfig({
+            workspaces: {
+                ...current.workspaces,
+                opened: current.workspaces?.opened ?? [],
+                active: current.workspaces?.active ?? "",
+                expanded: expanded.filter(isValidWorkspaceCwd),
+            },
+        });
+    } catch (e) {
+        console.warn("[taco] failed to persist expanded workspaces", e);
     }
 }

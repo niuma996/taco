@@ -8,6 +8,8 @@
 import type { AttachParams, SessionHistory, SessionId, SessionSnapshot } from "@taco-ai/protocol";
 import { ErrorCodes } from "@taco-ai/protocol";
 import { viewUserContent } from "../../attachments/userMessageView.ts";
+import type { AttachedSession } from "../../runtime/harness/attachedSession.ts";
+import { toSessionRuntimeSnapshot } from "../../runtime/harness/sessionRuntimeSnapshot.ts";
 import type { ImageContent, TextContent } from "../../runtime/pi/types.ts";
 import { resolveSessionByPrefix } from "../../runtime/session/sessionLookup.ts";
 import type { WorkspaceRuntime } from "../../runtime/workspace.ts";
@@ -108,32 +110,70 @@ export function registerSessionReadHandlers(): void {
         // snapshotSeq, so the ring must know about the disk tail first or
         // the client would adopt snapshotSeq=0 and re-recover on every push.
         await server.hydrateSessionEvents(params.workspace, params.sessionId);
+        // Snapshot reads are passive. An attached lane supplies live runtime
+        // state; an unattached session remains history-only until an explicit
+        // session.attach starts recovery.
+        const attached = workspace.getAttached?.(params.sessionId);
         for (let attempt = 0; attempt < 3; attempt++) {
             const beforeSeq = server.getSessionLastSeq(params.workspace, params.sessionId);
-            const history = toSessionHistory(
-                params.sessionId,
-                await workspace.getHistory(params.sessionId),
-            );
-            let tasks: SessionSnapshot["tasks"];
-            let planState: SessionSnapshot["planState"];
-            if (sessionKind === "main") {
-                const attached = await ensureAttached(workspace, params.sessionId);
-                tasks = buildTasksGetResult(attached.taskStore);
-                planState = {
-                    active: attached.planState.active,
-                    currentSlug: attached.planState.currentSlug,
-                };
-            }
-            const afterSeq = server.getSessionLastSeq(params.workspace, params.sessionId);
-            if (beforeSeq === afterSeq) {
-                return {
-                    sessionId: params.sessionId,
-                    sessionKind,
-                    snapshotSeq: afterSeq,
-                    history,
-                    ...(tasks ? { tasks } : {}),
-                    ...(planState ? { planState } : {}),
-                } satisfies SessionSnapshot;
+            let watch: Awaited<ReturnType<AttachedSession["watchSnapshot"]>> | undefined;
+            let changed = false;
+            try {
+                watch = await attached?.watchSnapshot?.();
+                watch?.start(() => {
+                    changed = true;
+                });
+                const source = watch ? structuredClone(watch.snapshot) : undefined;
+                // Lane snapshots stop at the latest compaction. Keep the
+                // existing full-history contract when that boundary is present.
+                const historySource =
+                    !source || source.transcript[0]?.type === "compaction"
+                        ? await workspace.getHistory(params.sessionId)
+                        : { leafEntryId: source.tipId, entries: source.transcript };
+                if (source && historySource.leafEntryId !== source.tipId) changed = true;
+                const history = toSessionHistory(params.sessionId, historySource);
+                let runtime: SessionSnapshot["runtime"];
+                if (source) {
+                    const settledBackgroundSubSessionIds =
+                        await workspace.settledBackgroundSubSessionIds(params.sessionId);
+                    runtime = toSessionRuntimeSnapshot(
+                        { ...source, transcript: historySource.entries },
+                        {
+                            settledBackgroundSubSessionIds,
+                            inFlightAgentToolCallIds: workspace.inFlightAgentToolCallIds(
+                                params.sessionId,
+                            ),
+                            pendingCommandPermissions: workspace.permissionBroker.pendingForSession(
+                                params.sessionId,
+                            ),
+                        },
+                    );
+                }
+                const tasks =
+                    sessionKind === "main" && attached
+                        ? buildTasksGetResult(attached.taskStore)
+                        : undefined;
+                const planState =
+                    sessionKind === "main" && attached
+                        ? {
+                              active: attached.planState.active,
+                              currentSlug: attached.planState.currentSlug,
+                          }
+                        : undefined;
+                const afterSeq = server.getSessionLastSeq(params.workspace, params.sessionId);
+                if (!changed && beforeSeq === afterSeq) {
+                    return {
+                        sessionId: params.sessionId,
+                        sessionKind,
+                        snapshotSeq: afterSeq,
+                        history,
+                        ...(runtime ? { runtime } : {}),
+                        ...(tasks ? { tasks } : {}),
+                        ...(planState ? { planState } : {}),
+                    } satisfies SessionSnapshot;
+                }
+            } finally {
+                watch?.unsubscribe();
             }
         }
         throw new RpcHandlerError(

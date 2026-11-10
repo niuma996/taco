@@ -6,6 +6,8 @@ import type {
     UseSessionSearchesResult,
     UseSessionSearchResult,
 } from "../../src/hooks/useSessionSearch";
+import { conversationActivityKey } from "../../src/lib/chat/conversationActivity";
+import { createSessionState } from "../../src/lib/chat/sessionState";
 import { createEmptyWorkspace } from "../../src/lib/chat/workspaceReducer";
 import {
     ConversationSidebar as Sidebar,
@@ -334,6 +336,23 @@ describe("Sidebar conversation groups", () => {
         ).toBeTruthy();
     });
 
+    it("keeps a failed project page visible and retries only that project", async () => {
+        const input = props();
+        const workspace = input.workspaces["/repo/one"];
+        workspace.listCursor = { updatedAt: "2026-01-01", id: "same-id" };
+        workspace.listTotal = 2;
+        input.onLoadMore = vi.fn().mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+        render(<Sidebar {...input} />);
+        const user = userEvent.setup({ delay: null });
+
+        await user.click(screen.getByRole("button", { name: /session.loadMore/ }));
+
+        expect(await screen.findByText("conversationNav.loadFailed")).toBeTruthy();
+        await user.click(screen.getByRole("button", { name: "conversationNav.retry" }));
+        await waitFor(() => expect(input.onLoadMore).toHaveBeenCalledTimes(2));
+        expect(screen.queryByText("conversationNav.loadFailed")).toBeNull();
+    });
+
     it("keeps workspace groups independently expanded after a lazy load finishes", async () => {
         const input = props();
         const { rerender } = render(<Sidebar {...input} />);
@@ -364,6 +383,22 @@ describe("Sidebar conversation groups", () => {
         expect(
             screen.getByRole("button", { name: "conversationNav.expandGroup two" }),
         ).toBeTruthy();
+    });
+
+    it("restores and persists the explicit project expansion preference", async () => {
+        const onExpandedWorkspacesChange = vi.fn();
+        const input = props({
+            expandedWorkspaces: ["/repo/two"],
+            onExpandedWorkspacesChange,
+        });
+        render(<Sidebar {...input} />);
+        const user = userEvent.setup({ delay: null });
+
+        expect(
+            screen.getByRole("button", { name: "conversationNav.expandGroup one" }),
+        ).toBeTruthy();
+        await user.click(screen.getByRole("button", { name: "conversationNav.collapseGroup two" }));
+        expect(onExpandedWorkspacesChange).toHaveBeenCalledWith([]);
     });
 
     it("freezes workspace order after lazy loads and later session activity", () => {
@@ -428,5 +463,94 @@ describe("Sidebar conversation groups", () => {
         );
         expect(screen.getByText("conversationNav.loading")).toBeTruthy();
         expect(screen.queryByText("conversationNav.noConversations")).toBeNull();
+    });
+});
+
+describe("conversation row activity", () => {
+    it.each(["workspace", "im"] as const)(
+        "shows running, waiting and unread in %s rows",
+        (mode) => {
+            const input = props({ mode });
+            const cwd = mode === "workspace" ? "/repo/one" : makeImCwd("wecom", "alice", "chat-1");
+            const sid = mode === "workspace" ? "same-id" : "im-1";
+            const ws = input.workspaces[cwd] ?? createEmptyWorkspace(cwd);
+            ws.sessionStatesById = {
+                [sid]: {
+                    ...createSessionState(),
+                    execution: "running",
+                    askUserPending: { ask: true },
+                },
+            };
+            input.workspaces[cwd] = ws;
+            input.unread = { [conversationActivityKey({ workspace: cwd, sessionId: sid })]: true };
+            render(<Sidebar {...input} />);
+            const row = screen.getByRole("button", {
+                name: mode === "workspace" ? "First chat" : "chat-1",
+            });
+            expect(within(row).getByRole("img", { name: "session.status.waiting" })).toBeTruthy();
+            expect(within(row).getByRole("img", { name: "session.status.unread" })).toBeTruthy();
+            expect(row.querySelector(".session-status-dot.running")).toBeNull();
+        },
+    );
+
+    it("exposes a localized running label when no input is pending", () => {
+        const input = props();
+        input.workspaces["/repo/one"].sessionStatesById = {
+            "same-id": { ...createSessionState(), execution: "running" },
+        };
+        render(<Sidebar {...input} />);
+        expect(
+            within(screen.getByRole("button", { name: "First chat" })).getByRole("img", {
+                name: "session.status.running",
+            }),
+        ).toBeTruthy();
+    });
+
+    it("shows error and pending-sync on rows and in the project summary", () => {
+        const input = props();
+        const cwd = "/repo/one";
+        input.workspaces[cwd].sessions.push(
+            { id: "incomplete", name: "Incomplete chat", createdAt: "2026-01-02" },
+            { id: "failed", name: "Failed chat", createdAt: "2026-01-03" },
+        );
+        input.workspaces[cwd].sessionStatesById = {
+            "same-id": createSessionState(),
+            incomplete: { ...createSessionState(), sync: "incomplete" },
+            failed: {
+                ...createSessionState(),
+                messages: [
+                    {
+                        id: "error",
+                        kind: "system",
+                        text: "[session.error] failed",
+                        ts: 1,
+                    },
+                ],
+            },
+        };
+        render(<Sidebar {...input} />);
+        const group = screen.getByRole("region", { name: "one" });
+        expect(
+            within(screen.getByRole("button", { name: "Incomplete chat" })).getByRole("img", {
+                name: "session.status.incomplete",
+            }),
+        ).toBeTruthy();
+        expect(
+            within(screen.getByRole("button", { name: "Failed chat" })).getByRole("img", {
+                name: "session.status.error",
+            }),
+        ).toBeTruthy();
+        const summary = group.querySelector(".conversation-group-status");
+        expect(summary).toBeTruthy();
+        expect(
+            within(summary as HTMLElement).getByRole("img", {
+                name: "session.status.incomplete",
+            }),
+        ).toBeTruthy();
+        expect(
+            within(summary as HTMLElement).getByRole("img", {
+                name: "session.status.error",
+            }),
+        ).toBeTruthy();
     });
 });

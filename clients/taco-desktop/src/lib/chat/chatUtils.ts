@@ -135,7 +135,9 @@ export type SessionEventLike =
           /** Messages drained from the queues by the abort (pi reports them, clients use them to restore drafts). */
           steer?: MessageLike[];
           followUp?: MessageLike[];
-      };
+      }
+    | { type: "navigation_start" }
+    | { type: "navigation_end" };
 
 /** Shape of session.event.params from server push. */
 export interface SessionEventParams {

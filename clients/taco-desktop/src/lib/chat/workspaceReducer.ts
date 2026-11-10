@@ -11,6 +11,7 @@ import type {
     AgentMessage,
     CommandPermissionRequest,
     PlanStateUpdatedParams,
+    SessionSnapshot,
     TaskItem,
     TaskListMeta,
     TasksUpdatedParams,
@@ -180,10 +181,19 @@ export type WorkspaceAction =
           pendingAskUserIds?: string[];
           /** Authoritative live state from session.attach; absent on older sidecars. */
           execution?: SessionExecution;
+          /** Reject an attach result if a newer lifecycle event already owns execution. */
+          executionRevision?: number;
           /** Background spawns still running, from the attach response. */
           inFlightAgentToolCallIds?: readonly string[];
           /** Child session ids that already produced a result file. */
           settledBackgroundSubSessionIds?: readonly string[];
+      }
+    | { type: "SELECT_SESSION"; cwd: string; sid: string }
+    | {
+          type: "SESSION_OPERATION_FINISHED";
+          cwd: string;
+          sid: string;
+          kind: "run" | "compaction" | "navigation";
       }
     | { type: "ATTACHED_PUSH"; cwd: string; sid: string }
     | {
@@ -277,6 +287,9 @@ export type WorkspaceAction =
           pendingAskUserIds?: string[];
           /** Replay after this snapshot must reach its watermark before sync is current. */
           sync?: "recovering";
+          runtime?: SessionSnapshot["runtime"];
+          tasks?: SessionSnapshot["tasks"];
+          planState?: SessionSnapshot["planState"];
       }
     | {
           type: "ASKUSER_ANSWERED";
@@ -429,10 +442,17 @@ function patchSession(
 ): Partial<WorkspaceState> {
     const previous = getSessionState(ws, sid) ?? createSessionState();
     const updated = patch.messages ? updateSessionMessages(previous, patch.messages) : previous;
+    const executionRevision =
+        patch.execution !== undefined && patch.execution !== previous.execution
+            ? (previous.executionRevision ?? 0) + 1
+            : (previous.executionRevision ?? 0);
     const lastAccess =
         Math.max(0, ...Object.values(ws.sessionStatesById ?? {}).map((s) => s.lastAccess)) + 1;
     return {
-        sessionStatesById: { ...ws.sessionStatesById, [sid]: { ...updated, ...patch, lastAccess } },
+        sessionStatesById: {
+            ...ws.sessionStatesById,
+            [sid]: { ...updated, ...patch, executionRevision, lastAccess },
+        },
     };
 }
 
@@ -486,6 +506,10 @@ function applySessionEvent(
             askUserPending,
             agentToolPending,
             backgroundSubagents,
+            ...((ev.type === "run_end" && session.operation?.kind === "run") ||
+            (ev.type === "navigation_end" && session.operation?.kind === "navigation")
+                ? { operation: null }
+                : {}),
             ...(action.type === "CHILD_MESSAGE_EVENT" ? { kind: "subagent" } : {}),
         }),
         pendingBySessionId,
@@ -684,18 +708,23 @@ export function workspacesReducer(
                         | undefined;
                     if (!details?.answers && details?.waiting !== false) askUserPending[id] = true;
                 }
+                const execution =
+                    action.executionRevision === undefined ||
+                    action.executionRevision === (session.executionRevision ?? 0)
+                        ? action.execution
+                        : undefined;
                 return {
                     ...patchSession(ws, action.sid, {
                         ...restored,
                         askUserPending,
                         backgroundSubagents,
-                        ...(action.execution ? { execution: action.execution } : {}),
+                        ...(execution ? { execution } : {}),
                     }),
-                    ...(action.execution === undefined
+                    ...(execution === undefined
                         ? {}
                         : {
                               pendingBySessionId:
-                                  action.execution === "running"
+                                  execution === "running"
                                       ? { ...ws.pendingBySessionId, [action.sid]: true }
                                       : omitKey(ws.pendingBySessionId, action.sid),
                           }),
@@ -705,6 +734,18 @@ export function workspacesReducer(
                     ...(ws.loadingSessionId === action.sid ? { loadingSessionId: undefined } : {}),
                 };
             });
+        case "SELECT_SESSION":
+            return updateWs(state, action.cwd, () => ({
+                activeSession: action.sid,
+                draftId: undefined,
+                loadingSessionId: undefined,
+            }));
+        case "SESSION_OPERATION_FINISHED":
+            return updateWs(state, action.cwd, (ws) =>
+                getSessionState(ws, action.sid)?.operation?.kind === action.kind
+                    ? patchSession(ws, action.sid, { operation: null })
+                    : undefined,
+            );
         case "ATTACHED_PUSH":
             return state;
         case "COMMAND_PERMISSION_REQUESTED":
@@ -895,6 +936,66 @@ export function workspacesReducer(
             );
         case "RESTORE_SESSION_SNAPSHOT":
             return updateWs(state, action.cwd, (ws) => {
+                if (action.runtime) {
+                    const runtime = action.runtime;
+                    let messages = action.messages;
+                    for (const request of runtime.pendingCommandPermissions)
+                        messages = attachCommandPermission(messages, request);
+                    const execution = runtime.operation?.kind === "run" ? "running" : "idle";
+                    const permissions = {
+                        ...omitRequestsForSession(ws.pendingCommandPermissions, action.sid),
+                    };
+                    for (const request of runtime.pendingCommandPermissions)
+                        permissions[request.requestId] = request;
+                    const queued = queuedItemsFromEvent({ queues: runtime.queues });
+                    return {
+                        ...patchSession(ws, action.sid, {
+                            messages,
+                            kind: action.sessionKind,
+                            execution,
+                            operation: runtime.operation,
+                            sync: action.sync ?? "recovering",
+                            historyLoaded: true,
+                            truncated: false,
+                            historyRequestRevision: undefined,
+                            askUserPending: Object.fromEntries(
+                                runtime.pendingAskUserToolCallIds.map((id) => [id, true as const]),
+                            ),
+                            agentToolPending: Object.fromEntries(
+                                runtime.inFlightAgentToolCallIds.map((id) => [id, true as const]),
+                            ),
+                            backgroundSubagents: rebuildBackgroundSubagents(
+                                messages,
+                                runtime.inFlightAgentToolCallIds,
+                                runtime.settledBackgroundSubSessionIds,
+                            ),
+                        }),
+                        pendingCommandPermissions: permissions,
+                        pendingBySessionId: {
+                            ...ws.pendingBySessionId,
+                            [action.sid]: execution === "running",
+                        },
+                        queuedBySessionId: queued.length
+                            ? { ...ws.queuedBySessionId, [action.sid]: queued }
+                            : omitKey(ws.queuedBySessionId, action.sid),
+                        ...(action.tasks
+                            ? {
+                                  taskSnapshotsBySessionId: {
+                                      ...ws.taskSnapshotsBySessionId,
+                                      [action.sid]: { ...action.tasks, updatedAt: Date.now() },
+                                  },
+                              }
+                            : {}),
+                        ...(action.planState
+                            ? {
+                                  planStatesBySessionId: {
+                                      ...ws.planStatesBySessionId,
+                                      [action.sid]: action.planState,
+                                  },
+                              }
+                            : {}),
+                    };
+                }
                 const restored = mergeSessionHistory(
                     getSessionState(ws, action.sid) ?? createSessionState(),
                     action.messages,

@@ -270,6 +270,7 @@ export function useWorkspaces(client: TacoClient): UseWorkspacesApi {
             if (
                 action.type === "SET_SESSION_SYNC" ||
                 action.type === "SET_SESSION_EXECUTION" ||
+                action.type === "SESSION_OPERATION_FINISHED" ||
                 action.type === "SESSION_UNCERTAIN"
             ) {
                 if (action.type === "SESSION_UNCERTAIN")
