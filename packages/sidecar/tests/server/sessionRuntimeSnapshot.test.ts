@@ -2,9 +2,9 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { SessionSnapshot } from "@taco-ai/protocol";
 import { ProviderKeyStore } from "../../src/runtime/models/providerKeyStore.ts";
+import type { WorkspaceRuntime } from "../../src/runtime/workspace.ts";
 import { SidecarServer } from "../../src/server/server.ts";
 import { createTaskStore } from "../../src/tasks/createTaskStore.ts";
-import type { WorkspaceRuntime } from "../../src/runtime/workspace.ts";
 
 function fixture(kind: "main" | "subagent" = "main") {
     const server = new SidecarServer({ providerKeyStore: new ProviderKeyStore({}) });
@@ -97,7 +97,7 @@ function fixture(kind: "main" | "subagent" = "main") {
     const workspace = {
         listSessions: async () => [{ id: "session" }],
         getSessionFacts: async () => ({ kind }),
-        getAttached: ((): typeof attached | undefined => attached),
+        getAttached: (): typeof attached | undefined => attached,
         attach: async () => assert.fail("snapshot must not attach a session"),
         getHistory: (async () =>
             assert.fail("must use the source watch transcript")) as WorkspaceRuntime["getHistory"],
