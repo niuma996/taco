@@ -95,6 +95,21 @@ export class ConversationRouter extends EventEmitter {
         return undefined;
     }
 
+    /**
+     * Scoped lookup for callers that already know the workspace: only that
+     * workspace's route may answer, and the session must still match. A bare
+     * reverse scan could hand back a route another conversation recreated
+     * under the same session id.
+     */
+    findRouteByWorkspace(
+        workspace: string,
+        sessionId: string,
+    ): { channelId: string; peerId: string; chatId: string } | undefined {
+        const entry = this.routes.get(workspace);
+        if (entry?.sessionId !== sessionId) return undefined;
+        return parseImCwd(workspace);
+    }
+
     lookup(
         channelId: string,
         peerId: string,

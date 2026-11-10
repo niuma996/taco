@@ -9,7 +9,7 @@
  * from learning its child finished, or fail the fire it describes.
  */
 
-import type { SessionId } from "@taco-ai/protocol";
+import type { SessionId, SessionTarget } from "@taco-ai/protocol";
 import type { WorkAttemptHandle } from "./workOperationTypes.ts";
 
 export interface WorkLaunch {
@@ -42,7 +42,7 @@ export interface WorkWaiting {
 export type ParentNoticeDecision =
     | { readonly mode: "legacy"; readonly claimId?: never }
     | { readonly mode: "skip"; readonly claimId?: never; readonly retry?: true }
-    | { readonly mode: "capture" | "silent"; readonly claimId: string };
+    | { readonly mode: "capture" | "silent"; readonly claimId: string; readonly workId?: string };
 
 export interface ParentNoticeOutcome {
     readonly status: "not_run" | "completed";
@@ -51,7 +51,12 @@ export interface ParentNoticeOutcome {
 
 export interface BackgroundWorkHooks {
     /** Claim parent-model awareness independently of whether an IM message was delivered. */
-    beginParentNotice(workId: string, tracked?: boolean): Promise<ParentNoticeDecision>;
+    beginParentNotice(
+        workId: string,
+        tracked?: boolean,
+        target?: SessionTarget,
+        legacyWorkId?: string,
+    ): Promise<ParentNoticeDecision>;
     /** Release only unadmitted prompts; admitted prompts remain closed even on failure. */
     endParentNotice(workId: string, claimId: string, outcome: ParentNoticeOutcome): Promise<void>;
     runParentNotice?<T>(
@@ -66,8 +71,12 @@ export interface BackgroundWorkHooks {
         operationId: string,
     ): Promise<boolean>;
     run?<T>(workId: string, sessionId: string, run: (attemptId: string) => Promise<T>): Promise<T>;
-    /** Stable Work id for a launch; lets a later flush find the Work without a map. */
-    workIdFor(parentSessionId: SessionId, parentToolCallId: string): string;
+    /**
+     * Stable Work id for a launch; lets a later flush find the Work without a
+     * map. The workspace is part of the id — pass the same value `onLaunch`
+     * receives, or a flush could recompute an id that belongs to nobody.
+     */
+    workIdFor(parentSessionId: SessionId, parentToolCallId: string, workspace?: string): string;
     /** Record the launch. Resolves to the Work id, or undefined if tracking is off. */
     onLaunch(launch: WorkLaunch): Promise<string | undefined>;
     /**
@@ -84,7 +93,7 @@ export interface BackgroundWorkHooks {
      * assistant text — the reply is being captured as the message, and sending
      * it live as well would say it twice.
      */
-    onNoticeRunStart(workId: string, parentSessionId: SessionId): void;
+    onNoticeRunStart(workId: string, parentSessionId: SessionId, workspace?: string): void;
     /**
      * Ends the hold opened by `onNoticeRunStart`. Called exactly once per
      * start, whatever the outcome, and decides nothing about what is sent.

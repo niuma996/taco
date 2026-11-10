@@ -1427,7 +1427,11 @@ export class AgentSpawner extends EventEmitter {
             for (const entry of entries) {
                 const workId =
                     entry.workId ??
-                    this.workHooks?.workIdFor(parentSessionId, entry.parentToolCallId);
+                    this.workHooks?.workIdFor(
+                        parentSessionId,
+                        entry.parentToolCallId,
+                        this.workspaceKey,
+                    );
                 const notification = this.formatBackgroundNotification(entry.agentType, {
                     subSessionId: entry.subSessionId,
                     resultText: "",
@@ -1444,6 +1448,9 @@ export class AgentSpawner extends EventEmitter {
                         workId,
                         trackedOnly,
                         entry.workId !== undefined,
+                        entry.workId === undefined
+                            ? this.workHooks?.workIdFor(parentSessionId, entry.parentToolCallId)
+                            : undefined,
                     );
                 } catch (e) {
                     // Still unreachable. Keep the entry and stop: the remaining
@@ -1672,16 +1679,23 @@ export class AgentSpawner extends EventEmitter {
         workId: string | undefined,
         trackedOnly = false,
         tracked = true,
+        legacyWorkId?: string,
     ): Promise<boolean> {
         const hooks = this.workHooks;
         if (!hooks || workId === undefined)
             return deliverSubagentResult(this.sessionRegistry, parentSessionId, notification);
-        const decision = await hooks.beginParentNotice(workId, tracked);
+        const decision = await hooks.beginParentNotice(
+            workId,
+            tracked,
+            { workspace: this.workspaceKey, sessionId: parentSessionId },
+            legacyWorkId,
+        );
         if (decision.mode === "skip") return !decision.retry;
         if (decision.mode === "legacy") {
             if (trackedOnly) return false;
             return deliverSubagentResult(this.sessionRegistry, parentSessionId, notification);
         }
+        workId = decision.workId ?? workId;
 
         let held = false;
         let ran = false;
@@ -1696,7 +1710,7 @@ export class AgentSpawner extends EventEmitter {
                 deliverSubagentResultDetailed(this.sessionRegistry, parentSessionId, notification, {
                     enqueueWhenBusy: false,
                     beforePrompt: () => {
-                        hooks.onNoticeRunStart(workId, parentSessionId);
+                        hooks.onNoticeRunStart(workId, parentSessionId, this.workspaceKey);
                         held = true;
                     },
                     afterPrompt: (text, didRun) => {

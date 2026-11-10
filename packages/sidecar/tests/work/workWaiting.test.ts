@@ -291,12 +291,16 @@ it("rewrites a legacy physical IM workspace key to the route key at startup", as
     });
     const work = await service.controller.start({
         sourceEventId: "legacy-im",
-        workspace: "/tmp/old-scratch",
         parentSessionId: "s",
         childSessionId: "c",
         agentType: "e",
         title: "legacy",
     });
+    await service.store.mutate(work.workId, (current) => ({
+        ...current,
+        workspace: "/tmp/old-scratch",
+        deliveryTarget: route,
+    }));
     await service.start();
     assert.equal((await service.store.get(work.workId))?.workspace, "im://wechat-1/peer/chat");
 });

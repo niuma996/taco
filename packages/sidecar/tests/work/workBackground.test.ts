@@ -170,7 +170,11 @@ describe("work × background subagent", () => {
             background: true,
         });
         await ws.agentSpawner.whenBackgroundRunsSettle();
-        return { toolCallId, workId: service.workIdFor(asSessionId(parent), toolCallId), res };
+        return {
+            toolCallId,
+            workId: service.workIdFor(asSessionId(parent), toolCallId, ws.workspaceKey),
+            res,
+        };
     }
 
     async function seed(id: string): Promise<void> {
@@ -309,7 +313,11 @@ describe("work × background subagent", () => {
                     });
                 await spawn("tc-pair-1");
                 await spawn("tc-pair-2");
-                const first = service.workIdFor(asSessionId("p-pair"), "tc-pair-1");
+                const first = service.workIdFor(
+                    asSessionId("p-pair"),
+                    "tc-pair-1",
+                    ws.workspaceKey,
+                );
                 await until(
                     async () => (await service.store.get(first))?.delivery?.status === "confirmed",
                     "the first notice",
@@ -446,7 +454,7 @@ describe("work × background subagent", () => {
             const restoreRun = stubRun("the answer text");
             const parent = asSessionId("p-fallback-race");
             const toolCallId = "tc-fallback-race";
-            const workId = service.workIdFor(parent, toolCallId);
+            const workId = service.workIdFor(parent, toolCallId, ws.workspaceKey);
             let heldAfterFallback = false;
             const restoreParent = stubParent({
                 prompt: async () => {

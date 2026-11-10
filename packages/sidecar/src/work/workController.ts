@@ -31,7 +31,7 @@ import {
     waitForInput as waitWorkForInput,
     withWaitingDeadline,
 } from "./workState.ts";
-import { type WorkStore, workIdForSource } from "./workStore.ts";
+import { legacyWorkIdForSource, type WorkStore, workIdForSource } from "./workStore.ts";
 import {
     type DeliveryTarget,
     isTerminal,
@@ -126,7 +126,10 @@ export class WorkController {
      * that two children settling back to back each own their hold: one run
      * ending cannot lift the other's, and the deliverer can ask about one Work.
      */
-    private readonly holds = new Map<string, { sessionId: string; count: number }>();
+    private readonly holds = new Map<
+        string,
+        { sessionId: string; workspace?: string; count: number }
+    >();
 
     constructor(options: WorkControllerOptions) {
         this.store = options.store;
@@ -147,7 +150,8 @@ export class WorkController {
      */
     async startScheduled(args: StartScheduledWorkArgs): Promise<WorkRecord> {
         const now = this.now();
-        const workId = workIdForSource(args.sourceEventId);
+        const workId = workIdForSource(args.sourceEventId, args.workspace);
+        const legacyId = legacyWorkIdForSource(args.sourceEventId);
         const record: WorkRecord = {
             schemaVersion: WORK_SCHEMA_VERSION,
             workId,
@@ -164,7 +168,7 @@ export class WorkController {
             updatedAt: now,
             attempt: { attemptId: uuidv7(), startedAt: now },
         };
-        const { record: stored, created } = await this.store.createIfAbsent(record);
+        const { record: stored, created } = await this.store.createIfAbsent(record, legacyId);
         if (created) {
             this.onChange(workId);
             // Pruned on start rather than only at boot: a frequent job would
@@ -180,7 +184,11 @@ export class WorkController {
 
     async start(args: StartWorkArgs): Promise<WorkRecord> {
         const now = this.now();
-        const workId = workIdForSource(args.sourceEventId);
+        const workId = workIdForSource(args.sourceEventId, args.workspace);
+        // Records from before ids carried the workspace keep their original
+        // id; the store adopts them rather than doubling the source.
+        const legacyId =
+            args.workspace !== undefined ? legacyWorkIdForSource(args.sourceEventId) : undefined;
         const record: WorkRecord = {
             schemaVersion: WORK_SCHEMA_VERSION,
             workId,
@@ -213,7 +221,7 @@ export class WorkController {
             updatedAt: now,
             attempt: { attemptId: uuidv7(), startedAt: now },
         };
-        const { record: stored, created } = await this.store.createIfAbsent(record);
+        const { record: stored, created } = await this.store.createIfAbsent(record, legacyId);
         if (created) this.onChange(workId);
         return stored;
     }
@@ -403,9 +411,9 @@ export class WorkController {
     }
 
     /** A notice run for `workId` started: capture the session's text instead of sending it live. */
-    holdReplies(workId: string, sessionId: string): void {
+    holdReplies(workId: string, sessionId: string, workspace?: string): void {
         const hold = this.holds.get(workId);
-        this.holds.set(workId, { sessionId, count: (hold?.count ?? 0) + 1 });
+        this.holds.set(workId, { sessionId, workspace, count: (hold?.count ?? 0) + 1 });
     }
 
     /** The notice run ended. Exactly once per `holdReplies`, including on failure. */
@@ -417,8 +425,13 @@ export class WorkController {
     }
 
     /** Whether the channel should keep this session's assistant text to itself. */
-    isHoldingReplies(sessionId: string): boolean {
-        for (const hold of this.holds.values()) if (hold.sessionId === sessionId) return true;
+    isHoldingReplies(sessionId: string, workspace?: string): boolean {
+        for (const hold of this.holds.values())
+            if (
+                hold.sessionId === sessionId &&
+                (workspace === undefined || hold.workspace === workspace)
+            )
+                return true;
         return false;
     }
 

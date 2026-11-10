@@ -538,7 +538,14 @@ export class SidecarServer implements ServerRpcSurface {
             root: join(tacoHome(), "work"),
             instanceId: SIDECAR_INSTANCE_ID,
             channels: this.channelRegistry,
-            resolveRoute: (sessionId) => this.conversationRouter?.findRouteBySessionId(sessionId),
+            // Work records carry their workspace, so routing is scoped to it:
+            // a bare session-id scan could pick a route another conversation
+            // recreated. The bare scan stays only for records old enough to
+            // have no workspace at all.
+            resolveRoute: (sessionId, workspace) =>
+                workspace !== undefined
+                    ? this.conversationRouter?.findRouteByWorkspace(workspace, sessionId)
+                    : this.conversationRouter?.findRouteBySessionId(sessionId),
             onChange: () => this.workPush.changed(),
             onProjectionChange: () => this.workPush.changed(),
             resolveTargetState: async (workspace, sessionId) => {
@@ -1733,7 +1740,7 @@ export class SidecarServer implements ServerRpcSurface {
             const held =
                 session !== undefined &&
                 method === PushMethods.Event &&
-                this.work.controller.isHoldingReplies(session);
+                this.work.controller.isHoldingReplies(session, workspace);
             // Child sessions report through their parent's tool result or Work
             // notice. They have no independent IM route and must not speak here.
             if (parsed && !held && sessionKind !== "subagent") {

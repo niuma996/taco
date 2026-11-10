@@ -525,6 +525,29 @@ describe("conversationRouter", () => {
             assert.equal(router.findRouteBySessionId("stale-1"), undefined);
         });
 
+        it("scopes findRouteByWorkspace to the given workspace and session", async () => {
+            const home = mkdtempSync(path.join(tmpdir(), "router-"));
+            const hook = stubHook();
+            const router = await ConversationRouter.load(home);
+            const a = await router.route(hook, "ch1", "u1", "c1");
+            const b = await router.route(hook, "ch1", "u2", "c2");
+            const wsA = makeImCwd("ch1", "u1", "c1");
+            const wsB = makeImCwd("ch1", "u2", "c2");
+
+            assert.deepEqual(router.findRouteByWorkspace(wsA, a.sessionId), {
+                channelId: "ch1",
+                peerId: "u1",
+                chatId: "c1",
+            });
+            // A session that only another workspace owns must not match here.
+            assert.equal(router.findRouteByWorkspace(wsA, b.sessionId), undefined);
+            assert.equal(router.findRouteByWorkspace(wsB, a.sessionId), undefined);
+            assert.equal(
+                router.findRouteByWorkspace(makeImCwd("ch1", "u9", "c9"), a.sessionId),
+                undefined,
+            );
+        });
+
         /**
          * routing.json is the only place peerId/chatId are persisted, so a missing
          * file means an empty table rather than a reconstruction from session

@@ -47,7 +47,7 @@ import type {
 import { WorkParentNotice } from "./workParentNotice.ts";
 import { WorkPermissionProjection } from "./workPermissionProjection.ts";
 import { WorkReconciler } from "./workReconciler.ts";
-import { isSafeWorkId, WorkStore, workIdForSource } from "./workStore.ts";
+import { isSafeWorkId, legacyWorkIdForSource, WorkStore, workIdForSource } from "./workStore.ts";
 import { isTerminal } from "./workTypes.ts";
 import { buildList, toSummary, type WorkListArgs } from "./workView.ts";
 
@@ -59,8 +59,14 @@ export interface WorkServiceOptions {
     readonly instanceId: string;
     readonly channels: Pick<ChannelRegistry, "sendText" | "maxMessageLength"> &
         Partial<Pick<ChannelRegistry, "getDeliveryBinding">>;
-    /** Session → IM route, or undefined when the session is not an IM conversation. */
-    readonly resolveRoute: (sessionId: string) => ImRoute | undefined;
+    /**
+     * Session → IM route, or undefined when the session is not an IM
+     * conversation. When the caller knows the workspace it is passed along:
+     * the resolver must then scope the lookup to that workspace instead of
+     * reverse-scanning every route for a bare session id another project
+     * could also hold.
+     */
+    readonly resolveRoute: (sessionId: string, workspace?: string) => ImRoute | undefined;
     readonly clock?: DeliveryClock;
     readonly onChange?: (workId: string) => void;
     readonly onProjectionChange?: () => void;
@@ -166,7 +172,10 @@ export class WorkService implements BackgroundWorkHooks, ScheduledWorkHooks, Wor
     private async migrateLegacyWorkspaceKeys(): Promise<void> {
         for (const record of await this.store.list()) {
             if (record.workspace?.startsWith("im://")) continue;
-            const route = this.options.resolveRoute(record.parentSessionId);
+            // Scoped ids are immutable. Historical attribution needs the frozen
+            // delivery target; a bare session id cannot establish project ownership.
+            if (record.workId !== legacyWorkIdForSource(record.sourceEventId)) continue;
+            const route = record.delivery?.target ?? record.deliveryTarget;
             if (!route) continue;
             const key = makeImCwd(route.channelId, route.peerId, route.chatId);
             await this.store.mutate(record.workId, (current) =>
@@ -221,12 +230,29 @@ export class WorkService implements BackgroundWorkHooks, ScheduledWorkHooks, Wor
         return this.execution.run(workId, sessionId, run);
     }
 
-    cancel(workId: string, attemptId: string): Promise<WorkCancelResult> {
-        return this.execution.cancel(workId, attemptId);
+    async cancel(workId: string, attemptId: string): Promise<WorkCancelResult> {
+        if (!isSafeWorkId(workId)) return { outcome: "not_found", newlyRequested: false };
+        const direct = await this.execution.cancel(workId, attemptId);
+        if (direct.outcome !== "not_found") return direct;
+        // A caller holding a pre-upgrade id still reaches the record.
+        const resolved = await this.store.resolveId(workId);
+        if (!resolved || resolved === workId) return direct;
+        return this.execution.cancel(resolved, attemptId);
     }
 
     async delete(workId: string): Promise<WorkDeleteResult> {
-        const outcome = await this.store.markDeleted(workId);
+        if (!isSafeWorkId(workId)) return { outcome: "not_found" };
+        // Direct first: the tombstone must queue ahead of mutations the caller
+        // already lined up behind this call. The alias lookup runs only on a
+        // genuine miss.
+        let outcome = await this.store.markDeleted(workId);
+        if (outcome === "not_found") {
+            const resolved = await this.store.resolveId(workId);
+            if (resolved && resolved !== workId) {
+                workId = resolved;
+                outcome = await this.store.markDeleted(workId);
+            }
+        }
         if (outcome === "deleted") {
             this.options.onChange?.(workId);
             await this.deliverer.forget(workId);
@@ -245,7 +271,14 @@ export class WorkService implements BackgroundWorkHooks, ScheduledWorkHooks, Wor
 
     async get(workId: string): Promise<WorkGetResult> {
         if (!isSafeWorkId(workId)) return { work: null };
-        const record = await this.store.get(workId);
+        let record = await this.store.get(workId);
+        if (!record) {
+            const resolved = await this.store.resolveId(workId);
+            if (resolved) {
+                workId = resolved;
+                record = await this.store.get(workId);
+            }
+        }
         if (!record) return { work: null };
         const work = toSummary(this.permissions.project(record));
         if (!record.result) return { work };
@@ -282,20 +315,24 @@ export class WorkService implements BackgroundWorkHooks, ScheduledWorkHooks, Wor
 
     async retryDelivery(workId: string): Promise<WorkRetryDeliveryResult> {
         if (!isSafeWorkId(workId)) return { outcome: "not_found" };
-        return { outcome: await this.deliverer.retry(workId) };
+        const direct = await this.deliverer.retry(workId);
+        if (direct !== "not_found") return { outcome: direct };
+        const resolved = await this.store.resolveId(workId);
+        if (!resolved || resolved === workId) return { outcome: direct };
+        return { outcome: await this.deliverer.retry(resolved) };
     }
 
     // ── BackgroundWorkHooks ──
 
-    workIdFor(parentSessionId: SessionId, parentToolCallId: string): string {
-        return workIdForSource(sourceEventIdFor(parentSessionId, parentToolCallId));
+    workIdFor(parentSessionId: SessionId, parentToolCallId: string, workspace?: string): string {
+        return workIdForSource(sourceEventIdFor(parentSessionId, parentToolCallId), workspace);
     }
 
     async onLaunch(launch: WorkLaunch): Promise<string | undefined> {
         try {
             // Frozen here, not at settle: a Work whose driver dies never settles,
             // and the user on the channel still has to be told it stopped.
-            const route = this.options.resolveRoute(launch.parentSessionId);
+            const route = this.options.resolveRoute(launch.parentSessionId, launch.workspace);
             const work = await this.controller.start({
                 sourceEventId: sourceEventIdFor(launch.parentSessionId, launch.parentToolCallId),
                 ...(launch.workspace !== undefined ? { workspace: launch.workspace } : {}),
@@ -327,7 +364,8 @@ export class WorkService implements BackgroundWorkHooks, ScheduledWorkHooks, Wor
 
     async onSettle(workId: string, parentSessionId: SessionId, settle: WorkSettle): Promise<void> {
         try {
-            const route = this.options.resolveRoute(parentSessionId);
+            const work = await this.store.get(workId);
+            const route = this.options.resolveRoute(parentSessionId, work?.workspace);
             const attemptId = settle.attemptId ?? this.launchAttempts.get(workId);
             if (!attemptId) return;
             if (this.launchAttempts.get(workId) === attemptId) this.launchAttempts.delete(workId);
@@ -463,9 +501,33 @@ export class WorkService implements BackgroundWorkHooks, ScheduledWorkHooks, Wor
         }
     }
 
-    async beginParentNotice(workId: string, tracked = true): Promise<ParentNoticeDecision> {
+    async beginParentNotice(
+        workId: string,
+        tracked = true,
+        parentTarget?: SessionTarget,
+        legacyWorkId?: string,
+    ): Promise<ParentNoticeDecision> {
         try {
+            // A replay recomputes the composite id; a record from before ids
+            // carried the workspace still owns the claim. An unknown id keeps
+            // its old skip/retry verdict below.
+            let resolved = isSafeWorkId(workId)
+                ? await this.store.resolveIdentity(workId)
+                : undefined;
+            // Old pending entries have no stored Work id. Their producer can
+            // supply the old hash, including tombstones with no source metadata.
+            if (resolved?.kind === "missing" && legacyWorkId && isSafeWorkId(legacyWorkId))
+                resolved = await this.store.resolveIdentity(legacyWorkId);
+            if (resolved?.kind === "ambiguous") return { mode: "skip" };
+            if (resolved?.kind === "found") workId = resolved.workId;
             const work = await this.store.get(workId);
+            if (
+                work &&
+                parentTarget &&
+                (work.workspace !== parentTarget.workspace ||
+                    work.parentSessionId !== parentTarget.sessionId)
+            )
+                return { mode: "skip" };
             const target = work?.delivery?.target ?? work?.deliveryTarget;
             if (target) {
                 if (!target.bindingId) return { mode: "skip" };
@@ -473,7 +535,10 @@ export class WorkService implements BackgroundWorkHooks, ScheduledWorkHooks, Wor
                 if (!current) return { mode: "skip", retry: true };
                 if (current !== target.bindingId) return { mode: "skip" };
             }
-            return await this.parentNotices.begin(workId, tracked);
+            const decision = await this.parentNotices.begin(workId, tracked);
+            return decision.mode === "capture" || decision.mode === "silent"
+                ? { ...decision, workId }
+                : decision;
         } catch (error) {
             log.error("could not claim parent notification", { workId, error: String(error) });
             return { mode: "skip", retry: true };
@@ -485,6 +550,8 @@ export class WorkService implements BackgroundWorkHooks, ScheduledWorkHooks, Wor
         claimId: string,
         outcome: ParentNoticeOutcome,
     ): Promise<void> {
+        const resolved = isSafeWorkId(workId) ? await this.store.resolveId(workId) : undefined;
+        if (resolved) workId = resolved;
         const before = await this.store.get(workId);
         if (before?.parentNotice?.claimId !== claimId) return;
         const attemptId = before.parentNotice.attemptId;
@@ -501,6 +568,8 @@ export class WorkService implements BackgroundWorkHooks, ScheduledWorkHooks, Wor
         sessionId: string,
         run: () => Promise<T>,
     ): Promise<T> {
+        const resolved = isSafeWorkId(workId) ? await this.store.resolveId(workId) : undefined;
+        if (resolved) workId = resolved;
         const validate = async () => {
             const work = await this.store.get(workId);
             const claim = work?.parentNotice;
@@ -549,8 +618,8 @@ export class WorkService implements BackgroundWorkHooks, ScheduledWorkHooks, Wor
         );
     }
 
-    onNoticeRunStart(workId: string, parentSessionId: SessionId): void {
-        this.controller.holdReplies(workId, parentSessionId);
+    onNoticeRunStart(workId: string, parentSessionId: SessionId, workspace?: string): void {
+        this.controller.holdReplies(workId, parentSessionId, workspace);
     }
 
     onNoticeRunRelease(workId: string, _parentSessionId: SessionId): void {

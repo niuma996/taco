@@ -33,8 +33,25 @@ export function assertSafeWorkId(id: string): void {
     if (!isSafeWorkId(id)) throw new Error(`unsafe work id: ${JSON.stringify(id)}`);
 }
 
-/** Stable id for one source event, so a repeat launch maps to the same Work. */
-export function workIdForSource(sourceEventId: string): string {
+/**
+ * Stable id for one source event, so a repeat launch maps to the same Work.
+ * The workspace is part of the hash: two projects may hold the same session
+ * id, and their source events must never share a record.
+ */
+export function workIdForSource(sourceEventId: string, workspace?: string): string {
+    if (workspace === undefined) return legacyWorkIdForSource(sourceEventId);
+    return `w-${createHash("sha256")
+        .update(`${workspace}\n${sourceEventId}`)
+        .digest("hex")
+        .slice(0, 32)}`;
+}
+
+/**
+ * The id scheme from before ids carried the workspace: the source hash alone.
+ * Records written under it keep their id; lookups and replays resolve through
+ * it so an upgrade never strands or duplicates them.
+ */
+export function legacyWorkIdForSource(sourceEventId: string): string {
     return `w-${createHash("sha256").update(sourceEventId).digest("hex").slice(0, 32)}`;
 }
 
@@ -51,6 +68,8 @@ export function checksumOf(text: string): string {
     return createHash("sha256").update(text).digest("hex");
 }
 
+type WorkIdResolution = { kind: "found"; workId: string } | { kind: "missing" | "ambiguous" };
+
 export class WorkStore {
     private readonly queues = new Map<string, Promise<void>>();
 
@@ -64,12 +83,51 @@ export class WorkStore {
     /**
      * Create the Work, or return the one that already exists for this source.
      * `created` tells the caller whether it won the race.
+     *
+     * `aliasId` is the id this source had before ids carried the workspace: a
+     * record stored there is adopted as-is, and its deletion marker still
+     * blocks the replay. Without it an upgraded daemon would spawn a second
+     * Work for a source it already tracks.
      */
-    async createIfAbsent(record: WorkRecord): Promise<{ record: WorkRecord; created: boolean }> {
-        return this.withQueue(record.workId, async () => {
+    async createIfAbsent(
+        record: WorkRecord,
+        aliasId?: string,
+    ): Promise<{ record: WorkRecord; created: boolean }> {
+        const create = async () => {
             if (await this.isDeleted(record.workId)) throw new Error("work source was deleted");
             const existing = await this.readSnapshot(record.workId);
             if (existing) return { record: existing, created: false };
+            if (aliasId !== undefined && aliasId !== record.workId) {
+                if (await this.isDeleted(aliasId)) {
+                    const marker = JSON.parse(
+                        await readFile(join(this.root, "deleted", `${aliasId}.json`), "utf8"),
+                    ) as { workspace?: string };
+                    // Old markers carry no attribution; keep their deletion conservative.
+                    if (marker.workspace === undefined || marker.workspace === record.workspace)
+                        throw new Error("work source was deleted");
+                }
+                const legacy = await this.readSnapshot(aliasId);
+                if (
+                    legacy?.sourceEventId === record.sourceEventId &&
+                    legacy.workspace === record.workspace
+                )
+                    return { record: legacy, created: false };
+                if (
+                    !legacy &&
+                    !(await this.isDeleted(aliasId)) &&
+                    (await this.hasSnapshot(aliasId))
+                )
+                    throw new Error("cannot replace an unrecognized work snapshot");
+            }
+            if (
+                record.workspace !== undefined &&
+                record.workId === legacyWorkIdForSource(record.sourceEventId)
+            ) {
+                const scopedId = workIdForSource(record.sourceEventId, record.workspace);
+                if (await this.isDeleted(scopedId)) throw new Error("work source was deleted");
+                const scoped = await this.readSnapshot(scopedId);
+                if (scoped) return { record: scoped, created: false };
+            }
             const snapshotExists = await stat(join(this.dir(record.workId), "work.json")).then(
                 () => true,
                 (error: NodeJS.ErrnoException) => {
@@ -80,12 +138,69 @@ export class WorkStore {
             if (snapshotExists) throw new Error("cannot replace an unrecognized work snapshot");
             await this.write(record);
             return { record, created: true };
-        });
+        };
+        // Both schemes share the legacy queue; canonical mutations retain their per-id queue.
+        return aliasId !== undefined && aliasId !== record.workId
+            ? this.withQueue(aliasId, () => this.withQueue(record.workId, create))
+            : this.withQueue(record.workId, create);
     }
 
     async get(workId: string): Promise<WorkRecord | undefined> {
         assertSafeWorkId(workId);
         return this.readSnapshot(workId);
+    }
+
+    /**
+     * The canonical id behind a possibly-stale one. A record written before
+     * ids carried the workspace answers to both its stored id and the
+     * composite a caller computes today. Unknown or ambiguous aliases resolve
+     * to undefined. Deleted owners still resolve so they cannot change projects.
+     */
+    async resolveId(workId: string): Promise<string | undefined> {
+        const resolved = await this.resolveIdentity(workId);
+        return resolved.kind === "found" ? resolved.workId : undefined;
+    }
+
+    /** Notifications distinguish an untracked source from an ambiguous tracked alias. */
+    async resolveIdentity(workId: string): Promise<WorkIdResolution> {
+        assertSafeWorkId(workId);
+        // A deleted or unreadable direct owner must never retarget a different project.
+        if ((await this.isDeleted(workId)) || (await this.hasSnapshot(workId)))
+            return { kind: "found", workId };
+        const identities: Pick<WorkRecord, "workId" | "sourceEventId" | "workspace">[] =
+            await this.list();
+        const markers = await readdir(join(this.root, "deleted")).catch((error) => {
+            if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+            throw error;
+        });
+        for (const file of markers) {
+            if (!file.endsWith(".json") || !isSafeWorkId(file.slice(0, -5))) continue;
+            const marker = JSON.parse(
+                await readFile(join(this.root, "deleted", file), "utf8"),
+            ) as Partial<WorkRecord>;
+            if (marker.workId === file.slice(0, -5) && typeof marker.sourceEventId === "string")
+                identities.push({
+                    workId: marker.workId,
+                    sourceEventId: marker.sourceEventId,
+                    ...(typeof marker.workspace === "string"
+                        ? { workspace: marker.workspace }
+                        : {}),
+                });
+        }
+        const matches = new Set(
+            identities
+                .filter(
+                    (record) =>
+                        legacyWorkIdForSource(record.sourceEventId) === workId ||
+                        (record.workspace !== undefined &&
+                            workIdForSource(record.sourceEventId, record.workspace) === workId),
+                )
+                .map((record) => record.workId),
+        );
+        if (matches.size === 0) return { kind: "missing" };
+        if (matches.size > 1) return { kind: "ambiguous" };
+        for (const id of matches) return { kind: "found", workId: id };
+        return { kind: "missing" };
     }
 
     /** Distinguish absent legacy sources from existing snapshots that could not be decoded. */
@@ -229,7 +344,12 @@ export class WorkStore {
             await this.ensureDir(dir);
             await this.atomicWrite(
                 join(dir, `${workId}.json`),
-                JSON.stringify({ workId, deletedAt: Date.now() }),
+                JSON.stringify({
+                    workId,
+                    sourceEventId: current.sourceEventId,
+                    workspace: current.workspace,
+                    deletedAt: Date.now(),
+                }),
             );
             return "deleted";
         });
