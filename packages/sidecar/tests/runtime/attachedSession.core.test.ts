@@ -67,13 +67,18 @@ describe("attachedSession.streaming", () => {
             tools?: unknown[];
             session?: Session;
             shouldAbortOperation?: (operationId: string) => Promise<boolean>;
+            tokensPerSecond?: number;
         } = {},
     ) {
         const env = new NodeExecutionEnv({ cwd: tmp });
         const repo = new JsonlSessionRepo({ fileSystem: env, sessionsRoot: join(tmp, "sessions") });
         // tokensPerSecond: 0 removes the pacing delay — the deltas still arrive as
         // separate events, the test just does not wait out a simulated token rate.
-        const faux = fauxProvider({ provider: "faux", tokensPerSecond: 0 } as never);
+        const faux = fauxProvider({
+            provider: "faux",
+            tokensPerSecond: options.tokensPerSecond ?? 0,
+            tokenSize: { min: 1, max: 1 },
+        } as never);
         faux.setResponses(
             (options.responses ?? [fauxAssistantMessage([fauxText(reply)])]) as never,
         );
@@ -106,6 +111,150 @@ describe("attachedSession.streaming", () => {
 
         return attached;
     }
+
+    it("preserves the source streaming message timestamp for continuation deltas", async () => {
+        const attached = await makeAttached("abcdefgh", true, { tokensPerSecond: 500 });
+        let firstDelta!: () => void;
+        const ready = new Promise<void>((resolve) => {
+            firstDelta = resolve;
+        });
+        const deltas: Array<{ timestamp: number }> = [];
+        attached.on("event", (event) => {
+            if (event.type === "message_update" && event.event.type === "text_delta") {
+                deltas.push(event.message);
+                firstDelta();
+            }
+        });
+        const run = attached.prompt("start");
+        try {
+            await ready;
+            const watch = await attached.watchSnapshot();
+            try {
+                const partial = watch.snapshot.operation?.streamingMessage;
+                assert.ok(partial);
+                assert.equal(partial.role, "assistant");
+                assert.equal(partial?.timestamp, deltas[0]?.timestamp);
+                assert.ok(
+                    partial?.content.some(
+                        (block) => block.type === "text" && block.text.length > 0,
+                    ),
+                );
+                await run;
+                assert.ok(deltas.length > 1);
+                assert.ok(deltas.every((message) => message.timestamp === partial.timestamp));
+            } finally {
+                watch.unsubscribe();
+            }
+        } finally {
+            await run;
+            await attached.dispose();
+        }
+    });
+
+    it("watches source tools, queue identities and the settled transcript during a real run", async () => {
+        let entered!: () => void;
+        let release!: () => void;
+        const started = new Promise<void>((resolve) => {
+            entered = resolve;
+        });
+        const blocked = new Promise<void>((resolve) => {
+            release = resolve;
+        });
+        const tool = {
+            name: "snapshotProbe",
+            label: "probe",
+            description: "probe",
+            parameters: { type: "object", properties: {} },
+            async execute(
+                _id: string,
+                _args: unknown,
+                onUpdate: (value: unknown, options?: { checkpoint: true }) => void,
+            ) {
+                onUpdate(
+                    { content: [{ type: "text", text: "working" }], details: { progress: 1 } },
+                    { checkpoint: true },
+                );
+                entered();
+                await blocked;
+                return { content: [{ type: "text", text: "done" }], details: { progress: 2 } };
+            },
+        };
+        const attached = await makeAttached("", true, {
+            tools: [tool],
+            responses: [
+                fauxAssistantMessage([
+                    { type: "toolCall", id: "probe-call", name: "snapshotProbe", arguments: {} },
+                ]),
+                fauxAssistantMessage([fauxText("finished")]),
+                fauxAssistantMessage([fauxText("followed up")]),
+            ],
+        });
+        const run = attached.prompt("start");
+        try {
+            await started;
+            const steer = await attached.enqueue("steer", "redirect");
+            const followUp = await attached.enqueue("followUp", "afterwards");
+            const watch = await attached.watchSnapshot();
+            try {
+                assert.equal(watch.snapshot.operation?.kind, "run");
+                assert.equal(watch.snapshot.operation?.status, "open");
+                assert.deepEqual(watch.snapshot.operation?.runningTools, [
+                    {
+                        toolCallId: "probe-call",
+                        toolName: "snapshotProbe",
+                        args: {},
+                        status: "running",
+                        result: {
+                            content: [{ type: "text", text: "working" }],
+                            details: { progress: 1 },
+                        },
+                    },
+                ]);
+                assert.deepEqual(
+                    watch.snapshot.queues.map((entry) => ({
+                        entryId: entry.entryId,
+                        kind: entry.kind,
+                    })),
+                    [
+                        { entryId: steer.mode === "queued" ? steer.entryId : "", kind: "steer" },
+                        {
+                            entryId: followUp.mode === "queued" ? followUp.entryId : "",
+                            kind: "followUp",
+                        },
+                    ],
+                );
+                assert.ok(
+                    watch.snapshot.transcript.some(
+                        (entry) => entry.type === "message" && entry.message.role === "user",
+                    ),
+                );
+            } finally {
+                watch.unsubscribe();
+            }
+        } finally {
+            release();
+            await run;
+            await attached.dispose();
+        }
+        const idle = await makeAttached("idle");
+        try {
+            await idle.prompt("hello");
+            const watch = await idle.watchSnapshot();
+            try {
+                assert.equal(watch.snapshot.operation, null);
+                assert.deepEqual(watch.snapshot.queues, []);
+                assert.ok(
+                    watch.snapshot.transcript.some(
+                        (entry) => entry.type === "message" && entry.message.role === "assistant",
+                    ),
+                );
+            } finally {
+                watch.unsubscribe();
+            }
+        } finally {
+            await idle.dispose();
+        }
+    });
 
     it("reuses a completed explicit operation instead of admitting the same prompt twice", async () => {
         const attached = await makeAttached("once");
@@ -328,6 +477,15 @@ describe("attachedSession.streaming", () => {
                     1,
                     "the interrupted run should be reported as open",
                 );
+
+                // Recovery reads must expose the resumed operation while it is
+                // still working, so reconnect does not wait for its final reply.
+                const watch = await attached2.watchSnapshot();
+                try {
+                    assert.equal(watch.snapshot.operation?.kind, "run");
+                } finally {
+                    watch.unsubscribe();
+                }
 
                 // The assertion that matters: this same call fails with LaneBusy
                 // while the recovered operation still occupies the lane, so it only

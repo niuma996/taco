@@ -15,6 +15,39 @@ import { NodeExecutionEnv } from "../../src/runtime/pi/node.ts";
 import { createWriteTool } from "../../src/runtime/pi/values.ts";
 
 describe("permissionBroker", () => {
+    it("recovers pending approvals by actual session and root display ownership", async () => {
+        const broker = new PermissionBroker(() => ({ mode: "ask", allow: [], deny: [] }), {
+            resolveDisplayContext: async (sessionId) => ({
+                displaySessionId: sessionId === "child" ? "root" : sessionId,
+                displayToolCallId: sessionId === "child" ? "agent-call" : undefined,
+            }),
+        });
+        const requests: CommandPermissionRequest[] = [];
+        broker.on("requested", (request) => requests.push(request));
+        const decisions = ["root", "child", "other"].map((sessionId) =>
+            broker.evaluateAndRequest({
+                sessionId,
+                toolCallId: `${sessionId}-tool`,
+                command: "pnpm build",
+            }),
+        );
+        await new Promise((resolve) => setImmediate(resolve));
+        try {
+            assert.deepEqual(broker.pendingForSession("root"), requests.slice(0, 2));
+            assert.deepEqual(broker.pendingForSession("child"), [requests[1]]);
+            assert.deepEqual(broker.pendingForSession("unknown"), []);
+            const childRequest = requests[1];
+            assert.ok(childRequest);
+            broker.resolve(childRequest.requestId, true, "once");
+            assert.deepEqual(broker.pendingForSession("root"), [requests[0]]);
+            broker.cleanupSession("root");
+            assert.deepEqual(broker.pendingForSession("root"), []);
+        } finally {
+            broker.cleanupAll();
+            await Promise.all(decisions);
+        }
+    });
+
     describe("PermissionBroker readOnly mode", () => {
         it("readOnly: isStrictReadOnly command auto-allows", async () => {
             const broker = new PermissionBroker(

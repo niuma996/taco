@@ -17,6 +17,7 @@ import { SessionList } from "../components/SessionList";
 import type { UseSessionSearchResult } from "../hooks/useSessionSearch";
 import type { WorkspaceState } from "../hooks/useWorkspaces";
 import { useT } from "../i18n/useI18n";
+import { conversationActivityKey, getConversationActivity } from "../lib/chat/conversationActivity";
 
 export interface SidebarProps {
     /** Embed the session list in a workspace group with a shared outer scroll area. */
@@ -25,11 +26,13 @@ export interface SidebarProps {
     /** Override the highlighted session when the list is embedded in a multi-workspace view. */
     activeSessionId?: string | null;
     ws: WorkspaceState | undefined;
+    unread?: Readonly<Record<string, true>>;
     onAttach: (sid: string) => void;
     onDelete: (sid: string) => void;
     onRename: (sid: string) => void;
     onLoadMore?: () => void;
     isLoadingMore?: boolean;
+    loadMoreError?: boolean;
     /** Same action as the topbar / session-bar "new chat" button. */
     onNewSession?: () => void;
     newSessionDisabled?: boolean;
@@ -39,7 +42,7 @@ export interface SidebarProps {
 
 export function Sidebar(props: SidebarProps) {
     const { t } = useT();
-    const { ws, onAttach, onDelete, onRename, onLoadMore, isLoadingMore } = props;
+    const { ws, onAttach, onDelete, onRename, onLoadMore, isLoadingMore, loadMoreError } = props;
     const { onNewSession, newSessionDisabled, search } = props;
     const searching = search.query.trim() !== "";
     const [searchOpen, setSearchOpen] = useState(searching);
@@ -101,7 +104,16 @@ export function Sidebar(props: SidebarProps) {
                     id: session.id,
                     label: session.name || session.id.slice(0, 8),
                     updatedAt: session.updatedAt ?? session.createdAt,
-                    running: Boolean(ws?.pendingBySessionId[session.id]),
+                    ...getConversationActivity(ws, session.id),
+                    unread: Boolean(
+                        ws &&
+                            props.unread?.[
+                                conversationActivityKey({
+                                    workspace: ws.cwd,
+                                    sessionId: session.id,
+                                })
+                            ],
+                    ),
                     active:
                         (props.activeSessionId === undefined
                             ? ws?.activeSession
@@ -120,7 +132,15 @@ export function Sidebar(props: SidebarProps) {
                               : t("session.noSearchResults")}
                     </li>
                 )}
-                {moreCursor && loadMore && (
+                {moreCursor && loadMore && loadMoreError && (
+                    <li className="session-load-error" role="status">
+                        <span>{t("conversationNav.loadFailed")}</span>
+                        <button type="button" onClick={loadMore} disabled={isLoadingMore}>
+                            {isLoadingMore ? t("session.loadingMore") : t("conversationNav.retry")}
+                        </button>
+                    </li>
+                )}
+                {moreCursor && loadMore && !loadMoreError && (
                     <li>
                         <button
                             type="button"

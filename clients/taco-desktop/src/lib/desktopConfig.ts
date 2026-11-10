@@ -28,6 +28,8 @@ export interface OnboardingStatus {
 export interface WorkspaceListState {
     opened: string[];
     active: string;
+    /** Filesystem projects whose groups are explicitly expanded in the chat sidebar. */
+    expanded?: string[];
 }
 
 export interface DesktopConfig {

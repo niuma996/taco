@@ -72,6 +72,21 @@ function setup(getEvents = vi.fn(async () => replay([]))) {
         }),
         sessionEventsGet: getEvents,
         sessionAttach: vi.fn(async () => ({ execution: "running" as const })),
+        sessionSnapshotGet: vi.fn(async ({ sessionId }) => ({
+            sessionId,
+            sessionKind: "main" as const,
+            snapshotSeq: 0,
+            history: { sessionId, leafEntryId: null, entries: [] },
+            runtime: {
+                operation: { id: "run", kind: "run" as const, startedAt: 1, status: "open" },
+                tools: [],
+                queues: [],
+                pendingCommandPermissions: [],
+                inFlightAgentToolCallIds: [],
+                settledBackgroundSubSessionIds: [],
+                pendingAskUserToolCallIds: [],
+            },
+        })),
     } as unknown as TacoClient;
     const onAction = vi.fn();
     const onSnapshotRequired = vi.fn(async () => ({ recovered: false as const }));
@@ -92,6 +107,7 @@ function setup(getEvents = vi.fn(async () => replay([]))) {
         onAction,
         getEvents,
         sessionAttach: client.sessionAttach,
+        sessionSnapshotGet: client.sessionSnapshotGet,
     };
 }
 async function flush() {
@@ -99,11 +115,12 @@ async function flush() {
 }
 
 describe("useSidecarStream isolation", () => {
-    it("probes live execution when reconnect replay misses no lifecycle frame", async () => {
+    it("probes live execution through a passive snapshot without attaching", async () => {
         const h = setup();
         h.ready();
         await flush();
-        expect(h.sessionAttach).toHaveBeenCalledTimes(3);
+        expect(h.sessionAttach).not.toHaveBeenCalled();
+        expect(h.sessionSnapshotGet).toHaveBeenCalledTimes(3);
         expect(h.onAction).toHaveBeenCalledWith({
             type: "SET_SESSION_EXECUTION",
             cwd: "/w",

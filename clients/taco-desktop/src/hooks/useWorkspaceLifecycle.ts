@@ -22,12 +22,14 @@ import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { type MutableRefObject, useCallback, useEffect, useRef, useState } from "react";
 import { bootMark, bootPhase } from "../lib/bootTrace";
 import { findPendingAskUserIds, historyToUiMessages } from "../lib/chat/chatUtils";
+import { snapshotToUiMessages } from "../lib/chat/sessionSnapshot";
 import { getSessionState } from "../lib/chat/sessionState";
 import type { SessionMeta, WorkspaceAction, WorkspaceState } from "../lib/chat/workspaceReducer";
 import type { TacoClient } from "../lib/clients/tacoClient.ts";
 import { loadGlobalConfig } from "../lib/globalConfig";
 import type { PushNotificationOptions } from "../lib/notifications";
 import type { SnapshotRecovery } from "../lib/sessionPushProcessor";
+import { sessionSynchronization } from "../lib/sessionSynchronization";
 import {
     initDefaultCwd,
     isValidWorkspaceCwd,
@@ -58,7 +60,7 @@ export interface UseWorkspaceLifecycleApi {
     getNavigationVersion: () => number;
     initFromStorage: () => Promise<void>;
     reloadAllWorkspaces: () => Promise<void>;
-    loadMoreSessions: (cwd: string) => Promise<void>;
+    loadMoreSessions: (cwd: string) => Promise<boolean>;
     openWorkspace: (rawCwd: string) => Promise<boolean>;
     browseAndOpen: () => Promise<void>;
     switchWorkspace: (cwd: string) => Promise<void>;
@@ -137,7 +139,13 @@ export function useWorkspaceLifecycle({
         const invalidate = () => {
             connectionGeneration.current++;
         };
-        const unsubscribeReady = client.onConnectionReady?.(invalidate);
+        const unsubscribeReady = client.onConnectionReady?.(() => {
+            invalidate();
+            for (const [cwd, ws] of Object.entries(workspacesRef.current)) {
+                for (const sid of Object.keys(ws.sessionStatesById ?? {}))
+                    dispatchWs({ type: "SESSION_UNCERTAIN", cwd, sid });
+            }
+        });
         const unsubscribeEpoch = client.onWorkspaceEpochChanged(invalidate);
         let unlisten: (() => void) | undefined;
         void listen("sidecar-exited", invalidate)
@@ -156,7 +164,7 @@ export function useWorkspaceLifecycle({
             unsubscribeEpoch();
             unlisten?.();
         };
-    }, [client]);
+    }, [client, dispatchWs, workspacesRef]);
 
     /** StrictMode double-run guard — see initFromStorage top. */
     const initStartedRef = useRef(false);
@@ -257,6 +265,7 @@ export function useWorkspaceLifecycle({
             const generation = connectionGeneration.current;
             const connectionIsCurrent = () => generation === connectionGeneration.current;
             const cached = getSessionState(workspacesRef.current[cwd], sessionId);
+            const executionRevision = cached?.executionRevision ?? 0;
             dispatchWs({ type: "ATTACH_START", cwd, sid: sessionId });
             if (
                 cached?.historyLoaded &&
@@ -275,6 +284,7 @@ export function useWorkspaceLifecycle({
                 });
                 return;
             }
+            const synchronization = sessionSynchronization(client);
             let attachResult: Awaited<ReturnType<typeof client.sessionAttach>>;
             try {
                 attachResult = await client.sessionAttach({
@@ -294,6 +304,21 @@ export function useWorkspaceLifecycle({
                 return;
             }
             if (!connectionIsCurrent()) return;
+            if (synchronization && typeof client.sessionSnapshotGet === "function") {
+                const restored = await synchronization.refresh(
+                    cwd,
+                    sessionId,
+                    cached?.kind ?? "main",
+                );
+                if (!connectionIsCurrent()) return;
+                if (!restored) {
+                    dispatchWs({ type: "ATTACH_FAILED", cwd, sid: sessionId });
+                    return;
+                }
+                if (navigationIsCurrent())
+                    dispatchWs({ type: "SELECT_SESSION", cwd, sid: sessionId });
+                return;
+            }
             const inFlightAgentToolCallIds = attachResult?.inFlightAgentToolCallIds;
             const settledBackgroundSubSessionIds = attachResult?.settledBackgroundSubSessionIds;
             let hist: Awaited<ReturnType<typeof client.sessionHistory>>;
@@ -325,6 +350,7 @@ export function useWorkspaceLifecycle({
                 inFlightAgentToolCallIds,
                 settledBackgroundSubSessionIds,
                 execution: attachResult?.execution,
+                executionRevision,
                 makeActive: navigationIsCurrent(),
             });
             // Hydrate the captured target only if no newer push replaced its entry.
@@ -827,9 +853,7 @@ export function useWorkspaceLifecycle({
                     sessionId: asSessionId(sessionId),
                 });
                 if (!canInstall()) return { recovered: false };
-                const messages = historyToUiMessages(
-                    snapshot.history.entries as Parameters<typeof historyToUiMessages>[0],
-                );
+                const messages = snapshotToUiMessages(snapshot);
                 dispatchWs({
                     type: "RESTORE_SESSION_SNAPSHOT",
                     cwd,
@@ -837,13 +861,16 @@ export function useWorkspaceLifecycle({
                     sessionKind: snapshot.sessionKind,
                     messages,
                     sync: "recovering",
+                    runtime: snapshot.runtime,
+                    tasks: snapshot.tasks,
+                    planState: snapshot.planState,
                     pendingAskUserIds:
                         snapshot.sessionKind === "main"
                             ? findPendingAskUserIds(messages)
                             : undefined,
                 });
-                // Protocol 2.13 snapshots contain transcript/tasks/plan only.
-                // They cannot certify whether a run is still executing.
+                if (snapshot.runtime) return { recovered: true, snapshotSeq: snapshot.snapshotSeq };
+                // Older snapshots cannot certify whether a run is executing.
                 dispatchWs({
                     type: "SET_SESSION_EXECUTION",
                     cwd,
@@ -912,9 +939,9 @@ export function useWorkspaceLifecycle({
      *  appends the next page. If the cursor is missing (e.g. a refresh reset
      *  it), the call is a no-op. */
     const loadMoreSessions = useCallback(
-        async (cwd: string): Promise<void> => {
+        async (cwd: string): Promise<boolean> => {
             const cursor = workspacesRef.current[cwd]?.listCursor;
-            if (!cursor) return;
+            if (!cursor) return true;
             const isCurrent = beginList(cwd);
             try {
                 const list = await client.sessionList({
@@ -925,8 +952,10 @@ export function useWorkspaceLifecycle({
                     },
                 });
                 if (isCurrent()) dispatchListResult(cwd, list, true);
+                return true;
             } catch (err) {
                 console.error("[taco] loadMoreSessions failed", cwd, err);
+                return false;
             }
         },
         [client, dispatchListResult, workspacesRef, beginList],

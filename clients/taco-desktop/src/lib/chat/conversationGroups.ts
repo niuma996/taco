@@ -1,4 +1,5 @@
 import { type ImConversationEntry, makeImCwd } from "@taco-ai/protocol";
+import { conversationActivityKey, getConversationActivity } from "./conversationActivity";
 import type { WorkspaceState } from "./workspaceReducer";
 
 export interface ConversationGroupItem {
@@ -7,6 +8,11 @@ export interface ConversationGroupItem {
     label: string;
     updatedAt: string | number;
     pending: boolean;
+    running: boolean;
+    waiting: boolean;
+    incomplete: boolean;
+    error: boolean;
+    unread: boolean;
 }
 
 export interface WorkspaceConversationGroup {
@@ -35,6 +41,7 @@ function workspaceLabel(cwd: string): string {
  */
 export function buildWorkspaceGroups(
     workspaces: Record<string, WorkspaceState>,
+    unread: Readonly<Record<string, true>> = {},
 ): WorkspaceConversationGroup[] {
     return Object.values(workspaces)
         .filter((workspace) => !workspace.cwd.startsWith("im://"))
@@ -43,13 +50,25 @@ export function buildWorkspaceGroups(
             kind: "workspace",
             cwd: workspace.cwd,
             label: workspaceLabel(workspace.cwd),
-            items: workspace.sessions.map((session) => ({
-                cwd: workspace.cwd,
-                sessionId: session.id,
-                label: session.name || session.id.slice(0, 8),
-                updatedAt: session.updatedAt ?? session.createdAt,
-                pending: Boolean(workspace.pendingBySessionId[session.id]),
-            })),
+            items: workspace.sessions.map((session) => {
+                const activity = getConversationActivity(workspace, session.id);
+                return {
+                    cwd: workspace.cwd,
+                    sessionId: session.id,
+                    label: session.name || session.id.slice(0, 8),
+                    updatedAt: session.updatedAt ?? session.createdAt,
+                    pending: activity.running,
+                    ...activity,
+                    unread: Boolean(
+                        unread[
+                            conversationActivityKey({
+                                workspace: workspace.cwd,
+                                sessionId: session.id,
+                            })
+                        ],
+                    ),
+                };
+            }),
         }));
 }
 
@@ -61,9 +80,13 @@ export function buildWorkspaceGroups(
 export function buildChannelConversationItems(
     conversations: readonly ImConversationEntry[],
     workspaces: Record<string, WorkspaceState>,
+    unread: Readonly<Record<string, true>> = {},
 ): ChannelConversationItem[] {
-    const activityBySession = new Map(
-        conversations.map((conversation) => [conversation.sessionId, conversation.lastUsedAt]),
+    const activityByConversation = new Map(
+        conversations.map((conversation) => [
+            makeImCwd(conversation.channelId, conversation.peerId, conversation.chatId),
+            conversation.lastUsedAt,
+        ]),
     );
     return conversations
         .map((conversation) => {
@@ -72,6 +95,7 @@ export function buildChannelConversationItems(
             const known = workspace?.sessions.find(
                 (session) => session.id === conversation.sessionId,
             );
+            const activity = getConversationActivity(workspace, conversation.sessionId);
             return {
                 cwd,
                 sessionId: conversation.sessionId,
@@ -84,12 +108,21 @@ export function buildChannelConversationItems(
                     known?.createdAt ??
                     conversation.updatedAt ??
                     conversation.lastUsedAt,
-                pending: Boolean(workspace?.pendingBySessionId[conversation.sessionId]),
+                pending: activity.running,
+                ...activity,
+                unread: Boolean(
+                    unread[
+                        conversationActivityKey({
+                            workspace: cwd,
+                            sessionId: conversation.sessionId,
+                        })
+                    ],
+                ),
             };
         })
         .sort(
             (a, b) =>
-                (activityBySession.get(b.sessionId) ?? 0) -
-                    (activityBySession.get(a.sessionId) ?? 0) || a.cwd.localeCompare(b.cwd),
+                (activityByConversation.get(b.cwd) ?? 0) -
+                    (activityByConversation.get(a.cwd) ?? 0) || a.cwd.localeCompare(b.cwd),
         );
 }

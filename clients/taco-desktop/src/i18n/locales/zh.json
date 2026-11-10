@@ -44,7 +44,11 @@
     "loadingMore": "加载中…",
     "status": {
       "idle": "空闲",
-      "running": "运行中"
+      "running": "运行中",
+      "waiting": "等待你的输入",
+      "error": "发生错误",
+      "incomplete": "状态待同步",
+      "unread": "有未读消息"
     },
     "createdAtLabel": "创建于",
     "openLog": "打开日志文件",

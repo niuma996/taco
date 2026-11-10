@@ -18,6 +18,7 @@ import { SessionList } from "../components/SessionList";
 import type { WorkspaceMode } from "../components/WorkspaceModeTabs";
 import type { UseSessionSearchesResult } from "../hooks/useSessionSearch";
 import { useT } from "../i18n/useI18n";
+import { summarizeConversationActivity } from "../lib/chat/conversationActivity";
 import {
     buildChannelConversationItems,
     buildWorkspaceGroups,
@@ -30,6 +31,9 @@ export interface ConversationSidebarProps {
     mode: WorkspaceMode;
     workspaces: Record<string, WorkspaceState>;
     activeCwd: string;
+    expandedWorkspaces?: readonly string[];
+    onExpandedWorkspacesChange?: (workspaces: string[]) => void;
+    unread?: Readonly<Record<string, true>>;
     conversations: readonly ImConversationEntry[] | null;
     conversationsLoading: boolean;
     conversationsError: string | null;
@@ -37,7 +41,7 @@ export interface ConversationSidebarProps {
     onOpenSession: (target: { workspace: string; sessionId: string }) => void;
     onSelectWorkspace?: (cwd: string) => void;
     onLoadWorkspace: (cwd: string) => Promise<void>;
-    onLoadMore: (cwd: string) => void;
+    onLoadMore: (cwd: string) => Promise<boolean>;
     onDelete: (target: { cwd: string; sessionId: string }) => void;
     onRename: (target: { cwd: string; sessionId: string; currentName?: string }) => void;
     onNewSession: (cwd: string) => void;
@@ -70,18 +74,23 @@ export function ConversationSidebar(props: ConversationSidebarProps) {
     }, [openSearches]);
 
     const [expandedGroupKeys, setExpandedGroupKeys] = useState<Set<string>>(
-        () => new Set([`workspace:${props.activeCwd}`]),
+        () =>
+            new Set(
+                (props.expandedWorkspaces ?? [props.activeCwd]).map((cwd) => `workspace:${cwd}`),
+            ),
     );
     const initializedModeRef = useRef<WorkspaceMode | null>(null);
     const previousActiveCwdRef = useRef(props.activeCwd);
     const [loadingGroups, setLoadingGroups] = useState<Set<string>>(new Set());
     const [failedGroups, setFailedGroups] = useState<Set<string>>(new Set());
+    const [loadingMoreGroups, setLoadingMoreGroups] = useState<Set<string>>(new Set());
+    const [failedMoreGroups, setFailedMoreGroups] = useState<Set<string>>(new Set());
     const [channelFilter, setChannelFilter] = useState<string | null>(null);
     const workspaceOrderRef = useRef(new Map<string, number>());
     const nextWorkspaceOrderRef = useRef(0);
 
     const workspaceGroups = useMemo(() => {
-        const groups = buildWorkspaceGroups(props.workspaces);
+        const groups = buildWorkspaceGroups(props.workspaces, props.unread);
         // Freeze the mount-time order for this run. Lazy history, selection
         // and newer session activity never move a directory under the pointer.
         // A workspace opened later is appended without disturbing existing rows.
@@ -96,11 +105,16 @@ export function ConversationSidebar(props: ConversationSidebarProps) {
                 (workspaceOrderRef.current.get(b.cwd) ?? 0),
         );
         return groups;
-    }, [props.workspaces]);
+    }, [props.workspaces, props.unread]);
 
     const channelItems = useMemo(
-        () => buildChannelConversationItems(props.conversations ?? [], props.workspaces),
-        [props.conversations, props.workspaces],
+        () =>
+            buildChannelConversationItems(
+                props.conversations ?? [],
+                props.workspaces,
+                props.unread,
+            ),
+        [props.conversations, props.workspaces, props.unread],
     );
     const channelIds = useMemo(
         () => [...new Set((props.conversations ?? []).map((item) => item.channelId))].sort(),
@@ -120,6 +134,7 @@ export function ConversationSidebar(props: ConversationSidebarProps) {
         if (props.mode !== "workspace") return;
         if (initializedModeRef.current === props.mode || workspaceGroups.length === 0) return;
         initializedModeRef.current = props.mode;
+        if (props.expandedWorkspaces !== undefined) return;
         const preferred =
             workspaceGroups.find((group) => group.cwd === props.activeCwd) ?? workspaceGroups[0];
         if (preferred)
@@ -127,7 +142,12 @@ export function ConversationSidebar(props: ConversationSidebarProps) {
                 if (current.has(preferred.key)) return current;
                 return new Set(current).add(preferred.key);
             });
-    }, [workspaceGroups, props.activeCwd, props.mode]);
+    }, [workspaceGroups, props.activeCwd, props.expandedWorkspaces, props.mode]);
+
+    useEffect(() => {
+        if (props.expandedWorkspaces === undefined) return;
+        setExpandedGroupKeys(new Set(props.expandedWorkspaces.map((cwd) => `workspace:${cwd}`)));
+    }, [props.expandedWorkspaces]);
 
     useEffect(() => {
         if (props.mode !== "workspace" || previousActiveCwdRef.current === props.activeCwd) return;
@@ -163,16 +183,41 @@ export function ConversationSidebar(props: ConversationSidebarProps) {
 
     const toggleGroup = (group: WorkspaceConversationGroup): void => {
         const open = expandedGroupKeys.has(group.key);
-        setExpandedGroupKeys((current) => {
-            const next = new Set(current);
-            if (open) next.delete(group.key);
-            else next.add(group.key);
-            return next;
-        });
+        const nextExpanded = new Set(expandedGroupKeys);
+        if (open) nextExpanded.delete(group.key);
+        else nextExpanded.add(group.key);
+        setExpandedGroupKeys(nextExpanded);
+        props.onExpandedWorkspacesChange?.(
+            [...nextExpanded]
+                .filter((key) => key.startsWith("workspace:"))
+                .map((key) => key.slice("workspace:".length)),
+        );
         if (open) return;
         const workspace = props.workspaces[group.cwd];
         if (workspace?.listTotal !== undefined) return;
         loadWorkspaceGroup(group);
+    };
+
+    const loadMoreGroup = async (group: WorkspaceConversationGroup): Promise<void> => {
+        setFailedMoreGroups((current) => {
+            if (!current.has(group.key)) return current;
+            const next = new Set(current);
+            next.delete(group.key);
+            return next;
+        });
+        setLoadingMoreGroups((current) => new Set(current).add(group.key));
+        try {
+            const loaded = await props.onLoadMore(group.cwd);
+            if (!loaded) setFailedMoreGroups((current) => new Set(current).add(group.key));
+        } catch {
+            setFailedMoreGroups((current) => new Set(current).add(group.key));
+        } finally {
+            setLoadingMoreGroups((current) => {
+                const next = new Set(current);
+                next.delete(group.key);
+                return next;
+            });
+        }
     };
 
     const renderWorkspaceBody = (group: WorkspaceConversationGroup) => {
@@ -208,10 +253,13 @@ export function ConversationSidebar(props: ConversationSidebarProps) {
                 showHeader={false}
                 activeSessionId={group.cwd === props.activeCwd ? workspace?.activeSession : null}
                 ws={workspace}
+                unread={props.unread}
                 onAttach={(sessionId) => props.onOpenSession({ workspace: group.cwd, sessionId })}
                 onDelete={(sessionId) => props.onDelete({ cwd: group.cwd, sessionId })}
                 onRename={(sessionId) => props.onRename({ cwd: group.cwd, sessionId })}
-                onLoadMore={() => props.onLoadMore(group.cwd)}
+                onLoadMore={() => void loadMoreGroup(group)}
+                isLoadingMore={loadingMoreGroups.has(group.key)}
+                loadMoreError={failedMoreGroups.has(group.key)}
                 onNewSession={() => props.onNewSession(group.cwd)}
                 newSessionDisabled={false}
                 search={search}
@@ -267,7 +315,11 @@ export function ConversationSidebar(props: ConversationSidebarProps) {
                         title: `${item.channelId} / ${item.peerId} / ${item.chatId}`,
                         tag: item.channelId,
                         updatedAt: item.updatedAt,
-                        running: item.pending,
+                        running: item.running,
+                        waiting: item.waiting,
+                        incomplete: item.incomplete,
+                        error: item.error,
+                        unread: item.unread,
                         active: item.cwd === props.activeCwd,
                     }))}
                     onOpen={(row) => {
@@ -294,6 +346,27 @@ export function ConversationSidebar(props: ConversationSidebarProps) {
                     }}
                 />
             </>
+        );
+    };
+
+    const renderGroupStatus = (group: WorkspaceConversationGroup) => {
+        const activity = summarizeConversationActivity(group.items);
+        const statuses = (["waiting", "running", "error", "incomplete", "unread"] as const).filter(
+            (status) => activity[status],
+        );
+        if (statuses.length === 0) return null;
+        return (
+            <span className="conversation-group-status">
+                {statuses.map((status) => (
+                    <span
+                        className={`session-status-dot ${status}`}
+                        role="img"
+                        aria-label={t(`session.status.${status}`)}
+                        title={t(`session.status.${status}`)}
+                        key={status}
+                    />
+                ))}
+            </span>
         );
     };
 
@@ -409,6 +482,7 @@ export function ConversationSidebar(props: ConversationSidebarProps) {
                                           <span className="conversation-group-label">
                                               {group.label}
                                           </span>
+                                          {renderGroupStatus(group)}
                                       </button>
                                       {isExpanded && (
                                           <div className="conversation-group-actions">

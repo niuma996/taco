@@ -1,4 +1,4 @@
-import type { CommandPermissionRequest } from "@taco-ai/protocol";
+import type { CommandPermissionRequest, SessionSnapshot } from "@taco-ai/protocol";
 import type { QueuedUiItem, UiMessage } from "./chatUtils";
 
 export type SessionExecution = "unknown" | "idle" | "running";
@@ -22,6 +22,8 @@ export interface SessionState {
     cacheBytes: number;
     lastAccess: number;
     revision: number;
+    executionRevision?: number;
+    operation?: NonNullable<SessionSnapshot["runtime"]>["operation"];
     historyRequestRevision?: number;
     messageVersions: Record<string, number>;
 }

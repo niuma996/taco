@@ -5,6 +5,7 @@
  * keys and push for TasksUpdatedParams/PlanStateUpdatedParams shape.
  */
 
+import type { CommandPermissionRequest } from "./config.js";
 import type { CompactionFailureReason, ServerPush, SessionId, WorkspaceId } from "./frames.js";
 import type { AgentMessage } from "./messages.js";
 import type { PlanStateUpdatedParams, TasksUpdatedParams } from "./push.js";
@@ -158,6 +159,47 @@ export type SessionTaskHistoryGetParams = ParamsOf<typeof sessionTaskHistoryGetS
 /** `session.planState.get` params — the current plan-mode state. */
 export type SessionPlanStateGetParams = ParamsOf<typeof sessionPlanStateGetSchema>;
 
+/** Current operation at the recovery watermark; null means the lane is idle. */
+export interface SessionRuntimeOperation {
+    id: string;
+    kind: "run" | "compaction" | "navigation";
+    startedAt: number;
+    status: string;
+    retry?: { attempt: number; maxAttempts: number; nextAttemptAt: number };
+}
+
+/** Includes staged results not yet committed to the transcript. */
+export interface SessionRuntimeTool {
+    toolCallId: string;
+    toolName: string;
+    args: unknown;
+    status: "running" | "settled";
+    result?: { content: Array<{ type: string; text?: string }>; details?: unknown };
+    isError?: boolean;
+}
+
+export interface SessionRuntimeQueueEntry {
+    entryId: string;
+    kind: "steer" | "followUp" | "nextRun" | "write";
+    message?: AgentMessage;
+}
+
+/**
+ * Authoritative runtime replacement at snapshotSeq. Required arrays may be
+ * empty and clear stale client state. Partial message timestamps are the
+ * original harness timestamps, preserving identity across replayed deltas.
+ */
+export interface SessionRuntimeSnapshot {
+    operation: SessionRuntimeOperation | null;
+    partialMessage?: AgentMessage;
+    tools: SessionRuntimeTool[];
+    queues: SessionRuntimeQueueEntry[];
+    pendingCommandPermissions: CommandPermissionRequest[];
+    inFlightAgentToolCallIds: string[];
+    settledBackgroundSubSessionIds: string[];
+    pendingAskUserToolCallIds: string[];
+}
+
 /**
  * Authoritative state at `snapshotSeq`. Clients must replay only frames after
  * that cursor; task and plan state are absent for subagent sessions.
@@ -167,6 +209,8 @@ export interface SessionSnapshot {
     sessionKind: "main" | "subagent";
     snapshotSeq: number;
     history: SessionHistory;
+    /** Absent on older servers and history-only unattached subagent reads. */
+    runtime?: SessionRuntimeSnapshot;
     tasks?: Pick<TasksUpdatedParams, "active" | "history">;
     planState?: Pick<PlanStateUpdatedParams, "active" | "currentSlug">;
 }

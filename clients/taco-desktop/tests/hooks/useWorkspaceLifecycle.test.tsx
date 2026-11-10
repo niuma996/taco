@@ -9,6 +9,8 @@ import {
     workspacesReducer,
 } from "../../src/lib/chat/workspaceReducer";
 import type { TacoClient } from "../../src/lib/clients/tacoClient";
+import { SessionPushProcessor } from "../../src/lib/sessionPushProcessor";
+import { bindSessionSynchronization } from "../../src/lib/sessionSynchronization";
 
 vi.mock("../../src/hooks/useSidecarStream", () => ({ sidecarLogListenerReady: Promise.resolve() }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn(async () => () => {}) }));
@@ -70,6 +72,197 @@ const flush = async () => {
 };
 
 describe("workspace lifecycle isolation", () => {
+    it("opens through the shared snapshot queue and replays new lifecycle frames without stealing a newer draft", async () => {
+        let navigation = 0;
+        const source = deferred<unknown>();
+        const h = setup(
+            { sessionSnapshotGet: vi.fn(() => source.promise) },
+            undefined,
+            () => navigation,
+        );
+        const processor = new SessionPushProcessor({
+            getEvents: async () => ({ events: [], firstSeq: 1, lastSeq: 10, resetRequired: false }),
+            recoverSnapshot: (_workspace, _session, kind, _after, _target, isCurrent) =>
+                h.result.current.restoreSessionSnapshot("/w", "A", kind, isCurrent),
+            deliver: (push) => {
+                if (push.seq === 11)
+                    h.workspacesRef.current = workspacesReducer(h.workspacesRef.current, {
+                        type: "APPLY_EVENT",
+                        cwd: "/w",
+                        sid: "A",
+                        now: 20,
+                        suppressedThinking: false,
+                        ev: { type: "run_end" },
+                    });
+            },
+            reportError: (message) => {
+                throw new Error(message);
+            },
+            snapshotRetryDelaysMs: [],
+        });
+        const unbind = bindSessionSynchronization(h.client, processor);
+        try {
+            const opening = h.result.current.attachSession("/w", "A");
+            await flush();
+            navigation++;
+            h.workspacesRef.current = workspacesReducer(h.workspacesRef.current, {
+                type: "BEGIN_PENDING_NEW_SESSION",
+                cwd: "/w",
+                draftId: "newer",
+            });
+            const push = processor.process({
+                method: "session.event",
+                workspace: "/w",
+                session: "A",
+                seq: 11,
+                params: { event: { type: "run_end" } },
+            } as never);
+            source.resolve({
+                history: { entries: [] },
+                sessionKind: "main",
+                snapshotSeq: 10,
+                runtime: {
+                    operation: { id: "run", kind: "run", status: "open", startedAt: 1 },
+                    partialMessage: {
+                        role: "assistant",
+                        timestamp: 12,
+                        content: [{ type: "text", text: "partial" }],
+                    },
+                    tools: [],
+                    queues: [],
+                    pendingCommandPermissions: [],
+                    inFlightAgentToolCallIds: [],
+                    settledBackgroundSubSessionIds: [],
+                    pendingAskUserToolCallIds: [],
+                },
+            });
+            await opening;
+            await push;
+            expect(h.client.sessionAttach).toHaveBeenCalledWith(
+                expect.objectContaining({ sessionId: "A" }),
+            );
+            expect(h.client.sessionHistory).not.toHaveBeenCalled();
+            expect(h.workspacesRef.current["/w"]?.draftId).toBe("newer");
+            expect(getSessionState(h.workspacesRef.current["/w"], "A")).toMatchObject({
+                execution: "idle",
+                operation: null,
+                messages: [{ text: "partial" }],
+            });
+            expect(processor.last("/w", "A")).toBe(11);
+        } finally {
+            unbind();
+        }
+    });
+
+    it("atomically restores runtime queues, partial text and effective permissions on the original target", async () => {
+        const permission = {
+            requestId: "new",
+            sessionId: "A",
+            toolCallId: "tool",
+            command: "sleep",
+            evaluation: {},
+        };
+        const h = setup({
+            sessionSnapshotGet: vi.fn(async () => ({
+                history: { entries: [] },
+                sessionKind: "main",
+                snapshotSeq: 20,
+                tasks: { active: null, history: [] },
+                planState: { active: true, currentSlug: "plan" },
+                runtime: {
+                    operation: { id: "operation", kind: "run", status: "running", startedAt: 1 },
+                    partialMessage: {
+                        role: "assistant",
+                        timestamp: 12,
+                        content: [{ type: "text", text: "partial" }],
+                    },
+                    tools: [],
+                    queues: [
+                        {
+                            entryId: "queued",
+                            kind: "followUp",
+                            message: { role: "user", content: "next" },
+                        },
+                    ],
+                    pendingCommandPermissions: [permission],
+                    inFlightAgentToolCallIds: [],
+                    settledBackgroundSubSessionIds: [],
+                    pendingAskUserToolCallIds: [],
+                },
+            })),
+        });
+        const original = h.workspacesRef.current["/w"];
+        if (!original) throw new Error("missing workspace fixture");
+        original.pendingCommandPermissions = {
+            old: { ...permission, requestId: "old" },
+            other: { ...permission, requestId: "other", sessionId: "B" },
+        } as never;
+        original.activeSession = "B";
+        await h.result.current.restoreSessionSnapshot("/w", "A", "main");
+        const ws = h.workspacesRef.current["/w"];
+        if (!ws) throw new Error("missing restored workspace");
+        expect(ws.activeSession).toBe("B");
+        expect(getSessionState(ws, "A")).toMatchObject({
+            execution: "running",
+            operation: { id: "operation" },
+            messages: [{ text: "partial" }],
+            sync: "recovering",
+        });
+        expect(ws.queuedBySessionId.A).toEqual([{ id: "queued", kind: "followUp", text: "next" }]);
+        expect(Object.keys(ws.pendingCommandPermissions).sort()).toEqual(["new", "other"]);
+        expect(ws.planStatesBySessionId.A?.currentSlug).toBe("plan");
+    });
+
+    for (const [initial, event, expected] of [
+        ["idle", "run_start", "running"],
+        ["running", "run_end", "idle"],
+    ] as const) {
+        it(`keeps newer ${event} execution while an older history request finishes`, async () => {
+            const history = deferred<{ entries: [] }>();
+            const h = setup({
+                sessionAttach: vi.fn(async () => ({ execution: initial })),
+                sessionHistory: vi.fn(() => history.promise),
+            });
+            const opening = h.result.current.attachSession("/w", "A");
+            await flush();
+            h.workspacesRef.current = workspacesReducer(h.workspacesRef.current, {
+                type: "APPLY_EVENT",
+                cwd: "/w",
+                sid: "A",
+                suppressedThinking: false,
+                now: 1,
+                ev: { type: event },
+            });
+            history.resolve({ entries: [] });
+            await opening;
+            expect(getSessionState(h.workspacesRef.current["/w"], "A")?.execution).toBe(expected);
+            expect(Boolean(h.workspacesRef.current["/w"]?.pendingBySessionId.A)).toBe(
+                expected === "running",
+            );
+        });
+    }
+
+    it("does not reuse an idle cached conversation after reconnect without checking the server", async () => {
+        const ws = createEmptyWorkspace("/w");
+        ws.sessionStatesById = {
+            A: {
+                ...createSessionState(),
+                historyLoaded: true,
+                sync: "current",
+                execution: "idle",
+            },
+        };
+        const h = setup({}, { "/w": ws });
+        h.ready();
+        await h.result.current.attachSession("/w", "A");
+        expect(h.client.sessionAttach).toHaveBeenCalledWith(
+            expect.objectContaining({ sessionId: "A" }),
+        );
+        expect(h.client.sessionHistory).toHaveBeenCalledWith(
+            expect.objectContaining({ sessionId: "A" }),
+        );
+    });
+
     it("hydrates A locally when B attach finishes first without stealing selection", async () => {
         const a = deferred<{ entries: [] }>();
         const h = setup({

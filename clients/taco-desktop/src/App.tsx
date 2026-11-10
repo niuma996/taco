@@ -39,6 +39,7 @@ import { AskUserProvider } from "./hooks/useAskUser";
 import { CHANNEL_NAME_WECOM, useChannelsPane } from "./hooks/useChannelsPane";
 import { useCheckpointsPane } from "./hooks/useCheckpointsPane";
 import { useConfigurationScope } from "./hooks/useConfigurationScope";
+import { useConversationActivity } from "./hooks/useConversationActivity";
 import { useConversationDrafts } from "./hooks/useConversationDrafts";
 import { useConversationsPane } from "./hooks/useConversationsPane";
 import { FilePreviewOpenerProvider } from "./hooks/useFilePreviewOpener";
@@ -63,6 +64,7 @@ import { useWorkspaceModels } from "./hooks/useWorkspaceModels";
 import { useWorkspaces } from "./hooks/useWorkspaces";
 import { useT } from "./i18n/useI18n";
 import type { ConversationTarget } from "./lib/chat/conversationDrafts";
+import { getSessionState } from "./lib/chat/sessionState";
 import { deriveSubagents, subagentDotState } from "./lib/chat/subagentList";
 import {
     readPersistedSidebarCollapsed,
@@ -77,7 +79,7 @@ import { createLatestRequestGuard } from "./lib/latestRequest";
 import { type AppNotification, toastsOnArrival } from "./lib/notifications";
 import { onWorkChangedEvent } from "./lib/workEvents.ts";
 import { onWorkspaceAssociationsChangedEvent } from "./lib/workspaceAssociationEvents.ts";
-import { getDefaultCwd } from "./lib/workspaceStorage.js";
+import { getDefaultCwd, persistExpandedWorkspaces } from "./lib/workspaceStorage.js";
 import { AgentsPane } from "./views/AgentsPane";
 import { ChannelsPane } from "./views/ChannelsPane";
 import { ChatPane } from "./views/ChatPane";
@@ -192,7 +194,14 @@ export default function App() {
     // switches to steer mode on runInFlight.
     const runInFlight = Boolean(activeSid ? ws?.pendingBySessionId[activeSid] : false);
     const busy = runInFlight || Object.keys(ws?.agentToolPending ?? {}).length > 0;
-    const contextInfo = useSessionContextInfo(client, activeCwd, activeSid);
+    const liveContextInfo = useSessionContextInfo(client, activeCwd, activeSid);
+    const activeRuntime = activeSid ? getSessionState(ws, activeSid) : undefined;
+    const contextInfo = {
+        ...liveContextInfo,
+        compacting:
+            liveContextInfo.compacting ||
+            (activeRuntime?.sync === "current" && activeRuntime.operation?.kind === "compaction"),
+    };
     // Sidebar session search. Server-side, so it covers the whole workspace
     // and not just the page the sidebar has loaded.
     const sessionSearches = useSessionSearches(client);
@@ -377,6 +386,24 @@ export default function App() {
 
     // Mount-time lifecycle: init, config, update check, FS scope, globalConfig subscription.
     const lifecycle = useAppLifecycle(activeCwd, initFromStorage);
+    const [expandedWorkspaces, setExpandedWorkspaces] = useState<string[] | undefined>(() =>
+        Array.isArray(lifecycle.desktopConfig?.workspaces?.expanded)
+            ? lifecycle.desktopConfig.workspaces.expanded
+            : undefined,
+    );
+    const expandedPreferenceInitializedRef = useRef(
+        lifecycle.desktopConfig?.workspaces?.expanded !== undefined,
+    );
+    useEffect(() => {
+        if (expandedPreferenceInitializedRef.current || lifecycle.desktopConfig === null) return;
+        expandedPreferenceInitializedRef.current = true;
+        const expanded = lifecycle.desktopConfig.workspaces?.expanded;
+        if (Array.isArray(expanded)) setExpandedWorkspaces(expanded);
+    }, [lifecycle.desktopConfig]);
+    const updateExpandedWorkspaces = useCallback((next: string[]) => {
+        setExpandedWorkspaces(next);
+        void persistExpandedWorkspaces(next);
+    }, []);
 
     const [mainView, setMainView] = useState<
         | "chat"
@@ -392,6 +419,18 @@ export default function App() {
         | "mcp"
         | "settings"
     >("chat");
+
+    const conversationActivity = useConversationActivity({
+        workspaces,
+        visibleTarget:
+            mainView === "chat" && activeSid && ws?.loadingSessionId !== activeSid
+                ? { workspace: activeCwd, sessionId: activeSid }
+                : null,
+    });
+    useEffect(
+        () => wsApi.onSessionRemoved(conversationActivity.release),
+        [wsApi.onSessionRemoved, conversationActivity.release],
+    );
 
     const [conversationMode, setConversationMode] = useState<WorkspaceMode>(() =>
         activeCwd.startsWith(IM_CWD_PREFIX) ? "im" : "workspace",
@@ -646,7 +685,8 @@ export default function App() {
         [openImConversation],
     );
     /**
-     * Open the conversation that started a Work. IM conversations already have
+     * Shared route for sidebar chats, Works, approvals and channel conversations.
+     * IM conversations already have
      * a full path; a filesystem session needs its workspace switched to first
      * (which loads its session list) before the attach is meaningful.
      */
@@ -824,8 +864,10 @@ export default function App() {
                         onClearNotifications={clearNotifications}
                         onNewNotification={toastNewNotification}
                         onOpenApproval={(target) => {
-                            openImConversationFromUi(target.cwd, target.sessionId);
-                            setMainView("chat");
+                            openSessionTarget({
+                                workspace: target.cwd,
+                                sessionId: target.sessionId,
+                            });
                         }}
                     />
                 </header>
@@ -844,6 +886,9 @@ export default function App() {
                             <ConversationSidebar
                                 mode={conversationMode}
                                 workspaces={workspaces}
+                                unread={conversationActivity.unread}
+                                expandedWorkspaces={expandedWorkspaces}
+                                onExpandedWorkspacesChange={updateExpandedWorkspaces}
                                 activeCwd={activeCwd}
                                 conversations={conversations}
                                 conversationsLoading={conversationsLoading}
@@ -851,7 +896,7 @@ export default function App() {
                                 searches={sessionSearches}
                                 onOpenSession={openSessionTarget}
                                 onLoadWorkspace={ensureWorkspaceSessions}
-                                onLoadMore={(cwd) => void loadMoreSessions(cwd)}
+                                onLoadMore={(cwd) => loadMoreSessions(cwd)}
                                 onDelete={({ cwd, sessionId }) =>
                                     setPendingDeleteSession({ cwd, sessionId })
                                 }
@@ -1156,8 +1201,7 @@ export default function App() {
                             conversationsUnread={conversationsUnread}
                             markConversationsSeen={markConversationsSeen}
                             onOpenConversation={(cwd, sid) => {
-                                openImConversationFromUi(cwd, sid);
-                                setMainView("chat");
+                                openSessionTarget({ workspace: cwd, sessionId: sid });
                             }}
                             activeCwd={activeCwd}
                         />
