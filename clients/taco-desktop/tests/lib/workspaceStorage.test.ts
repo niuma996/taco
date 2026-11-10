@@ -16,6 +16,7 @@ import {
     applyExistenceFlags,
     isValidWorkspaceCwd,
     lastSegment,
+    orderWorkspacesForActive,
     reseedDefaultIfEmpty,
 } from "../../src/lib/workspaceStorage.ts";
 
@@ -112,6 +113,17 @@ describe("lastSegment", () => {
         assert.equal(lastSegment("/Users/me/.taco/workspace"), "workspace");
         assert.equal(lastSegment("plain"), "plain");
         assert.equal(lastSegment(""), "");
+    });
+});
+
+describe("orderWorkspacesForActive", () => {
+    it("moves only the persisted active workspace to the recent-use front", () => {
+        assert.deepEqual(orderWorkspacesForActive(["/repo/a", "/repo/b", "/repo/c"], "/repo/b"), [
+            "/repo/b",
+            "/repo/a",
+            "/repo/c",
+        ]);
+        assert.deepEqual(orderWorkspacesForActive(["/repo/a"], "/repo/missing"), ["/repo/a"]);
     });
 });
 

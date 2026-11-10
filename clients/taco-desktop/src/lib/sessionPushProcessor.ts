@@ -19,6 +19,15 @@ export interface SessionPushProcessorOptions {
         targetSeq?: number,
         isCurrent?: () => boolean,
     ) => Promise<SnapshotRecovery>;
+    /** Authoritative execution check after replay has caught up. This resolves
+     *  reconnect gaps where the run_start happened before the saved cursor, so
+     *  replay has no lifecycle frame from which to infer current execution. */
+    probeExecution?: (
+        workspace: string,
+        session: string,
+        sessionKind: "main" | "subagent",
+    ) => Promise<"idle" | "running" | undefined>;
+    onExecutionState?: (workspace: string, session: string, execution: "idle" | "running") => void;
     reportError: (message: string, error?: unknown) => void;
     onSyncState?: (
         workspace: string,
@@ -176,9 +185,26 @@ export class SessionPushProcessor {
                     }
                     this.applyReplay(event);
                 }
-                // A caught-up stream does not certify execution; legacy snapshots
-                // leave that independent state unknown until a lifecycle event.
-                if (this.cursor.last(workspace, session) === replay.lastSeq) sync = "current";
+                if (this.cursor.last(workspace, session) === replay.lastSeq) {
+                    try {
+                        const execution = await this.options.probeExecution?.(
+                            workspace,
+                            session,
+                            sessionKind,
+                        );
+                        if (execution && isCurrent()) {
+                            this.options.onExecutionState?.(workspace, session, execution);
+                        }
+                    } catch (error) {
+                        if (isCurrent()) {
+                            this.options.reportError(
+                                `session execution probe failed (${workspace}/${session})`,
+                                error,
+                            );
+                        }
+                    }
+                    sync = "current";
+                }
                 return;
             }
         } finally {

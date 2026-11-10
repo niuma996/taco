@@ -36,6 +36,12 @@ import { useStableCallback } from "./primitives/useStableCallback";
 export type SidecarAction =
     | { type: "SESSION_UNCERTAIN"; cwd: string; sid: string }
     | {
+          type: "SET_SESSION_EXECUTION";
+          cwd: string;
+          sid: string;
+          execution: "idle" | "running" | "unknown";
+      }
+    | {
           type: "SET_SESSION_SYNC";
           cwd: string;
           sid: string;
@@ -462,6 +468,15 @@ export function useSidecarStream(
                 onActionRef({ type: "SET_SESSION_SYNC", cwd, sid, sync }),
             recoverSnapshot: (workspace, session, sessionKind, _lastSeq, _targetSeq, isCurrent) =>
                 onSnapshotRequiredRef(workspace, session, sessionKind, isCurrent),
+            probeExecution: async (workspace, session) => {
+                const attached = await clientRef.current.sessionAttach({
+                    workspace: asWorkspaceId(workspace),
+                    sessionId: asSessionId(session),
+                });
+                return attached.execution;
+            },
+            onExecutionState: (cwd, sid, execution) =>
+                onActionRef({ type: "SET_SESSION_EXECUTION", cwd, sid, execution }),
             reportError: (message, error) => {
                 console.error("[taco] session push recovery", message, error);
                 onLogLineRef(`[sidecar] ${message}`);

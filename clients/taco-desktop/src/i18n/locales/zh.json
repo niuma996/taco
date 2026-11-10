@@ -20,11 +20,13 @@
     "submitAnswersFailed": "提交回答失败：{{error}}",
     "newInWorkspace": "新建此工作区的聊天",
     "newChat": "新聊天",
+    "switchWorkspace": "切换工作区",
     "searching": "搜索中…",
     "noSearchResults": "没有匹配的聊天",
     "searchFailed": "搜索失败",
     "deleteSession": "删除聊天",
     "rename": "重命名聊天",
+    "moreActions": "聊天操作",
     "renameTitle": "重命名聊天",
     "renamePlaceholder": "聊天名",
     "renameConfirm": "保存",
@@ -166,6 +168,20 @@
     "imNotConnected": "渠道尚未连接，请先在「渠道」面板绑定渠道。",
     "imEmpty": "暂无渠道聊天"
   },
+  "conversationNav": {
+    "title": "会话",
+    "loading": "加载中…",
+    "loadFailed": "会话加载失败",
+    "retry": "重试",
+    "expandGroup": "展开",
+    "collapseGroup": "收起",
+    "noConversations": "暂无会话",
+    "noWorkspaces": "暂无已打开的工作区",
+    "openFolder": "打开文件夹",
+    "manageChannels": "管理渠道",
+    "filterByChannel": "按渠道筛选",
+    "allChannels": "全部渠道"
+  },
   "activity": {
     "chat": "聊天",
     "memory": "记忆",
@@ -202,7 +218,7 @@
     "askUserSubmit": "提交",
     "switchWorkspace": "切换工作区",
     "openFolder": "打开文件夹",
-    "manageAssociations": "关联目录…",
+    "manageAssociations": "关联目录",
     "contentLabel": "内容",
     "skillsEmptyState": "未发现技能。",
     "skillsSourceBuiltin": "内置",
@@ -1082,6 +1098,22 @@
     "pathPlaceholder": "/绝对路径",
     "scopeLabel": "作用范围",
     "scopeConversation": "当前聊天",
+    "scopePeer": "当前渠道子目录",
     "scopeChannel": "整个渠道"
+  },
+  "configScope": {
+    "label": "配置作用域",
+    "global": "公共配置",
+    "workspace": "Workspace",
+    "channel": "IM 渠道",
+    "effective": "最终生效",
+    "targetLabel": "配置目标",
+    "globalHint": "~/.taco 中的定义，由所有目标共享。",
+    "workspaceHint": "仅显示当前 Workspace 自己定义的配置。",
+    "channelHint": "显示该 IM 会话最终可使用的配置。",
+    "effectiveHint": "公共与 Workspace 配置按同名覆盖后的结果。",
+    "runtimeHint": "该 Workspace 的最终运行时工具目录。",
+    "noChannel": "暂无可用 IM 会话",
+    "noWorkspace": "暂无可用 Workspace"
   }
 }

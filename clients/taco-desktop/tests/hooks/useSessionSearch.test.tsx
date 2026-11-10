@@ -2,7 +2,11 @@ import { strict as assert } from "node:assert";
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, it, vi } from "vitest";
 
-import { SESSION_SEARCH_DEBOUNCE_MS, useSessionSearch } from "../../src/hooks/useSessionSearch";
+import {
+    SESSION_SEARCH_DEBOUNCE_MS,
+    useSessionSearch,
+    useSessionSearches,
+} from "../../src/hooks/useSessionSearch";
 import type { TacoClient } from "../../src/lib/clients/tacoClient.ts";
 
 interface SessionRow {
@@ -275,5 +279,52 @@ describe("useSessionSearch", () => {
         assert.equal(result.current.failed, true);
         assert.equal(result.current.sessions.length, 0);
         consoleError.mockRestore();
+    });
+});
+
+describe("useSessionSearches", () => {
+    it("keeps each workspace query and results independent", async () => {
+        const sessionList = vi.fn(async (params: { workspace: string; query?: string }) => ({
+            workspace: params.workspace,
+            sessions: [
+                {
+                    id: `${params.workspace}-${params.query}`,
+                    cwd: params.workspace,
+                    filePath: `${params.workspace}/s.jsonl`,
+                    createdAt: "2026-01-01T00:00:00Z",
+                    updatedAt: "2026-01-01T00:00:00Z",
+                },
+            ],
+            total: 1,
+        }));
+        const client = { sessionList } as unknown as TacoClient;
+        const { result } = renderHook(() => useSessionSearches(client));
+
+        act(() => result.current.forWorkspace("/one").setQuery("alpha"));
+        await act(async () => {
+            await vi.advanceTimersByTimeAsync(SESSION_SEARCH_DEBOUNCE_MS);
+        });
+        act(() => result.current.forWorkspace("/two").setQuery("beta"));
+        await act(async () => {
+            await vi.advanceTimersByTimeAsync(SESSION_SEARCH_DEBOUNCE_MS);
+        });
+
+        assert.equal(result.current.forWorkspace("/one").query, "alpha");
+        assert.deepEqual(
+            result.current.forWorkspace("/one").sessions.map((session) => session.id),
+            ["/one-alpha"],
+        );
+        assert.equal(result.current.forWorkspace("/two").query, "beta");
+        assert.deepEqual(
+            result.current.forWorkspace("/two").sessions.map((session) => session.id),
+            ["/two-beta"],
+        );
+        assert.deepEqual(
+            sessionList.mock.calls.map(([params]) => [params.workspace, params.query]),
+            [
+                ["/one", "alpha"],
+                ["/two", "beta"],
+            ],
+        );
     });
 });

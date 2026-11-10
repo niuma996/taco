@@ -285,6 +285,12 @@ export function resolveActiveCwd(stored: string | null, opened: string[]): strin
     return opened[0] ?? defaultCwd;
 }
 
+/** Keep the persisted list in recent-use order without moving the live UI. */
+export function orderWorkspacesForActive(opened: string[], active: string): string[] {
+    if (!active || !opened.includes(active)) return opened;
+    return [active, ...opened.filter((cwd) => cwd !== active)];
+}
+
 /**
  * Persists the opened-workspace list. Async because the write crosses an IPC
  * boundary; the caller can `await` if it needs to know the result, or fire
@@ -296,9 +302,10 @@ export async function persistCwds(cwds: string[]): Promise<void> {
     const current = await readDesktopConfig();
     const active = current.workspaces?.active ?? "";
     try {
+        const opened = cwds.filter(isValidWorkspaceCwd);
         await writeDesktopConfig({
             workspaces: {
-                opened: cwds.filter(isValidWorkspaceCwd),
+                opened: orderWorkspacesForActive(opened, active),
                 active,
             },
         });
@@ -322,7 +329,7 @@ export async function persistActiveCwd(cwd: string): Promise<void> {
     const opened = current.workspaces?.opened ?? [];
     try {
         await writeDesktopConfig({
-            workspaces: { opened, active: cwd },
+            workspaces: { opened: orderWorkspacesForActive(opened, cwd), active: cwd },
         });
     } catch (e) {
         console.warn("[taco] failed to persist active cwd", e);

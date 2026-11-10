@@ -13,7 +13,7 @@
  */
 
 import { asSessionId, asWorkspaceId, type SessionListResult } from "@taco-ai/protocol";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { SessionMeta } from "../lib/chat/workspaceReducer.ts";
 import type { TacoClient } from "../lib/clients/tacoClient.ts";
 
@@ -223,4 +223,217 @@ export function useSessionSearch(
         loadMore,
         refresh,
     };
+}
+
+interface WorkspaceSearchEntry {
+    query: string;
+    debounced: string;
+    results: SearchResults;
+    loading: boolean;
+}
+
+function emptyWorkspaceSearchEntry(): WorkspaceSearchEntry {
+    return { query: "", debounced: "", results: NO_RESULTS, loading: false };
+}
+
+/** Per-workspace search controllers. The navigation column can keep several
+ *  workspaces open without letting one workspace's query or cursor leak into
+ *  another. */
+export interface UseSessionSearchesResult {
+    forWorkspace: (cwd: string) => UseSessionSearchResult;
+}
+
+export function useSessionSearches(client: TacoClient): UseSessionSearchesResult {
+    const [entries, setEntries] = useState<Record<string, WorkspaceSearchEntry>>({});
+    const entriesRef = useRef(entries);
+    entriesRef.current = entries;
+    const timersRef = useRef(new Map<string, ReturnType<typeof setTimeout>>());
+    const seqRef = useRef(new Map<string, number>());
+
+    useEffect(
+        () => () => {
+            for (const timer of timersRef.current.values()) clearTimeout(timer);
+            timersRef.current.clear();
+        },
+        [],
+    );
+
+    const updateEntry = useCallback(
+        (cwd: string, update: (entry: WorkspaceSearchEntry) => WorkspaceSearchEntry): void => {
+            setEntries((current) => {
+                const entry = current[cwd] ?? emptyWorkspaceSearchEntry();
+                const nextEntry = update(entry);
+                if (nextEntry === entry) return current;
+                const next = { ...current, [cwd]: nextEntry };
+                entriesRef.current = next;
+                return next;
+            });
+        },
+        [],
+    );
+
+    const nextSequence = useCallback((cwd: string): number => {
+        const next = (seqRef.current.get(cwd) ?? 0) + 1;
+        seqRef.current.set(cwd, next);
+        return next;
+    }, []);
+
+    const fetchFirstPage = useCallback(
+        (target: string, query: string): void => {
+            const seq = nextSequence(target);
+            updateEntry(target, (entry) => ({ ...entry, loading: true }));
+            void client
+                .sessionList({ workspace: asWorkspaceId(target), query })
+                .then((result) => {
+                    if (seqRef.current.get(target) !== seq) return;
+                    updateEntry(target, (entry) => ({
+                        ...entry,
+                        results: {
+                            cwd: target,
+                            query,
+                            sessions: (result.sessions ?? []).map(toSessionMeta),
+                            cursor: result.nextCursor
+                                ? {
+                                      updatedAt: result.nextCursor.updatedAt,
+                                      id: result.nextCursor.id,
+                                  }
+                                : undefined,
+                            total: result.total,
+                        },
+                    }));
+                })
+                .catch((err: unknown) => {
+                    if (seqRef.current.get(target) !== seq) return;
+                    console.error("[useSessionSearches] session.list failed:", err);
+                    updateEntry(target, (entry) => ({
+                        ...entry,
+                        results: { cwd: target, query, sessions: [], failed: true },
+                    }));
+                })
+                .finally(() => {
+                    if (seqRef.current.get(target) === seq)
+                        updateEntry(target, (entry) => ({ ...entry, loading: false }));
+                });
+        },
+        [client, nextSequence, updateEntry],
+    );
+
+    const setQuery = useCallback(
+        (cwd: string, query: string): void => {
+            const existingTimer = timersRef.current.get(cwd);
+            if (existingTimer) clearTimeout(existingTimer);
+            timersRef.current.delete(cwd);
+
+            const trimmed = query.trim();
+            if (trimmed === "") {
+                nextSequence(cwd);
+                updateEntry(cwd, (entry) => ({
+                    ...entry,
+                    query,
+                    debounced: "",
+                    results: NO_RESULTS,
+                    loading: false,
+                }));
+                return;
+            }
+
+            updateEntry(cwd, (entry) => ({ ...entry, query }));
+            timersRef.current.set(
+                cwd,
+                setTimeout(() => {
+                    timersRef.current.delete(cwd);
+                    if (entriesRef.current[cwd]?.query.trim() !== trimmed) return;
+                    updateEntry(cwd, (entry) => ({ ...entry, debounced: trimmed }));
+                    fetchFirstPage(cwd, trimmed);
+                }, SESSION_SEARCH_DEBOUNCE_MS),
+            );
+        },
+        [fetchFirstPage, nextSequence, updateEntry],
+    );
+
+    const refresh = useCallback(
+        (cwd: string): void => {
+            const debounced = entriesRef.current[cwd]?.debounced ?? "";
+            if (debounced !== "") fetchFirstPage(cwd, debounced);
+        },
+        [fetchFirstPage],
+    );
+
+    const loadMore = useCallback(
+        (cwd: string): void => {
+            const entry = entriesRef.current[cwd];
+            if (
+                !entry ||
+                entry.results.cwd !== cwd ||
+                !entry.results.cursor ||
+                entry.results.query !== entry.debounced ||
+                entry.query.trim() !== entry.debounced ||
+                entry.loading
+            )
+                return;
+            const seq = nextSequence(cwd);
+            const cursor = entry.results.cursor;
+            updateEntry(cwd, (current) => ({ ...current, loading: true }));
+            void client
+                .sessionList({
+                    workspace: asWorkspaceId(cwd),
+                    query: entry.results.query,
+                    cursor: {
+                        updatedAt: cursor.updatedAt,
+                        id: asSessionId(cursor.id),
+                    },
+                })
+                .then((result) => {
+                    if (seqRef.current.get(cwd) !== seq) return;
+                    updateEntry(cwd, (current) => ({
+                        ...current,
+                        results: {
+                            cwd,
+                            query: current.results.query,
+                            sessions: [
+                                ...current.results.sessions,
+                                ...(result.sessions ?? []).map(toSessionMeta),
+                            ],
+                            cursor: result.nextCursor
+                                ? {
+                                      updatedAt: result.nextCursor.updatedAt,
+                                      id: result.nextCursor.id,
+                                  }
+                                : undefined,
+                            total: result.total,
+                        },
+                    }));
+                })
+                .catch((err: unknown) => {
+                    console.error("[useSessionSearches] session.list (load more) failed:", err);
+                })
+                .finally(() => {
+                    if (seqRef.current.get(cwd) === seq)
+                        updateEntry(cwd, (current) => ({ ...current, loading: false }));
+                });
+        },
+        [client, nextSequence, updateEntry],
+    );
+
+    const forWorkspace = useCallback(
+        (cwd: string): UseSessionSearchResult => {
+            const entry = entries[cwd] ?? emptyWorkspaceSearchEntry();
+            const shown = entry.results.cwd === cwd ? entry.results : NO_RESULTS;
+            return {
+                query: entry.query,
+                setQuery: (query) => setQuery(cwd, query),
+                pending: entry.query.trim() !== entry.debounced,
+                sessions: shown.sessions,
+                cursor: shown.cursor,
+                total: shown.total,
+                failed: shown.failed ?? false,
+                loading: entry.loading,
+                loadMore: () => loadMore(cwd),
+                refresh: () => refresh(cwd),
+            };
+        },
+        [entries, loadMore, refresh, setQuery],
+    );
+
+    return useMemo(() => ({ forWorkspace }), [forWorkspace]);
 }

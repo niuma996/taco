@@ -7,7 +7,7 @@
  * Data fetching and mutations live in useAgentsPane (App.tsx).
  */
 
-import type { AgentEntry, AgentRuntime, AgentsContentResult } from "@taco-ai/protocol";
+import type { AgentEntry, AgentRuntime, AgentScope, AgentsContentResult } from "@taco-ai/protocol";
 import { type ReactElement, useMemo, useState } from "react";
 import { AssistantMarkdown } from "../components/AssistantMarkdown";
 import { AddAgentMenu } from "../components/agents/AddAgentMenu";
@@ -20,6 +20,9 @@ import { useT } from "../i18n/useI18n";
 
 export interface AgentsPaneProps {
     agents: AgentEntry[];
+    globalAgentTypes?: string[];
+    /** Direct-layer views fix writes to that layer; aggregate views hide creation. */
+    editorScope?: AgentScope;
     error: string | null;
     selectedAgentType: string | null;
     onSelect: (agentType: string) => void;
@@ -31,12 +34,18 @@ export interface AgentsPaneProps {
     hasProjectDir: boolean;
     /** Directories a Claude Code agent may run in; the first is the default. */
     cwdChoices: ReadonlyArray<string>;
-    onSaveAgent: (input: AgentSaveInput, previousAgentType?: string) => Promise<void>;
-    onDeleteAgent: (agentType: string) => Promise<void>;
+    onSaveAgent: (
+        input: AgentSaveInput,
+        previousAgentType?: string,
+        previousScope?: AgentScope,
+    ) => Promise<void>;
+    onDeleteAgent: (agentType: string, scope?: AgentScope) => Promise<void>;
 }
 
 export function AgentsPane({
     agents,
+    globalAgentTypes,
+    editorScope,
     error,
     selectedAgentType,
     onSelect,
@@ -82,6 +91,7 @@ export function AgentsPane({
                 formOpen !== false && formOpen.mode === "edit" && selectedAgent
                     ? selectedAgent.agentType
                     : undefined,
+                formOpen !== false && formOpen.mode === "edit" ? selectedAgent?.scope : undefined,
             );
             setFormOpen(false);
         } catch (e) {
@@ -93,7 +103,7 @@ export function AgentsPane({
         if (!selectedAgent) return;
         setActionError(null);
         try {
-            await onDeleteAgent(selectedAgent.agentType);
+            await onDeleteAgent(selectedAgent.agentType, selectedAgent.scope);
             setConfirmDelete(false);
         } catch (e) {
             setActionError(e instanceof Error ? e.message : String(e));
@@ -110,12 +120,14 @@ export function AgentsPane({
                     query={query}
                     onQueryChange={setQuery}
                 >
-                    <AddAgentMenu
-                        onPick={(runtime) => {
-                            setFormError(null);
-                            setFormOpen({ mode: "new", runtime });
-                        }}
-                    />
+                    {editorScope && (
+                        <AddAgentMenu
+                            onPick={(runtime) => {
+                                setFormError(null);
+                                setFormOpen({ mode: "new", runtime });
+                            }}
+                        />
+                    )}
                 </PaneHeader>
                 {error && (
                     <div className="error-banner" role="alert">
@@ -148,9 +160,9 @@ export function AgentsPane({
                                                 ? t("agents.runtimeCc")
                                                 : a.source}
                                         </span>
-                                        {a.scope === "workspace" && (
+                                        {a.scope && (
                                             <span className="agents-list-item-source">
-                                                {t("agents.scope.workspace")}
+                                                {t(`configScope.${a.scope}`)}
                                             </span>
                                         )}
                                     </span>
@@ -285,10 +297,12 @@ export function AgentsPane({
                     }
                     saving={saving}
                     hasProjectDir={hasProjectDir}
+                    fixedScope={editorScope}
                     cwdChoices={cwdChoices}
-                    shadowedTypes={agents
-                        .filter((a) => a.scope === "global")
-                        .map((a) => a.agentType)}
+                    shadowedTypes={
+                        globalAgentTypes ??
+                        agents.filter((a) => a.scope === "global").map((a) => a.agentType)
+                    }
                     error={formError}
                     onSave={saveForm}
                     onCancel={() => setFormOpen(false)}

@@ -83,6 +83,8 @@ export interface AgentFormProps {
     saving?: boolean;
     /** False for IM conversations, which have no project directory to hold a workspace-scoped agent. */
     hasProjectDir: boolean;
+    /** Set by the pane's scope tabs to prevent writes landing in another layer. */
+    fixedScope?: AgentScope;
     /** Names of global agents; saving a workspace agent under one of them shadows it. */
     shadowedTypes: ReadonlyArray<string>;
     /**
@@ -111,7 +113,9 @@ export function AgentForm(props: AgentFormProps) {
     const isEdit = props.existing !== undefined;
     const isCc = props.runtime === "claude-code";
 
-    const [scope, setScope] = useState<AgentScope>(props.existing?.scope ?? "global");
+    const [scope, setScope] = useState<AgentScope>(
+        props.existing?.scope ?? props.fixedScope ?? "global",
+    );
     const [agentType, setAgentType] = useState(props.existing?.agentType ?? "");
     const [description, setDescription] = useState(props.existing?.description ?? "");
     const [whenToUse, setWhenToUse] = useState(props.existing?.whenToUse ?? "");
@@ -246,25 +250,27 @@ export function AgentForm(props: AgentFormProps) {
                     <li>{t("agents.form.ccRuleAskUser")}</li>
                 </ul>
             )}
-            <FormField
-                label={t("agents.form.scope")}
-                hint={t(
-                    scope === "global"
-                        ? "agents.form.scopeGlobalHint"
-                        : "agents.form.scopeWorkspaceHint",
-                )}
-            >
-                <Select
-                    value={scope}
-                    onValueChange={(v) => setScope(v as AgentScope)}
-                    options={SCOPES.map((value) => ({
-                        value,
-                        label: t(`agents.scope.${value}`),
-                    }))}
-                    disabled={!props.hasProjectDir}
+            {props.fixedScope === undefined && (
+                <FormField
                     label={t("agents.form.scope")}
-                />
-            </FormField>
+                    hint={t(
+                        scope === "global"
+                            ? "agents.form.scopeGlobalHint"
+                            : "agents.form.scopeWorkspaceHint",
+                    )}
+                >
+                    <Select
+                        value={scope}
+                        onValueChange={(v) => setScope(v as AgentScope)}
+                        options={SCOPES.map((value) => ({
+                            value,
+                            label: t(`agents.scope.${value}`),
+                        }))}
+                        disabled={!props.hasProjectDir}
+                        label={t("agents.form.scope")}
+                    />
+                </FormField>
+            )}
             {shadowsGlobal && (
                 <div className="agent-form-notice">{t("agents.form.shadowsGlobal")}</div>
             )}

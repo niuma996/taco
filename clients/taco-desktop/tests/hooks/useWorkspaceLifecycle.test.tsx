@@ -1,7 +1,7 @@
 import { act, cleanup, renderHook } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { useWorkspaceLifecycle } from "../../src/hooks/useWorkspaceLifecycle";
-import { createSessionState } from "../../src/lib/chat/sessionState";
+import { createSessionState, getSessionState } from "../../src/lib/chat/sessionState";
 import {
     createEmptyWorkspace,
     type WorkspaceAction,
@@ -124,7 +124,12 @@ describe("workspace lifecycle isolation", () => {
                 "/w": {
                     ...ws,
                     sessionStatesById: {
-                        A: { ...createSessionState(), historyLoaded: true, sync: "current" },
+                        A: {
+                            ...createSessionState(),
+                            execution: "idle",
+                            historyLoaded: true,
+                            sync: "current",
+                        },
                     },
                 } as WorkspaceState,
             },
@@ -135,6 +140,26 @@ describe("workspace lifecycle isolation", () => {
         expect(h.actions).toContainEqual(
             expect.objectContaining({ type: "ATTACH", sid: "A", makeActive: true }),
         );
+    });
+
+    it("reconciles execution when a complete cache still has unknown run state", async () => {
+        const ws = createEmptyWorkspace("/w");
+        const h = setup(
+            {
+                sessionAttach: vi.fn(async () => ({ execution: "idle" })),
+            },
+            {
+                "/w": {
+                    ...ws,
+                    sessionStatesById: {
+                        A: { ...createSessionState(), historyLoaded: true, sync: "current" },
+                    },
+                } as WorkspaceState,
+            },
+        );
+        await h.result.current.attachSession("/w", "A");
+        expect(h.client.sessionAttach).toHaveBeenCalledTimes(1);
+        expect(getSessionState(h.workspacesRef.current["/w"], "A")?.execution).toBe("idle");
     });
 
     it("keeps a newer TASKS_UPDATED when the attach task pull returns late", async () => {

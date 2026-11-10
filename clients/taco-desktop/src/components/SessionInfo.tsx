@@ -30,6 +30,7 @@ import {
     PanelLeftOpen,
     UsersRoundCollaboration,
 } from "lucide-react";
+import type { ReactNode } from "react";
 import { useNow } from "../hooks/useNow";
 import type { WorkspaceState } from "../hooks/useWorkspaces";
 import { useT, useUiLanguage } from "../i18n/useI18n";
@@ -55,6 +56,7 @@ export function SessionInfo({
     onNewSession,
     newSessionDisabled,
     isIm,
+    workspaceContext,
 }: {
     ws: WorkspaceState | undefined;
     onCopy: (sid: string) => void;
@@ -77,6 +79,8 @@ export function SessionInfo({
     newSessionDisabled?: boolean;
     /** IM conversations have no filesystem; suppress the file-tree button only. */
     isIm?: boolean;
+    /** Current workspace/channel identity, owned by ChatWorkspaceContext. */
+    workspaceContext?: ReactNode;
 }) {
     const { t } = useT();
     const lng = useUiLanguage();
@@ -138,7 +142,9 @@ export function SessionInfo({
         return (
             <div className="session-info empty">
                 {toggle}
-                {t("session.noActiveSession")}
+                {workspaceContext && <Divider orientation="vertical" />}
+                {workspaceContext}
+                <span className="session-info-empty-copy">{t("session.noActiveSession")}</span>
                 {filesButton}
             </div>
         );
@@ -161,6 +167,7 @@ export function SessionInfo({
         <div className="session-info">
             {toggle}
             <Divider orientation="vertical" />
+            {workspaceContext}
             {/* Status leads the metadata block: the dot reads as the session's
                 live signal before its name. Never shrinks — the title
                 truncates instead. */}

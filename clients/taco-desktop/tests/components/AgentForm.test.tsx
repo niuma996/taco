@@ -33,6 +33,23 @@ async function fillRequired(name: string) {
 }
 
 describe("AgentForm", () => {
+    it("locks creation to the scope selected in the pane", async () => {
+        const onSave = vi.fn<(v: AgentFormValue) => void>();
+        render(
+            <AgentForm
+                {...base}
+                runtime="standard"
+                fixedScope="workspace"
+                onSave={onSave}
+                onCancel={() => {}}
+            />,
+        );
+        assert.equal(screen.queryByRole("combobox", { name: "agents.form.scope" }), null);
+        const user = await fillRequired("local");
+        await user.click(screen.getByText("agents.form.save"));
+        assert.equal(onSave.mock.calls[0]?.[0].scope, "workspace");
+    });
+
     it("taco dialog: no Claude Code rules or fields, saves no Claude Code settings", async () => {
         const onSave = vi.fn<(v: AgentFormValue) => void>();
         render(<AgentForm {...base} runtime="standard" onSave={onSave} onCancel={() => {}} />);

@@ -1,6 +1,7 @@
 import { asWorkspaceId, type SkillDiagnosticEntry, type SkillEntry } from "@taco-ai/protocol";
 import { useEffect, useMemo, useState } from "react";
 import type { TacoClient } from "../lib/clients/tacoClient.ts";
+import { type ConfigurationScope, filterSkillScope } from "../lib/configurationScope";
 import { useAutoClearError } from "./primitives/useAutoClearError";
 
 export interface UseSkillsPaneResult {
@@ -25,6 +26,7 @@ export function useSkillsPane(
     client: TacoClient,
     active: boolean,
     activeCwd: string | undefined,
+    viewScope: ConfigurationScope = "effective",
 ): UseSkillsPaneResult {
     const [allSkills, setAllSkills] = useState<SkillEntry[]>([]);
     const {
@@ -43,41 +45,59 @@ export function useSkillsPane(
         clearError: clearSkillContentError,
     } = useAutoClearError();
 
+    const scopedSkills = useMemo(
+        () => filterSkillScope(allSkills, viewScope),
+        [allSkills, viewScope],
+    );
+
     // Case-insensitive fuzzy-ish filter: every whitespace-separated term must
     // appear in the name or description, so "release note" matches release-notes.
     const skills = useMemo(() => {
         const terms = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
-        if (terms.length === 0) return allSkills;
-        return allSkills.filter((s) => {
+        if (terms.length === 0) return scopedSkills;
+        return scopedSkills.filter((s) => {
             const haystack = `${s.name} ${s.description ?? ""}`.toLowerCase();
             return terms.every((t) => haystack.includes(t));
         });
-    }, [allSkills, query]);
+    }, [scopedSkills, query]);
 
     // Load list + auto-select first item so the content effect fires on entry.
     useEffect(() => {
-        if (!active || !activeCwd) return;
+        if (!active) return;
         // reset selection + content so previous workspace's state doesn't leak through
         setSelectedSkillName(null);
         setSkillContent("");
         clearSkillContentError();
         clearSkillsError();
+        setAllSkills([]);
+        if (!activeCwd) return;
+        let cancelled = false;
         void client
             .skillsList({ workspace: asWorkspaceId(activeCwd) })
             .then((r) => {
+                if (cancelled) return;
                 setAllSkills(r.skills);
                 setDiagnostics(r.diagnostics ?? []);
-                if (r.skills.length > 0) {
-                    setSelectedSkillName(r.skills[0].name);
-                }
+                const visible = filterSkillScope(r.skills, viewScope);
+                if (visible.length > 0) setSelectedSkillName(visible[0].name);
             })
             .catch((e: unknown) => {
-                // Surface it: a swallowed failure renders an empty list that is
-                // indistinguishable from a workspace with no skills.
+                if (cancelled) return;
                 console.error("[useSkillsPane] skillsList failed:", e);
                 failSkillsList(e);
             });
-    }, [active, activeCwd, client, clearSkillContentError, clearSkillsError, failSkillsList]);
+        return () => {
+            cancelled = true;
+        };
+    }, [
+        active,
+        activeCwd,
+        viewScope,
+        client,
+        clearSkillContentError,
+        clearSkillsError,
+        failSkillsList,
+    ]);
 
     // Fetch skill content when user picks a skill.
     // Cancellation flag prevents slow earlier requests from overwriting later selections.
@@ -111,7 +131,7 @@ export function useSkillsPane(
 
     return {
         skills,
-        totalCount: allSkills.length,
+        totalCount: scopedSkills.length,
         skillsError,
         query,
         setQuery,

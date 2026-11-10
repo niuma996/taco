@@ -267,7 +267,11 @@ export function useWorkspaces(client: TacoClient): UseWorkspacesApi {
     // ── helpers ──
     const dispatch = useCallback(
         (action: SidecarAction) => {
-            if (action.type === "SET_SESSION_SYNC" || action.type === "SESSION_UNCERTAIN") {
+            if (
+                action.type === "SET_SESSION_SYNC" ||
+                action.type === "SET_SESSION_EXECUTION" ||
+                action.type === "SESSION_UNCERTAIN"
+            ) {
                 if (action.type === "SESSION_UNCERTAIN")
                     promptTokens.current.delete(JSON.stringify([action.cwd, action.sid]));
                 dispatchWs(action);
@@ -942,6 +946,7 @@ export function useWorkspaces(client: TacoClient): UseWorkspacesApi {
         initFromStorage: lifecycle.initFromStorage,
         reloadAllWorkspaces: lifecycle.reloadAllWorkspaces,
         loadMoreSessions: lifecycle.loadMoreSessions,
+        ensureWorkspaceSessions: lifecycle.ensureWorkspaceSessions,
         openWorkspace: (cwd) => {
             navigationVersion.current++;
             return lifecycle.openWorkspace(cwd);

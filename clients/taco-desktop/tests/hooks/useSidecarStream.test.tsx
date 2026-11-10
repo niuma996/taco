@@ -71,6 +71,7 @@ function setup(getEvents = vi.fn(async () => replay([]))) {
             return () => {};
         }),
         sessionEventsGet: getEvents,
+        sessionAttach: vi.fn(async () => ({ execution: "running" as const })),
     } as unknown as TacoClient;
     const onAction = vi.fn();
     const onSnapshotRequired = vi.fn(async () => ({ recovered: false as const }));
@@ -90,6 +91,7 @@ function setup(getEvents = vi.fn(async () => replay([]))) {
         ready: () => ready("same-instance"),
         onAction,
         getEvents,
+        sessionAttach: client.sessionAttach,
     };
 }
 async function flush() {
@@ -97,6 +99,19 @@ async function flush() {
 }
 
 describe("useSidecarStream isolation", () => {
+    it("probes live execution when reconnect replay misses no lifecycle frame", async () => {
+        const h = setup();
+        h.ready();
+        await flush();
+        expect(h.sessionAttach).toHaveBeenCalledTimes(3);
+        expect(h.onAction).toHaveBeenCalledWith({
+            type: "SET_SESSION_EXECUTION",
+            cwd: "/w",
+            sid: "A",
+            execution: "running",
+        });
+    });
+
     it("selects current, running, waiting and unknown caches without scanning historical rows", () => {
         const idle = {
             ...createSessionState(),

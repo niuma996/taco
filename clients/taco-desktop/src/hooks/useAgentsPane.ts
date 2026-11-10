@@ -6,8 +6,9 @@ import {
     asWorkspaceId,
     type ClaudeCodePermissionMode,
 } from "@taco-ai/protocol";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { TacoClient } from "../lib/clients/tacoClient.ts";
+import { type ConfigurationScope, filterAgentScope } from "../lib/configurationScope";
 import { useAutoClearError } from "./primitives/useAutoClearError";
 
 export interface AgentSaveInput {
@@ -17,41 +18,41 @@ export interface AgentSaveInput {
     whenToUse?: string;
     runtime: AgentRuntime;
     maxTurns: number;
-    /** Wall-clock budget for a background spawn, in minutes; omitted = derived. */
     timeoutMinutes?: number;
     systemPrompt: string;
-    /** `claude-code` only; omitted = Claude Code's full preset. */
     tools?: string[];
-    /** `claude-code` only; omitted = "auto". */
     permissionMode?: ClaudeCodePermissionMode;
-    /** `claude-code` only: the directory it runs in. */
     cwd?: string;
 }
 
 export interface UseAgentsPaneResult {
     agents: AgentEntry[];
-    /** Directories a Claude Code agent may run in: the workspace's own first, then its associations. */
+    globalAgentTypes: string[];
     cwdChoices: string[];
-    /** Non-null when the agents list fetch failed; clears itself after a few seconds. */
     agentsError: string | null;
     selectedAgentType: string | null;
     setSelectedAgentType: (type: string | null) => void;
     agentContent: AgentsContentResult | null;
     agentContentLoading: boolean;
     agentContentError: string | null;
-    /** True while an agents.write/delete RPC is in flight. */
     agentSaving: boolean;
-    saveAgent: (input: AgentSaveInput, previousAgentType?: string) => Promise<void>;
-    deleteAgent: (agentType: string) => Promise<void>;
+    saveAgent: (
+        input: AgentSaveInput,
+        previousAgentType?: string,
+        previousScope?: AgentScope,
+    ) => Promise<void>;
+    deleteAgent: (agentType: string, scope?: AgentScope) => Promise<void>;
 }
 
-/** Loads the agents list + selected agent content, and owns write/delete mutations. */
+/** Loads the selected target/layer and owns scope-correct agent mutations. */
 export function useAgentsPane(
     client: TacoClient,
     active: boolean,
     activeCwd: string | undefined,
+    viewScope: ConfigurationScope = "effective",
 ): UseAgentsPaneResult {
-    const [agents, setAgents] = useState<AgentEntry[]>([]);
+    const [catalog, setCatalog] = useState<AgentEntry[]>([]);
+    const [globalAgentTypes, setGlobalAgentTypes] = useState<string[]>([]);
     const [cwdChoices, setCwdChoices] = useState<string[]>([]);
     const {
         error: agentsError,
@@ -63,55 +64,74 @@ export function useAgentsPane(
     const [agentContentLoading, setAgentContentLoading] = useState(false);
     const [agentContentError, setAgentContentError] = useState<string | null>(null);
     const [agentSaving, setAgentSaving] = useState(false);
+    const requestCounter = useRef(0);
+    const agents = useMemo(() => filterAgentScope(catalog, viewScope), [catalog, viewScope]);
 
     const reload = useCallback(async () => {
         if (!activeCwd) return;
-        const r = await client.agentsList({ workspace: asWorkspaceId(activeCwd) });
-        setAgents(r.agents);
-        // Absent from a sidecar older than the field; the form then saves no
-        // directory and the agent runs in the workspace, as before.
-        setCwdChoices(r.cwdChoices ?? []);
-        setSelectedAgentType((prev) =>
-            prev !== null && r.agents.some((a) => a.agentType === prev)
-                ? prev
-                : (r.agents[0]?.agentType ?? null),
+        const request = ++requestCounter.current;
+        const layer = viewScope === "global" || viewScope === "workspace" ? viewScope : undefined;
+        const workspace = asWorkspaceId(activeCwd);
+        const [result, globalResult] = await Promise.all([
+            client.agentsList({ workspace, ...(layer ? { scope: layer } : {}) }),
+            viewScope === "workspace"
+                ? client.agentsList({ workspace, scope: "global" })
+                : Promise.resolve(null),
+        ]);
+        if (request !== requestCounter.current) return;
+        setCatalog(result.agents);
+        setGlobalAgentTypes(
+            (globalResult?.agents ?? result.agents)
+                .filter((agent) => agent.scope === "global")
+                .map((agent) => agent.agentType),
         );
-    }, [activeCwd, client]);
+        setCwdChoices(result.cwdChoices ?? []);
+        const visible = filterAgentScope(result.agents, viewScope);
+        setSelectedAgentType((previous) =>
+            previous !== null && visible.some((agent) => agent.agentType === previous)
+                ? previous
+                : (visible[0]?.agentType ?? null),
+        );
+    }, [activeCwd, client, viewScope]);
 
-    // Load list on entry so the content effect fires on the first item.
     useEffect(() => {
-        if (!active || !activeCwd) return;
+        if (!active) return;
+        setCatalog([]);
+        if (!activeCwd) return;
         setSelectedAgentType(null);
         setAgentContent(null);
         setAgentContentError(null);
         clearAgentsError();
-        reload().catch((e: unknown) => {
-            // Surface it: a swallowed failure renders an empty list that is
-            // indistinguishable from a workspace with no agents.
-            console.error("[useAgentsPane] agentsList failed:", e);
-            failAgentsList(e);
+        reload().catch((error: unknown) => {
+            console.error("[useAgentsPane] agentsList failed:", error);
+            failAgentsList(error);
         });
+        return () => {
+            requestCounter.current += 1;
+        };
     }, [active, activeCwd, reload, clearAgentsError, failAgentsList]);
 
-    // Fetch agent content when user picks an agent.
-    // Cancellation flag prevents slow earlier requests from overwriting later selections.
     useEffect(() => {
         let cancelled = false;
         setAgentContent(null);
         setAgentContentError(null);
-        if (!selectedAgentType || !activeCwd) return;
+        const selected = agents.find((agent) => agent.agentType === selectedAgentType);
+        if (!selected || !activeCwd) return;
         setAgentContentLoading(true);
         void client
-            .agentsContent({ workspace: asWorkspaceId(activeCwd), agentType: selectedAgentType })
-            .then((r) => {
-                if (cancelled) return;
-                setAgentContent(r);
-                setAgentContentError(null);
+            .agentsContent({
+                workspace: asWorkspaceId(activeCwd),
+                agentType: selected.agentType,
+                ...(selected.scope ? { scope: selected.scope } : {}),
             })
-            .catch((e: unknown) => {
-                if (cancelled) return;
-                setAgentContentError(e instanceof Error ? e.message : String(e));
-                setAgentContent(null);
+            .then((result) => {
+                if (!cancelled) setAgentContent(result);
+            })
+            .catch((error: unknown) => {
+                if (!cancelled) {
+                    setAgentContentError(error instanceof Error ? error.message : String(error));
+                    setAgentContent(null);
+                }
             })
             .finally(() => {
                 if (!cancelled) setAgentContentLoading(false);
@@ -119,10 +139,10 @@ export function useAgentsPane(
         return () => {
             cancelled = true;
         };
-    }, [selectedAgentType, activeCwd, client]);
+    }, [selectedAgentType, agents, activeCwd, client]);
 
     const saveAgent = useCallback(
-        async (input: AgentSaveInput, previousAgentType?: string) => {
+        async (input: AgentSaveInput, previousAgentType?: string, previousScope?: AgentScope) => {
             if (!activeCwd) return;
             setAgentSaving(true);
             try {
@@ -130,6 +150,7 @@ export function useAgentsPane(
                     workspace: asWorkspaceId(activeCwd),
                     ...input,
                     ...(previousAgentType !== undefined ? { previousAgentType } : {}),
+                    ...(previousScope !== undefined ? { previousScope } : {}),
                 });
                 await reload();
                 setSelectedAgentType(input.agentType);
@@ -141,11 +162,15 @@ export function useAgentsPane(
     );
 
     const deleteAgent = useCallback(
-        async (agentType: string) => {
+        async (agentType: string, scope?: AgentScope) => {
             if (!activeCwd) return;
             setAgentSaving(true);
             try {
-                await client.agentsDelete({ workspace: asWorkspaceId(activeCwd), agentType });
+                await client.agentsDelete({
+                    workspace: asWorkspaceId(activeCwd),
+                    agentType,
+                    ...(scope ? { scope } : {}),
+                });
                 await reload();
             } finally {
                 setAgentSaving(false);
@@ -156,6 +181,7 @@ export function useAgentsPane(
 
     return {
         agents,
+        globalAgentTypes,
         cwdChoices,
         agentsError,
         selectedAgentType,

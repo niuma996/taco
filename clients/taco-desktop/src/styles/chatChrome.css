@@ -73,6 +73,61 @@ main {
 .session-info.empty {
     font-style: italic;
 }
+
+/* Where this conversation writes. Read-only for established sessions; the
+   same compact chip becomes a workspace menu on a filesystem new-chat page. */
+.session-info-context {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    flex: 0 1 auto;
+    min-width: 0;
+    max-width: min(34%, 220px);
+    box-sizing: border-box;
+    padding: 0.24rem 0.42rem;
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: var(--hover-overlay);
+    color: var(--fg-dim);
+    font: inherit;
+    font-size: 0.72rem;
+    font-style: normal;
+    line-height: 1.2;
+    white-space: nowrap;
+}
+
+.session-info-context svg {
+    flex: 0 0 auto;
+}
+
+.session-info-context-label {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+button.session-info-context.switchable {
+    cursor: pointer;
+}
+
+button.session-info-context.switchable:hover,
+button.session-info-context.switchable[data-state="open"] {
+    background: var(--accent-bg-hover);
+    color: var(--fg);
+}
+
+.session-info-context:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+}
+
+.session-info-empty-copy {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
 /* In the no-active-session bar there is no .session-info-details (the auto-margin
    element that pins the right-hand icon cluster). The file-tree toggle stays
    visible regardless of session state, so it pins itself right here. */

@@ -122,6 +122,11 @@ export function SkillsPane({
                                                 ? t("activity.skillsSourceBuiltin")
                                                 : t("activity.skillsSourceUser")}
                                         </span>
+                                        {skill.scope && (
+                                            <span className="skills-list-item-source">
+                                                {t(`configScope.${skill.scope}`)}
+                                            </span>
+                                        )}
                                     </span>
                                 </button>
                             ))}

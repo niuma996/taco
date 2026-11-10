@@ -6,22 +6,13 @@
  * switching only; per-pane domain logic lives in the hooks.
  */
 
-import type {
-    ChannelStatusEntry,
-    CommandPermissionScope,
-    ImConversationEntry,
-    SessionTarget,
-} from "@taco-ai/protocol";
-import {
-    asSessionId,
-    asWorkspaceId,
-    ErrorCodes,
-    IM_CWD_PREFIX,
-    makeImCwd,
-} from "@taco-ai/protocol";
+import type { ChannelStatusEntry, CommandPermissionScope, SessionTarget } from "@taco-ai/protocol";
+import { asSessionId, asWorkspaceId, ErrorCodes, IM_CWD_PREFIX } from "@taco-ai/protocol";
 import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityRail } from "./components/ActivityRail";
 import { ChannelBindDialog } from "./components/ChannelBindDialog";
+import { ChatWorkspaceContext } from "./components/ChatWorkspaceContext";
+import { ConfigurationScopeBar } from "./components/ConfigurationScopeBar";
 import { ConfirmModal } from "./components/ConfirmModal";
 import { FilesDrawer } from "./components/FilesDrawer";
 import { LlmDumpDock } from "./components/LlmDumpPanel";
@@ -38,7 +29,6 @@ import { UpdateDialog } from "./components/UpdateDialog";
 import { WindowControls } from "./components/WindowControls";
 import { WorkspaceAssociationsDialog } from "./components/WorkspaceAssociationsDialog";
 import { type WorkspaceMode, WorkspaceModeTabs } from "./components/WorkspaceModeTabs";
-import { WorkspacePicker } from "./components/WorkspacePicker";
 import { useChatInputState } from "./hooks/primitives/useChatInputState";
 import { useStableCallback } from "./hooks/primitives/useStableCallback";
 import { useTheme } from "./hooks/primitives/useTheme";
@@ -48,6 +38,7 @@ import { useAppLifecycle } from "./hooks/useAppLifecycle";
 import { AskUserProvider } from "./hooks/useAskUser";
 import { CHANNEL_NAME_WECOM, useChannelsPane } from "./hooks/useChannelsPane";
 import { useCheckpointsPane } from "./hooks/useCheckpointsPane";
+import { useConfigurationScope } from "./hooks/useConfigurationScope";
 import { useConversationDrafts } from "./hooks/useConversationDrafts";
 import { useConversationsPane } from "./hooks/useConversationsPane";
 import { FilePreviewOpenerProvider } from "./hooks/useFilePreviewOpener";
@@ -58,7 +49,7 @@ import { useProviders } from "./hooks/useProviders";
 import { useRightPanel } from "./hooks/useRightPanel";
 import { useRightPanelAutoOpen } from "./hooks/useRightPanelAutoOpen";
 import { useSessionContextInfo } from "./hooks/useSessionContextInfo";
-import { useSessionSearch } from "./hooks/useSessionSearch";
+import { useSessionSearches } from "./hooks/useSessionSearch";
 import {
     getSessionRecoveryTargets,
     sidecarLogListenerReady,
@@ -91,10 +82,10 @@ import { AgentsPane } from "./views/AgentsPane";
 import { ChannelsPane } from "./views/ChannelsPane";
 import { ChatPane } from "./views/ChatPane";
 import { CheckpointsPane } from "./views/CheckpointsPane";
+import { ConversationSidebar } from "./views/ConversationSidebar";
 import { MemoryPane } from "./views/MemoryPane";
 import { PluginsPane } from "./views/PluginsPane";
 import { SettingsPane } from "./views/SettingsPane";
-import { Sidebar } from "./views/Sidebar";
 import { SkillsPane } from "./views/SkillsPane";
 import { ToolsPane } from "./views/ToolsPane";
 import { WorkPane } from "./views/WorkPane";
@@ -146,6 +137,7 @@ export default function App() {
         initFromStorage,
         reloadAllWorkspaces,
         loadMoreSessions,
+        ensureWorkspaceSessions,
         switchWorkspace,
         browseAndOpen,
         attachSession,
@@ -203,7 +195,7 @@ export default function App() {
     const contextInfo = useSessionContextInfo(client, activeCwd, activeSid);
     // Sidebar session search. Server-side, so it covers the whole workspace
     // and not just the page the sidebar has loaded.
-    const sessionSearch = useSessionSearch(client, activeCwd);
+    const sessionSearches = useSessionSearches(client);
 
     // Manual compact from the context-usage popover. The outcome comes from the
     // compaction_finished push; this only covers the RPC not starting (session
@@ -530,7 +522,37 @@ export default function App() {
 
     // Secondary pane state + domain logic live in dedicated hooks. Each hook
     // gates its fetch on `mainView === "<view>"` so inactive panes stay idle.
-    const { tools, error: toolsError } = useToolsPane(client, mainView === "tools", activeCwd);
+    const {
+        conversations,
+        loading: conversationsLoading,
+        error: conversationsError,
+        unreadCount: conversationsUnread,
+        onConversationsChanged,
+        markConversationsSeen,
+        refreshConversations,
+    } = useConversationsPane(
+        client,
+        mainView === "chat" || ["channels", "agents", "skills", "tools"].includes(mainView),
+        activeCwd,
+    );
+    onConversationsChangedRef.current = onConversationsChanged;
+    const catalogConfig = useConfigurationScope({
+        variant: "catalog",
+        activeCwd,
+        workspaces,
+        conversations,
+    });
+    const runtimeConfig = useConfigurationScope({
+        variant: "runtime",
+        activeCwd,
+        workspaces,
+        conversations,
+    });
+    const { tools, error: toolsError } = useToolsPane(
+        client,
+        mainView === "tools",
+        runtimeConfig.targetCwd,
+    );
     const {
         skills,
         totalCount: skillsTotalCount,
@@ -543,9 +565,10 @@ export default function App() {
         skillContent,
         skillContentLoading,
         skillContentError,
-    } = useSkillsPane(client, mainView === "skills", activeCwd);
+    } = useSkillsPane(client, mainView === "skills", catalogConfig.targetCwd, catalogConfig.scope);
     const {
         agents,
+        globalAgentTypes,
         cwdChoices: agentCwdChoices,
         agentsError,
         selectedAgentType,
@@ -556,7 +579,7 @@ export default function App() {
         agentSaving,
         saveAgent,
         deleteAgent,
-    } = useAgentsPane(client, mainView === "agents", activeCwd);
+    } = useAgentsPane(client, mainView === "agents", catalogConfig.targetCwd, catalogConfig.scope);
     const {
         extensionStatus,
         extensionLoading,
@@ -585,25 +608,19 @@ export default function App() {
         applyChannelStatus,
     } = useChannelsPane(client, mainView === "channels", activeCwd, restartSidecar);
     applyChannelStatusRef.current = applyChannelStatus;
-    const {
-        conversations,
-        loading: conversationsLoading,
-        error: conversationsError,
-        unreadCount: conversationsUnread,
-        onConversationsChanged,
-        markConversationsSeen,
-        refreshConversations,
-    } = useConversationsPane(client, mainView === "channels", activeCwd);
-    onConversationsChangedRef.current = onConversationsChanged;
     const workOverview = useWorkOverview(client, mainView === "work", activeCwd);
-    // The picker's mode follows the active workspace instead of being stored,
-    // so the tab always names what is on screen. Cold start never restores an
-    // im:// workspace, so the app opens on the directory tab.
-    const workspaceMode: WorkspaceMode = activeCwd.startsWith(IM_CWD_PREFIX) ? "im" : "workspace";
-    const workspaceModeRequestGuardRef = useRef(createLatestRequestGuard());
+    // The top scope switch filters both navigation surfaces without selecting
+    // a target. Navigation updates it so the top bar follows the open chat.
+    const [conversationMode, setConversationMode] = useState<WorkspaceMode>(() =>
+        activeCwd.startsWith(IM_CWD_PREFIX) ? "im" : "workspace",
+    );
+    const sessionOpenRequestGuardRef = useRef(createLatestRequestGuard());
+    useEffect(() => {
+        setConversationMode(activeCwd.startsWith(IM_CWD_PREFIX) ? "im" : "workspace");
+    }, [activeCwd]);
     const openImConversationFromUi = useCallback(
         (cwd: string, sid: string): void => {
-            const isCurrent = workspaceModeRequestGuardRef.current.begin();
+            const isCurrent = sessionOpenRequestGuardRef.current.begin();
             void openImConversation(cwd, sid, isCurrent);
         },
         [openImConversation],
@@ -618,11 +635,14 @@ export default function App() {
             if (workspace.startsWith(IM_CWD_PREFIX)) {
                 openImConversationFromUi(workspace, sessionId);
             } else {
+                const isCurrent = sessionOpenRequestGuardRef.current.begin();
                 void (async () => {
                     try {
                         await switchWorkspace(workspace);
+                        if (!isCurrent()) return;
                         await attachSession(workspace, sessionId);
                     } catch (err) {
+                        if (!isCurrent()) return;
                         pushNotification(`Cannot open session: ${(err as Error).message}`);
                     }
                 })();
@@ -635,94 +655,17 @@ export default function App() {
         (workspace: string, sessionId: string) => openSessionTarget({ workspace, sessionId }),
         [openSessionTarget],
     );
-    const switchWorkspaceFromUi = useCallback(
-        (cwd: string): void => {
-            workspaceModeRequestGuardRef.current.begin();
-            void switchWorkspace(cwd);
-        },
-        [switchWorkspace],
-    );
     // The conversation pane only fetches while it is open; the IM picker
     // needs the list too. Pushes keep it fresh once loaded.
     useEffect(() => {
-        if (workspaceMode === "im" && conversations === null) void refreshConversations();
-    }, [workspaceMode, conversations, refreshConversations]);
-    // Where the directory tab returns to after a detour through IM.
-    const lastDirectoryCwdRef = useRef<string>("");
-    if (activeCwd && !activeCwd.startsWith(IM_CWD_PREFIX)) {
-        lastDirectoryCwdRef.current = activeCwd;
-    }
-    const changeWorkspaceMode = useCallback(
-        async (next: WorkspaceMode): Promise<void> => {
-            const isCurrent = workspaceModeRequestGuardRef.current.begin();
-            if (next === "im") {
-                // Fetch fresh rather than trusting the cached list: it may
-                // never have loaded (the pane fetches only while open), and a
-                // stale empty list would make the click do nothing.
-                let list: ImConversationEntry[];
-                try {
-                    list = (await client.channelsListConversations({})).conversations;
-                } catch (e) {
-                    if (!isCurrent()) return;
-                    pushNotification(`${t("workspaceMode.imLoadFailed")}: ${(e as Error).message}`);
-                    return;
-                }
-                if (!isCurrent()) return;
-                void refreshConversations();
-                // Default to the first conversation (most recently used).
-                const first = list[0];
-                if (!first) {
-                    // An empty list has three causes that need three different
-                    // answers: no channel declared at all, a channel that is
-                    // not connected yet, or a connected channel whose first
-                    // message has not arrived. Telling the user to "wait for a
-                    // message" when no channel exists is a dead end.
-                    const status = await client.channelsList().catch(() => null);
-                    if (!isCurrent()) return;
-                    if (!status) {
-                        showToast(t("workspaceMode.imLoadFailed"), "warn");
-                        return;
-                    }
-                    if (status.configured.length === 0) {
-                        showToast(t("workspaceMode.imNoChannel"), "warn");
-                        setMainView("channels");
-                    } else if (!status.configured.some((c) => c.state === "connected")) {
-                        showToast(t("workspaceMode.imNotConnected"), "warn");
-                        setMainView("channels");
-                    } else {
-                        showToast(t("workspaceMode.imNone"), "warn");
-                    }
-                    return;
-                }
-                await openImConversation(
-                    makeImCwd(first.channelId, first.peerId, first.chatId),
-                    first.sessionId,
-                    isCurrent,
-                );
-                if (!isCurrent()) return;
-                setMainView("chat");
-                return;
-            }
-            const back =
-                lastDirectoryCwdRef.current ||
-                Object.values(workspaces).find((w) => !w.cwd.startsWith(IM_CWD_PREFIX))?.cwd;
-            if (back && isCurrent()) await switchWorkspace(back);
-        },
-        [
-            client,
-            openImConversation,
-            pushNotification,
-            refreshConversations,
-            showToast,
-            switchWorkspace,
-            t,
-            workspaces,
-        ],
-    );
+        if (conversationMode === "im" && conversations === null) void refreshConversations();
+    }, [conversationMode, conversations, refreshConversations]);
     /** channelId whose bind dialog is open; null closes it. */
     const [bindingChannelId, setBindingChannelId] = useState<string | null>(null);
-    /** Workspace whose associated-directories dialog is open; null closes it. */
-    const [associationsCwd, setAssociationsCwd] = useState<string | null>(null);
+    /** Filesystem workspace or exact IM chat whose associations dialog is open. */
+    const [associationsTarget, setAssociationsTarget] = useState<{
+        workspace: string;
+    } | null>(null);
     const isWeComChannel = (channelId: string): boolean =>
         channelsStatus?.configured.find((c) => c.channelId === channelId)?.name ===
         CHANNEL_NAME_WECOM;
@@ -839,43 +782,8 @@ export default function App() {
                 <header className="topbar" data-tauri-drag-region>
                     <div className="topbar-picker-group">
                         <WorkspaceModeTabs
-                            mode={workspaceMode}
-                            onModeChange={(next) => void changeWorkspaceMode(next)}
-                        />
-                        <WorkspacePicker
-                            mode={workspaceMode}
-                            workspaces={
-                                workspaceMode === "im"
-                                    ? (conversations ?? []).map((c) => ({
-                                          cwd: makeImCwd(c.channelId, c.peerId, c.chatId),
-                                          label: c.peerId,
-                                          channel: c.channelId,
-                                      }))
-                                    : Object.values(workspaces)
-                                          .filter((w) => !w.cwd.startsWith(IM_CWD_PREFIX))
-                                          .map((w) => ({ cwd: w.cwd }))
-                            }
-                            activeCwd={activeCwd}
-                            onChange={(cwd) => {
-                                // An IM conversation is opened through its own
-                                // path (it pulls history and switches to the
-                                // chat view); a directory is a plain switch.
-                                const conv = (conversations ?? []).find(
-                                    (c) => makeImCwd(c.channelId, c.peerId, c.chatId) === cwd,
-                                );
-                                if (conv) {
-                                    openImConversationFromUi(cwd, conv.sessionId);
-                                    setMainView("chat");
-                                } else if (!cwd.startsWith(IM_CWD_PREFIX)) {
-                                    // An im:// cwd with no matching conversation
-                                    // must NOT fall through to switchWorkspace:
-                                    // that path treats it as a directory and
-                                    // persists the URL as the active workspace.
-                                    switchWorkspaceFromUi(cwd);
-                                }
-                            }}
-                            onOpenFolder={() => void browseAndOpen()}
-                            onManageAssociations={(cwd) => setAssociationsCwd(cwd)}
+                            mode={conversationMode}
+                            onModeChange={setConversationMode}
                         />
                     </div>
                     {/* ContextIndicator moved to ChatPane input-controls */}
@@ -916,41 +824,43 @@ export default function App() {
                                 transition driven by data-sidebar-collapsed on
                                 .layout, so the list wipes in/out instead of
                                 popping and keeps its scroll position. */}
-                            <Sidebar
-                                ws={ws}
-                                onAttach={async (sid) => {
-                                    try {
-                                        await attachSession(activeCwd, sid);
-                                    } catch (err) {
-                                        pushNotification(
-                                            `Cannot open session: ${(err as Error).message}`,
-                                        );
-                                    }
-                                }}
-                                onDelete={(sid) =>
-                                    setPendingDeleteSession({ cwd: activeCwd, sessionId: sid })
+                            <ConversationSidebar
+                                mode={conversationMode}
+                                workspaces={workspaces}
+                                activeCwd={activeCwd}
+                                conversations={conversations}
+                                conversationsLoading={conversationsLoading}
+                                conversationsError={conversationsError}
+                                searches={sessionSearches}
+                                onOpenSession={openSessionTarget}
+                                onLoadWorkspace={ensureWorkspaceSessions}
+                                onLoadMore={(cwd) => void loadMoreSessions(cwd)}
+                                onDelete={({ cwd, sessionId }) =>
+                                    setPendingDeleteSession({ cwd, sessionId })
                                 }
-                                onRename={(sid) => {
-                                    // Search matches include sessions that are
-                                    // not in the loaded page, so fall back to
-                                    // the result set for their current name.
+                                onRename={({ cwd, sessionId, currentName }) => {
+                                    const workspace = workspaces[cwd];
                                     const current =
-                                        ws?.sessions.find((s) => s.id === sid) ??
-                                        sessionSearch.sessions.find((s) => s.id === sid);
+                                        workspace?.sessions.find((s) => s.id === sessionId) ??
+                                        sessionSearches
+                                            .forWorkspace(cwd)
+                                            .sessions.find((s) => s.id === sessionId);
                                     setPendingRenameSession({
-                                        cwd: activeCwd,
-                                        sessionId: sid,
-                                        currentName: current?.name ?? "",
+                                        cwd,
+                                        sessionId,
+                                        currentName: currentName ?? current?.name ?? "",
                                     });
                                 }}
-                                onLoadMore={() => {
-                                    void loadMoreSessions(activeCwd);
+                                onNewSession={(cwd) => {
+                                    if (cwd === activeCwd) handleNewSession();
+                                    else {
+                                        void switchWorkspace(cwd).then(() => startNewSession(cwd));
+                                    }
                                 }}
-                                onNewSession={handleNewSession}
-                                newSessionDisabled={
-                                    !ws || Boolean(activeCwd?.startsWith(IM_CWD_PREFIX))
-                                }
-                                search={sessionSearch}
+                                onOpenFolder={() => void browseAndOpen()}
+                                onManageAssociations={setAssociationsTarget}
+                                onRetryConversations={() => void refreshConversations()}
+                                onManageChannels={() => setMainView("channels")}
                             />
                             {/* Owns the one file-preview popup the chat's `read`
                                 cards open; the file tree has its own inside
@@ -1054,6 +964,21 @@ export default function App() {
                                                 !ws || Boolean(activeCwd?.startsWith(IM_CWD_PREFIX))
                                             }
                                             isIm={Boolean(activeCwd?.startsWith(IM_CWD_PREFIX))}
+                                            workspaceContext={
+                                                <ChatWorkspaceContext
+                                                    cwd={activeCwd}
+                                                    workspaces={workspaces}
+                                                    switchable={
+                                                        !activeSid &&
+                                                        !activeCwd.startsWith(IM_CWD_PREFIX)
+                                                    }
+                                                    onSelect={(cwd) => {
+                                                        void switchWorkspace(cwd).then(() =>
+                                                            startNewSession(cwd),
+                                                        );
+                                                    }}
+                                                />
+                                            }
                                             llmDumpDock={
                                                 <LlmDumpDock
                                                     key={llmDumpEpoch}
@@ -1101,22 +1026,57 @@ export default function App() {
                             </FilePreviewOpenerProvider>
                         </>
                     ) : mainView === "tools" ? (
-                        <ToolsPane tools={tools} error={toolsError} />
+                        <div className="configuration-pane">
+                            <ConfigurationScopeBar
+                                variant="runtime"
+                                {...runtimeConfig}
+                                onScopeChange={runtimeConfig.setScope}
+                                onTargetChange={runtimeConfig.setTargetCwd}
+                            />
+                            <div className="configuration-pane-body">
+                                <ToolsPane tools={tools} error={toolsError} />
+                            </div>
+                        </div>
                     ) : mainView === "agents" ? (
-                        <AgentsPane
-                            agents={agents}
-                            error={agentsError}
-                            selectedAgentType={selectedAgentType ?? agents[0]?.agentType ?? null}
-                            onSelect={setSelectedAgentType}
-                            content={agentContent}
-                            contentLoading={agentContentLoading}
-                            contentError={agentContentError}
-                            saving={agentSaving}
-                            hasProjectDir={!activeCwd.startsWith(IM_CWD_PREFIX)}
-                            cwdChoices={agentCwdChoices}
-                            onSaveAgent={saveAgent}
-                            onDeleteAgent={deleteAgent}
-                        />
+                        <div className="configuration-pane">
+                            <ConfigurationScopeBar
+                                variant="catalog"
+                                {...catalogConfig}
+                                onScopeChange={catalogConfig.setScope}
+                                onTargetChange={catalogConfig.setTargetCwd}
+                            />
+                            <div className="configuration-pane-body">
+                                <AgentsPane
+                                    key={catalogConfig.scope}
+                                    agents={agents}
+                                    globalAgentTypes={globalAgentTypes}
+                                    editorScope={
+                                        !catalogConfig.hasTarget
+                                            ? undefined
+                                            : catalogConfig.scope === "global" ||
+                                                catalogConfig.scope === "workspace"
+                                              ? catalogConfig.scope
+                                              : undefined
+                                    }
+                                    error={agentsError}
+                                    selectedAgentType={
+                                        selectedAgentType ?? agents[0]?.agentType ?? null
+                                    }
+                                    onSelect={setSelectedAgentType}
+                                    content={agentContent}
+                                    contentLoading={agentContentLoading}
+                                    contentError={agentContentError}
+                                    saving={agentSaving}
+                                    hasProjectDir={
+                                        catalogConfig.targetCwd !== undefined &&
+                                        !catalogConfig.targetCwd.startsWith(IM_CWD_PREFIX)
+                                    }
+                                    cwdChoices={agentCwdChoices}
+                                    onSaveAgent={saveAgent}
+                                    onDeleteAgent={deleteAgent}
+                                />
+                            </div>
+                        </div>
                     ) : mainView === "plugins" ? (
                         <PluginsPane
                             status={extensionStatus}
@@ -1246,19 +1206,29 @@ export default function App() {
                             </div>
                         </div>
                     ) : (
-                        <SkillsPane
-                            skills={skills}
-                            totalCount={skillsTotalCount}
-                            skillsError={skillsError}
-                            query={skillsQuery}
-                            onQueryChange={setSkillsQuery}
-                            diagnostics={diagnostics}
-                            selectedName={selectedSkillName ?? skills[0]?.name ?? null}
-                            onSelect={setSelectedSkillName}
-                            content={skillContent}
-                            contentLoading={skillContentLoading}
-                            contentError={skillContentError}
-                        />
+                        <div className="configuration-pane">
+                            <ConfigurationScopeBar
+                                variant="catalog"
+                                {...catalogConfig}
+                                onScopeChange={catalogConfig.setScope}
+                                onTargetChange={catalogConfig.setTargetCwd}
+                            />
+                            <div className="configuration-pane-body">
+                                <SkillsPane
+                                    skills={skills}
+                                    totalCount={skillsTotalCount}
+                                    skillsError={skillsError}
+                                    query={skillsQuery}
+                                    onQueryChange={setSkillsQuery}
+                                    diagnostics={diagnostics}
+                                    selectedName={selectedSkillName ?? skills[0]?.name ?? null}
+                                    onSelect={setSelectedSkillName}
+                                    content={skillContent}
+                                    contentLoading={skillContentLoading}
+                                    contentError={skillContentError}
+                                />
+                            </div>
+                        </div>
                     )}
                     {/* Inline right-side panel (same layer as TaskPanel): mounted
                         across all mainViews so tree/preview state survives view
@@ -1307,7 +1277,8 @@ export default function App() {
                     // not linger as an unopenable ghost.
                     void (async () => {
                         await deleteSession(target.cwd, target.sessionId);
-                        sessionSearch.refresh();
+                        sessionSearches.forWorkspace(target.cwd).refresh();
+                        if (target.cwd.startsWith(IM_CWD_PREFIX)) await refreshConversations();
                     })();
                 }}
                 onCancel={() => setPendingDeleteSession(null)}
@@ -1326,7 +1297,8 @@ export default function App() {
                     // Same as delete: the search list is its own copy.
                     void (async () => {
                         await renameSession(target.cwd, target.sessionId, name);
-                        sessionSearch.refresh();
+                        sessionSearches.forWorkspace(target.cwd).refresh();
+                        if (target.cwd.startsWith(IM_CWD_PREFIX)) await refreshConversations();
                     })();
                 }}
                 onCancel={() => setPendingRenameSession(null)}
@@ -1351,10 +1323,11 @@ export default function App() {
                 onCancel={() => setBindingChannelId(null)}
             />
             <WorkspaceAssociationsDialog
-                open={associationsCwd !== null}
-                onClose={() => setAssociationsCwd(null)}
+                key={associationsTarget?.workspace ?? "none"}
+                open={associationsTarget !== null}
+                onClose={() => setAssociationsTarget(null)}
                 client={client}
-                workspace={associationsCwd ?? ""}
+                workspace={associationsTarget?.workspace ?? ""}
             />
             {lifecycle.desktopConfig !== null &&
                 isOnboardingRequired(lifecycle.desktopConfig) &&

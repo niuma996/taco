@@ -10,17 +10,20 @@
  * workspace's sessions, and "load more" pages through those matches.
  */
 
-import { Pencil, Plus, Trash } from "lucide-react";
-import { type KeyboardEvent, useRef, useState } from "react";
+import { Plus } from "lucide-react";
+import { useState } from "react";
 import { PaneSearch } from "../components/PaneSearch";
-import { IconButton } from "../components/ui/IconButton";
-import { useNow } from "../hooks/useNow";
+import { SessionList } from "../components/SessionList";
 import type { UseSessionSearchResult } from "../hooks/useSessionSearch";
 import type { WorkspaceState } from "../hooks/useWorkspaces";
-import { useT, useUiLanguage } from "../i18n/useI18n";
-import { formatRelativeTime } from "../lib/relativeTime";
+import { useT } from "../i18n/useI18n";
 
 export interface SidebarProps {
+    /** Embed the session list in a workspace group with a shared outer scroll area. */
+    embedded?: boolean;
+    showHeader?: boolean;
+    /** Override the highlighted session when the list is embedded in a multi-workspace view. */
+    activeSessionId?: string | null;
     ws: WorkspaceState | undefined;
     onAttach: (sid: string) => void;
     onDelete: (sid: string) => void;
@@ -38,40 +41,8 @@ export function Sidebar(props: SidebarProps) {
     const { t } = useT();
     const { ws, onAttach, onDelete, onRename, onLoadMore, isLoadingMore } = props;
     const { onNewSession, newSessionDisabled, search } = props;
-    const lng = useUiLanguage();
-    const nowMs = useNow();
     const searching = search.query.trim() !== "";
     const [searchOpen, setSearchOpen] = useState(searching);
-    const listRef = useRef<HTMLUListElement>(null);
-
-    // Same keyboard pattern as WorkPane: ArrowUp/Down/Home/End move focus
-    // between rows; Enter/Space activate the focused row natively.
-    const handleListKeyDown = (event: KeyboardEvent<HTMLUListElement>): void => {
-        if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
-        // Only steer focus when a row itself is focused; otherwise the action
-        // buttons inside a row would lose Home/End/arrow interactions.
-        if (!(event.target instanceof HTMLElement) || !event.target.closest("[data-session-row]"))
-            return;
-        const rows = Array.from(
-            listRef.current?.querySelectorAll<HTMLButtonElement>("[data-session-row]") ?? [],
-        );
-        if (rows.length === 0) return;
-        event.preventDefault();
-        const current = rows.indexOf(document.activeElement as HTMLButtonElement);
-        const index =
-            event.key === "Home"
-                ? 0
-                : event.key === "End"
-                  ? rows.length - 1
-                  : Math.min(
-                        rows.length - 1,
-                        Math.max(
-                            0,
-                            (current < 0 ? -1 : current) + (event.key === "ArrowDown" ? 1 : -1),
-                        ),
-                    );
-        rows[index]?.focus();
-    };
 
     // A query switches the list to the server's matches. The box's own text
     // decides, not the debounced query, so the mode flips as soon as the
@@ -85,100 +56,61 @@ export function Sidebar(props: SidebarProps) {
     // The hook refuses to page while the typed query is still debouncing.
     const moreDisabled = searching ? search.loading || search.pending : isLoadingMore;
     const loadMore = searching ? search.loadMore : onLoadMore;
+    const Container = props.embedded ? "section" : "aside";
 
     return (
-        <aside className="sidebar">
+        <Container className={props.embedded ? "session-list-panel" : "sidebar"}>
             {/* Pinned header — outside .sidebar-list so it stays put while the
                 list scrolls. The new-chat button stays mounted and collapses
                 with the same max-width/opacity slide as PaneSearch's input
                 wrap, so the two swap places without a pop in either
                 direction. */}
-            <div className="sidebar-header">
-                {onNewSession && (
-                    <span
-                        className={`sidebar-new-chat-wrap${searchOpen ? "" : " open"}`}
-                        aria-hidden={searchOpen}
-                        inert={searchOpen}
-                    >
-                        <button
-                            type="button"
-                            className="sidebar-new-chat"
-                            onClick={onNewSession}
-                            disabled={newSessionDisabled}
-                            tabIndex={searchOpen ? -1 : 0}
+            {props.showHeader !== false && (
+                <div className="sidebar-header">
+                    {onNewSession && (
+                        <span
+                            className={`sidebar-new-chat-wrap${searchOpen ? "" : " open"}`}
+                            aria-hidden={searchOpen}
+                            inert={searchOpen}
                         >
-                            <Plus size={14} aria-hidden="true" />
-                            {t("session.newChat")}
-                        </button>
-                    </span>
-                )}
-                <PaneSearch
-                    query={search.query}
-                    initiallyOpen={searching}
-                    onQueryChange={search.setQuery}
-                    onOpenChange={setSearchOpen}
-                />
-            </div>
+                            <button
+                                type="button"
+                                className="sidebar-new-chat"
+                                onClick={onNewSession}
+                                disabled={newSessionDisabled}
+                                tabIndex={searchOpen ? -1 : 0}
+                            >
+                                <Plus size={14} aria-hidden="true" />
+                                {t("session.newChat")}
+                            </button>
+                        </span>
+                    )}
+                    <PaneSearch
+                        query={search.query}
+                        initiallyOpen={searching}
+                        onQueryChange={search.setQuery}
+                        onOpenChange={setSearchOpen}
+                    />
+                </div>
+            )}
             {/* Scroll container: header stays fixed; min-height:0 lets flex children collapse correctly. */}
-            <ul className="sidebar-list" ref={listRef} onKeyDown={handleListKeyDown}>
-                {sessions.map((s) => (
-                    <li
-                        key={s.id}
-                        className={`session-item ${ws?.activeSession === s.id ? "active" : ""}`}
-                    >
-                        {/* The row's main click target is a real button so the
-                            list is keyboard-reachable; the hover actions stay
-                            siblings because nested <button> is invalid. */}
-                        <button
-                            type="button"
-                            className="session-item-main"
-                            data-session-row={s.id}
-                            onClick={() => onAttach(s.id)}
-                        >
-                            {/* Only phrasing content inside <button>: spans,
-                                styled as the original flex boxes. */}
-                            <span className="session-meta">
-                                <span className="session-main">
-                                    <span
-                                        className={`session-status-dot ${ws?.pendingBySessionId[s.id] ? "running" : "idle"}`}
-                                        aria-hidden="true"
-                                    />
-                                    <span className="session-id" title={s.name || undefined}>
-                                        {s.name || s.id.slice(0, 8)}
-                                    </span>
-                                </span>
-                                <span className="session-time">
-                                    {formatRelativeTime(s.updatedAt ?? s.createdAt, lng, nowMs)}
-                                </span>
-                            </span>
-                        </button>
-                        <div className="session-actions">
-                            <IconButton
-                                className="session-action"
-                                title={t("session.rename")}
-                                aria-label={t("session.rename")}
-                                onClick={(e) => {
-                                    e.stopPropagation();
-                                    onRename(s.id);
-                                }}
-                            >
-                                <Pencil size={14} aria-hidden="true" />
-                            </IconButton>
-                            <IconButton
-                                tone="danger"
-                                className="session-action"
-                                title={t("session.deleteSession")}
-                                aria-label={t("session.deleteSession")}
-                                onClick={(e) => {
-                                    e.stopPropagation();
-                                    onDelete(s.id);
-                                }}
-                            >
-                                <Trash size={14} aria-hidden="true" />
-                            </IconButton>
-                        </div>
-                    </li>
-                ))}
+            <SessionList
+                className="sidebar-list"
+                items={sessions.map((session) => ({
+                    key: session.id,
+                    id: session.id,
+                    label: session.name || session.id.slice(0, 8),
+                    updatedAt: session.updatedAt ?? session.createdAt,
+                    running: Boolean(ws?.pendingBySessionId[session.id]),
+                    active:
+                        (props.activeSessionId === undefined
+                            ? ws?.activeSession
+                            : props.activeSessionId) === session.id,
+                }))}
+                onOpen={(item) => onAttach(item.id)}
+                onRename={(item) => onRename(item.id)}
+                onDelete={(item) => onDelete(item.id)}
+            >
                 {searching && sessions.length === 0 && (
                     <li className="session-empty">
                         {search.failed
@@ -206,7 +138,7 @@ export function Sidebar(props: SidebarProps) {
                         </button>
                     </li>
                 )}
-            </ul>
-        </aside>
+            </SessionList>
+        </Container>
     );
 }

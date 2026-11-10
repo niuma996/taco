@@ -156,15 +156,13 @@ header.topbar select {
     border-radius: var(--radius-sm);
 }
 
-/* WorkspaceModeTabs + WorkspacePicker. The pane-width cap lives on the select,
-   not here: capping the group made the tabs spend the same budget, truncating
-   short workspace names at the default window width. */
+/* WorkspaceModeTabs. The picker that used to follow the tabs moved into the
+   conversation sidebar; the group now sizes to the tabs alone. */
 header.topbar .topbar-picker-group {
     display: flex;
     align-items: center;
     gap: 0.5rem;
-    /* Sizes to the workspace name instead of mirroring the pane width — the chevron
-       hugs the label, so there is no right edge that has to align with the card below. */
+    /* Sizes to the tabs instead of mirroring the pane width. */
     flex: 0 1 auto;
     min-width: 0;
 }

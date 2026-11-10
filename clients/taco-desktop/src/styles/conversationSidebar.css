@@ -1,0 +1,250 @@
+/* ConversationSidebar — the chat view's multi-workspace navigation column. */
+
+aside.conversation-sidebar {
+    width: var(--pane-width);
+    flex: 0 0 var(--pane-width);
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    border-right: 1px solid var(--divider-panel);
+    background: var(--pane-list-bg);
+    transition:
+        width var(--motion-duration-slow) var(--motion-ease-standard),
+        flex-basis var(--motion-duration-slow) var(--motion-ease-standard),
+        border-right-color var(--motion-duration-slow) var(--motion-ease-standard),
+        visibility 0s 0s;
+}
+
+.layout[data-sidebar-collapsed="true"] aside.conversation-sidebar {
+    width: 0;
+    flex-basis: 0;
+    border-right-color: transparent;
+    visibility: hidden;
+    transition:
+        width var(--motion-duration-slow) var(--motion-ease-standard),
+        flex-basis var(--motion-duration-slow) var(--motion-ease-standard),
+        border-right-color var(--motion-duration-slow) var(--motion-ease-standard),
+        visibility 0s var(--motion-duration-slow);
+}
+
+.conversation-sidebar-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex: 0 0 auto;
+    min-height: 36px;
+    padding: 0.35rem 0.65rem 0.2rem;
+    color: var(--fg);
+}
+
+.conversation-sidebar-title {
+    font-size: var(--text-sm);
+    font-weight: 650;
+}
+
+.conversation-sidebar-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.1rem;
+}
+
+.conversation-sidebar-action {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0.3rem;
+    border: 0;
+    border-radius: var(--radius-sm);
+    color: var(--fg-dim);
+    background: transparent;
+    cursor: pointer;
+}
+
+.conversation-sidebar-action:hover {
+    color: var(--fg);
+    background: var(--accent-bg-hover);
+}
+
+.conversation-sidebar-action:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
+}
+
+.conversation-sidebar-action.active {
+    color: var(--fg);
+    background: var(--accent-bg-active);
+}
+
+/* Search box revealed at the top of the expanded workspace group when its
+   magnifier is toggled. */
+.conversation-sidebar-search {
+    flex: 0 0 auto;
+    padding: 0 0.15rem 0.35rem;
+}
+
+.conversation-sidebar-search-input {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 0.3rem 0.45rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--bg);
+    color: var(--fg);
+    font: inherit;
+    font-size: var(--text-xs);
+}
+
+.conversation-sidebar-search-input:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -1px;
+}
+
+.conversation-sidebar-scroll {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: 0.15rem 0.35rem 0.6rem;
+}
+
+.conversation-group {
+    margin-bottom: 0.25rem;
+    border-radius: var(--radius-md);
+}
+
+.conversation-group-header {
+    display: flex;
+    align-items: center;
+    min-width: 0;
+}
+
+.conversation-group-toggle {
+    border: 0;
+    color: var(--fg-dim);
+    background: transparent;
+    cursor: pointer;
+}
+
+.conversation-group-toggle {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    flex: 1;
+    min-width: 0;
+    padding: 0.45rem 0.35rem;
+    text-align: left;
+    font: inherit;
+}
+
+.conversation-group-toggle:hover {
+    color: var(--fg);
+    background: var(--accent-bg-hover);
+}
+
+.conversation-group.expanded .conversation-group-toggle:hover {
+    background: transparent;
+}
+
+.conversation-group-toggle:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
+}
+
+.conversation-group-label {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.conversation-group-label {
+    flex: 1;
+    font-size: var(--text-sm);
+}
+
+.conversation-group-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.05rem;
+    margin-right: 0.2rem;
+}
+
+.conversation-channel-list {
+    width: 100%;
+    flex: 0 1 auto;
+    overflow: visible;
+}
+
+.conversation-channel-list .session-item {
+    min-height: 44px;
+    margin-inline: 0.15rem;
+}
+
+.conversation-group-body {
+    min-width: 0;
+    padding: 0 0.15rem 0.2rem;
+}
+
+.conversation-group-body > .session-list-panel {
+    width: 100%;
+    flex: 0 1 auto;
+    min-height: 0;
+    border: 0;
+    background: transparent;
+    overflow: visible;
+}
+
+.conversation-group-body > .session-list-panel .sidebar-header {
+    width: 100%;
+    padding-inline: 0.25rem;
+}
+
+.conversation-group-body > .session-list-panel .sidebar-list {
+    width: 100%;
+    overflow: visible;
+}
+
+.conversation-group-body > .session-list-panel .session-item {
+    min-height: 44px;
+    margin-inline: 0.15rem;
+}
+
+.conversation-group-empty {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.4rem;
+    padding: 0.75rem 0.5rem;
+    color: var(--fg-dim);
+    font-size: var(--text-xs);
+    text-align: center;
+}
+
+.conversation-group-error {
+    flex-wrap: wrap;
+}
+
+.conversation-group-empty button {
+    border: 0;
+    padding: 0.2rem 0.35rem;
+    border-radius: var(--radius-sm);
+    color: var(--accent);
+    background: transparent;
+    cursor: pointer;
+}
+
+.conversation-group-empty button:hover {
+    background: var(--accent-bg-hover);
+}
+
+.conversation-group-empty button:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    aside.conversation-sidebar {
+        transition: none;
+    }
+}

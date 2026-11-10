@@ -132,6 +132,8 @@ export interface ChatPaneProps {
     /** Opaque floating overlay anchored above the input footer (currently the
      *  LLM dump dock). Composed by the caller; the pane only places it. */
     llmDumpDock?: ReactNode;
+    /** Current workspace/channel identity shown in SessionInfo. */
+    workspaceContext?: ReactNode;
 }
 
 /** Stable fallback so the message window's callbacks don't churn with no workspace. */
@@ -362,6 +364,7 @@ export function ChatPane(props: ChatPaneProps) {
                 onNewSession={onNewSession}
                 newSessionDisabled={newSessionDisabled}
                 isIm={isIm}
+                workspaceContext={props.workspaceContext}
             />
             <main ref={mainRef} aria-busy={loadingSession || undefined}>
                 {showSkeleton ? (

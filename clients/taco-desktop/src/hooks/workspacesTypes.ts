@@ -61,6 +61,8 @@ export interface UseWorkspacesApi {
     reloadAllWorkspaces: () => Promise<void>;
     /** Sidebar "load more" — appends the next page using the current cursor. */
     loadMoreSessions: (cwd: string) => Promise<void>;
+    /** Load a non-active workspace's session list without navigating to it. */
+    ensureWorkspaceSessions: (cwd: string) => Promise<void>;
     /**
      * Resolve `true` when the workspace was ensured on the sidecar and is
      * now the active one; `false` if validation failed or the load/switch

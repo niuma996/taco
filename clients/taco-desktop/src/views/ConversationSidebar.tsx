@@ -1,0 +1,486 @@
+import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
+import type { ImConversationEntry } from "@taco-ai/protocol";
+import {
+    Check,
+    ChevronDown,
+    ChevronRight,
+    Filter,
+    Folder,
+    FolderPlus,
+    Link2,
+    LoaderCircle,
+    Plus,
+    Search,
+    Settings2,
+} from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { SessionList } from "../components/SessionList";
+import type { WorkspaceMode } from "../components/WorkspaceModeTabs";
+import type { UseSessionSearchesResult } from "../hooks/useSessionSearch";
+import { useT } from "../i18n/useI18n";
+import {
+    buildChannelConversationItems,
+    buildWorkspaceGroups,
+    type WorkspaceConversationGroup,
+} from "../lib/chat/conversationGroups";
+import type { WorkspaceState } from "../lib/chat/workspaceReducer";
+import { Sidebar } from "./Sidebar";
+
+export interface ConversationSidebarProps {
+    mode: WorkspaceMode;
+    workspaces: Record<string, WorkspaceState>;
+    activeCwd: string;
+    conversations: readonly ImConversationEntry[] | null;
+    conversationsLoading: boolean;
+    conversationsError: string | null;
+    searches: UseSessionSearchesResult;
+    onOpenSession: (target: { workspace: string; sessionId: string }) => void;
+    onSelectWorkspace?: (cwd: string) => void;
+    onLoadWorkspace: (cwd: string) => Promise<void>;
+    onLoadMore: (cwd: string) => void;
+    onDelete: (target: { cwd: string; sessionId: string }) => void;
+    onRename: (target: { cwd: string; sessionId: string; currentName?: string }) => void;
+    onNewSession: (cwd: string) => void;
+    onOpenFolder?: () => void;
+    /** Associate other directories with this filesystem workspace or IM chat. */
+    onManageAssociations?: (target: { workspace: string }) => void;
+    onRetryConversations: () => void;
+    onManageChannels: () => void;
+}
+
+export function ConversationSidebar(props: ConversationSidebarProps) {
+    const { t } = useT();
+    const [openSearches, setOpenSearches] = useState<Set<string>>(() => new Set());
+    const searchInputRef = useRef<HTMLInputElement>(null);
+    const searchVisible = (groupCwd: string): boolean => openSearches.has(groupCwd);
+
+    useEffect(() => {
+        if (openSearches.size > 0) searchInputRef.current?.focus();
+    }, [openSearches]);
+
+    const [expandedGroupKeys, setExpandedGroupKeys] = useState<Set<string>>(
+        () => new Set([`workspace:${props.activeCwd}`]),
+    );
+    const initializedModeRef = useRef<WorkspaceMode | null>(null);
+    const previousActiveCwdRef = useRef(props.activeCwd);
+    const [loadingGroups, setLoadingGroups] = useState<Set<string>>(new Set());
+    const [failedGroups, setFailedGroups] = useState<Set<string>>(new Set());
+    const [channelFilter, setChannelFilter] = useState<string | null>(null);
+    const workspaceOrderRef = useRef(new Map<string, number>());
+    const nextWorkspaceOrderRef = useRef(0);
+
+    const workspaceGroups = useMemo(() => {
+        const groups = buildWorkspaceGroups(props.workspaces);
+        // Freeze the mount-time order for this run. Lazy history, selection
+        // and newer session activity never move a directory under the pointer.
+        // A workspace opened later is appended without disturbing existing rows.
+        for (const group of groups) {
+            if (!workspaceOrderRef.current.has(group.cwd)) {
+                workspaceOrderRef.current.set(group.cwd, nextWorkspaceOrderRef.current++);
+            }
+        }
+        groups.sort(
+            (a, b) =>
+                (workspaceOrderRef.current.get(a.cwd) ?? 0) -
+                (workspaceOrderRef.current.get(b.cwd) ?? 0),
+        );
+        return groups;
+    }, [props.workspaces]);
+
+    const channelItems = useMemo(
+        () => buildChannelConversationItems(props.conversations ?? [], props.workspaces),
+        [props.conversations, props.workspaces],
+    );
+    const channelIds = useMemo(
+        () => [...new Set((props.conversations ?? []).map((item) => item.channelId))].sort(),
+        [props.conversations],
+    );
+    const visibleChannelItems = channelFilter
+        ? channelItems.filter((item) => item.channelId === channelFilter)
+        : channelItems;
+
+    useEffect(() => {
+        if (channelFilter && props.conversations && !channelIds.includes(channelFilter)) {
+            setChannelFilter(null);
+        }
+    }, [channelFilter, channelIds, props.conversations]);
+
+    useEffect(() => {
+        if (props.mode !== "workspace") return;
+        if (initializedModeRef.current === props.mode || workspaceGroups.length === 0) return;
+        initializedModeRef.current = props.mode;
+        const preferred =
+            workspaceGroups.find((group) => group.cwd === props.activeCwd) ?? workspaceGroups[0];
+        if (preferred)
+            setExpandedGroupKeys((current) => {
+                if (current.has(preferred.key)) return current;
+                return new Set(current).add(preferred.key);
+            });
+    }, [workspaceGroups, props.activeCwd, props.mode]);
+
+    useEffect(() => {
+        if (props.mode !== "workspace" || previousActiveCwdRef.current === props.activeCwd) return;
+        previousActiveCwdRef.current = props.activeCwd;
+        const activeGroup = workspaceGroups.find((group) => group.cwd === props.activeCwd);
+        if (activeGroup) {
+            setExpandedGroupKeys((current) => {
+                if (current.has(activeGroup.key)) return current;
+                return new Set(current).add(activeGroup.key);
+            });
+        }
+    }, [workspaceGroups, props.activeCwd, props.mode]);
+
+    const loadWorkspaceGroup = (group: WorkspaceConversationGroup): void => {
+        setFailedGroups((current) => {
+            if (!current.has(group.key)) return current;
+            const next = new Set(current);
+            next.delete(group.key);
+            return next;
+        });
+        setLoadingGroups((current) => new Set(current).add(group.key));
+        void props
+            .onLoadWorkspace(group.cwd)
+            .catch(() => setFailedGroups((current) => new Set(current).add(group.key)))
+            .finally(() =>
+                setLoadingGroups((current) => {
+                    const next = new Set(current);
+                    next.delete(group.key);
+                    return next;
+                }),
+            );
+    };
+
+    const toggleGroup = (group: WorkspaceConversationGroup): void => {
+        const open = expandedGroupKeys.has(group.key);
+        setExpandedGroupKeys((current) => {
+            const next = new Set(current);
+            if (open) next.delete(group.key);
+            else next.add(group.key);
+            return next;
+        });
+        if (open) return;
+        const workspace = props.workspaces[group.cwd];
+        if (workspace?.listTotal !== undefined) return;
+        loadWorkspaceGroup(group);
+    };
+
+    const renderWorkspaceBody = (group: WorkspaceConversationGroup) => {
+        const workspace = props.workspaces[group.cwd];
+        const loading = loadingGroups.has(group.key);
+        if (loading)
+            return (
+                <div className="conversation-group-empty">
+                    <LoaderCircle size={13} className="spin" aria-hidden="true" />
+                    {t("conversationNav.loading")}
+                </div>
+            );
+        if (failedGroups.has(group.key))
+            return (
+                <div className="conversation-group-empty conversation-group-error">
+                    <span>{t("conversationNav.loadFailed")}</span>
+                    <button type="button" onClick={() => loadWorkspaceGroup(group)}>
+                        {t("conversationNav.retry")}
+                    </button>
+                </div>
+            );
+        const search = props.searches.forWorkspace(group.cwd);
+        const searching = search.query.trim() !== "";
+        if ((!workspace || workspace.sessions.length === 0) && !searching)
+            return (
+                <div className="conversation-group-empty">
+                    {t("conversationNav.noConversations")}
+                </div>
+            );
+        return (
+            <Sidebar
+                embedded
+                showHeader={false}
+                activeSessionId={group.cwd === props.activeCwd ? workspace?.activeSession : null}
+                ws={workspace}
+                onAttach={(sessionId) => props.onOpenSession({ workspace: group.cwd, sessionId })}
+                onDelete={(sessionId) => props.onDelete({ cwd: group.cwd, sessionId })}
+                onRename={(sessionId) => props.onRename({ cwd: group.cwd, sessionId })}
+                onLoadMore={() => props.onLoadMore(group.cwd)}
+                onNewSession={() => props.onNewSession(group.cwd)}
+                newSessionDisabled={false}
+                search={search}
+            />
+        );
+    };
+
+    const renderChannelList = () => {
+        if (props.conversationsLoading && !props.conversations)
+            return <div className="conversation-group-empty">{t("conversationNav.loading")}</div>;
+        if (props.conversationsError)
+            return (
+                <div className="conversation-group-empty conversation-group-error">
+                    <span>{t("conversationNav.loadFailed")}</span>
+                    <button type="button" onClick={props.onRetryConversations}>
+                        {t("conversationNav.retry")}
+                    </button>
+                </div>
+            );
+        if (!props.conversationsLoading && props.conversations?.length === 0)
+            return (
+                <div className="conversation-group-empty conversation-group-error">
+                    <span>{t("workspaceMode.imNone")}</span>
+                </div>
+            );
+        if (visibleChannelItems.length === 0)
+            return (
+                <div className="conversation-group-empty">
+                    {t("conversationNav.noConversations")}
+                </div>
+            );
+        const byKey = new Map(visibleChannelItems.map((item) => [item.cwd, item]));
+        return (
+            <SessionList
+                className="sidebar-list conversation-channel-list"
+                items={visibleChannelItems.map((item) => ({
+                    key: item.cwd,
+                    id: item.sessionId,
+                    label: item.label,
+                    title: `${item.channelId} / ${item.peerId} / ${item.chatId}`,
+                    tag: item.channelId,
+                    updatedAt: item.updatedAt,
+                    running: item.pending,
+                    active: item.cwd === props.activeCwd,
+                }))}
+                onOpen={(row) => {
+                    const item = byKey.get(row.key);
+                    if (item)
+                        props.onOpenSession({ workspace: item.cwd, sessionId: item.sessionId });
+                }}
+                onRename={(row) => {
+                    const item = byKey.get(row.key);
+                    if (item)
+                        props.onRename({
+                            cwd: item.cwd,
+                            sessionId: item.sessionId,
+                            currentName: item.label,
+                        });
+                }}
+                onDelete={(row) => {
+                    const item = byKey.get(row.key);
+                    if (item) props.onDelete({ cwd: item.cwd, sessionId: item.sessionId });
+                }}
+                onManageAssociations={(row) => {
+                    const item = byKey.get(row.key);
+                    if (item) props.onManageAssociations?.({ workspace: item.cwd });
+                }}
+            />
+        );
+    };
+
+    return (
+        <aside className="conversation-sidebar" aria-label={t("conversationNav.title")}>
+            <div className="conversation-sidebar-header">
+                <span className="conversation-sidebar-title">
+                    {props.mode === "im" ? t("workspaceMode.im") : t("workspaceMode.workspace")}
+                </span>
+                <div className="conversation-sidebar-header-actions">
+                    {props.mode === "im" && (
+                        <DropdownMenu.Root>
+                            <DropdownMenu.Trigger asChild>
+                                <button
+                                    type="button"
+                                    className={`conversation-sidebar-action${channelFilter ? " active" : ""}`}
+                                    aria-label={t("conversationNav.filterByChannel")}
+                                    title={t("conversationNav.filterByChannel")}
+                                >
+                                    <Filter size={14} aria-hidden="true" />
+                                </button>
+                            </DropdownMenu.Trigger>
+                            <DropdownMenu.Portal>
+                                <DropdownMenu.Content
+                                    className="ui-menu"
+                                    align="end"
+                                    sideOffset={4}
+                                    collisionPadding={8}
+                                >
+                                    <DropdownMenu.RadioGroup
+                                        value={channelFilter ?? ""}
+                                        onValueChange={(value) => setChannelFilter(value || null)}
+                                    >
+                                        <DropdownMenu.RadioItem className="ui-menu-item" value="">
+                                            <span className="ui-menu-label">
+                                                {t("conversationNav.allChannels")}
+                                            </span>
+                                            {!channelFilter && (
+                                                <Check size={14} aria-hidden="true" />
+                                            )}
+                                        </DropdownMenu.RadioItem>
+                                        {channelIds.map((channelId) => (
+                                            <DropdownMenu.RadioItem
+                                                className="ui-menu-item"
+                                                value={channelId}
+                                                key={channelId}
+                                            >
+                                                <span className="ui-menu-label">{channelId}</span>
+                                                {channelFilter === channelId && (
+                                                    <Check size={14} aria-hidden="true" />
+                                                )}
+                                            </DropdownMenu.RadioItem>
+                                        ))}
+                                    </DropdownMenu.RadioGroup>
+                                </DropdownMenu.Content>
+                            </DropdownMenu.Portal>
+                        </DropdownMenu.Root>
+                    )}
+                    {props.mode === "workspace" && props.onOpenFolder && (
+                        <button
+                            type="button"
+                            className="conversation-sidebar-action"
+                            aria-label={t("conversationNav.openFolder")}
+                            title={t("conversationNav.openFolder")}
+                            onClick={props.onOpenFolder}
+                        >
+                            <FolderPlus size={14} aria-hidden="true" />
+                        </button>
+                    )}
+                    {props.mode === "im" && (
+                        <button
+                            type="button"
+                            className="conversation-sidebar-action"
+                            aria-label={t("conversationNav.manageChannels")}
+                            title={t("conversationNav.manageChannels")}
+                            onClick={props.onManageChannels}
+                        >
+                            <Settings2 size={14} aria-hidden="true" />
+                        </button>
+                    )}
+                </div>
+            </div>
+            <div className="conversation-sidebar-scroll">
+                {props.mode === "im"
+                    ? renderChannelList()
+                    : workspaceGroups.map((group) => {
+                          const isExpanded = expandedGroupKeys.has(group.key);
+                          const workspace = props.workspaces[group.cwd];
+                          const search = props.searches.forWorkspace(group.cwd);
+                          const workspaceHasRecords =
+                              workspace !== undefined &&
+                              (workspace.listTotal ?? workspace.sessions.length) > 0;
+                          return (
+                              <section
+                                  className={`conversation-group${isExpanded ? " expanded" : ""}`}
+                                  key={group.key}
+                                  aria-label={group.label}
+                              >
+                                  <div className="conversation-group-header">
+                                      <button
+                                          type="button"
+                                          className="conversation-group-toggle"
+                                          aria-expanded={isExpanded}
+                                          aria-label={`${isExpanded ? t("conversationNav.collapseGroup") : t("conversationNav.expandGroup")} ${group.label}`}
+                                          onClick={() => toggleGroup(group)}
+                                      >
+                                          {isExpanded ? (
+                                              <ChevronDown size={13} aria-hidden="true" />
+                                          ) : (
+                                              <ChevronRight size={13} aria-hidden="true" />
+                                          )}
+                                          <Folder size={13} aria-hidden="true" />
+                                          <span className="conversation-group-label">
+                                              {group.label}
+                                          </span>
+                                      </button>
+                                      {isExpanded && (
+                                          <div className="conversation-group-actions">
+                                              <button
+                                                  type="button"
+                                                  className="conversation-sidebar-action"
+                                                  aria-label={t("session.newChat")}
+                                                  title={t("session.newChat")}
+                                                  onClick={() => props.onNewSession(group.cwd)}
+                                              >
+                                                  <Plus size={13} aria-hidden="true" />
+                                              </button>
+                                              {workspaceHasRecords && (
+                                                  <button
+                                                      type="button"
+                                                      className={`conversation-sidebar-action${searchVisible(group.cwd) ? " active" : ""}`}
+                                                      aria-label={t("pane.searchLabel")}
+                                                      aria-expanded={searchVisible(group.cwd)}
+                                                      onClick={() => {
+                                                          if (searchVisible(group.cwd)) {
+                                                              search.setQuery("");
+                                                              setOpenSearches((current) => {
+                                                                  const next = new Set(current);
+                                                                  next.delete(group.cwd);
+                                                                  return next;
+                                                              });
+                                                          } else {
+                                                              setOpenSearches((current) =>
+                                                                  new Set(current).add(group.cwd),
+                                                              );
+                                                          }
+                                                      }}
+                                                  >
+                                                      <Search size={13} aria-hidden="true" />
+                                                  </button>
+                                              )}
+                                              {props.onManageAssociations && (
+                                                  <button
+                                                      type="button"
+                                                      className="conversation-sidebar-action"
+                                                      aria-label={t("activity.manageAssociations")}
+                                                      title={t("activity.manageAssociations")}
+                                                      onClick={() =>
+                                                          props.onManageAssociations?.({
+                                                              workspace: group.cwd,
+                                                          })
+                                                      }
+                                                  >
+                                                      <Link2 size={13} aria-hidden="true" />
+                                                  </button>
+                                              )}
+                                          </div>
+                                      )}
+                                  </div>
+                                  {isExpanded && (
+                                      <div className="conversation-group-body">
+                                          {searchVisible(group.cwd) && (
+                                              <div className="conversation-sidebar-search">
+                                                  <input
+                                                      ref={searchInputRef}
+                                                      className="conversation-sidebar-search-input"
+                                                      value={search.query}
+                                                      onChange={(e) =>
+                                                          search.setQuery(e.target.value)
+                                                      }
+                                                      onKeyDown={(e) => {
+                                                          if (e.key === "Escape") {
+                                                              search.setQuery("");
+                                                              setOpenSearches((current) => {
+                                                                  const next = new Set(current);
+                                                                  next.delete(group.cwd);
+                                                                  return next;
+                                                              });
+                                                          }
+                                                      }}
+                                                      placeholder={t("pane.searchPlaceholder")}
+                                                      aria-label={t("pane.searchLabel")}
+                                                  />
+                                              </div>
+                                          )}
+                                          {renderWorkspaceBody(group)}
+                                      </div>
+                                  )}
+                              </section>
+                          );
+                      })}
+                {props.mode === "workspace" && workspaceGroups.length === 0 && (
+                    <div className="conversation-group-empty">
+                        <span>{t("conversationNav.noWorkspaces")}</span>
+                        {props.onOpenFolder && (
+                            <button type="button" onClick={props.onOpenFolder}>
+                                {t("conversationNav.openFolder")}
+                            </button>
+                        )}
+                    </div>
+                )}
+            </div>
+        </aside>
+    );
+}

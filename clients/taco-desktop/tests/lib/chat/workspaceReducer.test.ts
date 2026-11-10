@@ -14,6 +14,7 @@ import { describe, it } from "node:test";
 
 import { asSessionId, asToolCallId, type CommandPermissionRequest } from "@taco-ai/protocol";
 import type { SessionEventLike, UiMessage } from "../../../src/lib/chat/chatUtils";
+import { getSessionState } from "../../../src/lib/chat/sessionState";
 import {
     sortSessionsByUpdatedDesc,
     type WorkspaceState,
@@ -544,6 +545,43 @@ describe("workspacesReducer — session loading", () => {
         assert.equal(next["/ws"]?.activeSession, "b");
         assert.equal(next["/ws"]?.loadingSessionId, undefined);
         assert.equal(next["/ws"]?.messages, newMsgs);
+    });
+
+    it("ATTACH applies the authoritative execution state and running marker", () => {
+        let state: Record<string, WorkspaceState> = {
+            "/ws": baseWs({ activeSession: "a", loadingSessionId: "b" }),
+        };
+        state = workspacesReducer(state, {
+            type: "ATTACH",
+            cwd: "/ws",
+            sid: "b",
+            messages: newMsgs,
+            execution: "running",
+        });
+        assert.equal(getSessionState(state["/ws"], "b")?.execution, "running");
+        assert.equal(state["/ws"]?.pendingBySessionId.b, true);
+
+        state = workspacesReducer(state, {
+            type: "ATTACH",
+            cwd: "/ws",
+            sid: "b",
+            messages: newMsgs,
+            execution: "idle",
+        });
+        assert.equal(getSessionState(state["/ws"], "b")?.execution, "idle");
+        assert.equal(state["/ws"]?.pendingBySessionId.b, undefined);
+    });
+
+    it("ADD_SESSION advances the workspace total when pagination is known", () => {
+        const state: Record<string, WorkspaceState> = {
+            "/ws": baseWs({ listTotal: 40 }),
+        };
+        const next = workspacesReducer(state, {
+            type: "ADD_SESSION",
+            cwd: "/ws",
+            session: { id: "new", createdAt: "2026-01-01" },
+        });
+        assert.equal(next["/ws"]?.listTotal, 41);
     });
 
     it("drops an ATTACH that lost the race to a later open", () => {

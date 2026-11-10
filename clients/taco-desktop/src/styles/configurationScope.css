@@ -1,0 +1,131 @@
+/* Main-content configuration navigation. Target changes are local to the pane. */
+.configuration-pane {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+}
+
+.configuration-pane-body {
+    display: flex;
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+}
+
+.configuration-scope {
+    flex: 0 0 auto;
+    padding: 0 var(--space-4);
+    border-bottom: 1px solid var(--divider-panel);
+    background: var(--pane-list-bg);
+}
+
+.configuration-scope-tabs {
+    display: flex;
+    gap: var(--space-4);
+    min-width: 0;
+}
+
+.configuration-scope-tab {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1-5);
+    min-height: 42px;
+    padding: 0 var(--space-1);
+    border: 0;
+    background: transparent;
+    color: var(--fg-dim);
+    font-size: var(--text-sm);
+    cursor: pointer;
+}
+
+.configuration-scope-tab::after {
+    position: absolute;
+    right: 0;
+    bottom: -1px;
+    left: 0;
+    height: 2px;
+    background: transparent;
+    content: "";
+}
+
+.configuration-scope-tab:hover {
+    color: var(--fg);
+}
+
+.configuration-scope-tab.active {
+    color: var(--accent);
+}
+
+.configuration-scope-tab.active::after {
+    background: var(--accent);
+}
+
+.configuration-scope-tab:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -3px;
+}
+
+.configuration-scope-context {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    min-height: 46px;
+    padding: var(--space-2) 0;
+    color: var(--fg-dim);
+    font-size: var(--text-xs);
+}
+
+.configuration-scope-global {
+    color: var(--fg);
+    font-family: var(--mono);
+}
+
+.configuration-scope-select {
+    max-width: 260px;
+}
+
+.configuration-scope-select.ui-select-trigger {
+    min-width: 150px;
+}
+
+.configuration-scope-hint {
+    min-width: 0;
+}
+
+.configuration-scope-path {
+    min-width: 0;
+    margin-left: auto;
+    overflow: hidden;
+    color: var(--fg-dim);
+    font-family: var(--mono);
+    font-size: var(--text-2xs);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.configuration-scope-empty {
+    color: var(--warning);
+}
+
+@media (max-width: 760px) {
+    .configuration-scope {
+        padding: 0 var(--space-3);
+    }
+
+    .configuration-scope-tabs {
+        gap: var(--space-2);
+        overflow-x: auto;
+    }
+
+    .configuration-scope-tab {
+        flex: 0 0 auto;
+    }
+
+    .configuration-scope-path {
+        display: none;
+    }
+}

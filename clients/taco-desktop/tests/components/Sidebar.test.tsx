@@ -34,7 +34,9 @@ function searchStub(overrides: Partial<UseSessionSearchResult> = {}): UseSession
 }
 
 describe("Sidebar session actions", () => {
-    it("keeps rename and delete actions keyboard reachable when idle", async () => {
+    it("keeps the session actions menu keyboard reachable when idle", async () => {
+        const onRename = vi.fn();
+        const onDelete = vi.fn();
         render(
             <Sidebar
                 ws={
@@ -45,34 +47,23 @@ describe("Sidebar session actions", () => {
                     } as never
                 }
                 onAttach={() => {}}
-                onDelete={() => {}}
-                onRename={() => {}}
+                onDelete={onDelete}
+                onRename={onRename}
                 search={searchStub()}
             />,
         );
 
         const search = screen.getByRole("button", { name: "pane.searchLabel" });
         const rowMain = document.querySelector("[data-session-row]") as HTMLElement;
-        const rename = screen.getByRole("button", { name: "session.rename" });
-        const remove = screen.getByRole("button", { name: "session.deleteSession" });
-
+        const more = screen.getByRole("button", { name: "session.moreActions" });
         const user = userEvent.setup({ delay: null });
         await user.tab();
         expect(document.activeElement).toBe(search);
-        // The row's main click target is a real button in the tab order —
-        // this is what makes the session list keyboard reachable at all.
         await user.tab();
         expect(document.activeElement).toBe(rowMain);
         await user.tab();
-        expect(document.activeElement).toBe(rename);
-        await user.tab();
-        expect(document.activeElement).toBe(remove);
+        expect(document.activeElement).toBe(more);
 
-        // The actions must remain in the sequential focus order while idle.
-        // CSS hides them visually with opacity, not display:none, so Tab can
-        // focus the first action and :focus-within can reveal the row.
-        // happy-dom replaces the global URL class, so `new URL(..., import.meta.url)`
-        // does not yield a file:// URL. Resolve the path ourselves.
         const css = readFileSync(
             resolve(dirname(fileURLToPath(import.meta.url)), "../../src/styles/sidebar.css"),
             "utf8",
@@ -83,8 +74,14 @@ describe("Sidebar session actions", () => {
         );
         expect(actionRule).toContain("opacity: 0");
         expect(actionRule).not.toContain("display: none");
-        expect(rename.getAttribute("tabindex")).toBeNull();
-        expect(remove.getAttribute("tabindex")).toBeNull();
+        expect(more.getAttribute("tabindex")).toBeNull();
+
+        await user.click(more);
+        await user.click(screen.getByRole("menuitem", { name: /session.rename/ }));
+        expect(onRename).toHaveBeenCalledWith("session-1");
+        await user.click(more);
+        await user.click(screen.getByRole("menuitem", { name: /session.deleteSession/ }));
+        expect(onDelete).toHaveBeenCalledWith("session-1");
     });
 
     it("moves focus between session rows with arrow keys", async () => {

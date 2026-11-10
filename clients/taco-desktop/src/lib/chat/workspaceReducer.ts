@@ -178,6 +178,8 @@ export type WorkspaceAction =
           messages: UiMessage[];
           /** askUser toolCallIds still waiting in history — restore pending so selection can resume the turn */
           pendingAskUserIds?: string[];
+          /** Authoritative live state from session.attach; absent on older sidecars. */
+          execution?: SessionExecution;
           /** Background spawns still running, from the attach response. */
           inFlightAgentToolCallIds?: readonly string[];
           /** Child session ids that already produced a result file. */
@@ -592,6 +594,7 @@ export function workspacesReducer(
                         : { sync: "current", execution: "unknown" },
                 ),
                 sessions: sortSessionsByUpdatedDesc([...ws.sessions, action.session]),
+                ...(ws.listTotal === undefined ? {} : { listTotal: ws.listTotal + 1 }),
                 ...(action.makeActive === false
                     ? {}
                     : { activeSession: action.session.id, draftId: undefined }),
@@ -647,7 +650,8 @@ export function workspacesReducer(
                 if (
                     (sameCurrent || preserveLive) &&
                     action.inFlightAgentToolCallIds === undefined &&
-                    action.settledBackgroundSubSessionIds === undefined
+                    action.settledBackgroundSubSessionIds === undefined &&
+                    action.execution === undefined
                 )
                     return undefined;
                 const restored =
@@ -666,6 +670,7 @@ export function workspacesReducer(
                     if (value !== "running") backgroundSubagents[id] = value;
                 if (
                     (sameCurrent || preserveLive) &&
+                    action.execution === undefined &&
                     sameBackgroundStates(backgroundSubagents, session.backgroundSubagents)
                 )
                     return undefined;
@@ -684,7 +689,16 @@ export function workspacesReducer(
                         ...restored,
                         askUserPending,
                         backgroundSubagents,
+                        ...(action.execution ? { execution: action.execution } : {}),
                     }),
+                    ...(action.execution === undefined
+                        ? {}
+                        : {
+                              pendingBySessionId:
+                                  action.execution === "running"
+                                      ? { ...ws.pendingBySessionId, [action.sid]: true }
+                                      : omitKey(ws.pendingBySessionId, action.sid),
+                          }),
                     ...(action.makeActive === false
                         ? {}
                         : { activeSession: action.sid, draftId: undefined }),

@@ -471,3 +471,43 @@ it("keeps execution unknown after snapshot catch-up until a new contiguous lifec
     assert.equal(getSessionState(state["/workspace"], "session")?.execution, "idle");
     assert.equal(getSessionState(state["/workspace"], "session")?.sync, "current");
 });
+
+it("probes execution when reconnecting with no missed lifecycle event", async () => {
+    let state: Record<string, WorkspaceState> = {
+        "/workspace": createEmptyWorkspace("/workspace"),
+    };
+    state = workspacesReducer(state, {
+        type: "SESSION_UNCERTAIN",
+        cwd: "/workspace",
+        sid: "session",
+    });
+    const processor = new SessionPushProcessor({
+        getEvents: async () => ({
+            events: [],
+            firstSeq: 0,
+            lastSeq: 0,
+            resetRequired: false,
+        }),
+        recoverSnapshot: async () => assert.fail("snapshot is not required"),
+        probeExecution: async () => "running",
+        onExecutionState: (cwd, sid, execution) => {
+            state = workspacesReducer(state, {
+                type: "SET_SESSION_EXECUTION",
+                cwd,
+                sid,
+                execution,
+            });
+        },
+        deliver: () => assert.fail("no event should be delivered"),
+        onSyncState: (cwd, sid, sync) => {
+            state = workspacesReducer(state, { type: "SET_SESSION_SYNC", cwd, sid, sync });
+        },
+        reportError: (message) => assert.fail(message),
+    });
+
+    await processor.reconcile("/workspace", "session");
+
+    assert.equal(getSessionState(state["/workspace"], "session")?.execution, "running");
+    assert.equal(getSessionState(state["/workspace"], "session")?.sync, "current");
+    assert.equal(state["/workspace"]?.pendingBySessionId.session, true);
+});

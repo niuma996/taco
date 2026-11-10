@@ -1,11 +1,7 @@
 /**
- * WorkspaceModeTabs — segmented switch in front of the workspace picker that
- * chooses which kind of workspace the picker lists: project directories or
- * IM channel conversations.
- *
- * The mode is not stored: it is derived from the active workspace, so the
- * tab always names what the user is looking at, and a cold start (which
- * never restores an `im://` workspace) lands on directories.
+ * WorkspaceModeTabs — segmented switch in front of the workspace picker and
+ * the chat navigation column. It filters the visible targets without opening
+ * a workspace or conversation by itself.
  */
 
 import type { KeyboardEvent } from "react";

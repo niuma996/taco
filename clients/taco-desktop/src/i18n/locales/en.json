@@ -20,11 +20,13 @@
     "submitAnswersFailed": "Submitting your answer failed: {{error}}",
     "newInWorkspace": "New chat in this workspace",
     "newChat": "New chat",
+    "switchWorkspace": "Switch workspace",
     "searching": "Searching…",
     "noSearchResults": "No matching chats",
     "searchFailed": "Search failed",
     "deleteSession": "Delete chat",
     "rename": "Rename chat",
+    "moreActions": "Chat actions",
     "renameTitle": "Rename chat",
     "renamePlaceholder": "Chat name",
     "renameConfirm": "Save",
@@ -166,6 +168,20 @@
     "imNotConnected": "The channel is not connected yet — bind it in the Channels pane.",
     "imEmpty": "No channel chats yet"
   },
+  "conversationNav": {
+    "title": "Conversations",
+    "loading": "Loading…",
+    "loadFailed": "Could not load conversations",
+    "retry": "Retry",
+    "expandGroup": "Expand",
+    "collapseGroup": "Collapse",
+    "noConversations": "No conversations",
+    "noWorkspaces": "No workspaces opened",
+    "openFolder": "Open folder",
+    "manageChannels": "Manage channels",
+    "filterByChannel": "Filter by channel",
+    "allChannels": "All channels"
+  },
   "activity": {
     "chat": "Chat",
     "memory": "Memory",
@@ -202,7 +218,7 @@
     "askUserSubmit": "Submit",
     "switchWorkspace": "Switch workspace",
     "openFolder": "Open folder",
-    "manageAssociations": "Associated directories…",
+    "manageAssociations": "Associated directories",
     "contentLabel": "Content",
     "skillsEmptyState": "No skills found.",
     "skillsSourceBuiltin": "Built-in",
@@ -1082,6 +1098,22 @@
     "pathPlaceholder": "/absolute/path",
     "scopeLabel": "Applies to",
     "scopeConversation": "This chat",
+    "scopePeer": "This channel directory",
     "scopeChannel": "The whole channel"
+  },
+  "configScope": {
+    "label": "Configuration scope",
+    "global": "Shared",
+    "workspace": "Workspace",
+    "channel": "IM channel",
+    "effective": "Effective",
+    "targetLabel": "Configuration target",
+    "globalHint": "Definitions stored in ~/.taco and shared by every target.",
+    "workspaceHint": "Only definitions owned by this workspace.",
+    "channelHint": "The effective catalog for this IM conversation.",
+    "effectiveHint": "Shared and workspace definitions after same-name overrides.",
+    "runtimeHint": "The runtime tool catalog for this workspace.",
+    "noChannel": "No IM conversations available",
+    "noWorkspace": "No workspaces available"
   }
 }

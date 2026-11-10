@@ -8,12 +8,10 @@
  * subagent toolsets stay anchored to the workspace's own root. The dialog
  * says so, because "associated" invites the wrong reading.
  *
- * GRANULARITY. An IM conversation can be associated on its own or across the
- * whole channel. The user picks: a conversation-scoped set belongs to that
- * conversation alone, a channel-scoped set covers every conversation on the
- * channel — including ones that start later. A conversation-scoped set wins
- * over the channel's when both exist, so a specific conversation can be
- * narrowed without touching the rest.
+ * GRANULARITY. An IM conversation can be associated on its own, at its peer
+ * directory, or across the whole channel. The most specific set wins:
+ * conversation, then peer, then channel. Emptying the current level exposes
+ * the inherited set below it.
  *
  * The list is edited as a whole: the user adds or removes rows, then saves
  * the full list. The store replaces rather than merges, so a partial update
@@ -22,7 +20,7 @@
  */
 
 import type { WorkspaceAssociationKey, WorkspaceAssociationScope } from "@taco-ai/protocol";
-import { parseImCwd } from "@taco-ai/protocol";
+import { makeImPeerAssociationId, parseImCwd } from "@taco-ai/protocol";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { FolderOpen, FolderPlus, Trash } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -69,14 +67,24 @@ export function WorkspaceAssociationsDialog({
     const imRoute = useMemo(() => (workspace ? parseImCwd(workspace) : undefined), [workspace]);
     const canChooseScope = imRoute !== undefined;
     const channelId = imRoute?.channelId;
+    const peerId = imRoute?.peerId;
 
     const key: WorkspaceAssociationKey = useMemo(
         () =>
             scope === "channel" && channelId
                 ? { scope: "channel", id: channelId }
-                : { scope: "workspace", id: workspace },
-        [scope, channelId, workspace],
+                : scope === "peer" && channelId && peerId
+                  ? {
+                        scope: "peer",
+                        id: makeImPeerAssociationId(channelId, peerId),
+                    }
+                  : { scope: "workspace", id: workspace },
+        [scope, channelId, peerId, workspace],
     );
+
+    useEffect(() => {
+        if (open) setScope("workspace");
+    }, [open]);
 
     useEffect(() => {
         if (!open) return;
@@ -162,6 +170,9 @@ export function WorkspaceAssociationsDialog({
                         label={t("associations.scopeLabel")}
                         options={[
                             { value: "workspace", label: t("associations.scopeConversation") },
+                            ...(peerId
+                                ? [{ value: "peer", label: t("associations.scopePeer") }]
+                                : []),
                             { value: "channel", label: t("associations.scopeChannel") },
                         ]}
                     />

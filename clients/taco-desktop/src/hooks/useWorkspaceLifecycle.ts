@@ -83,6 +83,8 @@ export interface UseWorkspaceLifecycleApi {
     defaultCwdSettled: boolean;
     /** Refresh one workspace's session list (sidebar titles) without attaching. */
     refreshSessionList: (cwd: string) => Promise<void>;
+    /** Ensure a workspace's session list is loaded without changing the active workspace. */
+    ensureWorkspaceSessions: (cwd: string) => Promise<void>;
     /** Re-attach the given session, reading through a ref so callers created
      *  before this hook's callbacks (e.g. the SidecarAction dispatcher) can
      *  reach the latest closure without a TDZ or stale-capture hazard. */
@@ -229,6 +231,21 @@ export function useWorkspaceLifecycle({
         [client, dispatchListResult, workspacesRef, beginList],
     );
 
+    const ensureWorkspaceSessions = useCallback(
+        async (cwd: string): Promise<void> => {
+            const workspace = workspacesRef.current[cwd];
+            if (
+                !workspace ||
+                workspace.listTotal !== undefined ||
+                listedWorkspaces.current.has(cwd)
+            ) {
+                return;
+            }
+            await loadWorkspaceSessions(cwd);
+        },
+        [loadWorkspaceSessions, workspacesRef],
+    );
+
     const attachSession = useCallback(
         async (
             cwd: string,
@@ -241,13 +258,19 @@ export function useWorkspaceLifecycle({
             const connectionIsCurrent = () => generation === connectionGeneration.current;
             const cached = getSessionState(workspacesRef.current[cwd], sessionId);
             dispatchWs({ type: "ATTACH_START", cwd, sid: sessionId });
-            if (cached?.historyLoaded && !cached.truncated && cached.sync === "current") {
+            if (
+                cached?.historyLoaded &&
+                !cached.truncated &&
+                cached.sync === "current" &&
+                cached.execution !== "unknown"
+            ) {
                 dispatchWs({
                     type: "ATTACH",
                     cwd,
                     sid: sessionId,
                     messages: cached.messages,
                     pendingAskUserIds: Object.keys(cached.askUserPending),
+                    execution: cached.execution,
                     makeActive: true,
                 });
                 return;
@@ -301,6 +324,7 @@ export function useWorkspaceLifecycle({
                 pendingAskUserIds: findPendingAskUserIds(messages),
                 inFlightAgentToolCallIds,
                 settledBackgroundSubSessionIds,
+                execution: attachResult?.execution,
                 makeActive: navigationIsCurrent(),
             });
             // Hydrate the captured target only if no newer push replaced its entry.
@@ -947,6 +971,7 @@ export function useWorkspaceLifecycle({
         renameSession,
         defaultCwdSettled,
         refreshSessionList,
+        ensureWorkspaceSessions,
         attachSessionRef,
     };
 }

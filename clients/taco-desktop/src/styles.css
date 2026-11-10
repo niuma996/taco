@@ -15,7 +15,9 @@
 @import "./styles/chatAttachments.css";
 @import "./styles/chatMarkdown.css";
 @import "./styles/sidebar.css";
+@import "./styles/conversationSidebar.css";
 @import "./styles/paneShared.css";
+@import "./styles/configurationScope.css";
 @import "./styles/toolsPane.css";
 @import "./styles/skillsPane.css";
 @import "./styles/agentsPane.css";

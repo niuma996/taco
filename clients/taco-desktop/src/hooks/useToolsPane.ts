@@ -19,17 +19,24 @@ export function useToolsPane(
     const { error, fail, clearError } = useAutoClearError();
 
     useEffect(() => {
-        if (!active || !activeCwd) return;
+        if (!active) return;
+        setTools([]);
+        if (!activeCwd) return;
+        let cancelled = false;
         clearError();
         void client
             .toolsList({ workspace: asWorkspaceId(activeCwd) })
-            .then((r) => setTools(r.tools))
+            .then((r) => {
+                if (!cancelled) setTools(r.tools);
+            })
             .catch((e: unknown) => {
-                // Surface it: a swallowed failure renders an empty catalog that
-                // is indistinguishable from a workspace with no tools.
+                if (cancelled) return;
                 console.error("[useToolsPane] toolsList failed:", e);
                 fail(e);
             });
+        return () => {
+            cancelled = true;
+        };
     }, [active, activeCwd, client, clearError, fail]);
 
     return { tools, error };
