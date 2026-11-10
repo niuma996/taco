@@ -457,3 +457,4 @@ export type {
     WorkspaceAssociationsSetParams,
     WorkspaceAssociationsSetResult,
 } from "./workspace.js";
+export { makeImPeerAssociationId } from "./workspace.js";

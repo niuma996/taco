@@ -59,6 +59,11 @@ export interface SessionAttachResult {
     attached: true;
     sessionId: SessionId;
     /**
+     * Current lane execution state read after attach. Absent on older
+     * sidecars, where the client must keep execution unknown.
+     */
+    execution?: "idle" | "running";
+    /**
      * parentToolCallIds whose subagent is running in the sidecar right now.
      * Absent on older sidecars. Process-memory state, so a fresh process
      * reports none — which is what lets a client expire agent tool cards

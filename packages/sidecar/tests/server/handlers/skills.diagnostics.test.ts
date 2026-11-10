@@ -9,6 +9,7 @@ import type { SkillDiagnosticEntry } from "@taco-ai/protocol";
 import { harnessContext } from "../../../src/lib/harnessContext.ts";
 import { SlashNormalizedExecutionEnv } from "../../../src/runtime/harness/slashNormalizedEnv.ts";
 import type { WorkspaceRuntime } from "../../../src/runtime/workspace.ts";
+import { skillScopeOf } from "../../../src/server/handlers/skills.ts";
 import { getRegisteredMethod } from "../../../src/server/methodRegistry.ts";
 import { registerBuiltinMethods } from "../../../src/server/methods.ts";
 import { dedupeSkillsByNameWithDuplicates } from "../../../src/skills/dedupeSkills.ts";
@@ -19,6 +20,28 @@ import {
 import { preloadSkillFrontmatter } from "../../../src/skills/skillFrontmatter.ts";
 import type { TacoSkill } from "../../../src/skills/tacoSkill.ts";
 import { useTempTacoHome } from "../../_helpers/tempTacoHome.ts";
+
+describe("skill configuration scope", () => {
+    it("distinguishes workspace skill roots from shared user roots", () => {
+        const base = { name: "s", description: "d", source: "user" as const };
+        assert.equal(
+            skillScopeOf({ ...base, filePath: "/repo/.taco/skills/s/SKILL.md" }, "/repo"),
+            "workspace",
+        );
+        assert.equal(
+            skillScopeOf({ ...base, filePath: "/repo/.pi/skills/s/SKILL.md" }, "/repo"),
+            "workspace",
+        );
+        assert.equal(
+            skillScopeOf({ ...base, filePath: "/home/me/.taco/skills/s/SKILL.md" }, "/repo"),
+            "global",
+        );
+        assert.equal(
+            skillScopeOf({ ...base, source: "builtin", filePath: "/builtin/s/SKILL.md" }, "/repo"),
+            undefined,
+        );
+    });
+});
 
 describe("skills.diagnostics", () => {
     /**

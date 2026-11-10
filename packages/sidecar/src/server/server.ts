@@ -380,6 +380,10 @@ export class SidecarServer implements ServerRpcSurface {
     get conversationRouterView(): ConversationRouter | undefined {
         return this.conversationRouter;
     }
+
+    async removeConversationRoute(workspace: string, expectedSessionId?: string): Promise<boolean> {
+        return (await this.conversationRouter?.remove(workspace, expectedSessionId)) ?? false;
+    }
     /** Process-level fan-out registry for all shared workspace pushes. */
     private readonly clientSinkRegistry: ClientSinkRegistry;
     /** taco.json channel instances, kept so channels.list can report the
@@ -1337,6 +1341,10 @@ export class SidecarServer implements ServerRpcSurface {
             this.emitPush(PushMethods.SessionRenamed, workspaceKey, e.sessionId, {
                 name: e.name,
             });
+            // IM routes announce before the first prompt writes its placeholder
+            // title. Refresh the flat conversation list after that title lands;
+            // otherwise the row shows chatId until the user opens the session.
+            if (workspaceKey.startsWith(IM_CWD_PREFIX)) this.broadcastConversationsChanged();
         });
         ws.on(
             "subagent.settled",
@@ -1706,7 +1714,7 @@ export class SidecarServer implements ServerRpcSurface {
     }
 
     /** Invalidate notification for `channels.listConversations`. Triggered by
-     *  ConversationRouter when a NEW session is created (not on every inbound
+     *  route creation/removal and IM title changes (not on every inbound
      *  message). Empty payload — desktop re-pulls the conversation list.
      *
      *  IM workspaces are skipped: the workspace registry is keyed by workspaceKey, so

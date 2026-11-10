@@ -1,8 +1,9 @@
 import { strict as assert } from "node:assert";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
+import { makeImPeerAssociationId } from "@taco-ai/protocol";
 import { evaluateCommand } from "../../src/permissions/commandPolicy.ts";
 import {
     AssociationValidationError,
@@ -162,6 +163,40 @@ describe("associationStore", () => {
             assert.deepEqual(store.get({ scope: "workspace", id: workspaceDir }), []);
         });
 
+        it("reads a version-1 association file and upgrades it additively", async () => {
+            const file = join(home, "workspace-associations.json");
+            writeFileSync(
+                file,
+                JSON.stringify({
+                    version: 1,
+                    workspaces: { [workspaceDir]: [otherDir] },
+                    channels: { legacy: [otherDir] },
+                }),
+            );
+
+            assert.deepEqual(store.get({ scope: "workspace", id: workspaceDir }), [otherDir]);
+            await store.set(
+                {
+                    scope: "peer",
+                    id: makeImPeerAssociationId("legacy", "peer"),
+                },
+                [workspaceDir],
+            );
+
+            const upgraded = JSON.parse(readFileSync(file, "utf8")) as {
+                version?: number;
+                workspaces?: Record<string, string[]>;
+                channels?: Record<string, string[]>;
+                peers?: Record<string, string[]>;
+            };
+            assert.equal(upgraded.version, 2);
+            assert.deepEqual(upgraded.workspaces?.[workspaceDir], [otherDir]);
+            assert.deepEqual(upgraded.channels?.legacy, [otherDir]);
+            assert.deepEqual(upgraded.peers?.[makeImPeerAssociationId("legacy", "peer")], [
+                workspaceDir,
+            ]);
+        });
+
         it("falls back from a conversation to its channel", async () => {
             const channel = "test-channel";
             const conversation = `im://${channel}/peer/chat`;
@@ -169,6 +204,41 @@ describe("associationStore", () => {
             const resolved = store.resolve(conversation as never);
             assert.deepEqual(resolved.roots, [otherDir]);
             assert.deepEqual(resolved.source, { scope: "channel", id: channel });
+        });
+
+        it("falls back from a conversation to its peer directory", async () => {
+            const channel = "peer-test-channel";
+            const peer = "peer";
+            const conversation = `im://${channel}/${peer}/chat`;
+            await store.set({ scope: "channel", id: channel }, [otherDir]);
+            await store.set({ scope: "peer", id: makeImPeerAssociationId(channel, peer) }, [
+                workspaceDir,
+            ]);
+
+            const resolved = store.resolve(conversation as never);
+            assert.deepEqual(resolved.roots, [workspaceDir]);
+            assert.deepEqual(resolved.source, {
+                scope: "peer",
+                id: makeImPeerAssociationId(channel, peer),
+            });
+        });
+
+        it("prefers a conversation's own set over its peer directory", async () => {
+            const channel = "peer-own-test-channel";
+            const peer = "peer";
+            const conversation = `im://${channel}/${peer}/chat`;
+            const own = mkdtempSync(join(tmpdir(), "taco-assoc-own-"));
+            try {
+                await store.set({ scope: "peer", id: makeImPeerAssociationId(channel, peer) }, [
+                    workspaceDir,
+                ]);
+                await store.set({ scope: "workspace", id: conversation }, [own]);
+                const resolved = store.resolve(conversation as never);
+                assert.deepEqual(resolved.roots, [own]);
+                assert.deepEqual(resolved.source, { scope: "workspace", id: conversation });
+            } finally {
+                rmSync(own, { recursive: true, force: true });
+            }
         });
 
         it("prefers a conversation's own set over the channel's", async () => {

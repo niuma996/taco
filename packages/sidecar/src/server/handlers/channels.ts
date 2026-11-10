@@ -13,7 +13,7 @@ import type {
     ChannelsSubmitVerifyCodeResult,
     ChannelsUnbindResult,
 } from "@taco-ai/protocol";
-import { ErrorCodes } from "@taco-ai/protocol";
+import { asSessionId, asWorkspaceId, ErrorCodes, makeImCwd } from "@taco-ai/protocol";
 import { WechatSdkMissingError, WecomSdkMissingError } from "../../channels/channelFactory.ts";
 import { installChannelSdk } from "../../channels/channelSdk.ts";
 import type { ChannelControl, ServerRpcSurface } from "../../runtime/serverRpcSurface.ts";
@@ -52,9 +52,44 @@ export function registerChannelsHandlers(): void {
 
     registerMethod("channelsListConversations", false, async ({ server, params }) => {
         const channelId = params.channelId;
-        return requireChannels(server).listConversations(
-            channelId,
-        ) satisfies ChannelsListConversationsResult;
+        const listed = requireChannels(server).listConversations(channelId).conversations;
+        const checked = await Promise.all(
+            listed.map(async (conversation) => {
+                const cwd = makeImCwd(
+                    conversation.channelId,
+                    conversation.peerId,
+                    conversation.chatId,
+                );
+                const runtime = await server.ensureWorkspace(asWorkspaceId(cwd)).catch(() => null);
+                if (!runtime) return conversation;
+                const sessions = await runtime.listSessions().catch(() => undefined);
+                // A read failure is not evidence that the route is stale.
+                if (!sessions) return conversation;
+                const session = sessions.find(
+                    (entry) => entry.id === asSessionId(conversation.sessionId),
+                );
+                if (session) {
+                    const sessionId = asSessionId(conversation.sessionId);
+                    const [name, activityAt] = await Promise.all([
+                        runtime.getSessionName(sessionId).catch(() => undefined),
+                        runtime.getSessionActivityAt(sessionId).catch(() => undefined),
+                    ]);
+                    return {
+                        ...conversation,
+                        ...(name !== undefined ? { name } : {}),
+                        updatedAt: new Date(activityAt ?? session.createdAt).toISOString(),
+                    };
+                }
+                await server.removeConversationRoute?.(cwd, conversation.sessionId);
+                return null;
+            }),
+        );
+        return {
+            conversations: checked.filter(
+                (conversation): conversation is NonNullable<typeof conversation> =>
+                    conversation !== null,
+            ),
+        } satisfies ChannelsListConversationsResult;
     });
 
     registerMethod(

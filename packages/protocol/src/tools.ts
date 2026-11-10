@@ -81,6 +81,8 @@ export interface SkillEntry {
     /** Aligned with `AgentEntry.source` — "builtin" comes from the sidecar's built-in directory,
      *  "user" is aggregated from the four user directories. */
     source: "builtin" | "user";
+    /** Configuration layer for user skills. Optional for backward compatibility and builtins. */
+    scope?: AgentScope;
     /**
      * When true, `formatSkillsForSystemPrompt` filters this skill out of
      * the system prompt, but the skill is still invokable explicitly.

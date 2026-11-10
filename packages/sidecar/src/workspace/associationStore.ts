@@ -5,10 +5,10 @@
  * directories the user granted. Lives at `$TACO_HOME/workspace-associations.json`
  * — a sidecar-owned file every client (desktop, CLI, scheduler) reads.
  *
- * Two scopes: `workspace` — one workspace (a filesystem cwd, or one IM
- * conversation `im://<channelId>/<peerId>/<chatId>`); `channel` — every
- * conversation on one IM channel. Separate namespaces, so a channel id that
- * looks like a path cannot collide with a workspace entry.
+ * Three scopes: `workspace` — one filesystem workspace or IM conversation;
+ * `peer` — every conversation under one channel/peer directory; `channel` —
+ * every conversation on one IM channel. Separate namespaces prevent ids that
+ * happen to look like paths from colliding.
  *
  * Reads are uncached: several servers share this file, so a cache would serve
  * a stale set. The file holds paths, not secrets, but it is written 0600.
@@ -17,8 +17,12 @@
 import { randomUUID } from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import type { WorkspaceAssociationKey, WorkspaceId } from "@taco-ai/protocol";
-import { IM_CWD_PREFIX, parseImCwd } from "@taco-ai/protocol";
+import type {
+    WorkspaceAssociationKey,
+    WorkspaceAssociationScope,
+    WorkspaceId,
+} from "@taco-ai/protocol";
+import { IM_CWD_PREFIX, makeImPeerAssociationId, parseImCwd } from "@taco-ai/protocol";
 import { tacoHome } from "../config/tacoHome.ts";
 import { restrictOwner } from "../lib/fsPermissions.ts";
 import { createLogger } from "../lib/logger.ts";
@@ -31,7 +35,7 @@ import {
 const log = createLogger("workspace:associations");
 
 /** On-disk schema version. Bumped when the document shape changes. */
-const ASSOCIATIONS_DOCUMENT_VERSION = 1;
+const ASSOCIATIONS_DOCUMENT_VERSION = 2;
 /** A crashed writer must not leave every later association write blocked. */
 const ASSOCIATIONS_LOCK_STALE_MS = 60_000;
 const ASSOCIATIONS_LOCK_RETRY_MS = 10;
@@ -42,6 +46,8 @@ export interface WorkspaceAssociationsDocument {
     workspaces?: Record<string, string[]>;
     /** Channel-scope sets, keyed by channel id. */
     channels?: Record<string, string[]>;
+    /** Peer-scope sets, keyed by channel/peer directory. */
+    peers?: Record<string, string[]>;
 }
 
 export function workspaceAssociationsPath(home: string = tacoHome()): string {
@@ -78,10 +84,10 @@ export interface AssociationStoreOptions {
  * workspace's key is its `im://` URL, which must not be run through
  * `path.resolve`.
  *
- * A channel-scope key is a channel id, not a path, so it is left alone.
+ * Channel and peer keys are stable ids, not paths, so they are left alone.
  */
 export function normalizeAssociationKey(key: WorkspaceAssociationKey): string {
-    if (key.scope === "channel") return key.id;
+    if (key.scope === "channel" || key.scope === "peer") return key.id;
     if (key.id.startsWith(IM_CWD_PREFIX)) return key.id;
     return path.resolve(key.id);
 }
@@ -102,11 +108,22 @@ export function associationAffectsWorkspace(cwd: string, key: WorkspaceAssociati
             normalizeAssociationKey(key)
         );
     }
-    // Channel scope: only IM conversations inherit a channel's set. An fs
-    // workspace's cwd is not a routing key, so it has no channel to
-    // fall back to.
+    // Peer/channel scopes only apply to IM conversations. A filesystem cwd is
+    // not a routing key, so it has neither a peer nor a channel to inherit.
     if (!cwd.startsWith(IM_CWD_PREFIX)) return false;
-    return parseImCwd(cwd)?.channelId === key.id;
+    const route = parseImCwd(cwd);
+    if (!route) return false;
+    if (key.scope === "channel") return route.channelId === key.id;
+    return makeImPeerAssociationId(route.channelId, route.peerId) === key.id;
+}
+
+function associationBucket(
+    doc: WorkspaceAssociationsDocument,
+    scope: WorkspaceAssociationScope,
+): Record<string, string[]> | undefined {
+    if (scope === "channel") return doc.channels;
+    if (scope === "peer") return doc.peers;
+    return doc.workspaces;
 }
 
 /**
@@ -133,7 +150,7 @@ export class WorkspaceAssociationStore {
      */
     get(key: WorkspaceAssociationKey): string[] {
         const doc = this.load();
-        const bucket = key.scope === "channel" ? doc.channels : doc.workspaces;
+        const bucket = associationBucket(doc, key.scope);
         const entry = bucket?.[normalizeAssociationKey(key)];
         if (!Array.isArray(entry)) return [];
         return entry.filter((v): v is string => typeof v === "string");
@@ -142,9 +159,9 @@ export class WorkspaceAssociationStore {
     /**
      * The effective set for a workspace, after the scope fallback.
      *
-     * A conversation's own entry wins when it exists. Otherwise the
-     * channel's entry applies, so a channel-wide grant covers conversations
-     * that have no entry of their own — including ones that start later.
+     * A conversation's own entry wins when it exists. Otherwise its peer
+     * directory applies, then the channel default. This lets a channel-wide
+     * grant cover future peers while one peer can set its own directories.
      *
      * An empty set is stored as "no entry" (see `set`), so it falls back
      * rather than denying: saving an empty list for one conversation means
@@ -168,6 +185,17 @@ export class WorkspaceAssociationStore {
         if (workspace.startsWith(IM_CWD_PREFIX)) {
             const route = parseImCwd(workspace);
             if (route) {
+                const peerKey: WorkspaceAssociationKey = {
+                    scope: "peer",
+                    id: makeImPeerAssociationId(route.channelId, route.peerId),
+                };
+                const peerEntry = doc.peers?.[peerKey.id];
+                if (Array.isArray(peerEntry)) {
+                    return {
+                        roots: peerEntry.filter((v): v is string => typeof v === "string"),
+                        source: peerKey,
+                    };
+                }
                 const channelEntry = doc.channels?.[route.channelId];
                 if (Array.isArray(channelEntry)) {
                     return {
@@ -198,7 +226,12 @@ export class WorkspaceAssociationStore {
                 // only around persist() would still allow stale read-modify-
                 // writes to discard another connection's entry.
                 const doc = this.load();
-                const bucket = key.scope === "channel" ? "channels" : "workspaces";
+                const bucket =
+                    key.scope === "channel"
+                        ? "channels"
+                        : key.scope === "peer"
+                          ? "peers"
+                          : "workspaces";
                 const next: WorkspaceAssociationsDocument = { ...doc };
                 const entries = { ...(next[bucket] ?? {}) };
                 const id = normalizeAssociationKey(key);

@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
 import type { ServerPush, WorkspaceAssociationKey, WorkspaceId } from "@taco-ai/protocol";
-import { asSessionId, asWorkspaceId } from "@taco-ai/protocol";
+import { asSessionId, asWorkspaceId, makeImPeerAssociationId } from "@taco-ai/protocol";
 import { ProviderKeyStore } from "../../src/runtime/models/providerKeyStore.ts";
 import { ClientSinkRegistry } from "../../src/server/clientSinkRegistry.ts";
 import { CompactionPushAdapter } from "../../src/server/compactionPushAdapter.ts";
@@ -252,6 +252,23 @@ describe("associationsFanout", () => {
             ]);
 
             await server.associations.set({ scope: "channel", id: "chan-1" }, [root]);
+
+            assert.equal(pushes.length, 1);
+            assert.equal(pushes[0].workspace, "im://chan-1/peer-1/chat-1");
+        });
+
+        it("fans a peer-scope change to conversations under that peer only", async () => {
+            const root = mkdtempSync(join(tmpdir(), "assoc-root-"));
+            const { server, pushes } = makeFanoutRecorder([
+                "im://chan-1/peer-1/chat-1",
+                "im://chan-1/peer-2/chat-1",
+                "im://chan-2/peer-1/chat-1",
+            ]);
+
+            await server.associations.set(
+                { scope: "peer", id: makeImPeerAssociationId("chan-1", "peer-1") },
+                [root],
+            );
 
             assert.equal(pushes.length, 1);
             assert.equal(pushes[0].workspace, "im://chan-1/peer-1/chat-1");

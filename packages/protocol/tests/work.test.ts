@@ -3,8 +3,8 @@ import { test } from "node:test";
 import { Check } from "typebox/value";
 import { RPC, rpcContract, rpcSchemas, SIDECAR_PROTOCOL_VERSION } from "../src/index.ts";
 
-test("work controls are process-scoped methods in protocol 2.13", () => {
-    assert.deepEqual(SIDECAR_PROTOCOL_VERSION, { major: 2, minor: 13 });
+test("work controls are process-scoped methods in protocol 2.14", () => {
+    assert.deepEqual(SIDECAR_PROTOCOL_VERSION, { major: 2, minor: 14 });
     assert.equal(RPC.workCancel, "work.cancel");
     assert.equal(RPC.workDelete, "work.delete");
     assert.equal(rpcContract.workCancel.scope, "process");

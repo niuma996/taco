@@ -193,6 +193,10 @@ export interface ImConversationEntry {
     peerId: string;
     chatId: string;
     sessionId: string;
+    /** User-defined session title. Older sidecars omit it; use chatId then. */
+    name?: string;
+    /** ISO transcript mtime, when the sidecar could read session metadata. */
+    updatedAt?: string;
     /** Epoch ms — matches ConversationRouter's internal RouteEntry, not the
      *  ISO strings SessionListEntry uses (no session-list identity here). */
     lastUsedAt: number;

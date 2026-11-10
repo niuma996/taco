@@ -10,20 +10,48 @@
 
 import * as nodeFs from "node:fs/promises";
 import * as nodePath from "node:path";
-import type { SkillContentResult, SkillEntry, SkillsListResult } from "@taco-ai/protocol";
+import type {
+    AgentScope,
+    SkillContentResult,
+    SkillEntry,
+    SkillsListResult,
+} from "@taco-ai/protocol";
+import type { TacoSkill } from "../../skills/tacoSkill.ts";
 import { type MethodCtx, registerMethod } from "../methodRegistry.ts";
+
+function isInside(root: string, filePath: string): boolean {
+    const rel = nodePath.relative(root, filePath);
+    return rel === "" || (!rel.startsWith("..") && !nodePath.isAbsolute(rel));
+}
+
+/** Classify user skills without changing the runtime loader or its override order. */
+export function skillScopeOf(
+    skill: Pick<TacoSkill, "source" | "filePath">,
+    executionCwd: string | undefined,
+): AgentScope | undefined {
+    if (skill.source === "builtin" || executionCwd === undefined) return undefined;
+    const filePath = nodePath.resolve(executionCwd, skill.filePath);
+    const workspaceRoots = [".taco", ".pi"].map((dir) =>
+        nodePath.resolve(executionCwd, dir, "skills"),
+    );
+    return workspaceRoots.some((root) => isInside(root, filePath)) ? "workspace" : "global";
+}
 
 export function registerSkillsHandlers(): void {
     registerMethod("skillsList", true, async ({ workspace }): Promise<SkillsListResult> => {
         const skills = workspace.resources.skills ?? [];
-        const entries: SkillEntry[] = skills.map((s) => ({
-            name: s.name,
-            description: s.description,
-            filePath: s.filePath,
-            source: s.source,
-            disableModelInvocation: s.disableModelInvocation,
-            inlineOnly: s.inlineOnly,
-        }));
+        const entries: SkillEntry[] = skills.map((s) => {
+            const scope = skillScopeOf(s, workspace.executionCwd);
+            return {
+                name: s.name,
+                description: s.description,
+                filePath: s.filePath,
+                source: s.source,
+                ...(scope !== undefined ? { scope } : {}),
+                disableModelInvocation: s.disableModelInvocation,
+                inlineOnly: s.inlineOnly,
+            };
+        });
         // Omit the key entirely when there is nothing wrong, rather than
         // sending `diagnostics: []`. Clients written before this field
         // existed then see a byte-identical result in the common case.

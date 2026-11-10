@@ -14,10 +14,9 @@
  * "relative to the workspace root".
  *
  * Storage is keyed by *scope* rather than by workspace alone, because the
- * admin picks the granularity: a whole IM channel, or one conversation
- * inside it. `scope: "channel"` entries are shared by every conversation on
- * that channel; `scope: "workspace"` entries belong to one workspace and
- * override the channel entry when present.
+ * admin picks the granularity: a whole IM channel, one peer directory inside
+ * it, or one conversation. The effective precedence is workspace
+ * (conversation), then peer, then channel.
  */
 
 import type { ParamsOf } from "./rpcContract/types.js";
@@ -32,9 +31,15 @@ import type {
  *
  * - `workspace` — one workspace: a filesystem cwd, or one IM conversation
  *   (`im://<channelId>/<peerId>/<chatId>`).
+ * - `peer` — every conversation under one channel/peer directory.
  * - `channel` — every conversation on one IM channel.
  */
-export type WorkspaceAssociationScope = "workspace" | "channel";
+export type WorkspaceAssociationScope = "workspace" | "peer" | "channel";
+
+/** Stable storage id for a channel/peer directory. */
+export function makeImPeerAssociationId(channelId: string, peerId: string): string {
+    return `${encodeURIComponent(channelId)}/${encodeURIComponent(peerId)}`;
+}
 
 /**
  * The key an association set is stored under.

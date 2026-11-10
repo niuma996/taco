@@ -110,6 +110,7 @@ because a registered system-service daemon can outlive a desktop upgrade.
 | 2.11 | `WorkSummary.sessionState` reports whether its target session remains available after deletion; Work results stay queryable and desktop navigation disables deleted targets |
 | 2.12 | `waiting` Work status for askUser/planExit interactions; attempt-scoped continuation; permission requests appear as process-local Work projections and are cleared on daemon replacement. Clients that do not advertise `clientCapabilities.workWaiting` receive a compatibility projection (`running`, without waiting details). |
 | 2.13 | `work.cancel` targets the displayed `attemptId`; `work.delete` removes terminal records through a durable tombstone. Optional `attemptId` / `canCancel` fields support method-gated controls. |
+| 2.14 | Optional Agent layer selectors for `agents.list` / `agents.content` / `agents.delete`, `previousScope` for shadowed edits, and optional Skill provenance. Calls without these fields retain the effective-catalog behavior. |
 
 Adding a value to an existing response enum is potentially breaking: older clients
 may index exhaustive maps with it. Such values require connection-scoped capability
@@ -504,6 +505,16 @@ runtime candidate construction in `discoverMcpTools` also filters by
 
 MCP tool execution is not gated by the command-permission broker —
 configuring a server is implicit authorization for every tool it exposes.
+
+### `channels.listConversations` metadata is optional
+
+Each entry always carries the IM route, session id and router `lastUsedAt`.
+Sidecars that can read the routed transcript also return its optional `name`
+and ISO `updatedAt`. Clients fall back to `chatId` and `lastUsedAt` when those
+fields are absent, so older sidecars remain compatible without a version gate.
+Deleting an IM session also removes its route and emits
+`channels.conversations_changed`; writing an IM session title emits the same
+invalidation so a newly created row can replace its chatId fallback in place.
 
 ### `channels.bind` may fail with `wechat_sdk_missing`
 

@@ -184,13 +184,16 @@ export function registerSessionLifecycleHandlers(): void {
             // sequenced push a reconnecting client sees, so the ring must be
             // seeded from disk tail before this handler emits anything.
             await server.hydrateSessionEvents(cwd, params.sessionId);
-            await workspace.attach(params.sessionId, { thinkingLevel: params.thinkingLevel });
+            const attached = await workspace.attach(params.sessionId, {
+                thinkingLevel: params.thinkingLevel,
+            });
             // Read after attach so the client can tell a live agent tool call from
             // one orphaned by a previous process exit. A history read alone cannot:
             // both look like a toolCall with no toolResult on disk.
             const result: SessionAttachResult = {
                 attached: true,
                 sessionId: params.sessionId,
+                execution: await attached.getExecutionState(),
                 inFlightAgentToolCallIds: workspace.inFlightAgentToolCallIds(params.sessionId),
                 // Background spawns need a second signal: their tool call says
                 // `ok` from launch, so "not in flight" alone cannot separate a
@@ -237,6 +240,17 @@ export function registerSessionLifecycleHandlers(): void {
                     });
                 },
             );
+            // An IM route points at exactly this transcript. Remove it with
+            // the delete so neither the flat chat list nor the next inbound
+            // message can keep addressing a session that no longer exists.
+            await server
+                .removeConversationRoute?.(workspace.workspaceKey, params.sessionId)
+                .catch((err) => {
+                    // The transcript is already gone. A routing.json write failure
+                    // must not turn that into a failed delete; startup/list checks
+                    // will prune the stale route again.
+                    log.warn("failed to remove deleted IM route", workspace.workspaceKey, err);
+                });
             const result: SessionDeleteResult = { deleted: true };
             return result;
         },

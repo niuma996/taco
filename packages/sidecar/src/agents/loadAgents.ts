@@ -164,7 +164,10 @@ function parseCwd(raw: unknown): string | undefined {
     return typeof raw === "string" && isAbsolute(raw.trim()) ? raw.trim() : undefined;
 }
 
-async function loadDir(dir: string, source: "builtin" | "user"): Promise<AgentDefinition[]> {
+export async function loadAgentDir(
+    dir: string,
+    source: "builtin" | "user",
+): Promise<AgentDefinition[]> {
     let files: string[];
     try {
         files = await readdir(dir);
@@ -202,11 +205,11 @@ export interface LoadAgentsOptions {
  */
 export async function loadAgents(opts: LoadAgentsOptions): Promise<AgentDefinition[]> {
     const byType = new Map<string, AgentDefinition>();
-    for (const def of await loadDir(opts.builtinDir, "builtin")) {
+    for (const def of await loadAgentDir(opts.builtinDir, "builtin")) {
         byType.set(def.agentType, def);
     }
     for (const dir of opts.userDirs) {
-        for (const def of await loadDir(dir, "user")) {
+        for (const def of await loadAgentDir(dir, "user")) {
             byType.set(def.agentType, def); // user overrides builtin
         }
     }

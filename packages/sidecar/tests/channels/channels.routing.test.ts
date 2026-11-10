@@ -433,6 +433,21 @@ describe("conversationRouter", () => {
             assert.equal(a.workspace, "im://ch1/u1/c1");
         });
 
+        it("removes a route only when its session identity still matches", async () => {
+            const home = mkdtempSync(path.join(tmpdir(), "router-"));
+            const hook = stubHook();
+            const router = await ConversationRouter.load(home);
+            const routed = await router.route(hook, "ch1", "u1", "c1");
+            let notifications = 0;
+            router.on("conversation", () => notifications++);
+
+            assert.equal(await router.remove(routed.workspace, "another-session"), false);
+            assert.equal(router.lookupByWorkspace(routed.workspace)?.sessionId, routed.sessionId);
+            assert.equal(await router.remove(routed.workspace, routed.sessionId), true);
+            assert.equal(router.lookupByWorkspace(routed.workspace), undefined);
+            assert.equal(notifications, 1);
+        });
+
         it("creates a new session when the routed session no longer exists", async () => {
             const home = mkdtempSync(path.join(tmpdir(), "router-"));
             const hook = stubHook();
@@ -879,6 +894,83 @@ describe("daemonOwnership", () => {
         assert.equal(owner.conversationRouterView?.findRouteBySessionId(sessionId)?.peerId, "u1");
     });
 
+    it("includes the session title and content time in channel conversations", async (t) => {
+        const { owner, transports } = await startPair(t);
+        const { sessionId } = await owner.buildChannelContext("mock-1").ingress.submit({
+            channelId: "mock-1",
+            peerId: "u1",
+            chatId: "c1",
+            platformMessageId: "msg-metadata",
+            text: "hello",
+        });
+        const workspace = "im://mock-1/u1/c1";
+        // Conversation invalidations are hosted by ordinary filesystem
+        // workspaces, so keep one open just as the desktop does.
+        await owner.ensureWorkspace(asWorkspaceId(mkdtempSync(join(home, "title-listener-"))));
+        const invalidationsBefore = transports[0].sent.filter(
+            (frame) => "method" in frame && frame.method === "channels.conversations_changed",
+        ).length;
+        const renamed = await request(transports[0], {
+            id: "rename-metadata",
+            method: "session.rename",
+            params: { workspace, sessionId, name: "Support chat" },
+        });
+        assert.ok(renamed.ok, JSON.stringify(renamed));
+        const invalidationsAfter = transports[0].sent.filter(
+            (frame) => "method" in frame && frame.method === "channels.conversations_changed",
+        ).length;
+        assert.equal(invalidationsAfter, invalidationsBefore + 1);
+
+        const listed = await request(transports[0], {
+            id: "list-metadata",
+            method: "channels.listConversations",
+            params: {},
+        });
+        assert.ok(listed.ok, JSON.stringify(listed));
+        const result = listed.result as {
+            conversations: Array<{ sessionId: string; name?: string; updatedAt?: string }>;
+        };
+        const entry = result.conversations.find((item) => item.sessionId === sessionId);
+        assert.equal(entry?.name, "Support chat");
+        assert.ok(entry?.updatedAt && !Number.isNaN(Date.parse(entry.updatedAt)));
+    });
+
+    it("prunes a routed conversation after its session disappears", async (t) => {
+        const { owner, transports } = await startPair(t);
+        const { sessionId } = await owner.buildChannelContext("mock-1").ingress.submit({
+            channelId: "mock-1",
+            peerId: "stale",
+            chatId: "c1",
+            platformMessageId: "msg-stale",
+            text: "hello",
+        });
+        const workspace = "im://mock-1/stale/c1";
+        assert.ok(owner.conversationRouterView?.findRouteBySessionId(sessionId));
+
+        const deleted = await request(transports[0], {
+            id: "delete-stale",
+            method: "session.delete",
+            params: { workspace, sessionId },
+        });
+        assert.ok(deleted.ok, JSON.stringify(deleted));
+        // Deletion is authoritative: the route must not wait for a later
+        // list call to notice that the transcript disappeared.
+        assert.equal(owner.conversationRouterView?.findRouteBySessionId(sessionId), undefined);
+
+        const listed = await request(transports[0], {
+            id: "list-stale",
+            method: "channels.listConversations",
+            params: {},
+        });
+        assert.ok(listed.ok, JSON.stringify(listed));
+        const result = listed.result as { conversations: Array<{ sessionId: string }> };
+        assert.equal(
+            result.conversations.some((entry) => entry.sessionId === sessionId),
+            false,
+        );
+        assert.equal(owner.conversationRouterView?.findRouteBySessionId(sessionId), undefined);
+    });
+
     it("disconnecting every client leaves the host's channel serving IM ingress", async (t) => {
         const { owner, connections, sinks } = await startPair(t);
         await Promise.all(connections.map((connection) => connection.stop()));
@@ -915,6 +1007,7 @@ describe("daemonOwnership", () => {
             params: { workspace: cwd, sessionId: "host-fs-session" },
         });
         assert.ok(attached.ok, JSON.stringify(attached));
+        assert.equal((attached.result as { execution?: string }).execution, "idle");
         assert.equal(await owner.ensureWorkspace(cwd), runtime);
         assert.ok(runtime.getAttached(asSessionId("host-fs-session")));
         assert.ok(

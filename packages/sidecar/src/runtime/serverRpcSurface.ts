@@ -171,6 +171,8 @@ export interface ServerRpcSurface {
      * handlers reject with `invalid_state` when absent.
      */
     readonly channels?: ChannelControl;
+    /** Remove an IM route if it still points at the expected session. */
+    removeConversationRoute?(workspace: string, expectedSessionId?: string): Promise<boolean>;
     /**
      * Read-only overview of managed background work, consumed by the `work.*`
      * handlers. Optional so test hooks need not implement it; handlers answer

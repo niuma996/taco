@@ -11,15 +11,22 @@ const workspace = workspaceIdSchema;
 
 export const toolsListSchema = Type.Object({ workspace });
 
+const editableAgentScope = Type.Union([Type.Literal("global"), Type.Literal("workspace")]);
+
 /** Shared with the desktop editor and sidecar's semantic validator. */
 export const AGENT_TYPE_PATTERN = /^[a-z][a-z0-9-]{0,62}$/;
 export const AGENT_TOOL_NAME_PATTERN = /^[A-Za-z][A-Za-z0-9_-]{0,127}$/;
 
-export const agentsListSchema = Type.Object({ workspace });
+export const agentsListSchema = Type.Object({
+    workspace,
+    scope: Type.Optional(editableAgentScope),
+});
 
 export const agentsContentSchema = Type.Object({
     workspace,
     agentType: Type.String({ minLength: 1 }),
+    // Select a specific layer when a workspace definition shadows a global one.
+    scope: Type.Optional(editableAgentScope),
 });
 
 const agentType = Type.String({
@@ -28,7 +35,7 @@ const agentType = Type.String({
     pattern: AGENT_TYPE_PATTERN.source,
 });
 
-const agentScope = Type.Union([Type.Literal("global"), Type.Literal("workspace")]);
+const agentScope = editableAgentScope;
 
 export const agentsWriteSchema = Type.Object({
     workspace,
@@ -71,11 +78,14 @@ export const agentsWriteSchema = Type.Object({
     // Present on rename: after the new file is written, the old definition is
     // deleted. Changing scope moves the definition and removes the old file too.
     previousAgentType: Type.Optional(agentType),
+    // Identifies a shadowed source definition when editing it in place.
+    previousScope: Type.Optional(editableAgentScope),
 });
 
 export const agentsDeleteSchema = Type.Object({
     workspace,
     agentType,
+    scope: Type.Optional(editableAgentScope),
 });
 
 export const skillsListSchema = Type.Object({ workspace });

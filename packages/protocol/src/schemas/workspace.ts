@@ -38,7 +38,9 @@ export const workspaceDisposeSchema = Type.Object({
  * silently unreachable entry.
  */
 const workspaceAssociationKeySchema = Type.Object({
-    scope: Type.Readonly(Type.Union([Type.Literal("workspace"), Type.Literal("channel")])),
+    scope: Type.Readonly(
+        Type.Union([Type.Literal("workspace"), Type.Literal("peer"), Type.Literal("channel")]),
+    ),
     id: Type.Readonly(Type.String({ minLength: 1 })),
 });
 

@@ -1132,6 +1132,12 @@ export class AttachedSession extends EventEmitter {
         return this.thinkingLevel;
     }
 
+    /** Current lane execution state, read from pi's live operation record. */
+    async getExecutionState(): Promise<"idle" | "running"> {
+        const info = await this.lane.inspectExecution(harnessContext);
+        return info.current?.kind === "run" ? "running" : "idle";
+    }
+
     /**
      * Abort the current turn.
      *

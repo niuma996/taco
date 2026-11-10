@@ -7,13 +7,14 @@
  * agents.delete  — remove one editable definition
  */
 
+import { join } from "node:path";
 import type {
     AgentsContentResult,
     AgentsDeleteResult,
     AgentsListResult,
     AgentsWriteResult,
 } from "@taco-ai/protocol";
-
+import { loadAgentDir } from "../../agents/loadAgents.ts";
 import type { AgentDefinition } from "../../agents/types.ts";
 import { createLogger } from "../../lib/logger.ts";
 import type { ServerRpcSurface } from "../../runtime/serverRpcSurface.ts";
@@ -23,6 +24,8 @@ import {
     type AgentScopeContext,
     agentScopeOf,
     deleteUserAgent,
+    readUserAgent,
+    userAgentsDir,
     writeUserAgent,
 } from "./agentsWrite.ts";
 
@@ -49,9 +52,17 @@ function scopeContext(workspace: WorkspaceRuntime): AgentScopeContext {
 }
 
 export function registerAgentsHandlers(): void {
-    registerMethod("agentsList", true, async ({ workspace }): Promise<AgentsListResult> => {
+    registerMethod("agentsList", true, async ({ workspace, params }): Promise<AgentsListResult> => {
         const ctx = scopeContext(workspace);
-        const agents = workspace.agents.map((a: AgentDefinition) => {
+        const scopedAgents =
+            params.scope === "global"
+                ? await loadAgentDir(userAgentsDir(), "user")
+                : params.scope === "workspace"
+                  ? ctx.workspaceDir
+                      ? await loadAgentDir(join(ctx.workspaceDir, ".taco", "agents"), "user")
+                      : []
+                  : workspace.agents;
+        const agents = scopedAgents.map((a: AgentDefinition) => {
             const scope = agentScopeOf(a, ctx);
             return {
                 agentType: a.agentType,
@@ -71,7 +82,9 @@ export function registerAgentsHandlers(): void {
         "agentsContent",
         true,
         async ({ workspace, params }): Promise<AgentsContentResult> => {
-            const def = workspace.findAgent(params.agentType);
+            const def = params.scope
+                ? await readUserAgent(params.agentType, params.scope, scopeContext(workspace))
+                : workspace.findAgent(params.agentType);
             if (!def) {
                 throw new Error(`agent not found: ${params.agentType}`);
             }
@@ -109,7 +122,12 @@ export function registerAgentsHandlers(): void {
         "agentsDelete",
         true,
         async ({ server, workspace, params }): Promise<AgentsDeleteResult> => {
-            await deleteUserAgent(params.agentType, workspace.agents, scopeContext(workspace));
+            await deleteUserAgent(
+                params.agentType,
+                workspace.agents,
+                scopeContext(workspace),
+                params.scope,
+            );
             await reloadAgents(server);
             return { ok: true };
         },

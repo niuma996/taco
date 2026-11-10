@@ -222,11 +222,12 @@ export async function writeUserAgent(
     const previousScope =
         previousType === undefined
             ? undefined
-            : requireEditable(
+            : (params.previousScope ??
+              requireEditable(
                   currentAgents.find((a) => a.agentType === previousType),
                   previousType,
                   ctx,
-              );
+              ));
     const scope = params.scope ?? previousScope ?? "global";
     const targetPath = pathFor(scope, target, ctx);
     const previousPath =
@@ -273,12 +274,42 @@ export async function writeUserAgent(
     }
 }
 
-/** Delete the definition in effect for `agentType`. Rescanning is the caller's job. */
+/** Read one editable layer directly, including a global definition hidden by a workspace override. */
+export async function readUserAgent(
+    agentType: string,
+    scope: AgentScope,
+    ctx: AgentScopeContext = {},
+): Promise<AgentDefinition> {
+    if (!AGENT_TYPE_PATTERN.test(agentType)) {
+        throw new AgentWriteError(`invalid agentType: ${agentType}`);
+    }
+    const filePath = pathFor(scope, agentType, ctx);
+    let text: string;
+    try {
+        text = await readFile(filePath, "utf-8");
+    } catch {
+        throw new AgentWriteError(`agent not found: ${agentType}`);
+    }
+    const definition = parseAgentMarkdown(text, filePath, "user");
+    if (!definition) throw new AgentWriteError(`agent "${agentType}" is not valid`);
+    return definition;
+}
+
+/** Delete the selected definition, or the one in effect when scope is omitted. */
 export async function deleteUserAgent(
     agentType: string,
     currentAgents: readonly AgentDefinition[],
     ctx: AgentScopeContext = {},
+    requestedScope?: AgentScope,
 ): Promise<void> {
+    if (requestedScope !== undefined) {
+        if (!AGENT_TYPE_PATTERN.test(agentType)) {
+            throw new AgentWriteError(`invalid agentType: ${agentType}`);
+        }
+        await readUserAgent(agentType, requestedScope, ctx);
+        await rm(pathFor(requestedScope, agentType, ctx), { force: true });
+        return;
+    }
     const scope = requireEditable(
         currentAgents.find((a) => a.agentType === agentType),
         agentType,

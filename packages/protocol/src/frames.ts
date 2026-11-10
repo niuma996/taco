@@ -97,8 +97,10 @@ export type CompactionFailureReason =
  *  history and still names the summary's session `parentSessionId`.
  *  2.11 reports whether a Work's target session has been deleted.
  *  2.12 adds managed Work waiting interactions and live permission projections.
- *  2.13 adds attempt-scoped Work cancellation and terminal-record deletion. */
-export const SIDECAR_PROTOCOL_VERSION = { major: 2, minor: 13 } as const;
+ *  2.13 adds attempt-scoped Work cancellation and terminal-record deletion.
+ *  2.14 adds layer-scoped Agent catalog reads/mutations and Skill provenance.
+ *  2.15 adds peer-scoped IM directory associations. */
+export const SIDECAR_PROTOCOL_VERSION = { major: 2, minor: 15 } as const;
 
 /**
  * Client-side gate for a sidecar's advertised protocol version. Semver-ish but

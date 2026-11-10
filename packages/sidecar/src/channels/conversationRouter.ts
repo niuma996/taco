@@ -140,6 +140,21 @@ export class ConversationRouter extends EventEmitter {
         return entries;
     }
 
+    /** Remove a route only if it still points at the expected session. */
+    async remove(workspace: string, expectedSessionId?: string): Promise<boolean> {
+        const existing = this.routes.get(workspace);
+        if (!existing || (expectedSessionId && existing.sessionId !== expectedSessionId))
+            return false;
+        const removed = this.routes.delete(workspace);
+        if (removed) {
+            await this.persist();
+            // Deletions and stale-route pruning need the same refresh push as
+            // new routes; listeners only need to re-read listConversations.
+            this.emit("conversation");
+        }
+        return removed;
+    }
+
     async route(
         hook: ServerRpcSurface,
         channelId: string,

@@ -121,13 +121,12 @@ export const PushMethods = {
      */
     ChannelStatusChanged: "channel.status_changed",
     /**
-     * Invalidate notification: ConversationRouter created a new IM session
-     * (or the underlying list shifted). Desktop re-pulls
-     * `channels.listConversations`. Fires only on new-session creation —
-     * not on every inbound message — so conversation volume cannot turn
-     * this into a push-storm. Workspace-dimensioned (no session): a new
-     * conversation has no attached session yet. Same invalidate-not-delta
-     * pattern as TasksUpdated / PlanStateUpdated.
+     * Invalidate notification: an IM route was created/removed or its session
+     * title changed. Desktop re-pulls `channels.listConversations`. It does
+     * not fire on lastUsedAt refreshes, so conversation volume cannot turn
+     * this into a push-storm. Workspace-dimensioned (no session): a new conversation has
+     * no attached session yet. Same invalidate-not-delta pattern as
+     * TasksUpdated / PlanStateUpdated.
      */
     ConversationsChanged: "channels.conversations_changed",
     /**

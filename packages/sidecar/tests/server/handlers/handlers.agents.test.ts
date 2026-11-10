@@ -56,6 +56,50 @@ describe("agents.write", () => {
         };
     }
 
+    describe("scoped agent deletion", () => {
+        it("deletes the selected global definition without touching a workspace override", async () => {
+            const project = mkdtempSync(join(tmpdir(), "taco-agent-scope-"));
+            const global = def({
+                agentType: "shared",
+                filePath: join(userAgentsDir(), "shared.md"),
+            });
+            const local = def({
+                agentType: "shared",
+                filePath: join(project, ".taco", "agents", "shared.md"),
+            });
+            await import("node:fs/promises").then(({ mkdir, writeFile }) =>
+                Promise.all([
+                    mkdir(join(project, ".taco", "agents"), { recursive: true }),
+                    mkdir(userAgentsDir(), { recursive: true }),
+                ]).then(() =>
+                    Promise.all([
+                        writeFile(
+                            local.filePath,
+                            "---\nname: shared\ndescription: local\n---\nlocal\n",
+                        ),
+                        writeFile(
+                            global.filePath,
+                            "---\nname: shared\ndescription: global\n---\nglobal\n",
+                        ),
+                    ]),
+                ),
+            );
+            try {
+                await deleteUserAgent(
+                    "shared",
+                    [local, global],
+                    { workspaceDir: project },
+                    "global",
+                );
+                assert.equal(existsSync(global.filePath), false);
+                assert.equal(existsSync(local.filePath), true);
+            } finally {
+                rmSync(project, { recursive: true, force: true });
+                rmSync(global.filePath, { force: true });
+            }
+        });
+    });
+
     describe("agentsWrite", () => {
         let home: string;
         let prevHome: string | undefined;
@@ -330,7 +374,10 @@ describe("agents.write", () => {
         });
 
         it("lets a workspace agent shadow a global one but not the reverse", async () => {
-            const global = def({ agentType: "shared" });
+            const global = def({
+                agentType: "shared",
+                filePath: join(userAgentsDir(), "shared.md"),
+            });
             await writeUserAgent(
                 params({ agentType: "shared", scope: "workspace" }),
                 [global],
