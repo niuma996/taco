@@ -53,6 +53,13 @@ export function registerChannelsHandlers(): void {
     registerMethod("channelsListConversations", false, async ({ server, params }) => {
         const channelId = params.channelId;
         const listed = requireChannels(server).listConversations(channelId).conversations;
+        // One config refresh for the whole list instead of one per conversation.
+        // Reading a route's name/updatedAt needs its workspace runtime, which
+        // stays resident for the process lifetime (no idle eviction). That is
+        // accepted here: listed routes are the ones the user sees, and a route
+        // with a live session already has a runtime. Routes found stale are
+        // removed below, which drops them from later lists.
+        if (listed.length > 0) await server.refreshConfiguration();
         const checked = await Promise.all(
             listed.map(async (conversation) => {
                 const cwd = makeImCwd(
@@ -60,7 +67,9 @@ export function registerChannelsHandlers(): void {
                     conversation.peerId,
                     conversation.chatId,
                 );
-                const runtime = await server.ensureWorkspace(asWorkspaceId(cwd)).catch(() => null);
+                const runtime = await server
+                    .ensureWorkspace(asWorkspaceId(cwd), { refreshConfig: false })
+                    .catch(() => null);
                 if (!runtime) return conversation;
                 const sessions = await runtime.listSessions().catch(() => undefined);
                 // A read failure is not evidence that the route is stale.

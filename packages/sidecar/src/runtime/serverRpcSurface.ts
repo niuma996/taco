@@ -124,7 +124,15 @@ export interface ServerRpcSurface {
     /** Whether the active client negotiated a named additive capability. */
     supportsClientCapability?(name: string): boolean;
     workspaceIds(): WorkspaceId[];
-    ensureWorkspace(cwd: WorkspaceId): Promise<WorkspaceRuntime>;
+    /**
+     * Resolve (creating on first use) the runtime for `cwd`. `refreshConfig:
+     * false` skips the config re-read for batch callers that already refreshed
+     * once for the whole request.
+     */
+    ensureWorkspace(
+        cwd: WorkspaceId,
+        options?: { refreshConfig?: boolean },
+    ): Promise<WorkspaceRuntime>;
     disposeWorkspace(cwd: WorkspaceId): Promise<void>;
     getSessionEvents(
         workspace: WorkspaceId,

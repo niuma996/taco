@@ -468,6 +468,12 @@ export function useSidecarStream(
                 onActionRef({ type: "SET_SESSION_SYNC", cwd, sid, sync }),
             recoverSnapshot: (workspace, session, sessionKind, _lastSeq, _targetSeq, isCurrent) =>
                 onSnapshotRequiredRef(workspace, session, sessionKind, isCurrent),
+            // `execution` is only exposed by session.attach, so recovery probes it
+            // through a full attach. That is deliberate and safe: attach is
+            // idempotent for an already-attached session (the event ring early-
+            // returns, the registry returns the existing attachment), and a
+            // running session is necessarily attached server-side. The extra
+            // result fields are ignored here.
             probeExecution: async (workspace, session) => {
                 const attached = await clientRef.current.sessionAttach({
                     workspace: asWorkspaceId(workspace),

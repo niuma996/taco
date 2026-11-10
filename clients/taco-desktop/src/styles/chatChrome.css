@@ -90,7 +90,7 @@ main {
     background: var(--hover-overlay);
     color: var(--fg-dim);
     font: inherit;
-    font-size: 0.72rem;
+    font-size: var(--text-2xs);
     font-style: normal;
     line-height: 1.2;
     white-space: nowrap;

@@ -7,7 +7,6 @@
  * agents.delete  — remove one editable definition
  */
 
-import { join } from "node:path";
 import type {
     AgentsContentResult,
     AgentsDeleteResult,
@@ -23,6 +22,7 @@ import { registerMethod } from "../methodRegistry.ts";
 import {
     type AgentScopeContext,
     agentScopeOf,
+    agentsDirFor,
     deleteUserAgent,
     readUserAgent,
     userAgentsDir,
@@ -59,7 +59,7 @@ export function registerAgentsHandlers(): void {
                 ? await loadAgentDir(userAgentsDir(), "user")
                 : params.scope === "workspace"
                   ? ctx.workspaceDir
-                      ? await loadAgentDir(join(ctx.workspaceDir, ".taco", "agents"), "user")
+                      ? await loadAgentDir(agentsDirFor("workspace", ctx), "user")
                       : []
                   : workspace.agents;
         const agents = scopedAgents.map((a: AgentDefinition) => {

@@ -111,6 +111,7 @@ because a registered system-service daemon can outlive a desktop upgrade.
 | 2.12 | `waiting` Work status for askUser/planExit interactions; attempt-scoped continuation; permission requests appear as process-local Work projections and are cleared on daemon replacement. Clients that do not advertise `clientCapabilities.workWaiting` receive a compatibility projection (`running`, without waiting details). |
 | 2.13 | `work.cancel` targets the displayed `attemptId`; `work.delete` removes terminal records through a durable tombstone. Optional `attemptId` / `canCancel` fields support method-gated controls. |
 | 2.14 | Optional Agent layer selectors for `agents.list` / `agents.content` / `agents.delete`, `previousScope` for shadowed edits, and optional Skill provenance. Calls without these fields retain the effective-catalog behavior. |
+| 2.15 | `peer` scope for IM directory associations (most specific conversation → peer → channel); optional `name` / `updatedAt` on `channels.listConversations` entries; optional `execution` on `session.attach` results; `channels.conversations_changed` also fires on IM session rename and on route removal. |
 
 Adding a value to an existing response enum is potentially breaking: older clients
 may index exhaustive maps with it. Such values require connection-scoped capability

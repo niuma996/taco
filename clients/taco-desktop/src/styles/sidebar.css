@@ -275,7 +275,7 @@ ul.conversation-channel-list .session-item.active {
     border-radius: 999px;
     background: var(--hover-overlay);
     color: color-mix(in srgb, var(--fg-dim) 88%, transparent);
-    font-size: 0.64rem;
+    font-size: var(--text-2xs);
     font-weight: 500;
     letter-spacing: 0.015em;
     line-height: 1.35;
@@ -285,7 +285,7 @@ ul.conversation-channel-list .session-item.active {
 }
 
 .session-time {
-    font-size: 0.68rem;
+    font-size: var(--text-2xs);
     line-height: 1.35;
     color: color-mix(in srgb, var(--fg-dim) 78%, transparent);
     /* Single-line ellipsis: locale time strings don't wrap to two lines. */

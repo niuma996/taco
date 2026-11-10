@@ -1019,10 +1019,18 @@ export class SidecarServer implements ServerRpcSurface {
         return { skills, skillDiagnostics, agents, extensions };
     }
 
-    /** For handlers / method layer — lazily created on first access */
-    async ensureWorkspace(cwd: WorkspaceId): Promise<WorkspaceRuntime> {
+    /**
+     * For handlers / method layer — lazily created on first access.
+     *
+     * `refreshConfig: false` skips the per-call config re-read for batch callers
+     * that have already refreshed once (e.g. a read listing several cwds).
+     */
+    async ensureWorkspace(
+        cwd: WorkspaceId,
+        options: { refreshConfig?: boolean } = {},
+    ): Promise<WorkspaceRuntime> {
         if (this.stopped) throw new Error("sidecar is stopped");
-        await this.refreshConfiguration();
+        if (options.refreshConfig !== false) await this.refreshConfiguration();
         return this.workspaces.ensure(cwd);
     }
 

@@ -139,6 +139,25 @@ describe("Sidebar conversation groups", () => {
         expect(oneSearch.setQuery).toHaveBeenCalledWith("");
     });
 
+    it("keeps focus in a remaining search when another group's search closes", async () => {
+        const input = props();
+        render(<Sidebar {...input} />);
+        const user = userEvent.setup({ delay: null });
+
+        await user.click(screen.getByRole("button", { name: "conversationNav.expandGroup two" }));
+        const one = screen.getByRole("region", { name: "one" });
+        const two = screen.getByRole("region", { name: "two" });
+        await user.click(within(one).getByRole("button", { name: "pane.searchLabel" }));
+        await user.click(within(two).getByRole("button", { name: "pane.searchLabel" }));
+        const twoBox = within(two).getByRole("textbox", { name: "pane.searchLabel" });
+        expect(document.activeElement).toBe(twoBox);
+
+        await user.click(within(one).getByRole("button", { name: "pane.searchLabel" }));
+
+        expect(within(one).queryByRole("textbox", { name: "pane.searchLabel" })).toBeNull();
+        expect(document.activeElement).toBe(twoBox);
+    });
+
     it("shows all workspaces and opens a session with its own workspace identity", async () => {
         const input = props();
         render(<Sidebar {...input} />);

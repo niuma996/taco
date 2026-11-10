@@ -48,7 +48,8 @@ export interface AgentScopeContext {
     readonly allowedCwds?: readonly string[];
 }
 
-function agentsDirFor(scope: AgentScope, ctx: AgentScopeContext): string {
+/** Directory holding the definitions of one editable layer. */
+export function agentsDirFor(scope: AgentScope, ctx: AgentScopeContext): string {
     if (scope === "global") return userAgentsDir();
     if (ctx.workspaceDir === undefined) {
         throw new AgentWriteError(

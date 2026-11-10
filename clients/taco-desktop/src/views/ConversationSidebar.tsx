@@ -51,11 +51,22 @@ export interface ConversationSidebarProps {
 export function ConversationSidebar(props: ConversationSidebarProps) {
     const { t } = useT();
     const [openSearches, setOpenSearches] = useState<Set<string>>(() => new Set());
-    const searchInputRef = useRef<HTMLInputElement>(null);
+    // Keyed by group cwd: several groups can keep a search open at once, and a
+    // single shared ref would be nulled when any one of them unmounts.
+    const searchInputRefs = useRef(new Map<string, HTMLInputElement>());
+    const pendingSearchFocusRef = useRef<string | null>(null);
     const searchVisible = (groupCwd: string): boolean => openSearches.has(groupCwd);
 
     useEffect(() => {
-        if (openSearches.size > 0) searchInputRef.current?.focus();
+        const target = pendingSearchFocusRef.current;
+        pendingSearchFocusRef.current = null;
+        if (target !== null) {
+            searchInputRefs.current.get(target)?.focus();
+            return;
+        }
+        // Closed one of several searches: keep focus in a search that remains.
+        const remaining = openSearches.values().next();
+        if (!remaining.done) searchInputRefs.current.get(remaining.value)?.focus();
     }, [openSearches]);
 
     const [expandedGroupKeys, setExpandedGroupKeys] = useState<Set<string>>(
@@ -411,6 +422,8 @@ export function ConversationSidebar(props: ConversationSidebarProps) {
                                                                   return next;
                                                               });
                                                           } else {
+                                                              pendingSearchFocusRef.current =
+                                                                  group.cwd;
                                                               setOpenSearches((current) =>
                                                                   new Set(current).add(group.cwd),
                                                               );
@@ -443,7 +456,11 @@ export function ConversationSidebar(props: ConversationSidebarProps) {
                                           {searchVisible(group.cwd) && (
                                               <div className="conversation-sidebar-search">
                                                   <input
-                                                      ref={searchInputRef}
+                                                      ref={(node) => {
+                                                          const refs = searchInputRefs.current;
+                                                          if (node) refs.set(group.cwd, node);
+                                                          else refs.delete(group.cwd);
+                                                      }}
                                                       className="conversation-sidebar-search-input"
                                                       value={search.query}
                                                       onChange={(e) =>
