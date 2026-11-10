@@ -81,11 +81,22 @@
 }
 
 /* ── Section grid — the column count follows the pane width so the cards
-      always fill it instead of leaving a centred measure with dead space. ── */
+      always fill it instead of leaving a centred measure with dead space.
+      auto-fit (not auto-fill) collapses the tracks no card occupies, so a
+      short list stretches across the pane instead of trailing an empty
+      column. ── */
 .plugins-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(min(100%, 26rem), 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 26rem), 1fr));
     gap: var(--space-2);
+}
+
+/* A lone card would otherwise stretch across the whole window; cap it and
+   centre it in its track. */
+.plugins-grid > * {
+    width: 100%;
+    max-width: 52rem;
+    margin-inline: auto;
 }
 
 .plugins-section {
