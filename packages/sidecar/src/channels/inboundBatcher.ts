@@ -184,27 +184,36 @@ export async function submitPreparedBatch(
     log: Logger,
     items: readonly PreparedInbound[],
 ): Promise<void> {
-    const first = items[0];
     const text = items
         .map((item) => item.text.trim())
         .filter((line) => line !== "")
         .join("\n\n");
     const media = items.flatMap((item) => item.media ?? []);
     try {
-        const { sessionId } = await ctx.ingress.submit({
-            platformMessageId: first.platformMessageId,
-            channelId: first.channelId,
-            peerId: first.peerId,
-            chatId: first.chatId,
-            kind: media.length > 0 ? "media" : "text",
-            text,
-            ...(media.length > 0 ? { media } : {}),
-        });
+        const messages = items.map((item) => ({
+            platformMessageId: item.platformMessageId,
+            channelId: item.channelId,
+            peerId: item.peerId,
+            chatId: item.chatId,
+            kind: (item.media && item.media.length > 0 ? "media" : "text") as "media" | "text",
+            text: item.text,
+            ...(item.media && item.media.length > 0 ? { media: item.media } : {}),
+        }));
+        const submitted = ctx.ingress.submitBatch
+            ? await ctx.ingress.submitBatch(messages)
+            : await ctx.ingress.submit({
+                  ...messages[0],
+                  kind: media.length > 0 ? "media" : "text",
+                  text,
+                  ...(media.length > 0 ? { media } : {}),
+              });
+        const { sessionId } = submitted;
+        const batchId = "batchId" in submitted ? submitted.batchId : undefined;
         // peerId/chatId are platform user identifiers and logs persist to
         // disk — only sessionId is safe to record.
         log.child({ sid: sessionId }).info(
             items.length > 1
-                ? `inbound message routed (batch of ${items.length})`
+                ? `inbound message routed (batch of ${items.length}${batchId ? `, ${batchId}` : ""})`
                 : "inbound message routed",
         );
     } catch (e) {

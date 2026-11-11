@@ -1,5 +1,4 @@
 import { extname } from "node:path";
-import type { PromptParams, SteerResult } from "@taco-ai/protocol";
 import {
     ATTACHMENT_MAX_BYTES,
     ATTACHMENT_MAX_COUNT,
@@ -7,10 +6,14 @@ import {
     asWorkspaceId,
     createRpcRequest,
     ErrorCodes,
+    makeImCwd,
+    type PromptParams,
     RPC,
+    type SteerResult,
 } from "@taco-ai/protocol";
 import { stageFromData } from "../attachments/attachmentStore.ts";
 import { extensionForMime, isModelImageMime, sniffImageMime } from "../attachments/mimeType.ts";
+import type { InboxStore } from "../inbox/inboxStore.ts";
 import type { ServerRpcSurface } from "../runtime/serverRpcSurface.ts";
 import type { ConversationRouter } from "./conversationRouter.ts";
 import type {
@@ -31,6 +34,7 @@ export class DefaultChannelContext implements ChannelContext {
         private readonly router: ConversationRouter,
         private readonly store: ChannelConfigStore,
         readonly logger: Logger,
+        private readonly inbox?: InboxStore,
     ) {}
 
     get config(): ChannelConfigStore {
@@ -97,6 +101,59 @@ export class DefaultChannelContext implements ChannelContext {
                 }
 
                 return { sessionId }; // reply is P1 passive-reply; P0 always undefined
+            },
+            submitBatch: async (messages) => {
+                if (!this.inbox) {
+                    const first = messages[0];
+                    if (!first) throw new Error("cannot submit an empty inbound batch");
+                    const combined = messages
+                        .map((message) => message.text.trim())
+                        .filter((line) => line !== "")
+                        .join("\n\n");
+                    const media = messages.flatMap((message) => message.media ?? []);
+                    return this.ingress.submit({
+                        ...first,
+                        kind: media.length > 0 ? "media" : "text",
+                        text: combined,
+                        ...(media.length > 0 ? { media } : {}),
+                    });
+                }
+                const first = messages[0];
+                if (!first) throw new Error("cannot submit an empty inbound batch");
+                const accepted = [];
+                for (const message of messages) {
+                    const result = await this.inbox.accept({
+                        bindingId: this.store.getDeliveryBinding?.() ?? "unknown",
+                        channelId: message.channelId,
+                        peerId: message.peerId,
+                        chatId: message.chatId,
+                        platformMessageId: message.platformMessageId,
+                        workspace: makeImCwd(message.channelId, message.peerId, message.chatId),
+                        text: message.text,
+                        ...(message.media ? { media: message.media } : {}),
+                        receivedAt: Date.now(),
+                    });
+                    accepted.push(result.receipt);
+                }
+                const workspace = makeImCwd(first.channelId, first.peerId, first.chatId);
+                const frozen = await this.inbox.freezeBatch(
+                    workspace,
+                    accepted.map((receipt) => receipt.receiptId),
+                );
+                for (const receipt of accepted) await this.inbox.markProcessing(receipt);
+                const combined = messages
+                    .map((message) => message.text.trim())
+                    .filter((line) => line !== "")
+                    .join("\n\n");
+                const media = messages.flatMap((message) => message.media ?? []);
+                const result = await this.ingress.submit({
+                    ...first,
+                    platformMessageId: frozen.batch.batchId,
+                    kind: media.length > 0 ? "media" : "text",
+                    text: combined,
+                    ...(media.length > 0 ? { media } : {}),
+                });
+                return { ...result, batchId: frozen.batch.batchId };
             },
         };
     }

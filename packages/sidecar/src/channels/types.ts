@@ -33,6 +33,11 @@ export interface ChannelIngress {
     submit(
         msg: ChannelInboundMessage,
     ): Promise<{ sessionId: string; reply?: ChannelOutboundMessage }>;
+    /** Submit one already-frozen batch. Implementations with an inbox persist
+     * each member before dispatch; older test and plugin contexts may omit it. */
+    submitBatch?(
+        messages: readonly ChannelInboundMessage[],
+    ): Promise<{ sessionId: string; batchId?: string; reply?: ChannelOutboundMessage }>;
 }
 
 export interface ChannelConfigStore {

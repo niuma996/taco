@@ -78,6 +78,7 @@ import {
 import { tacoHome } from "../config/tacoHome.ts";
 import { activateExtensions } from "../extensions/activation.ts";
 import type { ExtensionRegistry, WorkspaceExtensionSet } from "../extensions/index.ts";
+import { InboxStore } from "../inbox/inboxStore.ts";
 import { createLogger } from "../lib/logger.ts";
 import { createPrivateMcpLease, McpScope } from "../mcp/mcpScope.ts";
 import { workspaceKey } from "../memory/local/store.ts";
@@ -355,6 +356,7 @@ export class SidecarServer implements ServerRpcSurface {
     readonly channelRegistry: ChannelRegistry;
     /** Process-level Work ledger and its delivery. */
     readonly work: WorkService;
+    readonly inbox: InboxStore;
     private readonly workPush: WorkPushAdapter;
     readonly channelBindBroker: ChannelBindBroker;
     /** Resolved by the ctor after the broker + router exist. */
@@ -564,6 +566,7 @@ export class SidecarServer implements ServerRpcSurface {
                     : "missing";
             },
         });
+        this.inbox = new InboxStore(join(tacoHome(), "inbox"));
         this.channelFactory = new ChannelFactory({
             broker: this.channelBindBroker,
             // Resolved at push time: the router only knows a route once the
@@ -737,6 +740,7 @@ export class SidecarServer implements ServerRpcSurface {
             this.conversationRouter,
             new FileChannelConfigStore(channelId, config),
             this.channelLogger(channelId),
+            this.inbox,
         );
     }
 
