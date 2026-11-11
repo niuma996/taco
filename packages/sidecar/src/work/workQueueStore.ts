@@ -3,7 +3,13 @@ import { mkdir, readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { restrictOwner } from "../lib/fsPermissions.ts";
 import { writeJsonAtomic } from "../store/atomicFile.ts";
-import { type IndexEntry, readIndex, sameStamp, stampOf, writeIndex } from "../store/indexFile.ts";
+import {
+    type IndexEntry,
+    readIndex,
+    sameStamp,
+    stampOf,
+    tryWriteIndex,
+} from "../store/indexFile.ts";
 import { SerialChain } from "../store/serial.ts";
 import {
     isQueueTerminal,
@@ -11,6 +17,9 @@ import {
     type WorkQueueEntry,
     type WorkQueueIntent,
 } from "./workQueueTypes.ts";
+
+/** Leading `_` so the id validator never treats the cache as a record. Shipped caches use this name. */
+export const QUEUE_INDEX_FILE = "_index.json";
 
 const SAFE_QUEUE_ID = /^q-[a-f0-9]{32}$/;
 const MAX_WAIT_MS = 24 * 60 * 60_000;
@@ -28,6 +37,12 @@ const QUEUE_STATUSES = [
 interface QueueSummary {
     readonly sequence: number;
     readonly status: WorkQueueEntry["status"];
+}
+
+interface AdmissionScan {
+    readonly byId: Map<string, QueueSummary>;
+    index: Record<string, IndexEntry<QueueSummary>>;
+    readonly hadIndex: boolean;
 }
 
 function isQueueStatus(value: unknown): value is WorkQueueEntry["status"] {
@@ -69,13 +84,19 @@ export class WorkQueueStore {
                 .slice(0, 32)}`;
             const existing = await this.read(queueId);
             if (existing) return { entry: existing, created: false };
-            const summaries = await this.summaries();
-            const open = [...summaries.values()].filter((s) => !isQueueTerminal(s.status)).length;
-            if (open >= this.pendingLimit) throw new Error("Work queue is full");
+            const scan = await this.summaries();
+            const open = [...scan.byId.values()].filter((s) => !isQueueTerminal(s.status)).length;
+            if (open >= this.pendingLimit) {
+                await this.persistIndex(scan);
+                throw new Error("Work queue is full");
+            }
             const sequence =
-                [...summaries.values()].reduce((max, s) => Math.max(max, s.sequence), 0) + 1;
+                [...scan.byId.values()].reduce((max, s) => Math.max(max, s.sequence), 0) + 1;
             const deadlineAt = intent.deadlineAt ?? now + MAX_WAIT_MS;
-            if (!Number.isFinite(deadlineAt)) throw new Error("invalid Work queue deadline");
+            if (!Number.isFinite(deadlineAt)) {
+                await this.persistIndex(scan);
+                throw new Error("invalid Work queue deadline");
+            }
             const entry: WorkQueueEntry = {
                 ...intent,
                 schemaVersion: 1,
@@ -88,6 +109,15 @@ export class WorkQueueStore {
                 deadlineAt,
             };
             await this.write(entry);
+            // Stamp after the record is on disk, or the cache is always one behind.
+            const stamp = await stampOf(this.path(entry.queueId));
+            if (stamp) {
+                scan.index[entry.queueId] = {
+                    stamp,
+                    summary: { sequence: entry.sequence, status: entry.status },
+                };
+            }
+            await this.persistIndex(scan);
             return { entry, created: true };
         });
     }
@@ -209,19 +239,19 @@ export class WorkQueueStore {
 
     /**
      * Per-record `{sequence, status}` for admission. A record whose file
-     * changed since the index was written is re-read, and a missing or stale
-     * index falls back to parsing every record. The index is written back so
-     * the next enqueue sees one refresh instead of a rescan.
+     * changed since the index was written is re-read. Does not write the
+     * index: the caller persists it after any new record is on disk.
      */
-    private async summaries(): Promise<Map<string, QueueSummary>> {
+    private async summaries(): Promise<AdmissionScan> {
         const ids = await this.ids();
         const cached = await readIndex<QueueSummary>(
             this.root,
+            QUEUE_INDEX_FILE,
             (id) => SAFE_QUEUE_ID.test(id),
             isQueueSummary,
         );
-        const result = new Map<string, QueueSummary>();
-        const next: Record<string, IndexEntry<QueueSummary>> = {};
+        const byId = new Map<string, QueueSummary>();
+        const index: Record<string, IndexEntry<QueueSummary>> = {};
         for (const id of ids) {
             const path = this.path(id);
             const stamp = await stampOf(path);
@@ -235,11 +265,16 @@ export class WorkQueueStore {
                 if (!entry) continue;
                 summary = { sequence: entry.sequence, status: entry.status };
             }
-            result.set(id, summary);
-            next[id] = { stamp, summary };
+            byId.set(id, summary);
+            index[id] = { stamp, summary };
         }
-        await writeIndex(this.root, next).catch(() => undefined);
-        return result;
+        return { byId, index, hadIndex: cached !== undefined };
+    }
+
+    /** A missing store is not created until a record exists. */
+    private async persistIndex(scan: AdmissionScan): Promise<void> {
+        if (Object.keys(scan.index).length === 0 && !scan.hadIndex) return;
+        await tryWriteIndex(this.root, QUEUE_INDEX_FILE, scan.index);
     }
 
     private async save(entry: WorkQueueEntry): Promise<WorkQueueEntry> {

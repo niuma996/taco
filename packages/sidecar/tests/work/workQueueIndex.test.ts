@@ -134,6 +134,14 @@ describe("WorkQueueStore derived index", () => {
         assert.ok(listed.every((e) => isSafeQueueId(e.queueId)));
     });
 
+    it("indexes the record it just wrote", async (t) => {
+        const { store, root } = await rig(t);
+        const a = (await store.enqueue(intent("a"))).entry;
+        const index = JSON.parse(await readFile(join(root, "_index.json"), "utf8"));
+        assert.equal(index.entries[a.queueId].summary.sequence, a.sequence);
+        assert.equal(index.entries[a.queueId].summary.status, "queued");
+    });
+
     it("keeps sequence monotonic across many enqueues", async (t) => {
         const { store } = await rig(t);
         const sequences: number[] = [];

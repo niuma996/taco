@@ -456,14 +456,7 @@ export class WorkService implements BackgroundWorkHooks, ScheduledWorkHooks, Wor
         sessionId: string,
         operationId: string,
     ): Promise<boolean> {
-        return (await this.store.list()).some(
-            (work) =>
-                work.status === "running" &&
-                work.attempt.cancelRequestedAt !== undefined &&
-                work.attempt.operation?.workspace === workspace &&
-                work.attempt.operation.sessionId === sessionId &&
-                work.attempt.operation.operationId === operationId,
-        );
+        return this.store.cancellationRequested(workspace, sessionId, operationId);
     }
 
     run<T>(workId: string, sessionId: string, run: (attemptId: string) => Promise<T>): Promise<T> {
