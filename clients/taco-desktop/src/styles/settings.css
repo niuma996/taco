@@ -69,7 +69,7 @@
 .settings-tab h3 {
     margin: 0 0 var(--space-1-5) 0;
     font-size: var(--text-md);
-    font-weight: var(--weight-semibold);
+    font-weight: var(--weight-title);
 }
 /* Second and subsequent h3 within a settings-tab: extra top spacing for visual separation. */
 .settings-tab h3.settings-tab-h3-secondary {
@@ -172,7 +172,7 @@
     cursor: pointer;
     color: var(--fg);
     font-size: var(--text-sm);
-    font-weight: var(--weight-semibold);
+    font-weight: var(--weight-title);
 }
 .permission-builtin .settings-tab-desc {
     margin: var(--space-2) 0;
@@ -691,7 +691,7 @@
     flex-wrap: wrap;
 }
 .mcp-server-name {
-    font-weight: var(--weight-medium);
+    font-weight: var(--weight-title);
     color: var(--fg);
     font-family: var(--mono);
     font-size: var(--text-sm);

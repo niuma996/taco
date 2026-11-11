@@ -231,8 +231,8 @@ header.topbar .topbar-picker-group {
     border: 0;
     border-radius: var(--radius-sm);
     padding: 0.35rem 0.4rem;
-    font-weight: 600;
-    font-size: 0.95rem;
+    font-weight: var(--weight-title);
+    font-size: var(--text-md);
     line-height: 1.2;
     cursor: pointer;
     -webkit-app-region: no-drag;
@@ -970,7 +970,7 @@ body[data-panel-resizing="true"] .subagent-panel {
 }
 
 .right-panel-title {
-    font-weight: 600;
+    font-weight: var(--weight-title);
     /* Same token PaneHeader uses, so all three right panels (task, files,
        subagents) render their title at one size — FilesDrawer previously
        inherited the body size and dwarfed the other two. */
@@ -1048,8 +1048,8 @@ body[data-panel-resizing="true"] .subagent-panel {
 
 .task-history-heading {
     margin: 0 0 6px;
-    font-size: 11px;
-    font-weight: 600;
+    font-size: var(--text-2xs);
+    font-weight: var(--weight-title);
     color: var(--fg-dim);
     text-transform: uppercase;
     letter-spacing: 0.04em;

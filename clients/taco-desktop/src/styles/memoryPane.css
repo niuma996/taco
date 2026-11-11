@@ -108,7 +108,7 @@
     background: var(--pane-list-bg);
     color: var(--fg-dim);
     font-size: var(--text-2xs);
-    font-weight: var(--weight-semibold);
+    font-weight: var(--weight-title);
     letter-spacing: 0.04em;
     text-transform: uppercase;
 }
@@ -184,7 +184,7 @@
     -webkit-line-clamp: 2;
     min-height: calc(2 * var(--leading-tight) * var(--text-base));
     font-size: var(--text-base);
-    font-weight: var(--weight-semibold);
+    font-weight: var(--weight-title);
     text-align: left;
     line-height: var(--leading-tight);
     word-break: break-word;
@@ -249,7 +249,7 @@
    opacity on dim text in the light theme falls below a readable contrast. */
 .memory-topic-card.archived .memory-card-title {
     color: var(--fg-dim);
-    font-weight: var(--weight-medium);
+    font-weight: var(--weight-title);
 }
 
 .memory-topic-card.archived:hover .memory-card-title,
@@ -371,7 +371,7 @@
     min-width: 0;
     margin: 0;
     font-size: var(--text-lg);
-    font-weight: var(--weight-semibold);
+    font-weight: var(--weight-title);
     line-height: var(--leading-tight);
     word-break: break-word;
 }
@@ -569,7 +569,7 @@
 .memory-dream-header h2 {
     margin: 0;
     font-size: var(--text-lg);
-    font-weight: var(--weight-semibold);
+    font-weight: var(--weight-title);
 }
 
 .memory-dream-subtitle {
@@ -662,7 +662,7 @@
 .memory-dream-group-label {
     color: var(--fg-dim);
     font-size: var(--text-2xs);
-    font-weight: var(--weight-semibold);
+    font-weight: var(--weight-title);
     letter-spacing: 0.04em;
     text-transform: uppercase;
 }
@@ -786,7 +786,7 @@
 .memory-view-sources h3 {
     margin: 0 0 var(--space-2);
     font-size: inherit;
-    font-weight: var(--weight-semibold);
+    font-weight: var(--weight-title);
 }
 
 .memory-view-sources ul {

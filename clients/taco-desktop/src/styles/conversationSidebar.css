@@ -40,7 +40,7 @@ aside.conversation-sidebar {
 
 .conversation-sidebar-title {
     font-size: var(--text-sm);
-    font-weight: 650;
+    font-weight: var(--weight-title);
 }
 
 .conversation-sidebar-header-actions {

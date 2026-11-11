@@ -124,7 +124,7 @@
     display: -webkit-box;
     -webkit-box-orient: vertical;
     -webkit-line-clamp: 2;
-    font-weight: var(--weight-semibold);
+    font-weight: var(--weight-title);
     line-height: var(--leading-tight);
     word-break: break-word;
 }
@@ -200,7 +200,7 @@
 .tools-detail-name {
     margin: 0 0 var(--space-1-5) 0;
     font-size: var(--text-lg);
-    font-weight: var(--weight-semibold);
+    font-weight: var(--weight-title);
     overflow-wrap: anywhere;
 }
 
@@ -232,7 +232,7 @@
     letter-spacing: 0.06em;
     color: var(--fg-dim);
     margin: 0 0 var(--space-1-5) 0;
-    font-weight: var(--weight-semibold);
+    font-weight: var(--weight-title);
 }
 
 .tools-detail-schema {

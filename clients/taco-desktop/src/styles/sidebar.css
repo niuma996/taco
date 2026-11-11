@@ -245,7 +245,7 @@ ul.conversation-channel-list .session-item.active {
 .session-id {
     font-family: inherit;
     font-size: var(--text-sm);
-    font-weight: 550;
+    font-weight: var(--weight-title);
     line-height: 1.35;
     color: var(--fg);
     /* Single-line ellipsis: long session names truncate with ellipsis.

@@ -144,8 +144,8 @@ button.session-info-context.switchable[data-state="open"] {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    font-size: 0.85rem;
-    font-weight: 600;
+    font-size: var(--text-base);
+    font-weight: var(--weight-title);
     color: var(--fg);
 }
 .session-info-id {

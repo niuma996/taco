@@ -216,6 +216,11 @@
     --weight-normal: 400;
     --weight-medium: 500;
     --weight-semibold: 600;
+    /* Title role weight — pane titles, item titles and the uppercase micro
+       labels all share it, so a title reads as structure rather than
+       emphasis. Separate from --weight-normal so titles can be retuned
+       without touching ordinary body text. */
+    --weight-title: 400;
 
     /* Tight headings, normal controls and metadata, relaxed reading prose. */
     --leading-tight: 1.3;

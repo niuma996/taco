@@ -351,8 +351,8 @@ html *:hover {
 }
 .error-fallback-title {
     margin: 0 0 0.6rem 0;
-    font-size: 1.1rem;
-    font-weight: 600;
+    font-size: var(--text-lg);
+    font-weight: var(--weight-title);
     color: var(--error);
 }
 .error-fallback-message {
@@ -502,7 +502,7 @@ html *:hover {
 .onboarding-step h2 {
     margin: 0;
     font-size: 1.6rem;
-    font-weight: 600;
+    font-weight: var(--weight-title);
     letter-spacing: -0.02em;
     line-height: 1.2;
 }
@@ -568,7 +568,7 @@ html *:hover {
 .onboarding-welcome-language-label {
     font-size: var(--text-sm);
     color: var(--fg-dim);
-    font-weight: 500;
+    font-weight: var(--weight-title);
 }
 
 /* Language step picker — wider so options don't wrap */
