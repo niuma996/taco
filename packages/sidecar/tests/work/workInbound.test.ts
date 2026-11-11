@@ -115,9 +115,9 @@ it("tracks one frozen batch as one inbound Work and delivers one final reply", a
 });
 
 it("runs scheduled fires through the durable queue without legacy followUp", async (t) => {
-    const { service, calls } = await rig(t);
+    const { root, service, calls } = await rig(t);
     const reported: string[] = [];
-    const result = await service.queueScheduled(
+    const pending = service.queueScheduled(
         {
             jobId: "job",
             fireId: "fire",
@@ -129,6 +129,15 @@ it("runs scheduled fires through the durable queue without legacy followUp", asy
         },
         (workId) => reported.push(workId),
     );
+    // `queueScheduled` resolves through the queue's own unref'd wake timer, so
+    // awaiting it alone can leave the event loop empty. Poll the ledger with a
+    // ref'd timer instead; once the entry is terminal the await returns at once.
+    const queue = new WorkQueueStore(join(root, "queue"));
+    await eventually(
+        async () => (await queue.list())[0]?.status,
+        (status) => status === "completed",
+    );
+    const result = await pending;
     assert.equal(result.status, "completed");
     assert.ok(result.workId);
     assert.deepEqual(reported, [result.workId]);

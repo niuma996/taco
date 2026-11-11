@@ -326,12 +326,14 @@ describe("work.delivery", () => {
             await deliverer.deliver(id);
             assert.equal(sender.calls.length, 1);
             clock.advance(UNAVAILABLE_RETRY_MS + 1);
+            // The re-arm happens after the send result is persisted. Observe both
+            // in one condition: checking the send alone can catch the gap where
+            // the fired timer is dead and the next one is not armed yet.
             await until(
-                async () => sender.calls.length === 2,
-                "the next probe without a reconnect",
+                async () => sender.calls.length === 2 && clock.pending === 1,
+                "the next probe was armed after a reconnect-less send",
             );
             assert.equal((await deliveryOf(store, id))?.status, "pending");
-            assert.equal(clock.pending, 1, "the next probe is armed");
         });
 
         it("a channel that never comes back still lets the notice expire", async () => {
