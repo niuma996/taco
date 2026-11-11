@@ -275,6 +275,20 @@ export class WeComChannelHandle implements ChannelHandle {
         client.on("authenticated", () => {
             if (stale()) return;
             broker.setState(ctx.channelId, "connected");
+            void ctx.ingress
+                .recoverPrepared?.(
+                    "wecom",
+                    (data) => this.prepareStored(client, data),
+                    (message) => {
+                        if (!stale())
+                            this.enqueue(
+                                message.peerId,
+                                message.chatId,
+                                Promise.resolve({ ...message, media: message.media }),
+                            );
+                    },
+                )
+                .catch(() => ctx.logger.error("inbox recovery failed"));
         });
         client.on("error", (...args: unknown[]) => {
             if (stale()) return;
@@ -299,7 +313,7 @@ export class WeComChannelHandle implements ChannelHandle {
             this.enqueue(
                 peerId,
                 frame.body.chatid,
-                this.prepareMedia(client, frame.body.msgid, peerId, frame.body.chatid, {
+                this.prepareReceived(client, frame.body.msgid, peerId, frame.body.chatid, {
                     url: media.url,
                     aesKey: media.aeskey,
                     name: "image",
@@ -318,7 +332,7 @@ export class WeComChannelHandle implements ChannelHandle {
             this.enqueue(
                 peerId,
                 frame.body.chatid,
-                this.prepareMedia(client, frame.body.msgid, peerId, frame.body.chatid, {
+                this.prepareReceived(client, frame.body.msgid, peerId, frame.body.chatid, {
                     url: media.url,
                     aesKey: media.aeskey,
                     name: "file",
@@ -344,18 +358,18 @@ export class WeComChannelHandle implements ChannelHandle {
             // cursor) so session.prompt's commandId idempotency catches
             // redeliveries. Falling back to the user/chat pair is a safety
             // net for an SDK upgrade that drops the field.
-            const platformMessageId = body.msgid || `${peerId}-${chatId}-${Date.now()}`;
+            const platformMessageId = body.msgid;
             this.enqueue(
                 peerId,
                 chatId,
-                Promise.resolve({
+                this.prepareReceived(
+                    client,
                     platformMessageId,
-                    channelId: ctx.channelId,
                     peerId,
                     chatId,
-                    text: body.text.content,
-                    media: undefined,
-                }),
+                    undefined,
+                    body.text.content,
+                ),
             );
         });
     }
@@ -370,6 +384,50 @@ export class WeComChannelHandle implements ChannelHandle {
         item: Promise<PreparedInbound | undefined>,
     ): void {
         this.batcher?.push(`${peerId}\u0000${chatId?.trim() || peerId}`, item);
+    }
+
+    private async prepareStored(client: WeComClientLike, data: unknown) {
+        const stored = data as {
+            platformMessageId: string;
+            peerId: string;
+            chatId: string;
+            text: string;
+            media?: { url: string; aesKey?: string; name: string; kind: "image" | "file" };
+        };
+        return stored.media
+            ? this.prepareMedia(
+                  client,
+                  stored.platformMessageId,
+                  stored.peerId,
+                  stored.chatId,
+                  stored.media,
+              )
+            : { ...stored, channelId: this.ctx.channelId, media: undefined };
+    }
+
+    private async prepareReceived(
+        client: WeComClientLike,
+        platformMessageId: string,
+        peerId: string,
+        chatId: string | undefined,
+        media?: { url: string; aesKey?: string; name: string; kind: "image" | "file" },
+        text = "",
+    ): Promise<PreparedInbound | undefined> {
+        const data = { platformMessageId, peerId, chatId: chatId?.trim() || peerId, media, text };
+        const prepare = () => this.prepareStored(client, data);
+        const message = this.ctx.ingress.prepare
+            ? await this.ctx.ingress.prepare(
+                  {
+                      ...data,
+                      media: undefined,
+                      channelId: this.ctx.channelId,
+                      bindingId: this.clientBinding,
+                  },
+                  { format: "wecom", data },
+                  prepare,
+              )
+            : await prepare();
+        return message ? { ...message, media: message.media } : undefined;
     }
 
     /**

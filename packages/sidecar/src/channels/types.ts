@@ -33,11 +33,21 @@ export interface ChannelIngress {
     submit(
         msg: ChannelInboundMessage,
     ): Promise<{ sessionId: string; reply?: ChannelOutboundMessage }>;
-    /** Submit one already-frozen batch. Implementations with an inbox persist
-     * each member before dispatch; older test and plugin contexts may omit it. */
+    /** Candidate members are deduplicated before a durable ingress freezes their batch. */
     submitBatch?(
         messages: readonly ChannelInboundMessage[],
     ): Promise<{ sessionId: string; batchId?: string; reply?: ChannelOutboundMessage }>;
+    /** Persist an adapter's recoverable source before media download or batching. */
+    prepare?(
+        message: ChannelInboundMessage,
+        source: { format: string; data: unknown },
+        prepare: () => Promise<ChannelInboundMessage | undefined>,
+    ): Promise<ChannelInboundMessage | undefined>;
+    recoverPrepared?(
+        format: string,
+        prepare: (data: unknown) => Promise<ChannelInboundMessage | undefined>,
+        ready: (message: ChannelInboundMessage) => void,
+    ): Promise<void>;
 }
 
 export interface ChannelConfigStore {
@@ -118,7 +128,9 @@ export type ChannelRouteResolver = (sessionId: string) => ImRoute | undefined;
 
 /** Unified inbound message model. kind discriminates the union: P1 platform callbacks / menu clicks use "event". */
 export interface ChannelInboundMessage {
+    readonly bindingId?: string;
     readonly platformMessageId: string;
+    readonly platformTimestamp?: number;
     readonly channelId: string;
     readonly peerId: string;
     readonly chatId: string;

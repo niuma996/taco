@@ -405,6 +405,35 @@ export class WeChatChannel implements Channel {
                 },
             });
 
+            const recoverInbound = () => {
+                if (!active()) return;
+                void ctx.ingress
+                    .recoverPrepared?.(
+                        "wechat",
+                        async (data) => {
+                            const msg = data as IncomingLike;
+                            return prepareInbound(
+                                ctx,
+                                log,
+                                bot,
+                                msg,
+                                msg.userId,
+                                msg.raw.group_id?.trim() || msg.userId,
+                            );
+                        },
+                        (message) => {
+                            if (active())
+                                batcher.push(
+                                    `${message.peerId}\u0000${message.chatId}`,
+                                    Promise.resolve({ ...message, media: message.media }),
+                                );
+                        },
+                    )
+                    .catch(() => log.error("inbox recovery failed"));
+            };
+            bot.on("poll:start", recoverInbound);
+            recoverInbound();
+
             bot.onMessage((msg) => {
                 if (!active()) return;
                 markHealthy();
@@ -419,10 +448,31 @@ export class WeChatChannel implements Channel {
                 const chatId = msg.raw.group_id?.trim() || msg.userId;
                 // The sender is part of the key as well as the chat: two people
                 // writing in a group are two turns, not one.
+                const source = {
+                    platformMessageId: String(
+                        msg.raw.message_id ??
+                            msg.raw.client_id ??
+                            msg.raw.seq ??
+                            `${peerId}-${chatId}-${msg.raw.create_time_ms}`,
+                    ),
+                    channelId: ctx.channelId,
+                    peerId,
+                    chatId,
+                    text: msg.text,
+                    bindingId: binding.value,
+                };
+                const prepare = () => prepareInbound(ctx, log, bot, msg, peerId, chatId);
+                const prepared = ctx.ingress.prepare
+                    ? ctx.ingress.prepare(source, { format: "wechat", data: msg }, prepare)
+                    : prepare();
                 batcher.push(
                     `${peerId}\u0000${chatId}`,
-                    prepareInbound(ctx, log, bot, msg, peerId, chatId),
+                    prepared.then((message) =>
+                        message ? { ...message, media: message.media } : undefined,
+                    ),
                 );
+                // SDKs that await callbacks can only advance after durable admission.
+                return prepared.then(() => undefined);
             });
 
             return {

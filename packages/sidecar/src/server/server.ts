@@ -650,6 +650,7 @@ export class SidecarServer implements ServerRpcSurface {
         this.conversationRouter ??= await ConversationRouter.load(tacoHome());
         this.conversationRouter.on("conversation", this.onRouterConversation);
         this.channelConfigs = channelConfigs;
+        await this.inbox.cleanup().catch(() => log.error("inbox recovery or cleanup failed"));
         this.channelBindBroker.on("status", this.onBrokerStatus);
         const startedChannelIds: string[] = [];
         if (channelConfigs.length > 0) {
@@ -741,6 +742,7 @@ export class SidecarServer implements ServerRpcSurface {
             new FileChannelConfigStore(channelId, config),
             this.channelLogger(channelId),
             this.inbox,
+            () => this.channelRegistry.getDeliveryBinding(channelId),
         );
     }
 

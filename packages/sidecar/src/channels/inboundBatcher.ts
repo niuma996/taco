@@ -166,6 +166,7 @@ export class InboundBatcher<T> {
 
 /** One inbound message, downloaded and ready to join its chat's batch. */
 export interface PreparedInbound {
+    readonly bindingId?: string;
     readonly platformMessageId: string;
     readonly channelId: string;
     readonly peerId: string;
@@ -177,7 +178,7 @@ export interface PreparedInbound {
 /**
  * Submit one chat's batch as a single prompt — wording and pictures in one
  * user turn, so the model sees the picture its caption talks about. The
- * batch's first message names the command, so a redelivery of it still dedups.
+ * durable ingress deduplicates members before choosing the immutable batch id.
  */
 export async function submitPreparedBatch(
     ctx: ChannelContext,
@@ -191,6 +192,7 @@ export async function submitPreparedBatch(
     const media = items.flatMap((item) => item.media ?? []);
     try {
         const messages = items.map((item) => ({
+            ...(item.bindingId ? { bindingId: item.bindingId } : {}),
             platformMessageId: item.platformMessageId,
             channelId: item.channelId,
             peerId: item.peerId,

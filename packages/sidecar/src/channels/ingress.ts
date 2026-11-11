@@ -6,7 +6,6 @@ import {
     asWorkspaceId,
     createRpcRequest,
     ErrorCodes,
-    makeImCwd,
     type PromptParams,
     RPC,
     type SteerResult,
@@ -16,9 +15,11 @@ import { extensionForMime, isModelImageMime, sniffImageMime } from "../attachmen
 import type { InboxStore } from "../inbox/inboxStore.ts";
 import type { ServerRpcSurface } from "../runtime/serverRpcSurface.ts";
 import type { ConversationRouter } from "./conversationRouter.ts";
+import { combineInbound, InboxIngress } from "./inboxIngress.ts";
 import type {
     ChannelConfigStore,
     ChannelContext,
+    ChannelInboundMessage,
     ChannelIngress,
     ChannelMediaRef,
     Logger,
@@ -28,134 +29,100 @@ import type {
  *  layer reverse-depending on server layer), instead injecting the narrow ServerRpcSurface
  *  interface and ConversationRouter. */
 export class DefaultChannelContext implements ChannelContext {
+    private readonly durableIngress?: InboxIngress;
     constructor(
         readonly channelId: string,
         private readonly hook: ServerRpcSurface,
         private readonly router: ConversationRouter,
         private readonly store: ChannelConfigStore,
         readonly logger: Logger,
-        private readonly inbox?: InboxStore,
-    ) {}
+        inbox?: InboxStore,
+        binding?: () => string | undefined,
+    ) {
+        if (inbox)
+            this.durableIngress = new InboxIngress(
+                channelId,
+                inbox,
+                () => binding?.() ?? store.getDeliveryBinding?.(),
+                (message) => router.route(hook, channelId, message.peerId, message.chatId),
+                (message) => this.submitLegacy(message),
+            );
+    }
 
     get config(): ChannelConfigStore {
         return this.store;
     }
 
     get ingress(): ChannelIngress {
-        return {
-            submit: async (msg) => {
-                // route() derives the sessionId from the (channelId, peerId, chatId)
-                // triple and returns it. Reusing the same triple across messages
-                // routes to the same session; the router persists the choice in
-                // routing.json so the peer+chat conversation has a stable UUID
-                // across restarts. Passing a caller-supplied sessionId here would
-                // race with that derivation and leak per-message ids into
-                // routing.json, so we deliberately do not.
-                const { workspace, sessionId } = await this.router.route(
-                    this.hook,
-                    msg.channelId,
-                    msg.peerId,
-                    msg.chatId,
-                );
+        return (
+            this.durableIngress ?? {
+                submit: (message) => this.submitLegacy(message),
+                submitBatch: (messages) => this.submitLegacy(combineInbound(messages)),
+            }
+        );
+    }
 
-                // route() already created the empty session; here we separately deliver
-                // the real text prompt — two steps rather than session.create with an
-                // initialPrompt — so that route() can return a stable sessionId first
-                // and then this dispatches the actual message. platformMessageId is
-                // used as the RPC id for idempotency.
-                // platformMessageId doubles as both RPC id and commandId:
-                // id is used for frame-level response / tracing, commandId for sidecar command idempotency dedup.
-                const id = msg.platformMessageId;
-                const staged = await stageMedia(msg.media, workspace);
-                // A refusal is otherwise invisible: the prompt names only the
-                // attachments that arrived, and the sender is never told a
-                // file was lost. The note in the prompt and this log say so.
-                if (staged.refused > 0) {
-                    this.logger.warn(
-                        `media not staged (${msg.platformMessageId}): ${staged.refused} file(s)`,
-                    );
-                }
-                const params: PromptParams = {
-                    workspace: asWorkspaceId(workspace),
-                    sessionId: asSessionId(sessionId),
-                    text: withUndeliveredNote(msg.text, staged),
-                    // Media travels as attachments only. The composer inlines
-                    // an image when the model can see one and names the file
-                    // in the hidden tag either way — inlining here as well
-                    // would send the model the same picture twice.
-                    attachments: staged.ids,
-                };
-                const res = await this.hook.dispatchRpc?.(
-                    createRpcRequest(id, RPC.sessionPrompt, params, id),
-                );
-                // Without this the failure is invisible: submit() still returns a
-                // sessionId and the peer simply never receives a reply.
-                if (res?.ok === false) {
-                    if (res.error.code === ErrorCodes.SessionBusy) {
-                        await this.deliverAsFollowUp(id, params, sessionId);
-                    } else {
-                        this.logger
-                            .child({ sid: sessionId })
-                            .warn(`prompt rejected: ${res.error.code} ${res.error.message}`);
-                    }
-                }
+    private async submitLegacy(
+        msg: ChannelInboundMessage,
+    ): Promise<{ sessionId: string; failed?: boolean }> {
+        // route() derives the sessionId from the (channelId, peerId, chatId)
+        // triple and returns it. Reusing the same triple across messages
+        // routes to the same session; the router persists the choice in
+        // routing.json so the peer+chat conversation has a stable UUID
+        // across restarts. Passing a caller-supplied sessionId here would
+        // race with that derivation and leak per-message ids into
+        // routing.json, so we deliberately do not.
+        const { workspace, sessionId } = await this.router.route(
+            this.hook,
+            msg.channelId,
+            msg.peerId,
+            msg.chatId,
+        );
 
-                return { sessionId }; // reply is P1 passive-reply; P0 always undefined
-            },
-            submitBatch: async (messages) => {
-                if (!this.inbox) {
-                    const first = messages[0];
-                    if (!first) throw new Error("cannot submit an empty inbound batch");
-                    const combined = messages
-                        .map((message) => message.text.trim())
-                        .filter((line) => line !== "")
-                        .join("\n\n");
-                    const media = messages.flatMap((message) => message.media ?? []);
-                    return this.ingress.submit({
-                        ...first,
-                        kind: media.length > 0 ? "media" : "text",
-                        text: combined,
-                        ...(media.length > 0 ? { media } : {}),
-                    });
-                }
-                const first = messages[0];
-                if (!first) throw new Error("cannot submit an empty inbound batch");
-                const accepted = [];
-                for (const message of messages) {
-                    const result = await this.inbox.accept({
-                        bindingId: this.store.getDeliveryBinding?.() ?? "unknown",
-                        channelId: message.channelId,
-                        peerId: message.peerId,
-                        chatId: message.chatId,
-                        platformMessageId: message.platformMessageId,
-                        workspace: makeImCwd(message.channelId, message.peerId, message.chatId),
-                        text: message.text,
-                        ...(message.media ? { media: message.media } : {}),
-                        receivedAt: Date.now(),
-                    });
-                    accepted.push(result.receipt);
-                }
-                const workspace = makeImCwd(first.channelId, first.peerId, first.chatId);
-                const frozen = await this.inbox.freezeBatch(
-                    workspace,
-                    accepted.map((receipt) => receipt.receiptId),
-                );
-                for (const receipt of accepted) await this.inbox.markProcessing(receipt);
-                const combined = messages
-                    .map((message) => message.text.trim())
-                    .filter((line) => line !== "")
-                    .join("\n\n");
-                const media = messages.flatMap((message) => message.media ?? []);
-                const result = await this.ingress.submit({
-                    ...first,
-                    platformMessageId: frozen.batch.batchId,
-                    kind: media.length > 0 ? "media" : "text",
-                    text: combined,
-                    ...(media.length > 0 ? { media } : {}),
-                });
-                return { ...result, batchId: frozen.batch.batchId };
-            },
+        // route() already created the empty session; here we separately deliver
+        // the real text prompt — two steps rather than session.create with an
+        // initialPrompt — so that route() can return a stable sessionId first
+        // and then this dispatches the actual message. platformMessageId is
+        // used as the RPC id for idempotency.
+        // platformMessageId doubles as both RPC id and commandId:
+        // id is used for frame-level response / tracing, commandId for sidecar command idempotency dedup.
+        const id = msg.platformMessageId;
+        const staged = await stageMedia(msg.media, workspace);
+        // A refusal is otherwise invisible: the prompt names only the
+        // attachments that arrived, and the sender is never told a
+        // file was lost. The note in the prompt and this log say so.
+        if (staged.refused > 0) {
+            this.logger.warn(
+                `media not staged (${msg.platformMessageId}): ${staged.refused} file(s)`,
+            );
+        }
+        const params: PromptParams = {
+            workspace: asWorkspaceId(workspace),
+            sessionId: asSessionId(sessionId),
+            text: withUndeliveredNote(msg.text, staged),
+            // Media travels as attachments only. The composer inlines
+            // an image when the model can see one and names the file
+            // in the hidden tag either way — inlining here as well
+            // would send the model the same picture twice.
+            attachments: staged.ids,
         };
+        const res = await this.hook.dispatchRpc?.(
+            createRpcRequest(id, RPC.sessionPrompt, params, id),
+        );
+        // Without this the failure is invisible: submit() still returns a
+        // sessionId and the peer simply never receives a reply.
+        let failed = res?.ok === false;
+        if (res?.ok === false) {
+            if (res.error.code === ErrorCodes.SessionBusy) {
+                failed = !(await this.deliverAsFollowUp(id, params, sessionId));
+            } else {
+                this.logger
+                    .child({ sid: sessionId })
+                    .warn(`prompt rejected: ${res.error.code} ${res.error.message}`);
+            }
+        }
+
+        return failed ? { sessionId, failed: true } : { sessionId };
     }
 
     /**
@@ -178,16 +145,16 @@ export class DefaultChannelContext implements ChannelContext {
         id: string,
         params: PromptParams,
         sessionId: string,
-    ): Promise<void> {
+    ): Promise<boolean> {
         const log = this.logger.child({ sid: sessionId });
         const queued = await this.hook.dispatchRpc?.(
             createRpcRequest(`${id}:followUp`, RPC.sessionFollowUp, params, `${id}:followUp`),
         );
         if (queued?.ok === false) {
             log.warn(`followUp fallback rejected: ${queued.error.code} ${queued.error.message}`);
-            return;
+            return false;
         }
-        if ((queued?.result as SteerResult | undefined)?.mode !== "idle") return;
+        if ((queued?.result as SteerResult | undefined)?.mode !== "idle") return true;
         const retry = await this.hook.dispatchRpc?.(
             createRpcRequest(`${id}:retry`, RPC.sessionPrompt, params, `${id}:retry`),
         );
@@ -196,6 +163,7 @@ export class DefaultChannelContext implements ChannelContext {
                 `prompt retry after idle followUp rejected: ${retry.error.code} ${retry.error.message}`,
             );
         }
+        return retry?.ok !== false;
     }
 }
 

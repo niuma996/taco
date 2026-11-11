@@ -118,7 +118,7 @@ for (const mode of [
                 channelId: "wecom",
                 peerId: "u1",
                 chatId: "c1",
-                platformMessageId: id,
+                platformMessageId: `${mode}:${id}`,
                 text: id,
                 kind: "text",
             });
