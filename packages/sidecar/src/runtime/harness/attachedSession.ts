@@ -36,6 +36,7 @@ import { contextFor, harnessContext } from "../../lib/harnessContext.ts";
 import { createLogger } from "../../lib/logger.ts";
 import { createTopicUsageTracker } from "../../memory/dream/usageTracker.ts";
 import { MemoryExtractorImpl, type MemoryStore } from "../../memory/index.ts";
+import type { PlanWriteApprover } from "../../permissions/mutationGate.ts";
 import type { PlanModeState } from "../../plan/planModeState.ts";
 import type { SkillReinjectorHandle } from "../../skills/skillReinjector.ts";
 import type { TacoSkill } from "../../skills/tacoSkill.ts";
@@ -182,6 +183,11 @@ export interface AttachedSessionOptions {
      * a grant added or removed mid-session reaches the next turn.
      */
     getAssociatedRoots?: () => readonly string[];
+    /**
+     * Asks the user to approve a plan-mode write outside the plan document.
+     * Absent in contexts with no approval UI; the gate then keeps refusing.
+     */
+    requestPlanWriteApproval?: PlanWriteApprover;
     /** User-level memory store — drives extraction + context injection. */
     memoryStore?: MemoryStore;
     /** Read-through store for inherited context; defaults to `memoryStore`. */
@@ -831,6 +837,9 @@ export class AttachedSession extends EventEmitter {
                           extra: [args.attachmentsDir],
                       }
                     : undefined,
+                // Plan mode's one escape hatch: the user approves a write
+                // outside the plan document through the desktop prompt.
+                requestPlanWriteApproval: args.requestPlanWriteApproval,
                 checkpointManager: attached.checkpoints,
                 // Passed through, not currently read: keeps the pinOnce wiring
                 // live end-to-end so a future pinOnce tag only touches its hook.

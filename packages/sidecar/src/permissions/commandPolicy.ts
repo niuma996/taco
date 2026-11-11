@@ -163,7 +163,13 @@ const SHELL_METACHARACTERS = /[<>|;&$`\n(){}[\]*?]/;
 // Colon / tilde / caret / at / percent show up in git revisions
 // (`HEAD:path`, `HEAD~1`, `main^2`, `@`, `--pretty=format:%s`). None of
 // these are shell metacharacters, so they stay in the literal class.
-const SAFE_LITERAL = /^--?[A-Za-z0-9_+/,+=:@^~%-]+$|^[A-Za-z0-9_./,+=:@^~%-]+$/;
+//
+// `\p{L}\p{N}` admits non-ASCII text: `echo "=== 说明 ==="` and
+// `grep "中文"` are ordinary inspection commands, and rejecting them made
+// plan mode refuse read-only checks written in a non-English language.
+// `containsShellSyntax` has already rejected the metacharacters that could
+// change what the command does, so a letter or digit is never a control.
+const SAFE_LITERAL = /^--?[\p{L}\p{N}_+/,+=:@^~%.#-]+$|^[\p{L}\p{N}_./,+=:@^~%.#-]+$/u;
 
 function containsShellSyntax(command: string): boolean {
     return SHELL_METACHARACTERS.test(command);

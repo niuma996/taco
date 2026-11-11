@@ -11,7 +11,7 @@ import {
     parsePermissionRule,
     validatePermissionRule,
 } from "../../src/permissions/shellRuleMatching.ts";
-import { createPlanModeState, enterPlanMode } from "../../src/plan/planModeState.ts";
+import { createPlanModeState, enterPlanMode, exitPlanMode } from "../../src/plan/planModeState.ts";
 
 describe("shellParser", () => {
     describe("Tree-sitter shell parsing", () => {
@@ -696,6 +696,125 @@ describe("mutationGate", () => {
                     input: { command: "echo hi > src/a.ts" },
                 });
                 assert.equal(result?.block, true);
+            });
+
+            it("allows a read-only compound command with non-ASCII text", async () => {
+                const result = await gate({
+                    toolName: "shell",
+                    input: {
+                        command: `cd ${root} && ls packages && echo "=== 方案 说明 ===" && grep -rn "中文" packages/ | head -20`,
+                    },
+                });
+                assert.equal(result, undefined);
+            });
+
+            it("still blocks a redirect on a non-ASCII echo", async () => {
+                const result = await gate({
+                    toolName: "shell",
+                    input: { command: 'echo "说明" > src/a.ts' },
+                });
+                assert.equal(result?.block, true);
+            });
+
+            it("asks for approval before writing outside the plan document", async () => {
+                const asked: string[] = [];
+                const approving = createMutationGateHook({
+                    root,
+                    getPlanState: () => planState,
+                    requestPlanWriteApproval: async ({ writePath }) => {
+                        asked.push(writePath);
+                        return { approved: true };
+                    },
+                });
+
+                const first = await approving({
+                    toolName: "write",
+                    input: { path: "docs/plan.md" },
+                    toolCallId: "tc-1",
+                });
+                assert.equal(first, undefined);
+                assert.deepEqual(asked, [join(root, "docs", "plan.md")]);
+
+                // The grant belongs to this plan-mode session: an `edit` of
+                // the same file must not prompt again.
+                const second = await approving({
+                    toolName: "edit",
+                    input: { path: "docs/plan.md" },
+                    toolCallId: "tc-2",
+                });
+                assert.equal(second, undefined);
+                assert.equal(asked.length, 1);
+            });
+
+            it("blocks the write when the user declines", async () => {
+                const declining = createMutationGateHook({
+                    root,
+                    getPlanState: () => planState,
+                    requestPlanWriteApproval: async () => ({
+                        approved: false,
+                        reason: "user_denied",
+                    }),
+                });
+                const result = await declining({
+                    toolName: "write",
+                    input: { path: "docs/plan.md" },
+                    toolCallId: "tc-1",
+                });
+                assert.equal(result?.block, true);
+                assert.match(result?.reason ?? "", /plan mode is read-only/);
+                assert.match(result?.reason ?? "", /declined/);
+            });
+
+            it("does not ask for the plan document itself", async () => {
+                let asked = 0;
+                const approving = createMutationGateHook({
+                    root,
+                    getPlanState: () => planState,
+                    requestPlanWriteApproval: async () => {
+                        asked++;
+                        return { approved: true };
+                    },
+                });
+                const result = await approving({
+                    toolName: "write",
+                    input: { path: ".taco/plans/2026-08-09-abc123.md" },
+                    toolCallId: "tc-1",
+                });
+                assert.equal(result, undefined);
+                assert.equal(asked, 0);
+            });
+
+            it("does not carry an approval into the next plan session", async () => {
+                let asked = 0;
+                const approving = createMutationGateHook({
+                    root,
+                    getPlanState: () => planState,
+                    requestPlanWriteApproval: async () => {
+                        asked++;
+                        // Approve the first plan session, decline the next one.
+                        return asked === 1
+                            ? { approved: true }
+                            : { approved: false, reason: "user_denied" };
+                    },
+                });
+                assert.equal(
+                    await approving({
+                        toolName: "write",
+                        input: { path: "docs/plan.md" },
+                        toolCallId: "tc-1",
+                    }),
+                    undefined,
+                );
+                exitPlanMode(planState);
+                enterPlanMode(planState, "2026-08-10-def456");
+
+                const result = await approving({
+                    toolName: "write",
+                    input: { path: "docs/plan.md" },
+                    toolCallId: "tc-2",
+                });
+                assert.equal(result?.block, true);
+                assert.equal(asked, 2);
             });
         });
 

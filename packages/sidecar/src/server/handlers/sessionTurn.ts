@@ -16,6 +16,7 @@ import { asSessionId, asWorkspaceId, ErrorCodes } from "@taco-ai/protocol";
 
 import { composeForSession } from "../../attachments/composePrompt.ts";
 import { createLogger } from "../../lib/logger.ts";
+import { exitPlanMode } from "../../plan/planModeState.ts";
 import { isBusyError } from "../../runtime/harness/harnessErrors.ts";
 import { textsFromAgentMessages } from "../../runtime/harness/messageText.ts";
 import { AnswerReceiptConflict, withAnswerReceipt } from "../../runtime/session/answerReceipt.ts";
@@ -25,6 +26,7 @@ import {
     resolveAskUserQuestions,
     wrapAskUserContext,
 } from "../../tools/askUserInjectionText.ts";
+import { PLAN_APPROVAL_LABEL, PLAN_APPROVAL_QUESTION } from "../../tools/planExit.ts";
 import { type MethodCtx, RpcHandlerError, registerMethod } from "../methodRegistry.ts";
 import { ensureAttached, requireAttached } from "./attachGuard.ts";
 import { rethrowAttachmentError } from "./attachment.ts";
@@ -38,6 +40,13 @@ const log = createLogger("session:turn");
  * is stuck, not slow.
  */
 const COMPACTION_WAIT_MS = 35_000;
+
+/** True when the user approved the plan on a `planExit` question card. */
+function isPlanApproved(answers: Record<string, string | string[]>): boolean {
+    const answer = answers[PLAN_APPROVAL_QUESTION];
+    const label = Array.isArray(answer) ? answer[0] : answer;
+    return label === PLAN_APPROVAL_LABEL;
+}
 
 /**
  * Wait out an in-flight compaction before starting a turn, and refuse the turn
@@ -232,6 +241,14 @@ export function registerSessionTurnHandlers(): void {
                             ErrorCodes.InvalidState,
                             `no waiting ${toolName} tool result for toolCallId=${params.toolCallId}`,
                         );
+                    }
+                    // Plan approval changes plan-mode state, so it is decided
+                    // here — the one place that knows the answers came from a
+                    // person and that the toolResult is still waiting. The
+                    // model's own `answers` argument is not trusted for this.
+                    if (toolName === "planExit" && isPlanApproved(answers)) {
+                        exitPlanMode(attached.planState);
+                        workspace.publishCurrentPlanSnapshot(params.sessionId);
                     }
                     return wrapAskUserContext(
                         formatAskUserContextBody(toolName, questions, answers),

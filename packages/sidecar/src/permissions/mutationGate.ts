@@ -3,7 +3,8 @@
  *
  * Three guarantees that a system prompt cannot provide, because the model is
  * free to ignore prose:
- *   1. Plan mode is read-only. Only the plan document may be written.
+ *   1. Plan mode is read-only, except for the plan document and write paths
+ *      the user explicitly approves at the moment of the write.
  *   2. Built-in write targets stay inside the workspace root, an associated
  *      directory, or an `extraWriteRoots` entry. Which argument names the
  *      target comes from `tools/fileAccess.ts` — PDF tools write `output` /
@@ -34,12 +35,46 @@ import {
 export interface ToolCallGateEvent {
     readonly toolName: string;
     readonly input: Record<string, unknown>;
+    /** Present on runtime events; used to route a plan-write approval prompt. */
+    readonly toolCallId?: string;
+    /** The run's abort signal, forwarded to an approval wait. */
+    readonly signal?: AbortSignal;
 }
 
 export interface ToolCallGateResult {
     readonly block?: boolean;
     readonly reason?: string;
 }
+
+/** A file write outside the plan document that needs the user's answer. */
+export interface PlanWriteApprovalRequest {
+    readonly toolCallId: string;
+    readonly writePath: string;
+    readonly signal?: AbortSignal;
+}
+
+export interface PlanWriteApprovalDecision {
+    readonly approved: boolean;
+    /** Why the write was refused, when the transport knows (e.g. `user_denied`). */
+    readonly reason?: string;
+}
+
+/**
+ * Ask the user to approve one write. The gate treats a missing approver as a
+ * refusal, so a session without an approval UI keeps plan mode read-only.
+ */
+export type PlanWriteApprover = (
+    request: PlanWriteApprovalRequest,
+) => Promise<PlanWriteApprovalDecision>;
+
+/** Human-readable form of the broker's denial reasons. */
+const PLAN_WRITE_DENIALS: Readonly<Record<string, string>> = {
+    user_denied: "the user declined this write",
+    timeout: "the approval request timed out",
+    aborted: "the approval request was aborted",
+    im_channel: "an IM session has no approval UI",
+    no_approver: "no desktop client is connected to approve it",
+};
 
 const SHELL_TOOL = "shell";
 
@@ -72,6 +107,17 @@ export interface MutationGateOptions {
      */
     readonly getAssociatedRoots?: () => readonly string[];
     readonly getPlanState: () => PlanModeState;
+    /**
+     * Asks the user to approve a built-in write whose target is outside the
+     * plan document while plan mode is active.
+     *
+     * Plan mode is read-only except for the plan document. The model proposes
+     * the path; only the user's answer opens the gate, and the approval is
+     * remembered for the rest of this plan-mode session (a later `edit` of the
+     * same file must not re-prompt). Absent means no approval UI is available
+     * and every such write stays refused.
+     */
+    readonly requestPlanWriteApproval?: PlanWriteApprover;
     /**
      * Additional directories a built-in write may target outside
      * `root`, checked with the same symlink-safe containment. Plan mode
@@ -174,11 +220,21 @@ async function fenceReadPath(
  *
  * Extra roots are ignored in plan mode, and a relative path is never
  * re-anchored onto one: pi resolves a relative path against cwd.
+ *
+ * In plan mode a target outside the plan document is offered to the user
+ * through {@link PlanWriteApprover}; an approved path is remembered for the
+ * rest of that plan-mode session.
  */
 async function containWrite(
     opts: MutationGateOptions,
     plansDir: string,
-    planActive: boolean,
+    planState: PlanModeState,
+    approval: {
+        readonly toolCallId: string;
+        readonly signal?: AbortSignal;
+        readonly isApproved: (absolutePath: string) => boolean;
+        readonly grant: (absolutePath: string) => void;
+    },
     toolName: string,
     raw: string,
 ): Promise<{ ok: true; absolutePath: string } | { ok: false; block: ToolCallGateResult }> {
@@ -187,7 +243,7 @@ async function containWrite(
     // let `~/.taco/taco.json` pass as if it were inside the root.
     const target = normalizeBuiltinToolPath(raw);
     let resolved = await resolveWithinRootSet(opts.root, opts.getAssociatedRoots?.() ?? [], target);
-    if (!resolved.ok && !planActive && opts.extraWriteRoots?.length) {
+    if (!resolved.ok && !planState.active && opts.extraWriteRoots?.length) {
         const absoluteTarget = resolve(opts.root, target);
         for (const extra of opts.extraWriteRoots) {
             const inExtra = await resolveWithinRoot(extra, absoluteTarget);
@@ -200,28 +256,63 @@ async function containWrite(
     if (!resolved.ok) {
         return { ok: false, block: { block: true, reason: resolved.reason } };
     }
-    if (planActive) {
+    if (planState.active) {
         const withinPlans = await resolveWithinRoot(plansDir, resolved.absolutePath);
-        if (!withinPlans.ok) {
-            return {
-                ok: false,
-                block: {
-                    block: true,
-                    reason: `plan mode is read-only: refused ${toolName} on ${raw}. Only the plan document under ${plansDir} may be written; call planExit to get approval first.`,
-                },
-            };
+        if (!withinPlans.ok && !approval.isApproved(resolved.absolutePath)) {
+            if (!opts.requestPlanWriteApproval) {
+                return {
+                    ok: false,
+                    block: { block: true, reason: planWriteRefusal(toolName, raw, plansDir) },
+                };
+            }
+            const decision = await opts.requestPlanWriteApproval({
+                toolCallId: approval.toolCallId,
+                writePath: resolved.absolutePath,
+                signal: approval.signal,
+            });
+            if (!decision.approved) {
+                const why =
+                    PLAN_WRITE_DENIALS[decision.reason ?? ""] ?? "the write was not approved";
+                return {
+                    ok: false,
+                    block: {
+                        block: true,
+                        reason: planWriteRefusal(toolName, raw, plansDir, why),
+                    },
+                };
+            }
+            approval.grant(resolved.absolutePath);
         }
     }
     return { ok: true, absolutePath: resolved.absolutePath };
+}
+
+function planWriteRefusal(toolName: string, raw: string, plansDir: string, why?: string): string {
+    const outcome = why ? ` (${why})` : "";
+    return `plan mode is read-only: refused ${toolName} on ${raw}${outcome}. Only the plan document under ${plansDir} may be written; call planExit to get approval first.`;
 }
 
 export function createMutationGateHook(
     opts: MutationGateOptions,
 ): (event: ToolCallGateEvent) => Promise<ToolCallGateResult | undefined> {
     const plansDir = getPlansDir(opts.root);
+    // Plan-write approvals are per plan-mode session: a new planEnter creates
+    // a new slug, so a grant from an earlier plan never carries over.
+    const approvedWrites = new Map<string, Set<string>>();
+    const isPlanWriteApproved = (state: PlanModeState, absolutePath: string): boolean => {
+        if (state.currentSlug === null) return false;
+        return approvedWrites.get(state.currentSlug)?.has(absolutePath) ?? false;
+    };
+    const grantPlanWrite = (state: PlanModeState, absolutePath: string): void => {
+        if (state.currentSlug === null) return;
+        const paths = approvedWrites.get(state.currentSlug) ?? new Set<string>();
+        paths.add(absolutePath);
+        approvedWrites.set(state.currentSlug, paths);
+    };
 
     return async (event) => {
-        const planActive = opts.getPlanState().active;
+        const planState = opts.getPlanState();
+        const planActive = planState.active;
 
         if (event.toolName === SHELL_TOOL) {
             if (!planActive) return undefined;
@@ -255,7 +346,19 @@ export function createMutationGateHook(
                     reason: `${event.toolName} requires a string "${writeKey}" argument`,
                 };
             }
-            const contained = await containWrite(opts, plansDir, planActive, event.toolName, raw);
+            const contained = await containWrite(
+                opts,
+                plansDir,
+                planState,
+                {
+                    toolCallId: event.toolCallId ?? "",
+                    signal: event.signal,
+                    isApproved: (absolutePath) => isPlanWriteApproved(planState, absolutePath),
+                    grant: (absolutePath) => grantPlanWrite(planState, absolutePath),
+                },
+                event.toolName,
+                raw,
+            );
             if (!contained.ok) return contained.block;
 
             // This branch returns, so a PDF tool's reads never reach the fence

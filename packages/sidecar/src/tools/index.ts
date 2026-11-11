@@ -212,7 +212,7 @@ export function defaultToolsWithTasks(
     tools.push(createTaskUpdateTool(store, baseDir, taskAdapter, sessionId));
     tools.push(createTaskListTool(store));
     tools.push(createPlanEnterTool(planState, projectDir, planPublisher, sessionId));
-    tools.push(createPlanExitTool(planState, projectDir, planPublisher, sessionId));
+    tools.push(createPlanExitTool(planState, projectDir));
     tools.push(...createJobsTools());
     return orderTools(tools);
 }

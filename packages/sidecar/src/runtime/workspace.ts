@@ -759,6 +759,19 @@ export class WorkspaceRuntime extends EventEmitter {
             // allowedRoots lets a shell command `cd` into them, and the
             // mutation gate lets a write target land in them.
             getAssociatedRoots: () => this.resolveAssociatedRoots(),
+            // Plan mode is read-only except for the plan document. A write
+            // outside it is put to the user through the same prompt channel
+            // shell commands use, so "the user asked for this file" is decided
+            // by the user, never by the model's own claim.
+            requestPlanWriteApproval: async (sessionId, request) => {
+                const decision = await this.permissionBroker.requestPlanWriteApproval({
+                    sessionId,
+                    toolCallId: request.toolCallId,
+                    writePath: request.writePath,
+                    signal: request.signal,
+                });
+                return { approved: decision.approved, reason: decision.denialReason };
+            },
         });
 
         this.agentSpawner = new AgentSpawner({

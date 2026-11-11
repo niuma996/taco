@@ -30,6 +30,10 @@ import type { ResolvedCompaction } from "../../config/config.ts";
 import type { WorkspaceExtensionSet } from "../../extensions/index.ts";
 import { harnessContext } from "../../lib/harnessContext.ts";
 import type { MemoryStore } from "../../memory/index.ts";
+import type {
+    PlanWriteApprovalDecision,
+    PlanWriteApprovalRequest,
+} from "../../permissions/mutationGate.ts";
 import type { SkillReinjectorHandle } from "../../skills/skillReinjector.ts";
 import type { SpawnSkillSubagentOptions } from "../../skills/skillTool.ts";
 import { createSkillTool } from "../../skills/skillTool.ts";
@@ -244,6 +248,15 @@ export interface SessionRegistryOptions {
      */
     readonly getAssociatedRoots?: () => readonly string[];
     /**
+     * Asks the user to approve a plan-mode write outside the plan document.
+     * WorkspaceRuntime binds this to the workspace's permission broker;
+     * absent (tests, no approval UI) leaves the gate refusing such writes.
+     */
+    readonly requestPlanWriteApproval?: (
+        sessionId: SessionId,
+        request: PlanWriteApprovalRequest,
+    ) => Promise<PlanWriteApprovalDecision>;
+    /**
      * Per-turn tool context provider. Threaded straight through to every
      * AttachedSession's harness — the harness calls it once per turn to
      * resolve the `TacoToolContext` snapshot for that turn's tool calls.
@@ -294,6 +307,11 @@ export class SessionRegistry extends EventEmitter {
      * grant added or removed mid-session reaches the next turn.
      */
     readonly getAssociatedRoots?: () => readonly string[];
+    /** Plan-mode write approval, bound to the workspace's permission broker. */
+    readonly requestPlanWriteApproval?: (
+        sessionId: SessionId,
+        request: PlanWriteApprovalRequest,
+    ) => Promise<PlanWriteApprovalDecision>;
     /** Per-turn tool context provider (see options below). */
     readonly getToolContext: () => TacoToolContextBase;
 
@@ -436,6 +454,7 @@ export class SessionRegistry extends EventEmitter {
         this.getInstructionsConfig = options.getInstructionsConfig;
         this.getImChannelContext = options.getImChannelContext;
         this.getAssociatedRoots = options.getAssociatedRoots;
+        this.requestPlanWriteApproval = options.requestPlanWriteApproval;
         this.getToolContext = options.getToolContext;
         this.spawnSubagent = options.spawnSubagent;
         this.resumeSubagent = options.resumeSubagent;
@@ -1024,6 +1043,7 @@ export class SessionRegistry extends EventEmitter {
                 const sessionKind: "main" | "subagent" =
                     facts.kind === "subagent" ? "subagent" : "main";
                 const refreshToolset = this.refreshToolset;
+                const requestPlanWriteApproval = this.requestPlanWriteApproval;
                 attached = await AttachedSession.create({
                     session,
                     models: this.models,
@@ -1071,6 +1091,9 @@ export class SessionRegistry extends EventEmitter {
                     getInstructionsConfig: this.getInstructionsConfig,
                     getImChannelContext: this.getImChannelContext,
                     getAssociatedRoots: this.getAssociatedRoots,
+                    requestPlanWriteApproval: requestPlanWriteApproval
+                        ? (request) => requestPlanWriteApproval(sessionId, request)
+                        : undefined,
                     getToolContext: this.getToolContext,
                     sessionCwd: this.sessionCwd,
                     sessionKind,

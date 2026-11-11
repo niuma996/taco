@@ -15,6 +15,7 @@ const PLAN_MODE_BODY = `You are in PLAN MODE. Keep project files unchanged excep
 - Inspect relevant code with the available read-only tools
 - Delegate focused read-only exploration to an available explorer subagent when it helps
 - Write or revise the plan document at .taco/plans/<slug>.md
+- When the user asks for the plan to be saved somewhere else (a repository document, a named path), write it there as well — that write is put to the user for approval
 - Resolve required user decisions using the question mechanism available in this session
 - Call planExit when the plan is ready for approval
 
@@ -36,7 +37,7 @@ const PLAN_MODE_BODY = `You are in PLAN MODE. Keep project files unchanged excep
 
 5. **Exit**: Once the plan is implementable and required decisions are resolved, call planExit to present it for user approval. Investigate further only to resolve a concrete gap that blocks the plan.
 
-Do not implement the plan before approval. The plan document is the only file you may modify in plan mode.`;
+Do not implement the plan before approval. The plan document is the one file you may write without asking; any other write is shown to the user for approval, so only propose paths the user actually named.`;
 
 export function buildPlanModeContextHook(
     getPlanState: () => PlanModeState,

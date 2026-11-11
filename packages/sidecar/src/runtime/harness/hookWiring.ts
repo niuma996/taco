@@ -28,7 +28,7 @@ import { harnessContext } from "../../lib/harnessContext.ts";
 import { createLogger } from "../../lib/logger.ts";
 import type { MemoryStore } from "../../memory/index.ts";
 import { buildMemoryContextHook } from "../../memory/memoryTag.ts";
-import { createMutationGateHook } from "../../permissions/mutationGate.ts";
+import { createMutationGateHook, type PlanWriteApprover } from "../../permissions/mutationGate.ts";
 import { buildSkillReinjector, type SkillReinjectorHandle } from "../../skills/skillReinjector.ts";
 import {
     buildAssociatedWorkspacesContextHook,
@@ -87,13 +87,25 @@ export const HOOK_TIMEOUT_MS = 2_000;
  * (`"foo hook timed out after 2000ms"`) so downstream log scrapers and
  * error-string assertions keep working.
  */
-export function withHookTimeout<T>(promise: Promise<T>, label: string): Promise<T> {
+export function withHookTimeout<T>(
+    promise: Promise<T>,
+    label: string,
+    timeoutMs = HOOK_TIMEOUT_MS,
+): Promise<T> {
     return withDeadline(promise, {
-        timeoutMs: HOOK_TIMEOUT_MS,
+        timeoutMs,
         code: "HOOK_TIMEOUT",
         label: `${label} hook`,
     });
 }
+
+/**
+ * The mutation gate can wait for a person: a plan-write approval is a desktop
+ * prompt, and the broker's own timeout bounds it (10 minutes by default).
+ * The hook deadline has to outlast that, or the gate would report a timeout
+ * while the prompt is still on screen.
+ */
+const PLAN_WRITE_APPROVAL_HOOK_TIMEOUT_MS = 10 * 60_000 + 30_000;
 
 export interface HookWiringOptions {
     /** Workspace cwd — used by the instructions (CLAUDE.md) hook. */
@@ -191,6 +203,12 @@ export interface HookWiringOptions {
         readonly extra?: readonly string[];
     };
     /**
+     * Asks the user to approve a plan-mode write outside the plan document
+     * (see `MutationGateOptions.requestPlanWriteApproval`). Absent in
+     * contexts with no approval UI, where the gate keeps refusing.
+     */
+    requestPlanWriteApproval?: PlanWriteApprover;
+    /**
      * Turn-scoped pre-write snapshots. When present, the mutation gate captures
      * each allowed `write` / `edit` target before it changes, so a turn's edits
      * can be rolled back. Absent → no snapshots (the gate still enforces
@@ -268,10 +286,11 @@ export function wrapHook<T, R>(
     fn: (e: T) => R | Promise<R>,
     label: string,
     onFailure?: (err: unknown) => R | undefined,
+    options?: { readonly timeoutMs?: number },
 ): (e: T) => Promise<R | undefined> {
     return async (e) => {
         try {
-            return await withHookTimeout(Promise.resolve(fn(e)), label);
+            return await withHookTimeout(Promise.resolve(fn(e)), label, options?.timeoutMs);
         } catch (err) {
             log.error(`${label} hook failed:`, err);
             return onFailure?.(err);
@@ -331,12 +350,14 @@ export async function wireHarnessHooks(
             event: ToolCallEvent,
         ) => ToolCallResult | undefined | Promise<ToolCallResult | undefined>,
     ): (() => void) =>
-        harness.hooks.on("before_tool", async (event) => {
+        harness.hooks.on("before_tool", async (event, context) => {
+            const signal = (context as { abortSignal?: AbortSignal } | undefined)?.abortSignal;
             const result = await hook({
                 type: "tool_call",
                 toolCallId: event.toolCallId,
                 toolName: event.toolName,
                 input: event.args,
+                ...(signal === undefined ? {} : { signal }),
             });
             if (result?.block !== true) return undefined;
             return { block: { reason: result.reason ?? "blocked" } };
@@ -540,6 +561,7 @@ export async function wireHarnessHooks(
             getAssociatedRoots: opts.getMutationGateAssociatedRoots,
             readRoots: opts.mutationGateReadRoots,
             getPlanState: () => getActiveTasksState().planState,
+            requestPlanWriteApproval: opts.requestPlanWriteApproval,
             captureBeforeWrite: checkpoints
                 ? (path) => checkpoints.captureBeforeWrite(path)
                 : undefined,
@@ -557,10 +579,21 @@ export async function wireHarnessHooks(
         });
         disposers.push(
             onToolCall(
-                wrapHook(gate, "mutation-gate", () => ({
-                    block: true,
-                    reason: "mutation gate failed or timed out; blocking to fail closed",
-                })),
+                wrapHook(
+                    gate,
+                    "mutation-gate",
+                    () => ({
+                        block: true,
+                        reason: "mutation gate failed or timed out; blocking to fail closed",
+                    }),
+                    {
+                        // Only an approval wait needs the long deadline; without
+                        // an approver the gate keeps the ordinary hook budget.
+                        timeoutMs: opts.requestPlanWriteApproval
+                            ? PLAN_WRITE_APPROVAL_HOOK_TIMEOUT_MS
+                            : undefined,
+                    },
+                ),
             ),
         );
     }

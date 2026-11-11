@@ -20,11 +20,14 @@ export interface CommandPermissionPromptRequest {
     /**
      * What is being approved. "command" (the default) is a shell command;
      * "config" is a global-config change, where there is no command to show
-     * and the fields being changed take its place.
+     * and the fields being changed take its place. "planWrite" is a write
+     * outside the plan document while plan mode is active.
      */
     kind?: PermissionRequestKind;
     /** For kind="config": the config fields the change touches. */
     configFields?: readonly string[];
+    /** For kind="planWrite": the absolute path being written. */
+    writePath?: string;
     evaluation: Pick<
         CommandEvaluation,
         | "risk"
@@ -58,6 +61,9 @@ export function CommandPermissionPrompt({
     const [error, setError] = useState<string | null>(null);
 
     const isConfig = request.kind === "config";
+    const isPlanWrite = request.kind === "planWrite";
+    /** Neither has a command line, and neither can be persisted as a rule. */
+    const isNonCommand = isConfig || isPlanWrite;
 
     // Blacklist matches and unsupported syntax only support one-time approval.
     const persistentDisabled =
@@ -74,11 +80,13 @@ export function CommandPermissionPrompt({
         }
     };
 
-    const riskLabel = isConfig
-        ? t("configChange.risk")
-        : t(
-              `settings.permissionsRisk${request.evaluation.risk.charAt(0).toUpperCase()}${request.evaluation.risk.slice(1)}`,
-          );
+    const riskLabel = isPlanWrite
+        ? t("planWrite.risk")
+        : isConfig
+          ? t("configChange.risk")
+          : t(
+                `settings.permissionsRisk${request.evaluation.risk.charAt(0).toUpperCase()}${request.evaluation.risk.slice(1)}`,
+            );
 
     return (
         <div className={className ? `permission-prompt ${className}` : "permission-prompt"}>
@@ -93,10 +101,12 @@ export function CommandPermissionPrompt({
                         </div>
                     ))}
                 </div>
+            ) : isPlanWrite ? (
+                <div className="permission-prompt-command">{request.writePath}</div>
             ) : (
                 <div className="permission-prompt-command">{request.command}</div>
             )}
-            {!isConfig &&
+            {!isNonCommand &&
                 request.evaluation.triggeringCommand &&
                 request.evaluation.triggeringCommand.trim() !== request.command.trim() && (
                     <div>
@@ -120,10 +130,11 @@ export function CommandPermissionPrompt({
                             ? t("settings.permissionsSubmitting")
                             : t("settings.permissionsAllowOnce")}
                     </button>
-                    {/* A config change is global, so "allow for the session" and
-                        "always allow" have no meaningful scope — the change is
-                        already written, and there is nothing to remember. */}
-                    {!isConfig && (
+                    {/* A config change is global and a plan write is scoped to
+                        one plan session, so "allow for the session" and
+                        "always allow" have no meaningful scope — there is
+                        nothing to remember as a reusable rule. */}
+                    {!isNonCommand && (
                         <>
                             <button
                                 type="button"

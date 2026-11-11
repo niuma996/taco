@@ -1,12 +1,15 @@
 import { readFileSync } from "node:fs";
-import type { AskUserQuestion, SessionId, WorkspaceId } from "@taco-ai/protocol";
+import type { AskUserQuestion } from "@taco-ai/protocol";
 import type { Static } from "typebox";
 import { Type } from "typebox";
-import { exitPlanMode, isPlanModeActive, type PlanModeState } from "../plan/planModeState.ts";
+import { isPlanModeActive, type PlanModeState } from "../plan/planModeState.ts";
 import { getPlanPath, getPlansDir } from "../plan/planPersistence.ts";
-import type { PlanSnapshotPublisher } from "../plan/planPushAdapter.ts";
 import type { AgentHarnessTool, ExecutionToolContext, TextContent } from "../runtime/pi/types.ts";
 import { askUserAnswersSchema } from "./askUser.ts";
+
+/** Approval question shown on the desktop; the server matches these labels. */
+export const PLAN_APPROVAL_QUESTION = "Approve this plan?";
+export const PLAN_APPROVAL_LABEL = "Approve";
 
 /**
  * planExit parameter schema:
@@ -43,11 +46,11 @@ function buildApprovalQuestion(planSlug: string, planContent: string) {
         text: `**Plan: \`${planSlug}\`**\n\n${preview}${truncated ? "\n..." : ""}\n\nPlease review this plan. If approved, exit plan mode. If rejected, you may update the .md plan file.`,
         questions: [
             {
-                question: "Approve this plan?",
+                question: PLAN_APPROVAL_QUESTION,
                 header: "planExit",
                 options: [
                     {
-                        label: "Approve",
+                        label: PLAN_APPROVAL_LABEL,
                         description: "Approve the plan, exit plan mode, and start implementation.",
                     },
                     {
@@ -64,8 +67,6 @@ function buildApprovalQuestion(planSlug: string, planContent: string) {
 export function createPlanExitTool(
     state: PlanModeState,
     projectDir: string,
-    publisher: PlanSnapshotPublisher | undefined,
-    sessionId: SessionId,
 ): AgentHarnessTool<ExecutionToolContext> {
     return {
         name: "planExit",
@@ -86,50 +87,47 @@ export function createPlanExitTool(
             _toolCallId: string,
             params: PlanExitInput,
             _onUpdate: unknown,
-            context: ExecutionToolContext,
         ): Promise<{
             content: TextContent[];
             details: PlanExitToolDetails;
             terminate?: boolean;
         }> {
-            if (!isPlanModeActive(state)) {
-                throw new Error("Not in plan mode. Use planEnter first to enter plan mode.");
-            }
-
-            // Second call: answers were forwarded by the frontend via
-            // session.steer injecting <ask_user_context>. The model re-invokes
-            // this tool with a non-empty `answers` field. We skip readFileSync
-            // here — the user may have deleted the .md, but the Approve/Reject
-            // decision should not be blocked by unrelated I/O.
             const answers = params.answers;
-            if (answers && Object.keys(answers).length > 0) {
-                const firstKey = Object.keys(answers)[0];
-                const choice = answers[firstKey];
-                const choiceLabel = Array.isArray(choice) ? choice[0] : choice;
-                const approved = choiceLabel === "Approve";
+            const answered = answers !== undefined && Object.keys(answers).length > 0;
 
-                if (approved) {
-                    exitPlanMode(state);
-                    publisher?.publishPlanState(context.env.cwd as WorkspaceId, sessionId, {
-                        active: false,
-                        currentSlug: null,
-                    });
+            if (!isPlanModeActive(state)) {
+                // The approval decision is made by the server
+                // (`session.submitAnswers`), the only channel that can prove a
+                // person answered. By the time the model re-invokes this tool
+                // with the submitted answers, plan mode is already off. A
+                // fresh call without answers is still a misuse.
+                if (!answered) {
+                    throw new Error("Not in plan mode. Use planEnter first to enter plan mode.");
                 }
-                // On reject, plan mode stays active so the model can revise the document and retry planExit.
-
                 return {
                     content: [
                         {
                             type: "text",
-                            text: approved
-                                ? "Plan approved. Exited plan mode.\n\nNext: use taskCreate to break this plan into an executable task list; when the user says 'continue', work through the list, calling taskUpdate on each as you finish."
-                                : "Plan rejected. Stayed in plan mode — you may revise the plan document and call planExit again.",
+                            text: "Plan approved. Exited plan mode.\n\nNext: use taskCreate to break this plan into an executable task list; when the user says 'continue', work through the list, calling taskUpdate on each as you finish.",
                         },
                     ],
-                    details: {
-                        planContent: "",
-                        approved,
-                    },
+                    details: { planContent: "", approved: true },
+                };
+            }
+
+            if (answered) {
+                // Still in plan mode: the user did not approve. Either they
+                // rejected, or the model supplied `answers` on its own — the
+                // server is the only path that exits plan mode, so a
+                // fabricated answer changes nothing.
+                return {
+                    content: [
+                        {
+                            type: "text",
+                            text: "Plan rejected. Stayed in plan mode — you may revise the plan document and call planExit again.",
+                        },
+                    ],
+                    details: { planContent: "", approved: false },
                 };
             }
 

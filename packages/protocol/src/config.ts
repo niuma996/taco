@@ -168,9 +168,10 @@ export interface CommandEvaluation {
  * `command` is the default and the historical shape: a shell command the
  * broker evaluated. `config` is a global-config change — there is no command
  * to evaluate, so the broker asks unconditionally and the UI shows the fields
- * being changed instead of a command line.
+ * being changed instead of a command line. `planWrite` is a file write outside
+ * the plan document while plan mode is active; the UI shows the target path.
  */
-export type PermissionRequestKind = "command" | "config";
+export type PermissionRequestKind = "command" | "config" | "planWrite";
 export interface CommandPermissionRequest {
     requestId: string;
     sessionId: SessionId;
@@ -184,6 +185,8 @@ export interface CommandPermissionRequest {
      * prompt to show. Empty for kind="command".
      */
     configFields?: readonly string[];
+    /** For kind="planWrite": the absolute path the tool is trying to write. */
+    writePath?: string;
     /** Root session id for UI routing — == sessionId for main-session requests. */
     displaySessionId?: SessionId;
     /** Root agent toolCallId — == toolCallId for main-session requests. */

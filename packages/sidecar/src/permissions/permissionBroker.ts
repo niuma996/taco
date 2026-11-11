@@ -232,6 +232,66 @@ export class PermissionBroker extends EventEmitter {
     }
 
     /**
+     * Request approval for a write outside the plan document while plan mode
+     * is active.
+     *
+     * Plan mode is read-only except for the plan document; this is the single
+     * escape hatch. The model proposes the path, the user decides — the same
+     * trust boundary as a shell command, and the reason the gate must not
+     * accept the model's own claim that the user asked for it.
+     *
+     * Scope is "once" only: `persistentAllowed: false` keeps resolve() from
+     * storing a reusable rule, and the gate remembers the path for the
+     * lifetime of this plan-mode session instead.
+     */
+    async requestPlanWriteApproval(args: {
+        sessionId: string;
+        toolCallId: string;
+        /** Absolute path the tool is trying to write. */
+        writePath: string;
+        signal?: AbortSignal;
+    }): Promise<CommandPermissionDecision> {
+        const evaluation: CommandEvaluation = {
+            behavior: "ask",
+            risk: "workspaceWrite",
+            reason: "plan mode allows only the plan document to be written",
+            persistentAllowed: false,
+        };
+        // A read-only subagent has no approval wiring of its own; treat an ask
+        // as a denial, exactly as evaluateAndRequest does.
+        if (this.readOnly) {
+            return { approved: false, scope: "once", evaluation };
+        }
+        const unanswerable = this.unanswerableReason();
+        if (unanswerable) {
+            return { approved: false, scope: "once", evaluation, denialReason: unanswerable };
+        }
+
+        // Same display-context resolution as the command path, so a subagent's
+        // request lands on the root agent's tool card.
+        const resolver = this.resolveDisplayContext;
+        const display = resolver
+            ? await resolver(args.sessionId).catch(() => undefined)
+            : undefined;
+        const displaySessionId = display?.displaySessionId ?? args.sessionId;
+        const displayToolCallId = display?.displayToolCallId;
+
+        const request: CommandPermissionRequest = {
+            requestId: randomUUID(),
+            sessionId: asSessionId(args.sessionId),
+            toolCallId: asToolCallId(args.toolCallId),
+            command: `plan write: ${args.writePath}`,
+            evaluation,
+            kind: "planWrite",
+            writePath: args.writePath,
+            displaySessionId: asSessionId(displaySessionId),
+            displayToolCallId:
+                displayToolCallId === undefined ? undefined : asToolCallId(displayToolCallId),
+        };
+        return await this.awaitDecision(request, args.signal);
+    }
+
+    /**
      * Why an ask cannot be put to anyone, or undefined when it can. An IM
      * conversation refuses first: it holds even while a desktop is connected.
      */

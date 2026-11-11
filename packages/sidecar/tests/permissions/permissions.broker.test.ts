@@ -176,6 +176,82 @@ describe("permissionBroker.config", () => {
             assert.equal(decision.denialReason, "user_denied");
         });
     });
+
+    describe("PermissionBroker plan-write approval", () => {
+        it("asks with the target path and reports the user's answer", async () => {
+            const broker = new PermissionBroker(() => noRules);
+            const requested: CommandPermissionRequest[] = [];
+            broker.on("requested", (r: CommandPermissionRequest) => requested.push(r));
+
+            const pending = broker.requestPlanWriteApproval({
+                sessionId: "s1",
+                toolCallId: "tc1",
+                writePath: "/tmp/workspace/docs/plan.md",
+            });
+            await Promise.resolve();
+
+            assert.equal(requested.length, 1);
+            assert.equal(requested[0].kind, "planWrite");
+            assert.equal(requested[0].writePath, "/tmp/workspace/docs/plan.md");
+            assert.match(requested[0].command, /docs\/plan\.md/);
+
+            broker.resolve(requested[0].requestId, true, "once");
+            const decision = await pending;
+            assert.equal(decision.approved, true);
+        });
+
+        it("is never persistable: a session or global scope falls back to once", async () => {
+            const broker = new PermissionBroker(() => noRules);
+            const requested: CommandPermissionRequest[] = [];
+            broker.on("requested", (r: CommandPermissionRequest) => requested.push(r));
+
+            const pending = broker.requestPlanWriteApproval({
+                sessionId: "s1",
+                toolCallId: "tc1",
+                writePath: "/tmp/plan.md",
+            });
+            await Promise.resolve();
+
+            broker.resolve(requested[0].requestId, true, "global");
+            const decision = await pending;
+            assert.equal(decision.scope, "once");
+        });
+
+        it("denies at once when no approver can answer", async () => {
+            const broker = new PermissionBroker(() => noRules, { hasApprover: () => false });
+            const decision = await broker.requestPlanWriteApproval({
+                sessionId: "s1",
+                toolCallId: "tc1",
+                writePath: "/tmp/plan.md",
+            });
+            assert.equal(decision.approved, false);
+            assert.equal(decision.denialReason, "no_approver");
+        });
+
+        it("an IM conversation refuses instead of waiting", async () => {
+            const broker = new PermissionBroker(() => noRules, { refuseApprovals: true });
+            const decision = await broker.requestPlanWriteApproval({
+                sessionId: "s1",
+                toolCallId: "tc1",
+                writePath: "/tmp/plan.md",
+            });
+            assert.equal(decision.approved, false);
+            assert.equal(decision.denialReason, "im_channel");
+        });
+
+        it("a read-only broker denies without asking", async () => {
+            const broker = new PermissionBroker(() => noRules, { readOnly: true });
+            let asked = 0;
+            broker.on("requested", () => asked++);
+            const decision = await broker.requestPlanWriteApproval({
+                sessionId: "s1",
+                toolCallId: "tc1",
+                writePath: "/tmp/plan.md",
+            });
+            assert.equal(decision.approved, false);
+            assert.equal(asked, 0);
+        });
+    });
 });
 
 describe("permissionBrokerImPolicy", () => {

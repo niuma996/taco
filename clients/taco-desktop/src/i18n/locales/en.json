@@ -239,6 +239,9 @@
   "configChange": {
     "risk": "Config change"
   },
+  "planWrite": {
+    "risk": "Plan mode write"
+  },
   "settings": {
     "appearanceTitle": "Theme",
     "appearanceDesc": "Choose a light or dark theme, or follow your operating system.",

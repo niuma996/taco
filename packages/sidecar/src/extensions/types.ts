@@ -80,6 +80,8 @@ export interface ToolCallEvent {
     toolCallId: string;
     toolName: string;
     input: Record<string, unknown>;
+    /** The run's abort signal, when the harness provides one. */
+    signal?: AbortSignal;
 }
 
 /**

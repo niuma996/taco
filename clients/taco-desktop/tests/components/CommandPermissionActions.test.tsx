@@ -130,6 +130,38 @@ describe("CommandPermissionPrompt persistent approvals", () => {
     });
 });
 
+describe("CommandPermissionPrompt plan-write approval", () => {
+    const planWrite: CommandPermissionRequest = {
+        ...request,
+        kind: "planWrite",
+        command: "plan write: /ws/docs/plan.md",
+        writePath: "/ws/docs/plan.md",
+        evaluation: {
+            behavior: "ask",
+            risk: "workspaceWrite",
+            reason: "plan mode allows only the plan document to be written",
+            persistentAllowed: false,
+        },
+    };
+
+    it("shows the target path instead of a command line", () => {
+        render(<CommandPermissionPrompt request={planWrite} onResolve={() => {}} />);
+        assert.ok(screen.getByText("/ws/docs/plan.md"));
+        assert.ok(screen.getByText(/planWrite\.risk/));
+    });
+
+    it("offers only one-time approval", () => {
+        render(<CommandPermissionPrompt request={planWrite} onResolve={() => {}} />);
+        expect(
+            screen.queryByRole("button", { name: "settings.permissionsAlwaysAllow" }),
+        ).toBeNull();
+        expect(
+            screen.queryByRole("button", { name: "settings.permissionsAllowSession" }),
+        ).toBeNull();
+        assert.ok(allowOnce());
+    });
+});
+
 it("disables persistent approval for unsupported syntax", () => {
     render(
         <CommandPermissionPrompt

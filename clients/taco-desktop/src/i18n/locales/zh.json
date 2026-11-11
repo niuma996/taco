@@ -239,6 +239,9 @@
   "configChange": {
     "risk": "配置变更"
   },
+  "planWrite": {
+    "risk": "计划模式写入"
+  },
   "settings": {
     "appearanceTitle": "主题",
     "appearanceDesc": "选择浅色或深色主题,或跟随操作系统。",

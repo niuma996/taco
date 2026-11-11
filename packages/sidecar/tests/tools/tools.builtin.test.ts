@@ -8,7 +8,7 @@ import { after, afterEach, before, beforeEach, describe, it } from "node:test";
 import type { MemoryUpsertParams } from "@taco-ai/protocol";
 import { asSessionId, asWorkspaceId, MEMORY_CONTENT_MAX_CHARS } from "@taco-ai/protocol";
 import { Value } from "typebox/value";
-import { createPlanModeState, enterPlanMode } from "../../src/plan/planModeState.ts";
+import { createPlanModeState, enterPlanMode, exitPlanMode } from "../../src/plan/planModeState.ts";
 import { NoopPlanPushAdapter } from "../../src/plan/planPushAdapter.ts";
 import { NodeExecutionEnv } from "../../src/runtime/pi/node.ts";
 import { createEditTool } from "../../src/runtime/pi/values.ts";
@@ -657,7 +657,7 @@ describe("planExit tool", () => {
         mkdirSync(plansDir, { recursive: true });
         writeFileSync(join(plansDir, "test-plan.md"), "# Plan\n\nDo stuff.\n\nMore details.");
 
-        const tool = createPlanExitTool(state, testDir, undefined, asSessionId("test-session"));
+        const tool = createPlanExitTool(state, testDir);
         const result = await invokeTool(
             tool,
             { planSlug: "test-plan" },
@@ -679,7 +679,7 @@ describe("planExit tool", () => {
     });
 
     it("rejects if not in plan mode", async () => {
-        const tool = createPlanExitTool(state, testDir, undefined, asSessionId("test-session"));
+        const tool = createPlanExitTool(state, testDir);
         try {
             await invokeTool(
                 tool,
@@ -696,13 +696,34 @@ describe("planExit tool", () => {
         rmSync(testDir, { recursive: true, force: true });
     });
 
-    it("exits plan mode when user approves", async () => {
+    it("does not exit when the model supplies an approval the user never gave", async () => {
+        // Only session.submitAnswers may exit plan mode; the tool's own
+        // `answers` argument is model-controlled and can be fabricated.
         enterPlanMode(state, "test-plan");
         const plansDir = join(testDir, ".taco", "plans");
         mkdirSync(plansDir, { recursive: true });
         writeFileSync(join(plansDir, "test-plan.md"), "# Plan\n\nDo stuff.");
 
-        const tool = createPlanExitTool(state, testDir, undefined, asSessionId("test-session"));
+        const tool = createPlanExitTool(state, testDir);
+        const result = await invokeTool(
+            tool,
+            { planSlug: "test-plan", answers: { "Approve this plan?": "Approve" } },
+            { env: new NodeExecutionEnv({ cwd: "/" }) },
+            { toolCallId: "tc-2" },
+        );
+
+        assert.equal(state.active, true);
+        const details = result.details as PlanExitToolDetails;
+        assert.equal(details.approved, false);
+
+        rmSync(testDir, { recursive: true, force: true });
+    });
+
+    it("reports approval when the server already exited plan mode", async () => {
+        enterPlanMode(state, "test-plan");
+
+        const tool = createPlanExitTool(state, testDir);
+        exitPlanMode(state);
         const result = await invokeTool(
             tool,
             { planSlug: "test-plan", answers: { "Approve this plan?": "Approve" } },
@@ -711,7 +732,6 @@ describe("planExit tool", () => {
         );
 
         assert.equal(state.active, false);
-        assert.equal(state.currentSlug, null);
         const details = result.details as PlanExitToolDetails;
         assert.equal(details.approved, true);
 
@@ -724,7 +744,7 @@ describe("planExit tool", () => {
         mkdirSync(plansDir, { recursive: true });
         writeFileSync(join(plansDir, "test-plan.md"), "# Plan\n\nDo stuff.");
 
-        const tool = createPlanExitTool(state, testDir, undefined, asSessionId("test-session"));
+        const tool = createPlanExitTool(state, testDir);
         const result = await invokeTool(
             tool,
             { planSlug: "test-plan", answers: { "Approve this plan?": "Reject" } },
@@ -755,7 +775,7 @@ describe("planExit tool — schema robustness", () => {
         mkdirSync(plansDir, { recursive: true });
         writeFileSync(join(plansDir, "stored-slug.md"), "# Plan from state\n\nBody.");
 
-        const tool = createPlanExitTool(state, testDir, undefined, asSessionId("test-session"));
+        const tool = createPlanExitTool(state, testDir);
         // No planSlug passed — relies entirely on state.currentSlug
         const result = await invokeTool(
             tool,
@@ -778,9 +798,12 @@ describe("planExit tool — schema robustness", () => {
         const mdPath = join(plansDir, "ephemeral.md");
         writeFileSync(mdPath, "# Ephemeral");
 
-        const tool = createPlanExitTool(state, testDir, undefined, asSessionId("test-session"));
-        // Simulate user/system deleting the plan document while waiting
+        // The server exits plan mode when the user approves, so by the
+        // second call the tool must report the decision without touching the
+        // plan file — the user may have deleted it in the meantime.
+        const tool = createPlanExitTool(state, testDir);
         rmSync(mdPath, { force: true });
+        exitPlanMode(state);
 
         // Second call, with answers — must not throw "Plan document not found"
         const result = await invokeTool(
@@ -790,7 +813,7 @@ describe("planExit tool — schema robustness", () => {
             { toolCallId: "tc" },
         );
 
-        assert.equal(state.active, false, "Approve should still exit plan mode");
+        assert.equal(state.active, false, "the server-side approval keeps plan mode off");
         const details = result.details as PlanExitToolDetails;
         assert.equal(details.approved, true);
         assert.equal(details.planContent, "", "second-call details should not carry plan content");
@@ -803,7 +826,7 @@ describe("planExit tool — schema robustness", () => {
         mkdirSync(plansDir, { recursive: true });
         writeFileSync(join(plansDir, "no-slug-2nd.md"), "# Body");
 
-        const tool = createPlanExitTool(state, testDir, undefined, asSessionId("test-session"));
+        const tool = createPlanExitTool(state, testDir);
         // Delete .md — but because this is a second call (with answers), it still doesn't read the file
         rmSync(join(plansDir, "no-slug-2nd.md"), { force: true });
 

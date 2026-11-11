@@ -24,8 +24,10 @@ export function createPlanEnterTool(
             "Enter plan mode. Use BEFORE you start writing code or making file changes when the task is " +
             "non-trivial: multi-file refactors, new features with design decisions, anything with " +
             "ambiguity about scope that requires user sign-off. In plan mode use available read-only tools, " +
-            "resolve required user decisions, and write only to .taco/plans/<slug>.md. Delegate focused " +
-            "read-only exploration only when an explorer is available and it helps complete the plan. " +
+            "resolve required user decisions, and write to .taco/plans/<slug>.md. A write to any other " +
+            "path is offered to the user for approval, so save a copy elsewhere only when the user names " +
+            "the path. " +
+            "Delegate focused read-only exploration only when an explorer is available and it helps complete the plan. " +
             "Do not implement project changes. When your plan is ready, call planExit to present it for user " +
             "approval. Do NOT call planEnter for trivial tasks — one-line fixes, simple questions, or " +
             "changes the user has already fully specified.",
@@ -33,7 +35,7 @@ export function createPlanEnterTool(
         executionMode: "sequential",
         taco: {
             promptSummary:
-                "Enter plan mode when implementation needs user sign-off. Inspect relevant code with available read-only tools, resolve required decisions, and write only `.taco/plans/<slug>.md`. Exit with `planExit` when the plan is ready for approval.",
+                "Enter plan mode when implementation needs user sign-off. Inspect relevant code with available read-only tools, resolve required decisions, and write `.taco/plans/<slug>.md`. A write elsewhere is offered to the user for approval. Exit with `planExit` when the plan is ready for approval.",
             mutates: false,
         },
         async execute(
@@ -64,7 +66,7 @@ export function createPlanEnterTool(
                 content: [
                     {
                         type: "text",
-                        text: `Entered plan mode: **${slug}**\n\nPlan path: ${planPath}\n\nUse available read-only tools to inspect relevant code and resolve required user decisions. You may write only the plan document at ${planPath}. Delegate focused read-only exploration only when an explorer is available and it helps. Once the plan is implementable, call planExit for approval.`,
+                        text: `Entered plan mode: **${slug}**\n\nPlan path: ${planPath}\n\nUse available read-only tools to inspect relevant code and resolve required user decisions. You may write the plan document at ${planPath}; a write to another path is shown to the user for approval — use one only when the user named it. Delegate focused read-only exploration only when an explorer is available and it helps. Once the plan is implementable, call planExit for approval.`,
                     },
                 ],
                 details: {
