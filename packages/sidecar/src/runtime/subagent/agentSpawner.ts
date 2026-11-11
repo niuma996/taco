@@ -7,7 +7,7 @@
  */
 
 import { EventEmitter } from "node:events";
-import { mkdir, stat, writeFile } from "node:fs/promises";
+import { mkdir, stat } from "node:fs/promises";
 import { dirname } from "node:path";
 import { asSessionId, type SessionId, type WorkspaceId } from "@taco-ai/protocol";
 import {
@@ -32,6 +32,7 @@ import type { DeferredToolCatalogEntry } from "../../prompts/formatCatalogForSys
 import type { EnvironmentContext } from "../../prompts/index.ts";
 import { interpolateArgs } from "../../skills/skillMessages.ts";
 import type { SpawnSkillSubagentOptions } from "../../skills/skillTool.ts";
+import { writeTextAtomic } from "../../store/atomicFile.ts";
 import { tagWrap } from "../../tags/builder.ts";
 import type { SubagentBudgetState } from "../../tags/subagentBudget.ts";
 import type { TacoTool } from "../../tools/index.ts";
@@ -1653,7 +1654,9 @@ export class AgentSpawner extends EventEmitter {
     ): Promise<string | undefined> {
         try {
             await mkdir(dirname(path), { recursive: true });
-            await writeFile(path, resultText, "utf8");
+            // Published by rename: the parent reads this file as the child's
+            // only answer, so a crash mid-write must not truncate it.
+            await writeTextAtomic(path, resultText);
             return path;
         } catch (e) {
             log.error("failed to persist background subagent result", {

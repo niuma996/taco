@@ -1,6 +1,7 @@
-import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { createLogger } from "../lib/logger.ts";
+import { writeJsonAtomic } from "../store/atomicFile.ts";
 import type { TaskList } from "./taskTypes.ts";
 
 const log = createLogger("tasks");
@@ -15,10 +16,12 @@ export const TASK_LIST_SCHEMA_VERSION = 1;
 export async function saveTaskListToDisk(baseDir: string, list: TaskList): Promise<void> {
     await mkdir(baseDir, { recursive: true });
     const filePath = join(baseDir, `${list.id}.json`);
-    await writeFile(
+    // Published by rename: a crash mid-write must not leave a truncated task
+    // list, because the same file is the only record of a session's tasks.
+    await writeJsonAtomic(
         filePath,
-        JSON.stringify({ schemaVersion: TASK_LIST_SCHEMA_VERSION, ...list }, null, 2),
-        "utf-8",
+        { schemaVersion: TASK_LIST_SCHEMA_VERSION, ...list },
+        { indent: 2 },
     );
 }
 

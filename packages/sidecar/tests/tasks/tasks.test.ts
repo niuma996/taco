@@ -1,5 +1,5 @@
 import { strict as assert } from "node:assert";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
@@ -12,7 +12,7 @@ import { sessionTasksDir } from "../../src/tasks/sessionTasksDir.ts";
 import { addTask, createTaskList } from "../../src/tasks/taskMutations.ts";
 import { loadAllTaskLists, saveTaskListToDisk } from "../../src/tasks/taskPersistence.ts";
 import { TaskPushAdapter } from "../../src/tasks/taskPushAdapter.ts";
-import type { TaskStore } from "../../src/tasks/taskTypes.ts";
+import type { TaskList, TaskStore } from "../../src/tasks/taskTypes.ts";
 import { buildTodoWriteReminderContextHook } from "../../src/tasks/todoWriteReminder.ts";
 
 describe("activeList", () => {
@@ -91,6 +91,59 @@ describe("sessionTasksDir", () => {
             const loaded = await loadAllTaskLists(join(tmpdir(), "taco-does-not-exist-xyz"));
             assert.deepEqual(loaded, []);
         });
+    });
+});
+
+describe("saveTaskListToDisk", () => {
+    it("publishes by rename so a rewrite never truncates the list", async () => {
+        const base = await mkdtemp(join(tmpdir(), "taco-tasks-atomic-"));
+        try {
+            const store = createTaskStore("/ws");
+            const list = createTaskList(store, "l1", "A");
+            await saveTaskListToDisk(base, list);
+            const file = join(base, "l1.json");
+            const before = await stat(file);
+
+            // The on-disk shape is frozen: two-space indent, schemaVersion first.
+            const raw = await readFile(file, "utf-8");
+            assert.equal(raw.startsWith('{\n  "schemaVersion": 1,'), true);
+            assert.equal(raw.endsWith("\n}"), true);
+
+            addTask(store, "l1", { content: "x", status: "pending", activeForm: "x" });
+            await saveTaskListToDisk(base, store.lists.get("l1") as TaskList);
+
+            // A new inode proves the file was replaced by rename, not truncated
+            // and rewritten in place — that is what makes a crash survivable.
+            const after = await stat(file);
+            assert.notEqual(after.ino, before.ino);
+            assert.deepEqual(await readdir(base), ["l1.json"]);
+            const loaded = await loadAllTaskLists(base);
+            assert.equal(loaded.length, 1);
+            assert.equal(loaded[0]?.tasks.length, 1);
+        } finally {
+            await rm(base, { recursive: true, force: true });
+        }
+    });
+
+    it("keeps concurrent saves of one list readable", async () => {
+        const base = await mkdtemp(join(tmpdir(), "taco-tasks-atomic-"));
+        try {
+            const store = createTaskStore("/ws");
+            createTaskList(store, "l1", "A");
+            await Promise.all(
+                Array.from({ length: 16 }, (_, index) =>
+                    saveTaskListToDisk(base, {
+                        ...(store.lists.get("l1") as TaskList),
+                        name: `A-${index}`,
+                    }),
+                ),
+            );
+            const loaded = await loadAllTaskLists(base);
+            assert.equal(loaded.length, 1);
+            assert.match(loaded[0]?.name ?? "", /^A-\d+$/);
+        } finally {
+            await rm(base, { recursive: true, force: true });
+        }
     });
 });
 
