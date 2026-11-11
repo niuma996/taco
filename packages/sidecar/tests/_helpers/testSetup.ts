@@ -13,6 +13,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { after } from "node:test";
 
 const home = mkdtempSync(join(tmpdir(), "taco-test-home-"));
 process.env.TACO_HOME = home;
@@ -20,3 +21,8 @@ process.env.TACO_HOME = home;
 process.on("exit", () => {
     rmSync(home, { recursive: true, force: true });
 });
+
+// Keep the process alive while tests await work driven by an unref'd daemon
+// timer, then release the handle when the test runner has finished.
+const keepalive = setInterval(() => {}, 60_000);
+after(() => clearInterval(keepalive));

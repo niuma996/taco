@@ -1,7 +1,9 @@
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, readdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { restrictOwner } from "../lib/fsPermissions.ts";
+import { writeJsonAtomic } from "../store/atomicFile.ts";
+import { SerialChain } from "../store/serial.ts";
 import {
     isQueueTerminal,
     type QueueCancelOutcome,
@@ -14,7 +16,7 @@ const MAX_WAIT_MS = 24 * 60 * 60_000;
 
 /** One daemon writes this ledger. In-memory serialization never substitutes for operation recovery. */
 export class WorkQueueStore {
-    private tail: Promise<unknown> = Promise.resolve();
+    private readonly chain = new SerialChain();
     constructor(
         private readonly root: string,
         private readonly pendingLimit = 1024,
@@ -24,7 +26,7 @@ export class WorkQueueStore {
         intent: WorkQueueIntent,
         now = Date.now(),
     ): Promise<{ entry: WorkQueueEntry; created: boolean }> {
-        return this.serial(async () => {
+        return this.chain.run(async () => {
             if (
                 !intent.workspace ||
                 !intent.sessionId ||
@@ -63,14 +65,14 @@ export class WorkQueueStore {
     }
 
     get(id: string): Promise<WorkQueueEntry | undefined> {
-        return this.serial(() => this.read(id));
+        return this.chain.run(() => this.read(id));
     }
     list(): Promise<WorkQueueEntry[]> {
-        return this.serial(() => this.readAll());
+        return this.chain.run(() => this.readAll());
     }
 
     claim(id: string, epoch: string): Promise<WorkQueueEntry | undefined> {
-        return this.serial(async () => {
+        return this.chain.run(async () => {
             const current = await this.read(id);
             if (!current || isQueueTerminal(current.status)) return undefined;
             if (current.driverEpoch === epoch && current.status !== "queued") return current;
@@ -93,7 +95,7 @@ export class WorkQueueStore {
         epoch: string,
         update: (entry: WorkQueueEntry) => WorkQueueEntry | undefined,
     ): Promise<WorkQueueEntry | undefined> {
-        return this.serial(async () => {
+        return this.chain.run(async () => {
             const entry = await this.read(id);
             if (!entry || entry.driverEpoch !== epoch || isQueueTerminal(entry.status))
                 return undefined;
@@ -117,7 +119,7 @@ export class WorkQueueStore {
         revision: number,
         now = Date.now(),
     ): Promise<{ outcome: QueueCancelOutcome; entry?: WorkQueueEntry }> {
-        return this.serial(async () => {
+        return this.chain.run(async () => {
             const entry = await this.read(id);
             if (!entry) return { outcome: "not_found" };
             if (entry.cancelRequestedAt !== undefined) return { outcome: "accepted", entry };
@@ -134,11 +136,6 @@ export class WorkQueueStore {
         });
     }
 
-    private serial<T>(run: () => Promise<T>): Promise<T> {
-        const result = this.tail.catch(() => undefined).then(run);
-        this.tail = result;
-        return result;
-    }
     private path(id: string): string {
         if (!SAFE_QUEUE_ID.test(id)) throw new Error("unsafe Work queue id");
         return join(this.root, `${id}.json`);
@@ -191,16 +188,8 @@ export class WorkQueueStore {
         return next;
     }
     private async write(entry: WorkQueueEntry): Promise<void> {
-        const path = this.path(entry.queueId);
         await mkdir(this.root, { recursive: true, mode: 0o700 });
         await restrictOwner(this.root, 0o700);
-        const temporary = `${path}.${randomUUID()}.tmp`;
-        try {
-            await writeFile(temporary, JSON.stringify(entry), { mode: 0o600 });
-            await restrictOwner(temporary);
-            await rename(temporary, path);
-        } finally {
-            await unlink(temporary).catch(() => undefined);
-        }
+        await writeJsonAtomic(this.path(entry.queueId), entry, { secure: true });
     }
 }

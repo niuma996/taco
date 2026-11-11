@@ -11,13 +11,15 @@
  * accepts a path.
  */
 
-import { createHash, randomUUID } from "node:crypto";
-import { mkdir, readdir, readFile, rename, rm, stat, unlink, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { mkdir, readdir, readFile, rm, stat } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type { SessionTarget } from "@taco-ai/protocol";
 import { WORK_STATUSES } from "@taco-ai/protocol";
 import { restrictOwner } from "../lib/fsPermissions.ts";
 import { createLogger } from "../lib/logger.ts";
+import { writeJsonAtomic } from "../store/atomicFile.ts";
+import { KeyedQueue } from "../store/serial.ts";
 import { isTerminal, WORK_SCHEMA_VERSION, type WorkRecord } from "./workTypes.ts";
 
 const log = createLogger("sidecar.work.store");
@@ -71,7 +73,7 @@ export function checksumOf(text: string): string {
 type WorkIdResolution = { kind: "found"; workId: string } | { kind: "missing" | "ambiguous" };
 
 export class WorkStore {
-    private readonly queues = new Map<string, Promise<void>>();
+    private readonly queue = new KeyedQueue();
 
     constructor(private readonly root: string) {}
 
@@ -318,7 +320,7 @@ export class WorkStore {
             interaction.toolCallId,
         );
         await this.ensureDir(dirname(path));
-        await this.atomicWrite(path, JSON.stringify({ invalidated: true }));
+        await writeJsonAtomic(path, { invalidated: true }, { secure: true });
     }
 
     async isDeleted(workId: string): Promise<boolean> {
@@ -342,14 +344,15 @@ export class WorkStore {
             await this.persistInvalidatedInteraction(current);
             const dir = join(this.root, "deleted");
             await this.ensureDir(dir);
-            await this.atomicWrite(
+            await writeJsonAtomic(
                 join(dir, `${workId}.json`),
-                JSON.stringify({
+                {
                     workId,
                     sourceEventId: current.sourceEventId,
                     workspace: current.workspace,
                     deletedAt: Date.now(),
-                }),
+                },
+                { secure: true },
             );
             return "deleted";
         });
@@ -407,7 +410,7 @@ export class WorkStore {
             )
         )
             return stored;
-        await this.atomicWrite(final, JSON.stringify(stored, null, JSON_INDENT));
+        await writeJsonAtomic(final, stored, { indent: JSON_INDENT, secure: true });
         return stored;
     }
 
@@ -434,10 +437,10 @@ export class WorkStore {
 
     private async write(record: WorkRecord): Promise<void> {
         await this.ensureDir(this.dir(record.workId));
-        await this.atomicWrite(
-            join(this.dir(record.workId), "work.json"),
-            JSON.stringify(record, null, JSON_INDENT),
-        );
+        await writeJsonAtomic(join(this.dir(record.workId), "work.json"), record, {
+            indent: JSON_INDENT,
+            secure: true,
+        });
     }
 
     /**
@@ -450,17 +453,6 @@ export class WorkStore {
         for (let at = dir; at.startsWith(this.root); at = dirname(at)) {
             await restrictOwner(at, 0o700);
             if (at === this.root) break;
-        }
-    }
-
-    private async atomicWrite(final: string, body: string): Promise<void> {
-        const tmp = `${final}.${process.pid}.${randomUUID()}.tmp`;
-        try {
-            await writeFile(tmp, body, "utf8");
-            await restrictOwner(tmp);
-            await rename(tmp, final);
-        } finally {
-            await unlink(tmp).catch(() => undefined);
         }
     }
 
@@ -494,21 +486,8 @@ export class WorkStore {
         }
     }
 
-    private async withQueue<T>(id: string, operation: () => Promise<T>): Promise<T> {
+    private withQueue<T>(id: string, operation: () => Promise<T>): Promise<T> {
         assertSafeWorkId(id);
-        const previous = this.queues.get(id) ?? Promise.resolve();
-        let release!: () => void;
-        const gate = new Promise<void>((resolve) => {
-            release = resolve;
-        });
-        const tail = previous.catch(() => undefined).then(() => gate);
-        this.queues.set(id, tail);
-        await previous.catch(() => undefined);
-        try {
-            return await operation();
-        } finally {
-            release();
-            if (this.queues.get(id) === tail) this.queues.delete(id);
-        }
+        return this.queue.run(id, operation);
     }
 }

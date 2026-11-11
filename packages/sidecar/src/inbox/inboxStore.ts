@@ -1,8 +1,9 @@
-import { randomUUID } from "node:crypto";
-import { mkdir, readdir, readFile, rename, rm, unlink, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type { SessionTarget } from "@taco-ai/protocol";
 import { restrictOwner } from "../lib/fsPermissions.ts";
+import { writeJsonAtomic } from "../store/atomicFile.ts";
+import { SerialChain } from "../store/serial.ts";
 import {
     INBOX_FALLBACK_WINDOW_MS,
     INBOX_SCHEMA_VERSION,
@@ -28,7 +29,7 @@ const receiptStatuses = new Set([
 
 /** Batch snapshots commit membership; receipt projections are repaired before any new write. */
 export class InboxStore {
-    private tail: Promise<unknown> = Promise.resolve();
+    private readonly chain = new SerialChain();
     private recovered = false;
 
     constructor(private readonly root: string) {}
@@ -333,19 +334,15 @@ export class InboxStore {
         this.recovered = true;
     }
     private serial<T>(run: () => Promise<T>): Promise<T> {
-        const result = this.tail
-            .catch(() => undefined)
-            .then(async () => {
-                if (!this.recovered) await this.recover();
-                try {
-                    return await run();
-                } catch (error) {
-                    this.recovered = false;
-                    throw error;
-                }
-            });
-        this.tail = result;
-        return result;
+        return this.chain.run(async () => {
+            if (!this.recovered) await this.recover();
+            try {
+                return await run();
+            } catch (error) {
+                this.recovered = false;
+                throw error;
+            }
+        });
     }
 
     private receiptPath(id: string): string {
@@ -438,13 +435,6 @@ export class InboxStore {
         await mkdir(dirname(path), { recursive: true, mode: 0o700 });
         await restrictOwner(this.root, 0o700);
         await restrictOwner(dirname(path), 0o700);
-        const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
-        try {
-            await writeFile(temporary, JSON.stringify(value), { mode: 0o600 });
-            await restrictOwner(temporary);
-            await rename(temporary, path);
-        } finally {
-            await unlink(temporary).catch(() => undefined);
-        }
+        await writeJsonAtomic(path, value, { secure: true });
     }
 }

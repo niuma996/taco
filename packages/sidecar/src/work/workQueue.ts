@@ -115,14 +115,17 @@ export class WorkQueue {
         if (this.stopped || this.timerAt <= Date.now() + delay) return;
         if (this.timer) clearTimeout(this.timer);
         this.timerAt = Date.now() + delay;
-        this.timer = setTimeout(() => {
-            this.timer = undefined;
-            this.timerAt = Infinity;
-            void this.pump().catch((error) => {
-                log.error("queue pass failed", { error: String(error) });
-                this.wake(this.pollMs);
-            });
-        }, delay);
+        this.timer = setTimeout(
+            () => {
+                this.timer = undefined;
+                this.timerAt = Infinity;
+                void this.pump().catch((error) => {
+                    log.error("queue pass failed", { error: String(error) });
+                    this.wake(this.pollMs);
+                });
+            },
+            Math.max(delay, 50),
+        );
         this.timer.unref?.();
     }
 

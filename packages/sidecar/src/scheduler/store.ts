@@ -13,12 +13,13 @@
  * cache rebuilt from disk on `start()`.
  */
 
-import { randomUUID } from "node:crypto";
 import type { Dirent } from "node:fs";
-import { mkdir, readdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { JobAlreadyExistsError } from "../lib/jobsErrors.ts";
 import { createLogger } from "../lib/logger.ts";
+import { writeJsonAtomic } from "../store/atomicFile.ts";
+import { KeyedQueue } from "../store/serial.ts";
 import { isBuiltinJob } from "./builtinJobs.ts";
 import { assertSafeJobId, isSafeJobId } from "./jobId.ts";
 import type { Job } from "./types.ts";
@@ -28,7 +29,7 @@ const log = createLogger("sidecar.scheduler.store");
 const JSON_INDENT = 2;
 
 export class JobStore {
-    private readonly queues = new Map<string, Promise<void>>();
+    private readonly queue = new KeyedQueue();
 
     constructor(private readonly dir: string) {}
 
@@ -62,16 +63,15 @@ export class JobStore {
         return this.readOne(`${id}.json`, id);
     }
 
-    /** Persist `job` atomically. Writes for one job are serialized and every
-     *  write uses a unique temporary file, so concurrent saves cannot race. */
+    /** Persist `job` atomically. Writes for one job are serialized. */
     async save(job: Job): Promise<void> {
         assertSafeJobId(job.id);
-        await this.withJobQueue(job.id, () => this.write(job));
+        await this.queue.run(job.id, () => this.write(job));
     }
 
     async create(job: Job): Promise<void> {
         assertSafeJobId(job.id);
-        await this.withJobQueue(job.id, async () => {
+        await this.queue.run(job.id, async () => {
             if (await this.readOne(`${job.id}.json`, job.id, false)) {
                 throw new JobAlreadyExistsError(job.id);
             }
@@ -82,7 +82,7 @@ export class JobStore {
     /** Serialized read-modify-write. Returning null deletes the job. */
     async mutate(id: string, update: (current: Job | null) => Job | null): Promise<Job | null> {
         assertSafeJobId(id);
-        return this.withJobQueue(id, async () => {
+        return this.queue.run(id, async () => {
             const current = await this.readOne(`${id}.json`, id, false);
             const next = update(current);
             if (next === current) return current;
@@ -99,19 +99,12 @@ export class JobStore {
 
     async delete(id: string): Promise<void> {
         assertSafeJobId(id);
-        await this.withJobQueue(id, () => this.unlink(id));
+        await this.queue.run(id, () => this.unlink(id));
     }
 
     private async write(job: Job): Promise<void> {
         await this.ensureDir();
-        const final = join(this.dir, `${job.id}.json`);
-        const tmp = `${final}.${process.pid}.${randomUUID()}.tmp`;
-        try {
-            await writeFile(tmp, JSON.stringify(job, null, JSON_INDENT), "utf8");
-            await rename(tmp, final);
-        } finally {
-            await unlink(tmp).catch(() => undefined);
-        }
+        await writeJsonAtomic(join(this.dir, `${job.id}.json`), job, { indent: JSON_INDENT });
     }
 
     private async unlink(id: string): Promise<void> {
@@ -119,23 +112,6 @@ export class JobStore {
         await unlink(final).catch((err: NodeJS.ErrnoException) => {
             if (err.code !== "ENOENT") throw err;
         });
-    }
-
-    private async withJobQueue<T>(id: string, operation: () => Promise<T>): Promise<T> {
-        const previous = this.queues.get(id) ?? Promise.resolve();
-        let release!: () => void;
-        const gate = new Promise<void>((resolve) => {
-            release = resolve;
-        });
-        const tail = previous.catch(() => undefined).then(() => gate);
-        this.queues.set(id, tail);
-        await previous.catch(() => undefined);
-        try {
-            return await operation();
-        } finally {
-            release();
-            if (this.queues.get(id) === tail) this.queues.delete(id);
-        }
     }
 
     /** Best-effort read — skips malformed files (logs a warning) rather
