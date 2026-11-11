@@ -82,6 +82,20 @@ export interface StartScheduledWorkArgs {
     readonly workspace: string;
     /** The session the fire's turn runs in. */
     readonly sessionId: string;
+    readonly queueId?: string;
+    readonly operation?: WorkOperationRef;
+}
+
+export interface StartInboundWorkArgs {
+    readonly sourceEventId: string;
+    readonly title: string;
+    readonly workspace: string;
+    readonly sessionId: string;
+    readonly sourceMemberIds: readonly string[];
+    readonly deliverTo: DeliveryTarget;
+    readonly maxMessageLength?: number;
+    readonly queueId: string;
+    readonly operation: WorkOperationRef;
 }
 
 export interface SettleWorkArgs {
@@ -166,7 +180,12 @@ export class WorkController {
             ownerInstanceId: this.instanceId,
             createdAt: now,
             updatedAt: now,
-            attempt: { attemptId: uuidv7(), startedAt: now },
+            attempt: {
+                attemptId: uuidv7(),
+                startedAt: now,
+                ...(args.queueId ? { queueId: args.queueId } : {}),
+                ...(args.operation ? { operation: args.operation } : {}),
+            },
         };
         const { record: stored, created } = await this.store.createIfAbsent(record, legacyId);
         if (created) {
@@ -179,6 +198,43 @@ export class WorkController {
                 });
             }
         }
+        return stored;
+    }
+
+    /** One frozen IM batch owns one Work and one frozen delivery binding. */
+    async startInbound(args: StartInboundWorkArgs): Promise<WorkRecord> {
+        const now = this.now();
+        const workId = workIdForSource(args.sourceEventId, args.workspace);
+        const record: WorkRecord = {
+            schemaVersion: WORK_SCHEMA_VERSION,
+            workId,
+            revision: 0,
+            kind: "inbound",
+            title: args.title,
+            sourceEventId: args.sourceEventId,
+            sourceMemberIds: args.sourceMemberIds,
+            workspace: args.workspace,
+            parentSessionId: args.sessionId,
+            deliveryTarget: args.deliverTo,
+            ...(args.maxMessageLength !== undefined
+                ? { maxMessageLength: args.maxMessageLength }
+                : {}),
+            status: "running",
+            ownerInstanceId: this.instanceId,
+            createdAt: now,
+            updatedAt: now,
+            attempt: {
+                attemptId: uuidv7(),
+                startedAt: now,
+                queueId: args.queueId,
+                operation: args.operation,
+            },
+        };
+        const { record: stored, created } = await this.store.createIfAbsent(
+            record,
+            legacyWorkIdForSource(args.sourceEventId),
+        );
+        if (created) this.onChange(workId);
         return stored;
     }
 
@@ -286,6 +342,10 @@ export class WorkController {
                       excerpt: excerpt(args.resultText),
                       path: args.path,
                   }),
+                  directReply:
+                      current.kind === "inbound" && args.outcome === "completed" && hasText
+                          ? args.resultText
+                          : undefined,
                   maxMessageLength,
               })
             : undefined;
@@ -540,6 +600,7 @@ export class WorkController {
             const deadRunning =
                 interruptOrphans &&
                 !skipWorkIds?.has(work.workId) &&
+                work.attempt.queueId === undefined &&
                 work.status === "running" &&
                 work.ownerInstanceId !== this.instanceId;
             if (work.status !== "waiting" && !deadRunning) continue;
@@ -749,6 +810,7 @@ function buildDelivery(args: {
     now: number;
     parentWillReply: boolean;
     template: string;
+    directReply?: string;
     maxMessageLength?: number;
 }): WorkDelivery {
     const cap = args.maxMessageLength ?? 2000;
@@ -767,8 +829,10 @@ function buildDelivery(args: {
         createdAt: args.now,
         maxMessageLength: cap,
         templateChunks,
-        ...(args.parentWillReply
-            ? { awaitingParentReplyUntil: args.now + PARENT_REPLY_GRACE_MS }
-            : { chunks: templateChunks, source: "template" as const }),
+        ...(args.directReply !== undefined
+            ? { chunks: chunkText(args.directReply, cap), source: "direct" as const }
+            : args.parentWillReply
+              ? { awaitingParentReplyUntil: args.now + PARENT_REPLY_GRACE_MS }
+              : { chunks: templateChunks, source: "template" as const }),
     };
 }

@@ -80,6 +80,7 @@ describe("work.* handlers", () => {
         assert.equal(RPC.workRetryDelivery, "work.retryDelivery");
         assert.equal(RPC.workCancel, "work.cancel");
         assert.equal(RPC.workDelete, "work.delete");
+        assert.equal(RPC.workQueueCancel, "work.queueCancel");
     });
 
     it("cancels a displayed waiting attempt and deletes its record through RPC", async () => {
@@ -115,6 +116,38 @@ describe("work.* handlers", () => {
     });
 
     describe("work.list", () => {
+        it("only exposes inbound Work to clients that negotiated its kind", async () => {
+            const { controller, server } = rig();
+            await controller.startInbound({
+                sourceEventId: "inbound:batch",
+                title: "IM batch",
+                workspace: "im://wechat/peer/chat",
+                sessionId: "s",
+                sourceMemberIds: ["i-a"],
+                deliverTo: { channelId: "wechat", peerId: "peer", chatId: "chat" },
+                queueId: `q-${"a".repeat(32)}`,
+                operation: {
+                    workspace: "im://wechat/peer/chat",
+                    sessionId: "s",
+                    lane: "main",
+                    operationId: "op",
+                },
+            });
+            const old = await callMethod<WorkListResult>("work.list", {
+                server: { ...server, supportsClientCapability: () => false },
+                params: {},
+            });
+            const current = await callMethod<WorkListResult>("work.list", {
+                server: {
+                    ...server,
+                    supportsClientCapability: (name: string) => name === "workInbound",
+                },
+                params: {},
+            });
+            assert.equal(old.active.length, 0);
+            assert.equal(current.active[0]?.kind, "inbound");
+        });
+
         it("projects waiting Work as running for a pre-2.12 client", async () => {
             const { controller, service } = rig();
             const started = await controller.start({

@@ -13,6 +13,7 @@ import {
 import { stageFromData } from "../attachments/attachmentStore.ts";
 import { extensionForMime, isModelImageMime, sniffImageMime } from "../attachments/mimeType.ts";
 import type { InboxStore } from "../inbox/inboxStore.ts";
+import type { InboxBatch } from "../inbox/inboxTypes.ts";
 import type { ServerRpcSurface } from "../runtime/serverRpcSurface.ts";
 import type { ConversationRouter } from "./conversationRouter.ts";
 import { combineInbound, InboxIngress } from "./inboxIngress.ts";
@@ -38,6 +39,11 @@ export class DefaultChannelContext implements ChannelContext {
         readonly logger: Logger,
         inbox?: InboxStore,
         binding?: () => string | undefined,
+        submitInbound?: (
+            message: ChannelInboundMessage,
+            target: { workspace: string; sessionId: string },
+            batch: InboxBatch,
+        ) => Promise<{ sessionId: string; failed?: boolean }>,
     ) {
         if (inbox)
             this.durableIngress = new InboxIngress(
@@ -45,7 +51,7 @@ export class DefaultChannelContext implements ChannelContext {
                 inbox,
                 () => binding?.() ?? store.getDeliveryBinding?.(),
                 (message) => router.route(hook, channelId, message.peerId, message.chatId),
-                (message) => this.submitLegacy(message),
+                submitInbound ?? ((message) => this.submitLegacy(message)),
             );
     }
 
@@ -187,7 +193,7 @@ interface StagedMedia {
  * be composed under. A media file that cannot be staged is counted, not
  * thrown: the sender's text still arrives, and the caller reports the loss.
  */
-async function stageMedia(
+export async function stageMedia(
     media: readonly ChannelMediaRef[] | undefined,
     workspaceId: string,
 ): Promise<StagedMedia> {
@@ -228,7 +234,7 @@ async function stageMedia(
  * because a partial delivery is invisible from the caption: the attachment
  * list names what arrived, never what did not.
  */
-function withUndeliveredNote(text: string, staged: StagedMedia): string {
+export function withUndeliveredNote(text: string, staged: StagedMedia): string {
     if (staged.refused === 0) return text;
     const note = `[${staged.refused} attachment(s) could not be delivered — too large, an unsupported format, or too many.]`;
     return text.trim() === "" ? note : `${text}\n\n${note}`;

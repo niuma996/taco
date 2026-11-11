@@ -56,6 +56,9 @@ export function toSummary(work: WorkRecord): WorkSummary {
         title: work.title,
         ...(work.agentType !== undefined ? { agentType: work.agentType } : {}),
         ...(work.jobId !== undefined ? { jobId: work.jobId } : {}),
+        ...(work.sourceMemberIds !== undefined
+            ? { sourceMemberIds: [...work.sourceMemberIds] }
+            : {}),
         status: work.status,
         ...(work.reason !== undefined ? { reason: work.reason } : {}),
         createdAt: work.createdAt,

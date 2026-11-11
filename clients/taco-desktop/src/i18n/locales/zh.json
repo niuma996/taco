@@ -567,7 +567,8 @@
       "cancelled": "已取消"
     },
     "kind": {
-      "scheduled": "定时任务"
+      "scheduled": "定时任务",
+      "inbound": "IM 消息"
     },
     "openSessionDeleted": "对应的聊天已删除。",
     "permissionRequired": "等待命令审批",

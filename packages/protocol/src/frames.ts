@@ -146,6 +146,8 @@ export interface ClientCapabilities {
     uiLocale?: SupportedLocale;
     /** Client can render the 2.12 waiting Work state and interaction details. */
     workWaiting?: boolean;
+    /** Client can display inbound IM batches as their own Work kind. */
+    workInbound?: boolean;
     /** Client distinguishes inherited read-only memory layers and duplicate topic ids. */
     memoryLayers?: boolean;
     [extension: string]: unknown;

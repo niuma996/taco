@@ -14,6 +14,7 @@ import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import type { Provider } from "@earendil-works/pi-ai";
 import {
+    type AgentMessage,
     asSessionId,
     asWorkspaceId,
     type ChannelStatusEntry,
@@ -21,6 +22,7 @@ import {
     type CustomModelEntry,
     type CustomProviderApi,
     type CustomProviderConfig,
+    createRpcRequest,
     ErrorCodes,
     IM_CWD_PREFIX,
     type InstructionsConfig,
@@ -29,6 +31,7 @@ import {
     PushMethods,
     type PushParams,
     parseImCwd,
+    RPC,
     type RpcRequest,
     type RpcResponse,
     type RpcValidationErrorData,
@@ -61,7 +64,7 @@ import {
     resolveChannelDefaultFromDocument,
 } from "../channels/imWorkspacePolicy.ts";
 import { ImWorkspacePolicyStore } from "../channels/imWorkspacePolicyStore.ts";
-import { DefaultChannelContext } from "../channels/ingress.ts";
+import { DefaultChannelContext, stageMedia, withUndeliveredNote } from "../channels/ingress.ts";
 import type { ChannelConfig } from "../channels/registry.ts";
 import { ChannelRegistry } from "../channels/registry.ts";
 import type { ChannelContext, Logger } from "../channels/types.ts";
@@ -101,7 +104,9 @@ import { loadSkillCatalog } from "../skills/skillCatalog.ts";
 import type { TacoSkill } from "../skills/tacoSkill.ts";
 import { TaskPushAdapter } from "../tasks/taskPushAdapter.ts";
 import { builtinToolCandidates } from "../tools/builtinCandidates.ts";
+import type { WorkQueueEntry } from "../work/workQueueTypes.ts";
 import { workRuntimeAdapter } from "../work/workRuntimeAdapter.ts";
+import type { QueueScheduledWork } from "../work/workService.ts";
 import { WorkService } from "../work/workService.ts";
 import {
     associationAffectsWorkspace,
@@ -565,6 +570,18 @@ export class SidecarServer implements ServerRpcSurface {
                     ? "available"
                     : "missing";
             },
+            queue: {
+                root: join(tacoHome(), "work-queue"),
+                execute: (entry) => this.executeQueuedWork(entry),
+                recover: async (entry) => {
+                    await this.dispatchQueueRpc(
+                        createRpcRequest(`${entry.queueId}:recover`, RPC.sessionAttach, {
+                            workspace: asWorkspaceId(entry.workspace),
+                            sessionId: asSessionId(entry.sessionId),
+                        }),
+                    );
+                },
+            },
         });
         this.inbox = new InboxStore(join(tacoHome(), "inbox"));
         this.channelFactory = new ChannelFactory({
@@ -743,7 +760,101 @@ export class SidecarServer implements ServerRpcSurface {
             this.channelLogger(channelId),
             this.inbox,
             () => this.channelRegistry.getDeliveryBinding(channelId),
+            async (message, target, batch) => {
+                if (!message.bindingId) throw new Error("inbound binding is missing");
+                await this.work.enqueueInbound({
+                    batchId: batch.batchId,
+                    memberReceiptIds: batch.memberReceiptIds,
+                    title: message.text.trim().slice(0, 60) || "IM media",
+                    workspace: target.workspace,
+                    sessionId: target.sessionId,
+                    text: message.text,
+                    ...(message.media ? { media: message.media } : {}),
+                    deliveryTarget: {
+                        channelId: message.channelId,
+                        peerId: message.peerId,
+                        chatId: message.chatId,
+                        bindingId: message.bindingId,
+                    },
+                });
+                return { sessionId: target.sessionId };
+            },
         );
+    }
+
+    queueScheduled(
+        request: QueueScheduledWork,
+        onWork?: (workId: string) => void,
+    ): Promise<{ workId?: string; status: string; reason?: string }> {
+        return this.work.queueScheduled(request, onWork);
+    }
+
+    private async executeQueuedWork(entry: WorkQueueEntry): Promise<AgentMessage> {
+        let createSession = entry.createSession === true;
+        if (entry.kind === "scheduled" && createSession) {
+            const existing = await this.dispatchRpc(
+                createRpcRequest(`${entry.queueId}:probe`, RPC.sessionHistory, {
+                    workspace: asWorkspaceId(entry.workspace),
+                    sessionId: asSessionId(entry.sessionId),
+                }),
+            );
+            if (existing.ok) createSession = false;
+            else if (existing.error.code !== ErrorCodes.NotFound)
+                throw Object.assign(new Error(existing.error.message), {
+                    code: existing.error.code,
+                });
+        }
+        if (entry.kind === "scheduled" && createSession) {
+            const result = await this.dispatchQueueRpc(
+                createRpcRequest(entry.queueId, RPC.sessionCreate, {
+                    workspace: asWorkspaceId(entry.workspace),
+                    sessionId: asSessionId(entry.sessionId),
+                    initialPrompt: entry.payload.text,
+                }),
+            );
+            return this.queuedReply(result);
+        }
+        if (!createSession)
+            await this.dispatchQueueRpc(
+                createRpcRequest(`${entry.queueId}:attach`, RPC.sessionAttach, {
+                    workspace: asWorkspaceId(entry.workspace),
+                    sessionId: asSessionId(entry.sessionId),
+                }),
+            );
+        let text = entry.payload.text;
+        let attachments: string[] | undefined;
+        if (entry.kind === "inbound") {
+            const staged = await stageMedia(entry.payload.media, entry.workspace);
+            text = withUndeliveredNote(text, staged);
+            attachments = staged.ids;
+        }
+        const result = await this.dispatchQueueRpc(
+            createRpcRequest(entry.queueId, RPC.sessionPrompt, {
+                workspace: asWorkspaceId(entry.workspace),
+                sessionId: asSessionId(entry.sessionId),
+                text,
+                ...(attachments ? { attachments } : {}),
+            }),
+        );
+        return this.queuedReply(result);
+    }
+
+    private async dispatchQueueRpc(request: RpcRequest): Promise<RpcResponse> {
+        // The persisted operation id already supplies getResult/accept/drive
+        // recovery. A commandId would additionally cache session_busy and
+        // replay that transient failure instead of admitting the retry.
+        const response = await this.dispatchRpc(request);
+        if (!response.ok)
+            throw Object.assign(new Error(response.error.message), { code: response.error.code });
+        return response;
+    }
+
+    private queuedReply(response: RpcResponse): AgentMessage {
+        if (!response.ok) throw new Error("queue response changed after validation");
+        const message = (response.result as { assistantMessage?: AgentMessage } | undefined)
+            ?.assistantMessage;
+        if (!message) throw new Error("queued session returned no assistant message");
+        return message;
     }
 
     /** Channel logger — scope carries the channelId; satisfies channels' Logger. */
@@ -1743,10 +1854,19 @@ export class SidecarServer implements ServerRpcSurface {
             // Only the model's own output is held: approval requests and other
             // server notices still reach the peer, or a run waiting on the
             // peer's approval would stall until its timeout.
+            const event =
+                method === PushMethods.Event
+                    ? (params as { event?: { type?: string; message?: { role?: string } } }).event
+                    : undefined;
+            const inboundReply =
+                session !== undefined &&
+                event?.type === "message_end" &&
+                event.message?.role === "assistant" &&
+                this.work.ownsInboundReply(workspace, session);
             const held =
                 session !== undefined &&
                 method === PushMethods.Event &&
-                this.work.controller.isHoldingReplies(session, workspace);
+                (this.work.controller.isHoldingReplies(session, workspace) || inboundReply);
             // Child sessions report through their parent's tool result or Work
             // notice. They have no independent IM route and must not speak here.
             if (parsed && !held && sessionKind !== "subagent") {

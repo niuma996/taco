@@ -66,7 +66,7 @@ export interface WorkDelivery {
      * one without needing the result text again.
      */
     readonly templateChunks?: readonly string[];
-    readonly source?: "parentReply" | "template";
+    readonly source?: "parentReply" | "template" | "direct";
     /** The channel's per-message cap at settle time; later chunking reuses it. */
     readonly maxMessageLength: number;
     readonly confirmedChunks: number;
@@ -83,6 +83,8 @@ export interface WorkDelivery {
 }
 
 export interface WorkAttempt {
+    /** The independent queue owns recovery for this attempt only. */
+    readonly queueId?: string;
     readonly interaction?: { readonly sessionId: string; readonly toolCallId: string };
     readonly sharedQueue?: boolean;
     readonly attemptId: string;
@@ -136,6 +138,8 @@ export interface WorkRecord {
     readonly title: string;
     /** Dedup key: the same source event never creates a second Work. */
     readonly sourceEventId: string;
+    /** Ordered inbox receipt ids for an inbound Work; absent for other sources. */
+    readonly sourceMemberIds?: readonly string[];
     /**
      * The workspace the parent session lives in, so the overview can open it.
      * Absent on records written before it was captured.

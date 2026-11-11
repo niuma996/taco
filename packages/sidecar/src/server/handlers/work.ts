@@ -24,6 +24,15 @@ export function registerWorkHandlers(): void {
         { command: true },
     );
     registerMethod(
+        "workQueueCancel",
+        false,
+        async ({ server, params }) =>
+            server.work?.cancelQueue?.(params.queueId, params.revision) ?? {
+                outcome: "not_found" as const,
+            },
+        { command: true },
+    );
+    registerMethod(
         "workDelete",
         false,
         async ({ server, params }) =>
@@ -34,14 +43,21 @@ export function registerWorkHandlers(): void {
         work.status === "waiting"
             ? { ...work, status: "running", needsAttention: false, waiting: undefined }
             : work;
-    const legacyList = (result: WorkListResult, supports: boolean): WorkListResult =>
-        supports
-            ? result
-            : {
-                  ...result,
-                  active: result.active.map(legacy),
-                  terminal: result.terminal.map(legacy),
-              };
+    const project = (
+        result: WorkListResult,
+        waiting: boolean,
+        inbound: boolean,
+    ): WorkListResult => {
+        return {
+            ...result,
+            active: result.active
+                .filter((work) => inbound || work.kind !== "inbound")
+                .map((work) => (waiting ? work : legacy(work))),
+            terminal: result.terminal
+                .filter((work) => inbound || work.kind !== "inbound")
+                .map((work) => (waiting ? work : legacy(work))),
+        };
+    };
     registerMethod("workList", false, async ({ server, params }): Promise<WorkListResult> => {
         if (!server.work) {
             return { instanceId: SIDECAR_INSTANCE_ID, active: [], terminal: [] };
@@ -51,12 +67,18 @@ export function registerWorkHandlers(): void {
             before: params.before,
             ...(params.jobId !== undefined ? { jobId: params.jobId } : {}),
         });
-        return legacyList(result, server.supportsClientCapability?.("workWaiting") ?? true);
+        return project(
+            result,
+            server.supportsClientCapability?.("workWaiting") ?? true,
+            server.supportsClientCapability?.("workInbound") ?? false,
+        );
     });
 
     registerMethod("workGet", false, async ({ server, params }): Promise<WorkGetResult> => {
         if (!server.work) return { work: null };
         const result = await server.work.get(params.workId);
+        if (result.work?.kind === "inbound" && !server.supportsClientCapability?.("workInbound"))
+            return { work: null };
         if (server.supportsClientCapability?.("workWaiting") ?? true) return result;
         return result.work ? { ...result, work: legacy(result.work) } : result;
     });

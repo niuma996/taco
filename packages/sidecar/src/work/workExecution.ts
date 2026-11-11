@@ -5,6 +5,12 @@ import { uuidv7 } from "../runtime/pi/values.ts";
 import { resolveWaitingInteraction } from "../runtime/session/waitingInteraction.ts";
 import type { WorkController } from "./workController.ts";
 import type { WorkOperationRef, WorkOperationRuntime } from "./workOperationTypes.ts";
+
+export interface WorkExecutionAdmission {
+    beforeAccept(): Promise<void>;
+    afterAccept(): Promise<void>;
+}
+
 import { cancelWaiting, interrupt, UNREADABLE_WORK_STALE_MS } from "./workState.ts";
 import type { WorkStore } from "./workStore.ts";
 import { isTerminal } from "./workTypes.ts";
@@ -33,6 +39,7 @@ export class WorkExecution {
         workId: string,
         sessionId: string,
         run: (attemptId: string) => Promise<T>,
+        admission?: WorkExecutionAdmission,
     ): Promise<T> {
         const snapshot = await this.store.get(workId);
         if (snapshot?.status !== "running") throw cancelled();
@@ -62,6 +69,7 @@ export class WorkExecution {
             {
                 ...ref,
                 beforeAccept: async (operationId) => {
+                    await admission?.beforeAccept();
                     const saved = await this.store.mutate(workId, (current) =>
                         current.status === "running" &&
                         current.attempt.attemptId === attemptId &&
@@ -78,16 +86,28 @@ export class WorkExecution {
                     if (!saved?.changed) throw cancelled();
                 },
                 afterAccept: async (operationId) => {
-                    const saved = await this.store.mutate(workId, (current) =>
-                        current.status === "running" && current.attempt.attemptId === attemptId
-                            ? {
-                                  ...current,
-                                  attempt: { ...current.attempt, operationAccepted: true },
-                              }
-                            : undefined,
-                    );
-                    if (!saved?.changed || saved.record.attempt.cancelRequestedAt !== undefined) {
-                        await this.runtime?.abort({ ...ref, operationId });
+                    try {
+                        const saved = await this.store.mutate(workId, (current) =>
+                            current.status === "running" && current.attempt.attemptId === attemptId
+                                ? {
+                                      ...current,
+                                      attempt: { ...current.attempt, operationAccepted: true },
+                                  }
+                                : undefined,
+                        );
+                        if (
+                            !saved?.changed ||
+                            saved.record.attempt.cancelRequestedAt !== undefined
+                        ) {
+                            await this.runtime?.abort({ ...ref, operationId });
+                        }
+                        await admission?.afterAccept();
+                    } catch (error) {
+                        if (!admission) throw error;
+                        throw Object.assign(new Error("accepted Work operation needs recovery"), {
+                            code: "queue_recovery_required",
+                            cause: error,
+                        });
                     }
                 },
             },
@@ -145,6 +165,7 @@ export class WorkExecution {
         for (const snapshot of await this.store.list()) {
             if (
                 snapshot.status !== "running" ||
+                snapshot.attempt.queueId !== undefined ||
                 !snapshot.attempt.operation ||
                 snapshot.ownerInstanceId === this.instanceId
             )

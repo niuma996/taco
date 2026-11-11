@@ -8,10 +8,17 @@ import { ConversationRouter } from "../../src/channels/conversationRouter.ts";
 import { DefaultChannelContext } from "../../src/channels/ingress.ts";
 import type { ChannelInboundMessage } from "../../src/channels/types.ts";
 import { InboxStore } from "../../src/inbox/inboxStore.ts";
+import type { InboxBatch } from "../../src/inbox/inboxTypes.ts";
 import { createLogger } from "../../src/lib/logger.ts";
 import type { ServerRpcSurface } from "../../src/runtime/serverRpcSurface.ts";
 
-async function rig(t: TestContext, rejectPrompt = false) {
+type SubmitInbound = (
+    message: ChannelInboundMessage,
+    target: { workspace: string; sessionId: string },
+    batch: InboxBatch,
+) => Promise<{ sessionId: string; failed?: boolean }>;
+
+async function rig(t: TestContext, rejectPrompt = false, submitInbound?: SubmitInbound) {
     const root = await mkdtemp(join(tmpdir(), "inbox-ingress-"));
     t.after(() => rm(root, { recursive: true, force: true }));
     const inbox = new InboxStore(join(root, "inbox"));
@@ -43,6 +50,8 @@ async function rig(t: TestContext, rejectPrompt = false) {
         config,
         createLogger("inbox-test"),
         inbox,
+        undefined,
+        submitInbound,
     );
     const msg = (id: string): ChannelInboundMessage => ({
         channelId: "wechat",
@@ -77,6 +86,22 @@ it("dispatches a real frozen batch without using stale receipt revisions", async
     assert.ok(result?.batchId);
     assert.equal(requests.filter((req) => req.method === RPC.sessionPrompt).length, 1);
     assert.equal((await inbox.list()).length, 2);
+});
+
+it("hands the frozen batch and target to inbound Work without legacy prompt dispatch", async (t) => {
+    const submitted: { message: ChannelInboundMessage; batch: InboxBatch }[] = [];
+    const { ctx, inbox, requests, msg } = await rig(t, false, async (message, target, batch) => {
+        submitted.push({ message, batch });
+        return { sessionId: target.sessionId };
+    });
+    await ctx.ingress.submitBatch?.([msg("a"), msg("b")]);
+    assert.equal(requests.filter((req) => req.method === RPC.sessionPrompt).length, 0);
+    assert.equal(submitted.length, 1);
+    const submittedBatch = submitted[0];
+    assert.ok(submittedBatch);
+    assert.equal(submittedBatch.batch.memberReceiptIds.length, 2);
+    assert.equal(submittedBatch.message.platformMessageId, submittedBatch.batch.batchId);
+    assert.equal((await inbox.getBatch(submittedBatch.batch.batchId))?.state, "submitted");
 });
 
 it("persists a single-message submit and does not dispatch its replay", async (t) => {

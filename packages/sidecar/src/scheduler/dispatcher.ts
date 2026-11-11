@@ -44,6 +44,18 @@ interface DispatchSurface {
     lookupRoute?(workspace: string): { sessionId: string } | undefined;
     /** Buffer queue events before prompting; absent on test stubs. */
     queueWatch?(workspace: string, sessionId: string): QueuedWatch | undefined;
+    queueScheduled?(
+        request: {
+            jobId: string;
+            fireId: string;
+            title: string;
+            workspace: string;
+            sessionId: string;
+            prompt: string;
+            createSession: boolean;
+        },
+        onWork?: (workId: string) => void,
+    ): Promise<{ workId?: string; status: string; reason?: string }>;
 }
 
 /** Resolve the runtime server a job's invoke should dispatch to, based on
@@ -158,13 +170,19 @@ async function invokeAgent(
     const { onPinnedSessionCreated } = options;
     // The session id is known before the turn starts on every strategy, so the
     // Work exists, and the history can point at it, while the turn runs.
-    const run = (sessionId: string, turn: (watch?: QueuedWatch) => Promise<TurnOutcome>) =>
-        trackTurn(server, options.work, job, workspace, sessionId, fire, turn);
+    const run = (
+        sessionId: string,
+        turn: (watch?: QueuedWatch) => Promise<TurnOutcome>,
+        createSession = false,
+    ) =>
+        server.queueScheduled && fire
+            ? queueTurn(server, job, workspace, sessionId, prompt, createSession, fire)
+            : trackTurn(server, options.work, job, workspace, sessionId, fire, turn);
 
     switch (strategy) {
         case "new": {
             const id = `sched-${randomUUID()}`;
-            return run(id, () => createWithPrompt(server, workspace, id, prompt));
+            return run(id, () => createWithPrompt(server, workspace, id, prompt), true);
         }
         case "reuse": {
             const existing = await lookupSession(server, workspace);
@@ -207,13 +225,58 @@ async function invokeAgent(
                     `pinned session ${pinned} for job ${job.id} no longer exists; re-creating`,
                 );
             }
-            const result = await run(id, () => createWithPrompt(server, workspace, id, prompt));
+            const result = await run(
+                id,
+                () => createWithPrompt(server, workspace, id, prompt),
+                true,
+            );
             if (onPinnedSessionCreated) {
                 await onPinnedSessionCreated(job.id, id, job.generation);
             }
             return result;
         }
     }
+}
+
+async function queueTurn(
+    server: DispatchSurface,
+    job: Job,
+    workspace: string,
+    sessionId: string,
+    prompt: string,
+    createSession: boolean,
+    fire: FireContext,
+): Promise<AgentInvokeResult> {
+    let reported: string | undefined;
+    const result = await server.queueScheduled?.(
+        {
+            jobId: job.id,
+            fireId: fire.fireId,
+            title: job.name,
+            workspace,
+            sessionId,
+            prompt,
+            createSession,
+        },
+        (workId) => {
+            if (reported === workId) return;
+            reported = workId;
+            fire.onWork(workId);
+        },
+    );
+    if (!result) throw new Error("scheduled queue did not answer");
+    if (result.status === "failed")
+        throw new ScheduledCommandFailed(
+            ErrorCodes.Internal,
+            result.reason ?? "scheduled queue execution failed",
+        );
+    if (result.status === "cancelled")
+        throw new ScheduledCommandFailed(
+            ErrorCodes.Aborted,
+            result.reason ?? "scheduled queue execution was cancelled",
+        );
+    if (result.workId && reported !== result.workId) fire.onWork(result.workId);
+    return result.workId ? { workId: result.workId } : {};
 }
 
 /**

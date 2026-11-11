@@ -219,7 +219,11 @@ export function WorkPane({ client, overview, onOpenSession }: WorkPaneProps) {
                         )}
                         <span className="work-item-title">{work.title || work.agentType}</span>
                         <span className="work-item-agent">
-                            {work.kind === "scheduled" ? t("work.kind.scheduled") : work.agentType}
+                            {work.kind === "scheduled"
+                                ? t("work.kind.scheduled")
+                                : work.kind === "inbound"
+                                  ? t("work.kind.inbound")
+                                  : work.agentType}
                         </span>
                     </button>
                     <div className="work-item-badges">

@@ -1036,7 +1036,11 @@ describe("daemonOwnership", () => {
         assert.ok(
             (await runtime.listSessions()).some((session) => session.id === "host-fs-session"),
         );
-        assert.deepEqual(new Set(owner.workspaceIds()), new Set(["im://mock-1/u3/c1", cwd]));
+        // Earlier tests share this durable home. Queue recovery may legitimately
+        // reopen their IM workspaces; this test only requires both new targets.
+        const workspaces = new Set(owner.workspaceIds());
+        assert.ok(workspaces.has(asWorkspaceId("im://mock-1/u3/c1")));
+        assert.ok(workspaces.has(cwd));
     });
 });
 

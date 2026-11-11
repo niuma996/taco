@@ -71,6 +71,14 @@ export function getTurnKey(params: unknown): string | undefined {
  *     This gives users enough to diagnose without becoming a leak channel.
  */
 export function normalizeError(id: string, e: unknown): RpcResponse {
+    // Internal queue admission failed after harness acceptance. The caller must
+    // inspect the same operation, and session.create must not roll it back.
+    if (
+        e instanceof Error &&
+        "code" in e &&
+        (e as { code?: unknown }).code === "queue_recovery_required"
+    )
+        return err(id, "queue_recovery_required", "accepted Work operation needs recovery");
     if (e instanceof RpcHandlerError) {
         return err(id, e.code, e.message, e.data);
     }

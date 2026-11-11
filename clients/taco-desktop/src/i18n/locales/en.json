@@ -567,7 +567,8 @@
       "cancelled": "Cancelled"
     },
     "kind": {
-      "scheduled": "Scheduled"
+      "scheduled": "Scheduled",
+      "inbound": "IM message"
     },
     "openSessionDeleted": "The target chat has been deleted.",
     "permissionRequired": "Command approval required",

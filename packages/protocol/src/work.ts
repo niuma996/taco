@@ -17,6 +17,7 @@ import type {
     workDeleteSchema,
     workGetSchema,
     workListSchema,
+    workQueueCancelSchema,
     workRetryDeliverySchema,
 } from "./schemas/work.js";
 
@@ -42,7 +43,7 @@ export interface WorkWaitingSummary {
     instanceId?: string;
 }
 
-export const WORK_KINDS = ["subagent", "scheduled"] as const;
+export const WORK_KINDS = ["subagent", "scheduled", "inbound"] as const;
 export type WorkKind = (typeof WORK_KINDS)[number];
 
 /**
@@ -106,7 +107,7 @@ export interface WorkDeliverySummary {
     /** Short machine code of the last failure, never platform text. */
     lastError?: string;
     /** Whether the message is the parent model's reply or the template. */
-    source?: "parentReply" | "template";
+    source?: "parentReply" | "template" | "direct";
     /** Epoch ms of the next automatic attempt, when one is scheduled. */
     nextAttemptAt?: number;
 }
@@ -125,6 +126,8 @@ export interface WorkSummary {
     agentType?: string;
     /** The job that fired, for a scheduled Work. */
     jobId?: string;
+    /** Ordered source receipt ids, exposed only for inbound Work tracking. */
+    sourceMemberIds?: string[];
     status: WorkStatus;
     /** Current attempt identity; absent on older daemons. */
     attemptId?: string;
@@ -167,6 +170,7 @@ export type WorkListParams = ParamsOf<typeof workListSchema>;
 export type WorkGetParams = ParamsOf<typeof workGetSchema>;
 export type WorkRetryDeliveryParams = ParamsOf<typeof workRetryDeliverySchema>;
 export type WorkCancelParams = ParamsOf<typeof workCancelSchema>;
+export type WorkQueueCancelParams = ParamsOf<typeof workQueueCancelSchema>;
 export type WorkDeleteParams = ParamsOf<typeof workDeleteSchema>;
 
 export type WorkCancelOutcome =
@@ -180,6 +184,12 @@ export interface WorkCancelResult {
     outcome: WorkCancelOutcome;
     /** False for a repeated request or when cancellation was not accepted. */
     newlyRequested: boolean;
+}
+
+export type WorkQueueCancelOutcome = "accepted" | "not_found" | "not_running" | "revision_mismatch";
+
+export interface WorkQueueCancelResult {
+    outcome: WorkQueueCancelOutcome;
 }
 
 export type WorkDeleteOutcome = "deleted" | "not_found" | "running";

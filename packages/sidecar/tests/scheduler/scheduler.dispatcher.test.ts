@@ -59,6 +59,37 @@ describe("dispatcher", () => {
     }
 
     describe("createJobDispatcher — agent.invoke path (new)", () => {
+        it("uses the durable Work queue when the host provides it", async () => {
+            const queued: unknown[] = [];
+            const fake = {
+                ...makeFakeServer(async () => {
+                    throw new Error("the legacy prompt path must not run");
+                }),
+                queueScheduled: async (request: unknown) => {
+                    queued.push(request);
+                    return { workId: "w-queued", status: "completed" };
+                },
+            };
+            const dispatcher = createJobDispatcher(() => fake);
+            const reported: string[] = [];
+            const result = await dispatcher(
+                invokeJob("/tmp/w", "echo hello", { sessionStrategy: "new" }),
+                { fireId: "fire-1", onWork: (id) => reported.push(id) },
+            );
+            assert.deepEqual(result, { workId: "w-queued" });
+            assert.deepEqual(reported, ["w-queued"]);
+            assert.equal(queued.length, 1);
+            assert.deepEqual(queued[0], {
+                jobId: "test-job",
+                fireId: "fire-1",
+                title: "test",
+                workspace: "/tmp/w",
+                sessionId: (queued[0] as { sessionId: string }).sessionId,
+                prompt: "echo hello",
+                createSession: true,
+            });
+        });
+
         it("dispatches a single session.create carrying the prompt", async () => {
             const fake = makeFakeServer(async (req) => {
                 assert.equal(req.method, "session.create");

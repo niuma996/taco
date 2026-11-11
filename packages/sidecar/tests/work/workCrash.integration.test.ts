@@ -7,15 +7,39 @@ import { join } from "node:path";
 import { it } from "node:test";
 import { fileURLToPath } from "node:url";
 import { operationResult } from "@taco-ai/pi-harness/harness/session";
+import { asSessionId } from "@taco-ai/protocol";
 import { harnessContext } from "../../src/lib/harnessContext.ts";
 import { NodeExecutionEnv } from "../../src/runtime/pi/node.ts";
 import type { Session } from "../../src/runtime/pi/types.ts";
 import { JsonlSessionRepo } from "../../src/runtime/pi/values.ts";
+import { SessionNotFoundError } from "../../src/runtime/session/sessionLookup.ts";
 import type { WorkspaceRuntime } from "../../src/runtime/workspace.ts";
 import type { WorkOperationRef } from "../../src/work/workOperationTypes.ts";
 import { workRuntimeAdapter } from "../../src/work/workRuntimeAdapter.ts";
 import { WorkService } from "../../src/work/workService.ts";
 import type { WorkCrashReady } from "../_helpers/workCrashChild.ts";
+
+it("treats a not-yet-created queue session as a missing operation", async () => {
+    const adapter = workRuntimeAdapter(
+        async () =>
+            ({
+                sessionRegistry: {
+                    withSession: async () => {
+                        throw new SessionNotFoundError(asSessionId("not-created"));
+                    },
+                },
+            }) as unknown as WorkspaceRuntime,
+    );
+    assert.deepEqual(
+        await adapter.inspect({
+            workspace: "/new",
+            sessionId: "not-created",
+            lane: "main",
+            operationId: "operation",
+        }),
+        { kind: "missing" },
+    );
+});
 
 async function bounded<T>(promise: Promise<T>, label: string, timeout = 15_000): Promise<T> {
     let timer: ReturnType<typeof setTimeout> | undefined;

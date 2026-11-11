@@ -19,12 +19,14 @@ import {
     type WorkDeleteResult,
     type WorkGetResult,
     type WorkListResult,
+    type WorkQueueCancelResult,
     type WorkRetryDeliveryResult,
 } from "@taco-ai/protocol";
 import type { ChannelRegistry } from "../channels/registry.ts";
 import { createLogger } from "../lib/logger.ts";
 import { withManagedOperation } from "../runtime/harness/operationExecution.ts";
 import type { WaitingInteraction } from "../runtime/session/waitingInteraction.ts";
+import { resolveWaitingInteraction } from "../runtime/session/waitingInteraction.ts";
 import { type SettleWorkArgs, WorkController } from "./workController.ts";
 import { type DeliveryClock, systemClock, WorkDeliverer } from "./workDelivery.ts";
 import { WorkExecution } from "./workExecution.ts";
@@ -46,6 +48,9 @@ import type {
 } from "./workOperationTypes.ts";
 import { WorkParentNotice } from "./workParentNotice.ts";
 import { WorkPermissionProjection } from "./workPermissionProjection.ts";
+import { WorkQueue } from "./workQueue.ts";
+import { WorkQueueStore } from "./workQueueStore.ts";
+import type { WorkQueueEntry } from "./workQueueTypes.ts";
 import { WorkReconciler } from "./workReconciler.ts";
 import { isSafeWorkId, legacyWorkIdForSource, WorkStore, workIdForSource } from "./workStore.ts";
 import { isTerminal } from "./workTypes.ts";
@@ -74,11 +79,38 @@ export interface WorkServiceOptions {
         workspace: string,
         sessionId: string,
     ) => Promise<"available" | "missing" | "unknown">;
+    readonly queue?: {
+        readonly root: string;
+        execute(entry: WorkQueueEntry): Promise<AgentMessage>;
+        recover(entry: WorkQueueEntry): Promise<void>;
+    };
+}
+
+export interface QueueScheduledWork {
+    readonly jobId: string;
+    readonly fireId: string;
+    readonly title: string;
+    readonly workspace: string;
+    readonly sessionId: string;
+    readonly prompt: string;
+    readonly createSession: boolean;
+}
+
+export interface QueueInboundWork {
+    readonly batchId: string;
+    readonly memberReceiptIds: readonly string[];
+    readonly title: string;
+    readonly workspace: string;
+    readonly sessionId: string;
+    readonly text: string;
+    readonly media?: readonly import("../channels/types.ts").ChannelMediaRef[];
+    readonly deliveryTarget: import("./workTypes.ts").DeliveryTarget;
 }
 
 /** What the `work.*` handlers need from the Work layer; nothing about stores or timers. */
 export interface WorkControl {
     cancel(workId: string, attemptId: string): Promise<WorkCancelResult>;
+    cancelQueue?(queueId: string, revision: number): Promise<WorkQueueCancelResult>;
     delete(workId: string): Promise<WorkDeleteResult>;
     sessionSkipped(target: SessionTarget): Promise<void>;
     list(args: WorkListArgs): Promise<WorkListResult>;
@@ -104,6 +136,9 @@ export class WorkService implements BackgroundWorkHooks, ScheduledWorkHooks, Wor
     private readonly parentNotices: WorkParentNotice;
     private readonly execution: WorkExecution;
     private readonly launchAttempts = new Map<string, string>();
+    private readonly queue?: WorkQueue;
+    private readonly queueWorkCallbacks = new Map<string, (workId: string) => void>();
+    private readonly inboundReplyOwners = new Map<string, string>();
 
     constructor(private readonly options: WorkServiceOptions) {
         const clock = options.clock ?? systemClock;
@@ -143,12 +178,139 @@ export class WorkService implements BackgroundWorkHooks, ScheduledWorkHooks, Wor
         this.permissions = new WorkPermissionProjection(options.instanceId, () =>
             options.onProjectionChange?.(),
         );
+        if (options.queue) this.queue = this.createQueue(options.queue);
+    }
+
+    private createQueue(options: NonNullable<WorkServiceOptions["queue"]>): WorkQueue {
+        return new WorkQueue(new WorkQueueStore(options.root), {
+            prepare: async (entry) => {
+                if (!entry.operation) throw new Error("queue operation is missing");
+                const work =
+                    entry.kind === "scheduled"
+                        ? await this.controller.startScheduled({
+                              sourceEventId: entry.sourceEventId,
+                              jobId: entry.jobId ?? "unknown",
+                              title: entry.title,
+                              workspace: entry.workspace,
+                              sessionId: entry.sessionId,
+                              queueId: entry.queueId,
+                              operation: entry.operation,
+                          })
+                        : await this.controller.startInbound({
+                              sourceEventId: entry.sourceEventId,
+                              title: entry.title,
+                              workspace: entry.workspace,
+                              sessionId: entry.sessionId,
+                              sourceMemberIds: entry.sourceMemberIds ?? [],
+                              maxMessageLength: this.options.channels.maxMessageLength(
+                                  entry.deliveryTarget?.channelId ?? "",
+                              ),
+                              deliverTo: (() => {
+                                  if (!entry.deliveryTarget)
+                                      throw new Error("inbound queue delivery is missing");
+                                  return entry.deliveryTarget;
+                              })(),
+                              queueId: entry.queueId,
+                              operation: entry.operation,
+                          });
+                if (work.attempt.queueId !== entry.queueId)
+                    throw Object.assign(
+                        new Error("existing Work retains its legacy queue semantics"),
+                        { code: "legacy_work" },
+                    );
+                const handle = {
+                    workId: work.workId,
+                    attemptId: work.attempt.attemptId,
+                };
+                if (entry.kind === "inbound")
+                    this.inboundReplyOwners.set(
+                        work.workId,
+                        this.replyOwner(entry.workspace, entry.sessionId),
+                    );
+                this.queueWorkCallbacks.get(entry.queueId)?.(work.workId);
+                this.queueWorkCallbacks.delete(entry.queueId);
+                return handle;
+            },
+            readWork: async (entry) =>
+                entry.work
+                    ? ((await this.store.get(entry.work.workId))?.status ?? "missing")
+                    : "missing",
+            readAttempt: async (entry) =>
+                entry.work
+                    ? (await this.store.get(entry.work.workId))?.attempt.attemptId
+                    : undefined,
+            inspect: async (ref) => {
+                if (!this.options.operations) return { kind: "missing" };
+                return this.options.operations.inspect(ref);
+            },
+            execute: async (entry, admission) => {
+                if (!entry.work) throw new Error("queue Work is not prepared");
+                return this.execution.run(
+                    entry.work.workId,
+                    entry.sessionId,
+                    () => options.execute(entry),
+                    admission,
+                );
+            },
+            settle: async (entry, outcome, message, reason) => {
+                if (!entry.work) return;
+                const waiting =
+                    outcome === "completed"
+                        ? resolveWaitingInteraction(message, entry.sessionId)
+                        : undefined;
+                if (waiting) {
+                    await this.controller.waitForInput(
+                        entry.work.workId,
+                        waiting,
+                        entry.work.attemptId,
+                    );
+                    return;
+                }
+                await this.controller.settle({
+                    workId: entry.work.workId,
+                    attemptId: entry.work.attemptId,
+                    outcome,
+                    resultText:
+                        message?.role === "assistant"
+                            ? message.content
+                                  .flatMap((block) => (block.type === "text" ? [block.text] : []))
+                                  .join("\n")
+                            : "",
+                    reason,
+                    deliver: entry.kind === "inbound",
+                    parentWillReply: false,
+                });
+                if (entry.kind === "inbound") this.inboundReplyOwners.delete(entry.work.workId);
+            },
+            cancel: async (entry) => {
+                if (entry.work)
+                    await this.execution.cancel(entry.work.workId, entry.work.attemptId);
+            },
+            recover: async (entry) => options.recover(entry),
+        });
+    }
+
+    private replyOwner(workspace: string, sessionId: string): string {
+        return JSON.stringify([workspace, sessionId]);
+    }
+
+    /** Used by the IM push sink only; desktop and session logs still receive every event. */
+    ownsInboundReply(workspace: string, sessionId: string): boolean {
+        return [...this.inboundReplyOwners.values()].includes(
+            this.replyOwner(workspace, sessionId),
+        );
     }
 
     /** Startup: close out Works whose process died, prune, then re-send what is still owed. */
     async start(): Promise<void> {
         await this.store.cleanupDeleted();
         await this.migrateLegacyWorkspaceKeys();
+        for (const work of await this.store.list())
+            if (work.kind === "inbound" && !isTerminal(work.status) && work.workspace)
+                this.inboundReplyOwners.set(
+                    work.workId,
+                    this.replyOwner(work.workspace, work.parentSessionId),
+                );
         try {
             const deferred = await this.execution.recover();
             const { interrupted, pruned } = await this.controller.reconcile(deferred);
@@ -166,6 +328,7 @@ export class WorkService implements BackgroundWorkHooks, ScheduledWorkHooks, Wor
             log.error("work delivery resume failed", { error: String(e) });
         });
         if (!this.maintenanceStopped) this.maintenance.start();
+        await this.queue?.start();
     }
 
     /** Rewrite pre-2.11 IM Work snapshots that stored the physical scratch cwd. */
@@ -194,11 +357,88 @@ export class WorkService implements BackgroundWorkHooks, ScheduledWorkHooks, Wor
     }
 
     stop(): void {
+        this.queue?.stop();
         this.maintenanceStopped = true;
         this.maintenance.stop();
         this.deliverer.stop();
         this.permissions.clear();
         this.launchAttempts.clear();
+    }
+
+    async queueScheduled(
+        request: QueueScheduledWork,
+        onWork?: (workId: string) => void,
+    ): Promise<{ workId?: string; status: string; reason?: string }> {
+        if (!this.queue) throw new Error("independent Work queue is unavailable");
+        let reported: string | undefined;
+        const report = (workId: string) => {
+            if (reported === workId) return;
+            reported = workId;
+            onWork?.(workId);
+        };
+        const queued = await this.queue.store.enqueue({
+            sourceEventId: scheduledSourceEventId(request.jobId, request.fireId),
+            kind: "scheduled",
+            title: request.title,
+            jobId: request.jobId,
+            workspace: request.workspace,
+            sessionId: request.sessionId,
+            lane: "main",
+            payload: { text: request.prompt },
+            createSession: request.createSession,
+        });
+        if (onWork) {
+            if (queued.entry.work) report(queued.entry.work.workId);
+            else {
+                this.queueWorkCallbacks.set(queued.entry.queueId, report);
+                const current = await this.queue.store.get(queued.entry.queueId);
+                if (current?.work) {
+                    report(current.work.workId);
+                    this.queueWorkCallbacks.delete(queued.entry.queueId);
+                }
+            }
+        }
+        this.queue.wake();
+        const result = await this.queue.wait(queued.entry.queueId);
+        this.queueWorkCallbacks.delete(queued.entry.queueId);
+        return {
+            ...(result.work ? { workId: result.work.workId } : {}),
+            status: result.status,
+            ...(result.reason ? { reason: result.reason } : {}),
+        };
+    }
+
+    async enqueueInbound(request: QueueInboundWork): Promise<{ queueId: string }> {
+        if (!this.queue) throw new Error("independent Work queue is unavailable");
+        // Ordinary new input supersedes an old question; explicit answers use
+        // session.submitAnswers and continue that Work with a fresh attempt.
+        for (const work of await this.store.list()) {
+            if (
+                work.kind === "inbound" &&
+                work.status === "waiting" &&
+                work.workspace === request.workspace &&
+                work.parentSessionId === request.sessionId
+            )
+                await this.execution.cancel(work.workId, work.attempt.attemptId);
+        }
+        const queued = await this.queue.store.enqueue({
+            sourceEventId: `inbound:${request.batchId}`,
+            kind: "inbound",
+            title: request.title,
+            workspace: request.workspace,
+            sessionId: request.sessionId,
+            lane: "main",
+            payload: { text: request.text, ...(request.media ? { media: request.media } : {}) },
+            sourceMemberIds: request.memberReceiptIds,
+            deliveryTarget: request.deliveryTarget,
+        });
+        this.queue.wake();
+        return { queueId: queued.entry.queueId };
+    }
+
+    async cancelQueue(queueId: string, revision: number): Promise<WorkQueueCancelResult> {
+        if (!this.queue) return { outcome: "not_found" };
+        return this.queue.cancel(queueId, revision);
     }
 
     // ── WorkControl (read side) ──
@@ -304,13 +544,35 @@ export class WorkService implements BackgroundWorkHooks, ScheduledWorkHooks, Wor
         this.permissions.resolved(workspace, requestId);
     }
 
-    answerWaiting(
+    async answerWaiting(
         target: SessionTarget,
         toolCallId: string,
         run: () => Promise<AgentMessage>,
         context?: WorkAnswerContext,
     ): Promise<AgentMessage> {
-        return this.reconciler.answer(target, toolCallId, run, context);
+        const tracked = await this.store
+            .list()
+            .then((works) =>
+                works.filter(
+                    (work) =>
+                        work.workspace === target.workspace &&
+                        work.parentSessionId === target.sessionId &&
+                        work.attempt.interaction?.toolCallId === toolCallId,
+                ),
+            )
+            // This read only cleans the IM single-outlet projection. The
+            // reconciler owns atomic answer admission and its legacy fallback.
+            .catch(() => []);
+        try {
+            return await this.reconciler.answer(target, toolCallId, run, context);
+        } finally {
+            this.queue?.wake();
+            for (const before of tracked) {
+                const after = await this.store.get(before.workId);
+                if (before.kind === "inbound" && after && isTerminal(after.status))
+                    this.inboundReplyOwners.delete(before.workId);
+            }
+        }
     }
 
     async retryDelivery(workId: string): Promise<WorkRetryDeliveryResult> {

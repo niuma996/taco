@@ -39,6 +39,15 @@ export const workCancelSchema = Type.Object({
     attemptId: Type.String({ minLength: 1, maxLength: 128 }),
 });
 
+export const workQueueCancelSchema = Type.Object({
+    queueId: Type.String({
+        minLength: 1,
+        maxLength: 128,
+        pattern: "^q-[a-f0-9]{32}$",
+    }),
+    revision: Type.Integer({ minimum: 0 }),
+});
+
 export const workDeleteSchema = Type.Object({
     workId: workIdSchema,
 });

@@ -161,15 +161,34 @@ for (const mode of [
             peerId: "u1",
             chatId: "c1",
         });
-        const history = await workspace.getHistory(asSessionId(sessionId));
-        assert.ok(
-            history.entries.some(
-                (e) =>
-                    e.type === "message" &&
-                    e.message.role === "assistant" &&
-                    JSON.stringify(e.message.content).includes("reply after stop"),
-            ),
-        );
+        // Durable ingress returns after the intent is committed; the queue owns
+        // execution and the single final Work delivery afterwards.
+        const deadline = Date.now() + 5000;
+        for (;;) {
+            const history = await workspace.getHistory(asSessionId(sessionId));
+            if (
+                history.entries.some(
+                    (e) =>
+                        e.type === "message" &&
+                        e.message.role === "assistant" &&
+                        JSON.stringify(e.message.content).includes("reply after stop"),
+                )
+            )
+                break;
+            assert.ok(Date.now() < deadline, "queued reply did not reach session history");
+            await new Promise((resolve) => setTimeout(resolve, 20));
+        }
+        for (;;) {
+            const replies = sent.filter((item) =>
+                JSON.stringify(item.body).includes("reply after stop"),
+            );
+            if (replies.length > 0) {
+                assert.equal(replies.length, 1, "Work delivery must be the only IM reply outlet");
+                break;
+            }
+            assert.ok(Date.now() < deadline, "Work reply was not delivered");
+            await new Promise((resolve) => setTimeout(resolve, 20));
+        }
         const childSessionId = asSessionId(childId ?? "child-reply");
         workspace.sessionRegistry.noteSessionKind(childSessionId, "subagent");
         const childFrames: unknown[] = [];

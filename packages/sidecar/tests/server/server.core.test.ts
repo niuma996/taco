@@ -900,6 +900,24 @@ describe("normalizeError.redaction", () => {
     });
 
     describe("normalizeError", () => {
+        it("preserves the internal post-accept queue recovery marker", () => {
+            const response = normalizeError(
+                "req-recovery",
+                Object.assign(new Error("disk detail must not leak"), {
+                    code: "queue_recovery_required",
+                }),
+            );
+            assert.deepEqual(response, {
+                id: "req-recovery",
+                ok: false,
+                error: {
+                    code: "queue_recovery_required",
+                    message: "accepted Work operation needs recovery",
+                    data: undefined,
+                },
+            });
+        });
+
         function callWith(thrown: unknown): { code: string; message: string } {
             const resp = normalizeError("req-1", thrown);
             assert.equal(resp.id, "req-1");

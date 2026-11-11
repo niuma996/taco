@@ -1,6 +1,6 @@
 import { makeImCwd } from "@taco-ai/protocol";
 import type { InboxStore } from "../inbox/inboxStore.ts";
-import type { InboxPreparation } from "../inbox/inboxTypes.ts";
+import type { InboxBatch, InboxPreparation } from "../inbox/inboxTypes.ts";
 import type { ChannelInboundMessage, ChannelIngress } from "./types.ts";
 
 export function combineInbound(messages: readonly ChannelInboundMessage[]): ChannelInboundMessage {
@@ -41,6 +41,8 @@ export class InboxIngress implements ChannelIngress {
         ) => Promise<{ workspace: string; sessionId: string }>,
         private readonly dispatch: (
             message: ChannelInboundMessage,
+            target: { workspace: string; sessionId: string },
+            batch: InboxBatch,
         ) => Promise<{ sessionId: string; failed?: boolean }>,
     ) {}
 
@@ -81,10 +83,14 @@ export class InboxIngress implements ChannelIngress {
                     }),
                 );
                 this.requireBinding({ ...payload, bindingId });
-                const result = await this.dispatch({
-                    ...payload,
-                    platformMessageId: batch.batchId,
-                });
+                const result = await this.dispatch(
+                    {
+                        ...payload,
+                        platformMessageId: batch.batchId,
+                    },
+                    target,
+                    batch,
+                );
                 await this.store.finishBatch(batch.batchId, result.failed);
             } catch (error) {
                 await this.store.finishBatch(batch.batchId, true);

@@ -162,7 +162,8 @@ export function registerSessionLifecycleHandlers(): void {
                     );
                     workspace.invalidateListCache();
                 } catch (e) {
-                    await rollbackCreatedSession(workspace, meta);
+                    if ((e as { code?: unknown }).code !== "queue_recovery_required")
+                        await rollbackCreatedSession(workspace, meta);
                     throw e;
                 }
             }

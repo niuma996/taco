@@ -191,7 +191,7 @@ export class WorkReconciler {
                                   resultText: partial ?? "",
                                   partial: !!partial,
                                   reason: error instanceof Error ? error.message : String(error),
-                                  deliver: false,
+                                  deliver: snapshot.kind === "inbound",
                                   parentWillReply: false,
                               }),
                     context !== undefined,
@@ -218,7 +218,7 @@ export class WorkReconciler {
                                             )
                                             .join("\n")
                                       : "",
-                              deliver: false,
+                              deliver: snapshot.kind === "inbound",
                               parentWillReply: false,
                           }),
                 context !== undefined,
