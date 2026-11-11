@@ -19,13 +19,6 @@ import { WORK_STATUSES } from "@taco-ai/protocol";
 import { restrictOwner } from "../lib/fsPermissions.ts";
 import { createLogger } from "../lib/logger.ts";
 import { writeJsonAtomic } from "../store/atomicFile.ts";
-import {
-    type IndexEntry,
-    readIndex,
-    sameStamp,
-    stampOf,
-    tryWriteIndex,
-} from "../store/indexFile.ts";
 import { KeyedQueue } from "../store/serial.ts";
 import { isTerminal, WORK_SCHEMA_VERSION, type WorkRecord } from "./workTypes.ts";
 
@@ -33,17 +26,9 @@ const log = createLogger("sidecar.work.store");
 
 const JSON_INDENT = 2;
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
-/** Not records. Their names match `isSafeWorkId`, so a scan must skip them. */
-const RESERVED_DIRS = new Set(["deleted", "interactions"]);
-/** Leading `_` so the id validator never treats the cache as a record. */
-export const WORK_INDEX_FILE = "_work-index.json";
 
 export function isSafeWorkId(id: string): boolean {
     return SAFE_ID.test(id);
-}
-
-function isWorkDir(name: string): boolean {
-    return isSafeWorkId(name) && !RESERVED_DIRS.has(name);
 }
 
 export function assertSafeWorkId(id: string): void {
@@ -83,97 +68,6 @@ export interface StoredResult {
 
 export function checksumOf(text: string): string {
     return createHash("sha256").update(text).digest("hex");
-}
-
-/** Fields identity resolution and cancellation checks need, and nothing else. */
-interface WorkSummary {
-    readonly sourceEventId: string;
-    readonly workspace?: string;
-    readonly status: WorkRecord["status"];
-    readonly cancelRequestedAt?: number;
-    readonly operation?: {
-        readonly workspace: string;
-        readonly sessionId: string;
-        readonly operationId: string;
-    };
-}
-
-function isWorkStatus(value: unknown): value is WorkRecord["status"] {
-    return typeof value === "string" && WORK_STATUSES.some((status) => status === value);
-}
-
-function isWorkSummary(value: unknown): value is WorkSummary {
-    if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
-    const summary = value as Record<string, unknown>;
-    if (typeof summary.sourceEventId !== "string" || !isWorkStatus(summary.status)) return false;
-    if (summary.workspace !== undefined && typeof summary.workspace !== "string") return false;
-    if (summary.cancelRequestedAt !== undefined && !Number.isFinite(summary.cancelRequestedAt))
-        return false;
-    if (summary.operation === undefined) return true;
-    if (typeof summary.operation !== "object" || summary.operation === null) return false;
-    const operation = summary.operation as Record<string, unknown>;
-    return (
-        typeof operation.workspace === "string" &&
-        typeof operation.sessionId === "string" &&
-        typeof operation.operationId === "string"
-    );
-}
-
-function summaryOf(record: WorkRecord): WorkSummary {
-    const operation = record.attempt.operation;
-    const cancelRequestedAt = record.attempt.cancelRequestedAt;
-    return {
-        sourceEventId: typeof record.sourceEventId === "string" ? record.sourceEventId : "",
-        ...(typeof record.workspace === "string" ? { workspace: record.workspace } : {}),
-        status: record.status,
-        ...(typeof cancelRequestedAt === "number" && Number.isFinite(cancelRequestedAt)
-            ? { cancelRequestedAt }
-            : {}),
-        ...(operation &&
-        typeof operation.workspace === "string" &&
-        typeof operation.sessionId === "string" &&
-        typeof operation.operationId === "string"
-            ? {
-                  operation: {
-                      workspace: operation.workspace,
-                      sessionId: operation.sessionId,
-                      operationId: operation.operationId,
-                  },
-              }
-            : {}),
-    };
-}
-
-function sameSummary(a: WorkSummary, b: WorkSummary): boolean {
-    return (
-        a.sourceEventId === b.sourceEventId &&
-        a.workspace === b.workspace &&
-        a.status === b.status &&
-        a.cancelRequestedAt === b.cancelRequestedAt &&
-        a.operation?.workspace === b.operation?.workspace &&
-        a.operation?.sessionId === b.operation?.sessionId &&
-        a.operation?.operationId === b.operation?.operationId &&
-        (a.operation === undefined) === (b.operation === undefined)
-    );
-}
-
-function sameIndex(
-    cached: Record<string, IndexEntry<WorkSummary>> | undefined,
-    next: Record<string, IndexEntry<WorkSummary>>,
-): boolean {
-    if (!cached) return false;
-    const ids = Object.keys(next);
-    if (ids.length !== Object.keys(cached).length) return false;
-    return ids.every((id) => {
-        const previous = cached[id];
-        const entry = next[id];
-        return (
-            previous !== undefined &&
-            entry !== undefined &&
-            sameStamp(previous.stamp, entry.stamp) &&
-            sameSummary(previous.summary, entry.summary)
-        );
-    });
 }
 
 type WorkIdResolution = { kind: "found"; workId: string } | { kind: "missing" | "ambiguous" };
@@ -275,14 +169,8 @@ export class WorkStore {
         // A deleted or unreadable direct owner must never retarget a different project.
         if ((await this.isDeleted(workId)) || (await this.hasSnapshot(workId)))
             return { kind: "found", workId };
-        const identities: Pick<WorkRecord, "workId" | "sourceEventId" | "workspace">[] = [];
-        for (const [id, summary] of await this.summaries()) {
-            identities.push({
-                workId: id,
-                sourceEventId: summary.sourceEventId,
-                ...(summary.workspace !== undefined ? { workspace: summary.workspace } : {}),
-            });
-        }
+        const identities: Pick<WorkRecord, "workId" | "sourceEventId" | "workspace">[] =
+            await this.list();
         const markers = await readdir(join(this.root, "deleted")).catch((error) => {
             if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
             throw error;
@@ -315,28 +203,6 @@ export class WorkStore {
         if (matches.size > 1) return { kind: "ambiguous" };
         for (const id of matches) return { kind: "found", workId: id };
         return { kind: "missing" };
-    }
-
-    /**
-     * Permission and cancel checks ask this on the hot path. The summary index
-     * answers it; `list()` still reads each record.
-     */
-    async cancellationRequested(
-        workspace: string,
-        sessionId: string,
-        operationId: string,
-    ): Promise<boolean> {
-        for (const summary of (await this.summaries()).values()) {
-            if (
-                summary.status === "running" &&
-                summary.cancelRequestedAt !== undefined &&
-                summary.operation?.workspace === workspace &&
-                summary.operation.sessionId === sessionId &&
-                summary.operation.operationId === operationId
-            )
-                return true;
-        }
-        return false;
     }
 
     /** Distinguish absent legacy sources from existing snapshots that could not be decoded. */
@@ -400,55 +266,11 @@ export class WorkStore {
         const entries = await readdir(this.root, { withFileTypes: true }).catch(() => []);
         const records: WorkRecord[] = [];
         for (const e of entries) {
-            if (!e.isDirectory() || !isWorkDir(e.name)) continue;
+            if (!e.isDirectory() || !isSafeWorkId(e.name)) continue;
             const record = await this.readSnapshot(e.name);
             if (record) records.push(record);
         }
         return records.sort((a, b) => b.createdAt - a.createdAt);
-    }
-
-    /**
-     * Identity and cancellation only need a few fields. Cache a miss only when
-     * the stamp is stable across the read: this store has no global chain, so a
-     * write between the stat and the read must not be pinned to the old summary.
-     * A tombstone does not change `work.json`, so one `deleted/` read drops those
-     * ids even when the stamp still matches.
-     */
-    private async summaries(): Promise<Map<string, WorkSummary>> {
-        const entries = await readdir(this.root, { withFileTypes: true }).catch(() => []);
-        const ids = entries.filter((e) => e.isDirectory() && isWorkDir(e.name)).map((e) => e.name);
-        const [cached, tombstones] = await Promise.all([
-            readIndex(this.root, WORK_INDEX_FILE, isSafeWorkId, isWorkSummary),
-            this.tombstoneIds(),
-        ]);
-        const result = new Map<string, WorkSummary>();
-        const next: Record<string, IndexEntry<WorkSummary>> = {};
-        for (const id of ids) {
-            if (tombstones.has(id)) continue;
-            const path = join(this.dir(id), "work.json");
-            const before = await stampOf(path);
-            if (!before) continue;
-            const previous = cached?.[id];
-            if (previous && sameStamp(previous.stamp, before)) {
-                result.set(id, previous.summary);
-                next[id] = { stamp: before, summary: previous.summary };
-                continue;
-            }
-            const record = await this.readSnapshotFile(id);
-            const after = await stampOf(path);
-            if (!record || !after || !sameStamp(before, after)) {
-                if (record) result.set(id, summaryOf(record));
-                continue;
-            }
-            const summary = summaryOf(record);
-            result.set(id, summary);
-            next[id] = { stamp: after, summary };
-        }
-        // A missing store must not be created by a read. Skip the write when
-        // nothing changed so a hot check does not rewrite the index every time.
-        if (!sameIndex(cached, next) && (Object.keys(next).length > 0 || cached !== undefined))
-            await tryWriteIndex(this.root, WORK_INDEX_FILE, next);
-        return result;
     }
 
     async delete(workId: string): Promise<void> {
@@ -510,18 +332,6 @@ export class WorkStore {
             if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
             throw error;
         }
-    }
-
-    private async tombstoneIds(): Promise<Set<string>> {
-        const files = await readdir(join(this.root, "deleted")).catch((error) => {
-            if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
-            throw error;
-        });
-        return new Set(
-            files
-                .filter((file) => file.endsWith(".json") && isSafeWorkId(file.slice(0, -5)))
-                .map((file) => file.slice(0, -5)),
-        );
     }
 
     /** The compact marker outlives result cleanup so replay cannot recreate the source. */
@@ -648,10 +458,6 @@ export class WorkStore {
 
     private async readSnapshot(workId: string): Promise<WorkRecord | undefined> {
         if (await this.isDeleted(workId)) return undefined;
-        return this.readSnapshotFile(workId);
-    }
-
-    private async readSnapshotFile(workId: string): Promise<WorkRecord | undefined> {
         const path = join(this.dir(workId), "work.json");
         let raw: string;
         try {

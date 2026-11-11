@@ -1,15 +1,8 @@
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, readdir, readFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { restrictOwner } from "../lib/fsPermissions.ts";
 import { writeJsonAtomic } from "../store/atomicFile.ts";
-import {
-    type IndexEntry,
-    readIndex,
-    sameStamp,
-    stampOf,
-    tryWriteIndex,
-} from "../store/indexFile.ts";
 import { SerialChain } from "../store/serial.ts";
 import {
     isQueueTerminal,
@@ -18,46 +11,18 @@ import {
     type WorkQueueIntent,
 } from "./workQueueTypes.ts";
 
-/** Leading `_` so the id validator never treats the cache as a record. Shipped caches use this name. */
-export const QUEUE_INDEX_FILE = "_index.json";
-
 const SAFE_QUEUE_ID = /^q-[a-f0-9]{32}$/;
 const MAX_WAIT_MS = 24 * 60 * 60_000;
-const QUEUE_STATUSES = [
-    "queued",
-    "admitting",
-    "running",
-    "waiting",
-    "completed",
-    "failed",
-    "cancelled",
-] as const;
 
-/** What `enqueue` needs for admission without parsing a record's payload. */
-interface QueueSummary {
-    readonly sequence: number;
-    readonly status: WorkQueueEntry["status"];
-}
-
-interface AdmissionScan {
-    readonly byId: Map<string, QueueSummary>;
-    index: Record<string, IndexEntry<QueueSummary>>;
-    readonly hadIndex: boolean;
-}
-
-function isQueueStatus(value: unknown): value is WorkQueueEntry["status"] {
-    return typeof value === "string" && QUEUE_STATUSES.some((status) => status === value);
-}
-
-function isQueueSummary(value: unknown): value is QueueSummary {
-    if (typeof value !== "object" || value === null) return false;
-    const summary = value as Record<string, unknown>;
-    return Number.isInteger(summary.sequence) && isQueueStatus(summary.status);
-}
+/** Finished entries age out; without a cap the directory grows for the daemon's lifetime. */
+export const QUEUE_RETENTION_MS = 30 * 24 * 60 * 60_000;
+export const QUEUE_RETENTION_COUNT = 500;
 
 /** One daemon writes this ledger. In-memory serialization never substitutes for operation recovery. */
 export class WorkQueueStore {
     private readonly chain = new SerialChain();
+    /** Live ids and the next sequence, seeded once per process from disk. */
+    private state?: { open: Set<string>; nextSequence: number };
     constructor(
         private readonly root: string,
         private readonly pendingLimit = 1024,
@@ -84,24 +49,15 @@ export class WorkQueueStore {
                 .slice(0, 32)}`;
             const existing = await this.read(queueId);
             if (existing) return { entry: existing, created: false };
-            const scan = await this.summaries();
-            const open = [...scan.byId.values()].filter((s) => !isQueueTerminal(s.status)).length;
-            if (open >= this.pendingLimit) {
-                await this.persistIndex(scan);
-                throw new Error("Work queue is full");
-            }
-            const sequence =
-                [...scan.byId.values()].reduce((max, s) => Math.max(max, s.sequence), 0) + 1;
+            const state = await this.derive();
+            if (state.open.size >= this.pendingLimit) throw new Error("Work queue is full");
             const deadlineAt = intent.deadlineAt ?? now + MAX_WAIT_MS;
-            if (!Number.isFinite(deadlineAt)) {
-                await this.persistIndex(scan);
-                throw new Error("invalid Work queue deadline");
-            }
+            if (!Number.isFinite(deadlineAt)) throw new Error("invalid Work queue deadline");
             const entry: WorkQueueEntry = {
                 ...intent,
                 schemaVersion: 1,
                 queueId,
-                sequence,
+                sequence: state.nextSequence,
                 revision: 0,
                 status: "queued",
                 enqueuedAt: now,
@@ -109,15 +65,6 @@ export class WorkQueueStore {
                 deadlineAt,
             };
             await this.write(entry);
-            // Stamp after the record is on disk, or the cache is always one behind.
-            const stamp = await stampOf(this.path(entry.queueId));
-            if (stamp) {
-                scan.index[entry.queueId] = {
-                    stamp,
-                    summary: { sequence: entry.sequence, status: entry.status },
-                };
-            }
-            await this.persistIndex(scan);
             return { entry, created: true };
         });
     }
@@ -127,6 +74,45 @@ export class WorkQueueStore {
     }
     list(): Promise<WorkQueueEntry[]> {
         return this.chain.run(() => this.readAll());
+    }
+
+    /**
+     * The scheduler's per-pass read. Only live entries are re-read, so a large
+     * ledger of finished ones costs nothing until `prune` removes them.
+     */
+    listOpen(): Promise<WorkQueueEntry[]> {
+        return this.chain.run(async () => {
+            const state = await this.derive();
+            const open: WorkQueueEntry[] = [];
+            for (const id of state.open) {
+                const entry = await this.read(id);
+                if (!entry || isQueueTerminal(entry.status)) {
+                    state.open.delete(id);
+                    continue;
+                }
+                open.push(entry);
+            }
+            return open.sort((a, b) => a.sequence - b.sequence);
+        });
+    }
+
+    /** Drop finished entries past the age window or beyond the newest `QUEUE_RETENTION_COUNT`. */
+    prune(now = Date.now()): Promise<number> {
+        return this.chain.run(async () => {
+            const state = await this.derive();
+            const finished = (await this.readAll())
+                .filter((entry) => isQueueTerminal(entry.status))
+                .sort((a, b) => b.updatedAt - a.updatedAt);
+            let removed = 0;
+            for (const [index, entry] of finished.entries()) {
+                if (index < QUEUE_RETENTION_COUNT && now - entry.updatedAt <= QUEUE_RETENTION_MS)
+                    continue;
+                await rm(this.path(entry.queueId), { force: true });
+                state.open.delete(entry.queueId);
+                removed++;
+            }
+            return removed;
+        });
     }
 
     claim(id: string, epoch: string): Promise<WorkQueueEntry | undefined> {
@@ -213,70 +199,45 @@ export class WorkQueueStore {
             entry.queueId !== id ||
             !Number.isInteger(entry.revision) ||
             !Number.isInteger(entry.sequence) ||
-            !isQueueStatus(entry.status)
+            ![
+                "queued",
+                "admitting",
+                "running",
+                "waiting",
+                "completed",
+                "failed",
+                "cancelled",
+            ].includes(entry.status)
         )
             throw new Error("unrecognized Work queue snapshot");
         return entry;
     }
     private async readAll(): Promise<WorkQueueEntry[]> {
-        const ids = await this.ids();
-        const entries = await Promise.all(ids.map((id) => this.read(id)));
-        return entries
-            .filter((e): e is WorkQueueEntry => e !== undefined)
-            .sort((a, b) => a.sequence - b.sequence);
-    }
-
-    /** Live record ids on disk; the index never introduces or removes records. */
-    private async ids(): Promise<string[]> {
         const files = await readdir(this.root).catch((error) => {
             if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
             throw error;
         });
-        return files
-            .filter((f) => f.endsWith(".json") && SAFE_QUEUE_ID.test(f.slice(0, -5)))
-            .map((f) => f.slice(0, -5));
-    }
-
-    /**
-     * Per-record `{sequence, status}` for admission. A record whose file
-     * changed since the index was written is re-read. Does not write the
-     * index: the caller persists it after any new record is on disk.
-     */
-    private async summaries(): Promise<AdmissionScan> {
-        const ids = await this.ids();
-        const cached = await readIndex<QueueSummary>(
-            this.root,
-            QUEUE_INDEX_FILE,
-            (id) => SAFE_QUEUE_ID.test(id),
-            isQueueSummary,
+        const entries = await Promise.all(
+            files
+                .filter((f) => f.endsWith(".json") && SAFE_QUEUE_ID.test(f.slice(0, -5)))
+                .map((f) => this.read(f.slice(0, -5))),
         );
-        const byId = new Map<string, QueueSummary>();
-        const index: Record<string, IndexEntry<QueueSummary>> = {};
-        for (const id of ids) {
-            const path = this.path(id);
-            const stamp = await stampOf(path);
-            if (!stamp) continue;
-            const previous = cached?.[id];
-            let summary: QueueSummary;
-            if (previous && sameStamp(previous.stamp, stamp)) {
-                summary = previous.summary;
-            } else {
-                const entry = await this.read(id);
-                if (!entry) continue;
-                summary = { sequence: entry.sequence, status: entry.status };
-            }
-            byId.set(id, summary);
-            index[id] = { stamp, summary };
+        return entries
+            .filter((e): e is WorkQueueEntry => e !== undefined)
+            .sort((a, b) => a.sequence - b.sequence);
+    }
+    private async derive(): Promise<{ open: Set<string>; nextSequence: number }> {
+        if (!this.state) {
+            const all = await this.readAll();
+            this.state = {
+                open: new Set(
+                    all.filter((entry) => !isQueueTerminal(entry.status)).map((e) => e.queueId),
+                ),
+                nextSequence: all.reduce((max, entry) => Math.max(max, entry.sequence), 0) + 1,
+            };
         }
-        return { byId, index, hadIndex: cached !== undefined };
+        return this.state;
     }
-
-    /** A missing store is not created until a record exists. */
-    private async persistIndex(scan: AdmissionScan): Promise<void> {
-        if (Object.keys(scan.index).length === 0 && !scan.hadIndex) return;
-        await tryWriteIndex(this.root, QUEUE_INDEX_FILE, scan.index);
-    }
-
     private async save(entry: WorkQueueEntry): Promise<WorkQueueEntry> {
         const next = { ...entry, revision: entry.revision + 1, updatedAt: Date.now() };
         await this.write(next);
@@ -286,5 +247,9 @@ export class WorkQueueStore {
         await mkdir(this.root, { recursive: true, mode: 0o700 });
         await restrictOwner(this.root, 0o700);
         await writeJsonAtomic(this.path(entry.queueId), entry, { secure: true });
+        if (!this.state) return;
+        if (isQueueTerminal(entry.status)) this.state.open.delete(entry.queueId);
+        else this.state.open.add(entry.queueId);
+        this.state.nextSequence = Math.max(this.state.nextSequence, entry.sequence + 1);
     }
 }

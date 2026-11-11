@@ -11,6 +11,7 @@ import type { WorkQueueStore } from "./workQueueStore.ts";
 import { isQueueTerminal, type WorkQueueEntry } from "./workQueueTypes.ts";
 
 const log = createLogger("sidecar.work.queue");
+const MIN_WAKE_DELAY_MS = 50;
 type QueueWorkStatus =
     | "running"
     | "waiting"
@@ -88,6 +89,15 @@ export class WorkQueue {
             await Promise.allSettled([...this.active.values()].map((value) => value.promise));
     }
 
+    /** Retention pass for finished entries; failures must not stop scheduling. */
+    async prune(): Promise<void> {
+        const removed = await this.store.prune().catch((error) => {
+            log.error("queue prune failed", { error: String(error) });
+            return 0;
+        });
+        if (removed > 0) log.info("pruned finished queue entries", { count: removed });
+    }
+
     /** Resolve when this intent reaches a terminal state or parks for a person. */
     async wait(queueId: string): Promise<WorkQueueEntry> {
         for (;;) {
@@ -124,7 +134,7 @@ export class WorkQueue {
                     this.wake(this.pollMs);
                 });
             },
-            Math.max(delay, 50),
+            Math.max(delay, MIN_WAKE_DELAY_MS),
         );
         this.timer.unref?.();
     }
@@ -163,7 +173,7 @@ export class WorkQueue {
         return JSON.stringify([entry.workspace, entry.sessionId, entry.lane]);
     }
     private async schedule(): Promise<void> {
-        const all = (await this.store.list()).filter((e) => !isQueueTerminal(e.status));
+        const all = await this.store.listOpen();
         const heads = new Map<string, WorkQueueEntry>();
         for (const entry of all)
             if (!heads.has(this.lane(entry))) heads.set(this.lane(entry), entry);

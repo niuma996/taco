@@ -173,7 +173,9 @@ export class WorkService implements BackgroundWorkHooks, ScheduledWorkHooks, Wor
         );
         this.maintenance = new WorkMaintenance(async () => {
             await this.execution.recover();
-            return this.controller.maintain();
+            const result = await this.controller.maintain();
+            await this.queue?.prune();
+            return result;
         }, clock);
         this.permissions = new WorkPermissionProjection(options.instanceId, () =>
             options.onProjectionChange?.(),
@@ -456,7 +458,18 @@ export class WorkService implements BackgroundWorkHooks, ScheduledWorkHooks, Wor
         sessionId: string,
         operationId: string,
     ): Promise<boolean> {
-        return this.store.cancellationRequested(workspace, sessionId, operationId);
+        for (const record of await this.store.list()) {
+            const operation = record.attempt.operation;
+            if (
+                record.status === "running" &&
+                record.attempt.cancelRequestedAt !== undefined &&
+                operation?.workspace === workspace &&
+                operation.sessionId === sessionId &&
+                operation.operationId === operationId
+            )
+                return true;
+        }
+        return false;
     }
 
     run<T>(workId: string, sessionId: string, run: (attemptId: string) => Promise<T>): Promise<T> {
