@@ -3,6 +3,7 @@ import { mkdir, readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { restrictOwner } from "../lib/fsPermissions.ts";
 import { writeJsonAtomic } from "../store/atomicFile.ts";
+import { type IndexEntry, readIndex, sameStamp, stampOf, writeIndex } from "../store/indexFile.ts";
 import { SerialChain } from "../store/serial.ts";
 import {
     isQueueTerminal,
@@ -13,6 +14,31 @@ import {
 
 const SAFE_QUEUE_ID = /^q-[a-f0-9]{32}$/;
 const MAX_WAIT_MS = 24 * 60 * 60_000;
+const QUEUE_STATUSES = [
+    "queued",
+    "admitting",
+    "running",
+    "waiting",
+    "completed",
+    "failed",
+    "cancelled",
+] as const;
+
+/** What `enqueue` needs for admission without parsing a record's payload. */
+interface QueueSummary {
+    readonly sequence: number;
+    readonly status: WorkQueueEntry["status"];
+}
+
+function isQueueStatus(value: unknown): value is WorkQueueEntry["status"] {
+    return typeof value === "string" && QUEUE_STATUSES.some((status) => status === value);
+}
+
+function isQueueSummary(value: unknown): value is QueueSummary {
+    if (typeof value !== "object" || value === null) return false;
+    const summary = value as Record<string, unknown>;
+    return Number.isInteger(summary.sequence) && isQueueStatus(summary.status);
+}
 
 /** One daemon writes this ledger. In-memory serialization never substitutes for operation recovery. */
 export class WorkQueueStore {
@@ -43,16 +69,18 @@ export class WorkQueueStore {
                 .slice(0, 32)}`;
             const existing = await this.read(queueId);
             if (existing) return { entry: existing, created: false };
-            const all = await this.readAll();
-            if (all.filter((entry) => !isQueueTerminal(entry.status)).length >= this.pendingLimit)
-                throw new Error("Work queue is full");
+            const summaries = await this.summaries();
+            const open = [...summaries.values()].filter((s) => !isQueueTerminal(s.status)).length;
+            if (open >= this.pendingLimit) throw new Error("Work queue is full");
+            const sequence =
+                [...summaries.values()].reduce((max, s) => Math.max(max, s.sequence), 0) + 1;
             const deadlineAt = intent.deadlineAt ?? now + MAX_WAIT_MS;
             if (!Number.isFinite(deadlineAt)) throw new Error("invalid Work queue deadline");
             const entry: WorkQueueEntry = {
                 ...intent,
                 schemaVersion: 1,
                 queueId,
-                sequence: all.reduce((max, e) => Math.max(max, e.sequence), 0) + 1,
+                sequence,
                 revision: 0,
                 status: "queued",
                 enqueuedAt: now,
@@ -155,33 +183,65 @@ export class WorkQueueStore {
             entry.queueId !== id ||
             !Number.isInteger(entry.revision) ||
             !Number.isInteger(entry.sequence) ||
-            ![
-                "queued",
-                "admitting",
-                "running",
-                "waiting",
-                "completed",
-                "failed",
-                "cancelled",
-            ].includes(entry.status)
+            !isQueueStatus(entry.status)
         )
             throw new Error("unrecognized Work queue snapshot");
         return entry;
     }
     private async readAll(): Promise<WorkQueueEntry[]> {
-        const files = await readdir(this.root).catch((error) => {
-            if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
-            throw error;
-        });
-        const entries = await Promise.all(
-            files
-                .filter((f) => f.endsWith(".json") && SAFE_QUEUE_ID.test(f.slice(0, -5)))
-                .map((f) => this.read(f.slice(0, -5))),
-        );
+        const ids = await this.ids();
+        const entries = await Promise.all(ids.map((id) => this.read(id)));
         return entries
             .filter((e): e is WorkQueueEntry => e !== undefined)
             .sort((a, b) => a.sequence - b.sequence);
     }
+
+    /** Live record ids on disk; the index never introduces or removes records. */
+    private async ids(): Promise<string[]> {
+        const files = await readdir(this.root).catch((error) => {
+            if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+            throw error;
+        });
+        return files
+            .filter((f) => f.endsWith(".json") && SAFE_QUEUE_ID.test(f.slice(0, -5)))
+            .map((f) => f.slice(0, -5));
+    }
+
+    /**
+     * Per-record `{sequence, status}` for admission. A record whose file
+     * changed since the index was written is re-read, and a missing or stale
+     * index falls back to parsing every record. The index is written back so
+     * the next enqueue sees one refresh instead of a rescan.
+     */
+    private async summaries(): Promise<Map<string, QueueSummary>> {
+        const ids = await this.ids();
+        const cached = await readIndex<QueueSummary>(
+            this.root,
+            (id) => SAFE_QUEUE_ID.test(id),
+            isQueueSummary,
+        );
+        const result = new Map<string, QueueSummary>();
+        const next: Record<string, IndexEntry<QueueSummary>> = {};
+        for (const id of ids) {
+            const path = this.path(id);
+            const stamp = await stampOf(path);
+            if (!stamp) continue;
+            const previous = cached?.[id];
+            let summary: QueueSummary;
+            if (previous && sameStamp(previous.stamp, stamp)) {
+                summary = previous.summary;
+            } else {
+                const entry = await this.read(id);
+                if (!entry) continue;
+                summary = { sequence: entry.sequence, status: entry.status };
+            }
+            result.set(id, summary);
+            next[id] = { stamp, summary };
+        }
+        await writeIndex(this.root, next).catch(() => undefined);
+        return result;
+    }
+
     private async save(entry: WorkQueueEntry): Promise<WorkQueueEntry> {
         const next = { ...entry, revision: entry.revision + 1, updatedAt: Date.now() };
         await this.write(next);
