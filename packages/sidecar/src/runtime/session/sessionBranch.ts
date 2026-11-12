@@ -20,6 +20,7 @@
  */
 
 import { harnessContext } from "../../lib/harnessContext.ts";
+import { textBlocks } from "../../lib/textBlocks.ts";
 import { applyTuiVisibilityToContent } from "../../tags/index.ts";
 import type { AgentMessage, Context, Entry, Session } from "../pi/types.ts";
 import { createBranchSummaryMessage, createCompactionSummaryMessage } from "../pi/values.ts";
@@ -151,13 +152,7 @@ export async function buildMemoryExtractionMessages(session: Session): Promise<A
                 ? entry.message.content
                 : entry.message.content.filter((block) => block.type === "text");
         const content = applyTuiVisibilityToContent(raw);
-        const text =
-            typeof content === "string"
-                ? content
-                : content
-                      .filter((block) => block.type === "text")
-                      .map((block) => (block.type === "text" ? block.text : ""))
-                      .join("\n");
+        const text = typeof content === "string" ? content : textBlocks(content).join("\n");
         return text.trim()
             ? [
                   {

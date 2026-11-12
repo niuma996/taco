@@ -1,5 +1,6 @@
 import type { WorkCancelResult } from "@taco-ai/protocol";
 import { createLogger } from "../lib/logger.ts";
+import { textBlocks } from "../lib/textBlocks.ts";
 import { withManagedOperation } from "../runtime/harness/operationExecution.ts";
 import { uuidv7 } from "../runtime/pi/values.ts";
 import { resolveWaitingInteraction } from "../runtime/session/waitingInteraction.ts";
@@ -221,9 +222,7 @@ export class WorkExecution {
                     outcome: observed.outcome,
                     resultText:
                         observed.message?.role === "assistant"
-                            ? observed.message.content
-                                  .flatMap((block) => (block.type === "text" ? [block.text] : []))
-                                  .join("\n")
+                            ? textBlocks(observed.message.content).join("\n")
                             : "",
                     reason: observed.reason,
                     parentWillReply: false,

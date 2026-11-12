@@ -34,6 +34,7 @@ import type {
 } from "../../extensions/index.ts";
 import { contextFor, harnessContext } from "../../lib/harnessContext.ts";
 import { createLogger } from "../../lib/logger.ts";
+import { textBlocks } from "../../lib/textBlocks.ts";
 import { createTopicUsageTracker } from "../../memory/dream/usageTracker.ts";
 import { MemoryExtractorImpl, type MemoryStore } from "../../memory/index.ts";
 import type { PlanWriteApprover } from "../../permissions/mutationGate.ts";
@@ -1174,9 +1175,7 @@ export class AttachedSession extends EventEmitter {
         if (!outcome?.tipId || outcome.tipId === outcome.fromTipId) return "";
         const entry = await this.session.getEntry(outcome.tipId, harnessContext);
         return entry?.type === "message" && entry.message.role === "assistant"
-            ? entry.message.content
-                  .flatMap((block) => (block.type === "text" ? [block.text] : []))
-                  .join("\n")
+            ? textBlocks(entry.message.content).join("\n")
             : "";
     }
 

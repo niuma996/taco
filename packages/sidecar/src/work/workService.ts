@@ -24,6 +24,7 @@ import {
 } from "@taco-ai/protocol";
 import type { ChannelRegistry } from "../channels/registry.ts";
 import { createLogger } from "../lib/logger.ts";
+import { textBlocks } from "../lib/textBlocks.ts";
 import { withManagedOperation } from "../runtime/harness/operationExecution.ts";
 import type { WaitingInteraction } from "../runtime/session/waitingInteraction.ts";
 import { resolveWaitingInteraction } from "../runtime/session/waitingInteraction.ts";
@@ -273,11 +274,7 @@ export class WorkService implements BackgroundWorkHooks, ScheduledWorkHooks, Wor
                     attemptId: entry.work.attemptId,
                     outcome,
                     resultText:
-                        message?.role === "assistant"
-                            ? message.content
-                                  .flatMap((block) => (block.type === "text" ? [block.text] : []))
-                                  .join("\n")
-                            : "",
+                        message?.role === "assistant" ? textBlocks(message.content).join("\n") : "",
                     reason,
                     deliver: entry.kind === "inbound",
                     parentWillReply: false,

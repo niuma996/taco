@@ -1,6 +1,7 @@
 import type { AgentMessage, SessionTarget } from "@taco-ai/protocol";
 import { ErrorCodes } from "@taco-ai/protocol";
 import { createLogger } from "../lib/logger.ts";
+import { textBlocks } from "../lib/textBlocks.ts";
 import { isAbortedTurn, isBusyError } from "../runtime/harness/harnessErrors.ts";
 import { resolveWaitingInteraction } from "../runtime/session/waitingInteraction.ts";
 import type { WorkController } from "./workController.ts";
@@ -212,11 +213,7 @@ export class WorkReconciler {
                               outcome: "completed",
                               resultText:
                                   reply.role === "assistant"
-                                      ? reply.content
-                                            .flatMap((block) =>
-                                                block.type === "text" ? [block.text] : [],
-                                            )
-                                            .join("\n")
+                                      ? textBlocks(reply.content).join("\n")
                                       : "",
                               deliver: snapshot.kind === "inbound",
                               parentWillReply: false,

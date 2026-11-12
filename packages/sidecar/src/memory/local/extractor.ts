@@ -11,6 +11,7 @@
 import { MEMORY_CONTENT_MAX_CHARS, type MemorySource } from "@taco-ai/protocol";
 import { extractJsonSpan } from "../../lib/jsonExtract.ts";
 import { createLogger } from "../../lib/logger.ts";
+import { textBlocks } from "../../lib/textBlocks.ts";
 import { completeSimpleWithLiteFallback } from "../../runtime/models/liteModel.ts";
 import type { AgentMessage, Api, Model, Models } from "../../runtime/pi/types.ts";
 import { backgroundThinkingLevel, tacoRequestHeaders } from "../../runtime/runtimeResources.ts";
@@ -144,10 +145,7 @@ function conversationalText(message: AgentMessage): string {
     if (message.role !== "user" && message.role !== "assistant") return "";
     return typeof message.content === "string"
         ? message.content
-        : message.content
-              .filter((block) => block.type === "text")
-              .map((block) => (block.type === "text" ? block.text : ""))
-              .join("\n");
+        : textBlocks(message.content).join("\n");
 }
 
 function userText(message: AgentMessage): string {
