@@ -7,25 +7,15 @@ import { updateTask } from "../tasks/taskMutations.ts";
 import { saveTaskListToDisk } from "../tasks/taskPersistence.ts";
 import type { TaskSnapshotPublisher } from "../tasks/taskPushAdapter.ts";
 
-import type { TaskStore } from "../tasks/taskTypes.ts";
-import { isUnfinishedStatus } from "../tasks/taskTypes.ts";
+import { isUnfinishedStatus, type TaskStore, taskStatusSchema } from "../tasks/taskTypes.ts";
 
 const taskUpdateSchema = Type.Object({
     taskId: Type.String({ description: "Task ID (from taskCreate output / taskList)" }),
     updates: Type.Object({
         content: Type.Optional(Type.String()),
         status: Type.Optional(
-            Type.Union(
-                [
-                    Type.Literal("pending"),
-                    Type.Literal("in_progress"),
-                    Type.Literal("completed"),
-                    Type.Literal("failed"),
-                ],
-                {
-                    description:
-                        "Task status. Both `failed` and `completed` are terminal; use `failed` to abandon remaining tasks when the topic changes.",
-                },
+            taskStatusSchema(
+                "Task status. Both `failed` and `completed` are terminal; use `failed` to abandon remaining tasks when the topic changes.",
             ),
         ),
         activeForm: Type.Optional(Type.String()),

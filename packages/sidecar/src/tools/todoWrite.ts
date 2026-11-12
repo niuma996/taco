@@ -8,24 +8,10 @@ import { addTask, createTaskList } from "../tasks/taskMutations.ts";
 import { saveTaskListToDisk } from "../tasks/taskPersistence.ts";
 import type { TaskSnapshotPublisher } from "../tasks/taskPushAdapter.ts";
 
-import type { TaskStore } from "../tasks/taskTypes.ts";
+import { type TaskStore, taskItemSchema } from "../tasks/taskTypes.ts";
 
 const todoWriteSchema = Type.Object({
-    todos: Type.Array(
-        Type.Object({
-            content: Type.String({ description: "Task description" }),
-            status: Type.Union(
-                [
-                    Type.Literal("pending"),
-                    Type.Literal("in_progress"),
-                    Type.Literal("completed"),
-                    Type.Literal("failed"),
-                ],
-                { description: "Task status" },
-            ),
-            activeForm: Type.String({ description: "In-progress description" }),
-        }),
-    ),
+    todos: Type.Array(taskItemSchema),
 });
 
 export type TodoWriteInput = Static<typeof todoWriteSchema>;

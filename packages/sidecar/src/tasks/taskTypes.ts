@@ -1,4 +1,28 @@
 import type { TaskItem } from "@taco-ai/protocol";
+import { Type } from "typebox";
+
+/**
+ * Task status union shared by the mutation tools' TypeBox schemas. Callers
+ * keep their own description, since their guidance to the model differs.
+ */
+export function taskStatusSchema(description: string) {
+    return Type.Union(
+        [
+            Type.Literal("pending"),
+            Type.Literal("in_progress"),
+            Type.Literal("completed"),
+            Type.Literal("failed"),
+        ],
+        { description },
+    );
+}
+
+/** One task as taskCreate / todoWrite accept it; the store adds ids and timestamps. */
+export const taskItemSchema = Type.Object({
+    content: Type.String({ description: "Task description" }),
+    status: taskStatusSchema("Task status"),
+    activeForm: Type.String({ description: "In-progress description" }),
+});
 
 /**
  * Reuses the protocol-layer TaskItem (4-field wire shape) and adds store-private
