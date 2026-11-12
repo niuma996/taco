@@ -52,6 +52,7 @@ import type {
     SteerResult,
     SubagentAbortResult,
 } from "../session.js";
+import type { SubagentStartedPayload } from "../tools.js";
 import { domainContract, domainMethods, domainSchemas, row } from "./types.js";
 
 /** `session.attach` result — the attach acknowledgement plus live subagent state. */
@@ -78,6 +79,8 @@ export interface SessionAttachResult {
      * on older sidecars.
      */
     settledBackgroundSubSessionIds?: string[];
+    /** Active continuations, keyed by the original spawn owner and execution. */
+    activeSubagentChatRuns?: SubagentStartedPayload[];
 }
 
 /** `session.detach` result. */

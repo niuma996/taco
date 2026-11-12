@@ -102,7 +102,7 @@ describe("subagent stop wording", () => {
         assert.match(text, /50-minute/);
         assert.match(text, /29 turn/);
         assert.match(text, /time limit, not a failure/);
-        assert.match(text, /agentContinue|continuing that session/);
+        assert.match(text, /chatToAgent|continuing that session/);
     });
 
     it("recognizes its own abort reason and nothing else", () => {

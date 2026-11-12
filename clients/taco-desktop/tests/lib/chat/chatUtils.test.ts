@@ -12,6 +12,7 @@ import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
 import type { CheckpointEntry } from "@taco-ai/protocol";
 import {
+    AGENT_TOOL_NAMES,
     checkpointForMessage,
     extractAssistantTextAndThinking,
     findPendingAskUserIds,
@@ -25,12 +26,94 @@ import {
     queuedItemsFromEvent,
     stringifyResult,
     summarizeKnownArgFields,
+    toolResultIsError,
     toolResultLine,
     turnStartAtOrBefore,
     type UiMessage,
     type UiThinkingBlock,
     type UiToolCall,
 } from "../../../src/lib/chat/chatUtils";
+
+describe("chatToAgent delivery receipts", () => {
+    const call: HistoryEntryLike = {
+        id: "send-call",
+        type: "message",
+        timestamp: 1,
+        payload: {
+            role: "assistant",
+            content: [
+                {
+                    type: "toolCall",
+                    id: "send-1",
+                    name: "chatToAgent",
+                    arguments: { subSessionId: "sub-1", prompt: "continue" },
+                },
+            ],
+        },
+    };
+
+    it("keeps messaging separate from child creation and historical continuation", () => {
+        assert.equal(AGENT_TOOL_NAMES.has("chatToAgent"), false);
+    });
+
+    it("honors a delivery error even when the harness flag is false", () => {
+        assert.equal(toolResultIsError("chatToAgent", false, { status: "error" }), true);
+        assert.equal(toolResultIsError("shell", false, { status: "error" }), false);
+    });
+
+    it("keeps an awaited send running when attach confirms its call is in flight", () => {
+        const ui = historyToUiMessages([call], { inFlightAgentToolCallIds: ["send-1"] });
+        assert.equal(ui[0]?.kind, "assistant");
+        if (ui[0]?.kind !== "assistant") return;
+        assert.equal(ui[0].tools[0]?.status, "running");
+    });
+
+    for (const status of ["queued", "started", "completed", "error", "aborted"] as const) {
+        it(`restores a delayed ${status} receipt onto its call instead of an orphan execution`, () => {
+            const details = {
+                subSessionId: "sub-1",
+                messageId: "msg-1",
+                status,
+                effectiveDelivery: "nextTurn",
+                runId: "run-1",
+                resultPath: "results/run-1.json",
+            };
+            const ui = historyToUiMessages(
+                [
+                    call,
+                    {
+                        id: "later-assistant",
+                        type: "message",
+                        timestamp: 2,
+                        payload: {
+                            role: "assistant",
+                            content: [{ type: "text", text: "another turn" }],
+                        },
+                    },
+                    {
+                        id: "receipt",
+                        type: "message",
+                        timestamp: 3,
+                        payload: {
+                            role: "toolResult",
+                            toolCallId: "send-1",
+                            toolName: "chatToAgent",
+                            content: "message delivered",
+                            isError: false,
+                            details,
+                        },
+                    },
+                ],
+                { inFlightAgentToolCallIds: [] },
+            );
+            assert.equal(ui.length, 2);
+            if (ui[0]?.kind !== "assistant") return assert.fail("missing send call");
+            assert.equal(ui[0].tools[0]?.status, status === "error" ? "error" : "ok");
+            assert.deepEqual(ui[0].tools[0]?.details, details);
+            assert.equal(ui[0].tools[0]?.resultText, "message delivered");
+        });
+    }
+});
 
 describe("checkpointForMessage", () => {
     it("only attaches a checkpoint to its persisted assistant entry anchor", async () => {
@@ -773,7 +856,7 @@ describe("historyToUiMessages — 长耗时工具不被 expire", () => {
         return assistant.tools.find((t) => t.id === "call-long-1");
     };
 
-    for (const name of ["agent", "agentContinue", "skill"]) {
+    for (const name of ["agent", "chatToAgent", "skill"]) {
         it(`在飞的 ${name} 保持 running,不被标为 error`, () => {
             const tool = toolOf(inFlight(name));
             assert.equal(tool?.status, "running");
@@ -830,7 +913,7 @@ describe("historyToUiMessages — 长耗时工具不被 expire", () => {
             return assistant.tools.find((t) => t.id === "call-long-1");
         };
 
-        for (const name of ["agent", "agentContinue", "skill"]) {
+        for (const name of ["agent", "chatToAgent", "skill"]) {
             it(`${name} 在集合内 → 保持 running`, () => {
                 const tool = toolWithInFlight(name, ["call-long-1"]);
                 assert.equal(tool?.status, "running");

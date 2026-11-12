@@ -31,6 +31,7 @@ const PROMPT_MAX_LINES = 5;
 export function SubagentPanel({
     messages,
     backgroundSubagents,
+    backgroundRunIds,
     open,
     selectedSubSessionId,
     onSelect,
@@ -43,6 +44,7 @@ export function SubagentPanel({
     /** Live background-spawn record; without it a background child reads as
      *  finished from launch (its tool call says `ok` from the receipt). */
     backgroundSubagents?: Parameters<typeof deriveSubagents>[1];
+    backgroundRunIds?: Parameters<typeof deriveSubagents>[2];
     open: boolean;
     selectedSubSessionId: string | null;
     onSelect: (subSessionId: string) => void;
@@ -57,8 +59,8 @@ export function SubagentPanel({
     const [searchOpen, setSearchOpen] = useState(false);
 
     const entries = useMemo(
-        () => deriveSubagents(messages, backgroundSubagents),
-        [messages, backgroundSubagents],
+        () => deriveSubagents(messages, backgroundSubagents, backgroundRunIds),
+        [messages, backgroundSubagents, backgroundRunIds],
     );
     const shown = useMemo(() => filterSubagents(entries, query), [entries, query]);
     const selected: SubagentEntry | null =

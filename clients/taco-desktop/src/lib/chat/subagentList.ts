@@ -118,10 +118,9 @@ function backgroundStatus(
 /**
  * Collapse a session's message stream into one entry per subagent.
  *
- * Keyed by subSessionId because `agentContinue` produces additional tool calls
- * against an existing child session. First occurrence wins for the descriptive
- * fields (agentContinue's args carry no description); the last occurrence wins
- * for status, so a continued subagent reads as running again.
+ * Keyed by subSessionId because repeated `agent` history can refer to an
+ * existing child session. First occurrence wins for descriptive fields; the
+ * last occurrence wins for status.
  *
  * `backgroundSubagents` is the one input that is not derivable from the message
  * stream. A background spawn's tool call settles at launch, so the stream says
@@ -132,9 +131,11 @@ function backgroundStatus(
 export function deriveSubagents(
     messages: readonly UiMessage[],
     backgroundSubagents: Readonly<Record<string, BackgroundSubagentState>> = {},
+    backgroundRunIds: Readonly<Record<string, string>> = {},
 ): SubagentEntry[] {
     const out: SubagentEntry[] = [];
     const indexBySubSessionId = new Map<string, number>();
+    const currentRuns = new Map<string, SubagentStatus>();
 
     for (const message of messages) {
         if (message.kind !== "assistant") continue;
@@ -149,6 +150,16 @@ export function deriveSubagents(
                 continue;
             }
             if (entry === null) continue;
+            if (
+                entry.subSessionId &&
+                readString(tool.details, "runId") &&
+                backgroundSubagents[tool.id] !== undefined &&
+                backgroundRunIds[tool.id] !== undefined
+            )
+                currentRuns.set(
+                    entry.subSessionId,
+                    backgroundStatus(tool.id, backgroundSubagents, tool.status),
+                );
 
             // Detached entries have no key to merge on, so each stands alone.
             if (entry.subSessionId === null) {
@@ -168,7 +179,10 @@ export function deriveSubagents(
         }
     }
 
-    return out;
+    return out.map((entry) => {
+        const status = entry.subSessionId ? currentRuns.get(entry.subSessionId) : undefined;
+        return status === undefined ? entry : { ...entry, status };
+    });
 }
 
 /** Case-insensitive match over agentType and description. */

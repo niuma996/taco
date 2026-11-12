@@ -1,4 +1,7 @@
+import type { AgentChatArgs, AgentChatResult } from "../../agents/agentConversationTypes.ts";
 import { disposeInOrder } from "../../lib/async.ts";
+import { createChatToAgentTool } from "../../tools/chatToAgent.ts";
+import { createListAgentSessionsTool } from "../../tools/listAgentSessions.ts";
 /**
  * SessionRegistry — owns session lifecycle and state within a workspace.
  *
@@ -18,6 +21,7 @@ import type {
     SupportedLocale,
     WorkspaceId,
 } from "@taco-ai/protocol";
+import { asSessionId } from "@taco-ai/protocol";
 import type { AgentToolPolicy } from "../../agents/filterTools.ts";
 import type {
     SubagentContextMode,
@@ -42,7 +46,6 @@ import type { ImChannelContext } from "../../tags/index.ts";
 import type { SubagentBudgetState } from "../../tags/subagentBudget.ts";
 import { type AgentTypeDescriptor, createAgentTool } from "../../tools/agent.ts";
 import { createAgentAbortTool } from "../../tools/agentAbort.ts";
-import { createAgentContinueTool } from "../../tools/agentContinue.ts";
 import type { TacoToolContextBase } from "../../tools/context.ts";
 import type { TacoTool } from "../../tools/index.ts";
 import { AttachedSession } from "../harness/attachedSession.ts";
@@ -149,26 +152,11 @@ export interface SessionRegistryOptions {
         isError: boolean;
         background?: boolean;
     }>;
-    /**
-     * Resume callback for the `agentContinue` tool. Same deferred-evaluation
-     * pattern as `spawnSubagent`. The facade supplies an arrow that calls
-     * AgentSpawner.resumeSubagent — moved to a separate option so the spawn
-     * surface stays narrow for callers (e.g. tests) that want only fresh
-     * subagents.
-     */
-    readonly resumeSubagent: (args: {
-        parentSessionId: SessionId;
-        parentToolCallId: string;
-        subSessionId: SessionId;
-        prompt: string;
-        signal?: AbortSignal;
-        onUpdate?: SubagentProgressSink;
-    }) => Promise<{
-        subSessionId: SessionId;
-        resultText: string;
-        isError: boolean;
-        aborted?: boolean;
-    }>;
+    /** Resume an existing child session for the chatToAgent conversation layer. */
+    readonly chatToAgent?: (caller: SessionId, args: AgentChatArgs) => Promise<AgentChatResult>;
+    readonly listAgentSessions?: (
+        caller: SessionId,
+    ) => Promise<import("@taco-ai/protocol").AgentSessionDescriptor[]>;
     /** Skill subagent spawn callback (same deferred AgentSpawner pattern). */
     readonly spawnSkillSubagent: (
         opts: SpawnSkillSubagentOptions,
@@ -401,7 +389,8 @@ export class SessionRegistry extends EventEmitter {
     }
 
     private readonly spawnSubagent: SessionRegistryOptions["spawnSubagent"];
-    private readonly resumeSubagent: SessionRegistryOptions["resumeSubagent"];
+    private readonly chatAgent: SessionRegistryOptions["chatToAgent"];
+    private readonly listAgentInstances: SessionRegistryOptions["listAgentSessions"];
     private readonly abortSubagentRun: (
         subSessionId: string,
         forParentSessionId?: SessionId,
@@ -457,7 +446,8 @@ export class SessionRegistry extends EventEmitter {
         this.requestPlanWriteApproval = options.requestPlanWriteApproval;
         this.getToolContext = options.getToolContext;
         this.spawnSubagent = options.spawnSubagent;
-        this.resumeSubagent = options.resumeSubagent;
+        this.chatAgent = options.chatToAgent;
+        this.listAgentInstances = options.listAgentSessions;
         this.abortSubagentRun = options.abortSubagentRun ?? (() => false);
         this.spawnSkillSubagent = options.spawnSkillSubagent;
         this.availableAgentTypes = options.availableAgentTypes;
@@ -475,11 +465,10 @@ export class SessionRegistry extends EventEmitter {
         const listing: TacoTool[] = [];
         const listingCtx: SubagentSpawnContext = {
             spawn: () => Promise.reject(new Error("tools.list stub: not executable")),
-            continue: () => Promise.reject(new Error("tools.list stub: not executable")),
             abortSubagent: () => ({ stopped: false }),
         };
         listing.push(createAgentTool(listingCtx, [...this.availableAgentTypes]));
-        listing.push(createAgentContinueTool(listingCtx));
+        listing.push(...this.conversationTools(asSessionId("tools-list")));
         listing.push(createAgentAbortTool(listingCtx));
         listing.push(
             createSkillTool(() => this.skills, {
@@ -915,15 +904,6 @@ export class SessionRegistry extends EventEmitter {
                     signal: args.signal,
                     onUpdate: args.onUpdate,
                 }),
-            continue: (args) =>
-                this.resumeSubagent({
-                    parentSessionId: sessionId,
-                    parentToolCallId: args.parentToolCallId,
-                    subSessionId: args.subSessionId,
-                    prompt: args.prompt,
-                    signal: args.signal,
-                    onUpdate: args.onUpdate,
-                }),
             // Restricted to this session's own children: the model knows only
             // its own subagent ids, but a guessed id must not stop another
             // session's run.
@@ -939,7 +919,7 @@ export class SessionRegistry extends EventEmitter {
         const sessionTools = [
             ...baseTools,
             createAgentTool(spawnContext, [...this.availableAgentTypes]),
-            createAgentContinueTool(spawnContext),
+            ...this.conversationTools(sessionId),
             createAgentAbortTool(spawnContext),
             createSkillTool(() => this.skills, {
                 parentSessionId: sessionId,
@@ -979,12 +959,29 @@ export class SessionRegistry extends EventEmitter {
      * otherwise the tools' closures and attached.taskStore would hold two
      * independent TaskStore instances and diverge on task mutation.
      */
+    conversationTools(sessionId: SessionId): TacoTool[] {
+        const chat = this.chatAgent;
+        const list = this.listAgentInstances;
+        if (!chat || !list) return [];
+        const context = {
+            chat: (args: AgentChatArgs) => chat(sessionId, args),
+            list: () => list(sessionId),
+        };
+        return [createChatToAgentTool(context), createListAgentSessionsTool(context)];
+    }
+
     async toolsForChildSession(sessionId: SessionId): Promise<{
         tools: TacoTool[];
         taskState: SessionTaskState;
     }> {
         const taskState = await buildSessionTaskState(sessionId, this.sessionsRoot);
-        return { tools: this.toolsForSession(sessionId, taskState), taskState };
+        return {
+            tools: [
+                ...this.toolsForSession(sessionId, taskState),
+                ...this.conversationTools(sessionId),
+            ],
+            taskState,
+        };
     }
 
     /**
@@ -1005,6 +1002,7 @@ export class SessionRegistry extends EventEmitter {
     ): Promise<AttachedSession> {
         const existing = this.attached.get(sessionId);
         if (existing) {
+            await existing.syncAgentCommunicationTools?.(tools);
             // A resume re-attaches to the mounted session. The harness hooks
             // were wired at create time, so any run-scoped control the caller
             // brought must be pushed onto the live handle or it is ignored.

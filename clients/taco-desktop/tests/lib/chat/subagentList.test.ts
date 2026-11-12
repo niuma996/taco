@@ -79,7 +79,18 @@ describe("deriveSubagents — 基本抽取", () => {
 
     it("忽略非 agent 工具", () => {
         const shell: UiToolCall = { id: "c2", name: "shell", args: {}, status: "ok" };
-        assert.equal(deriveSubagents([asst("m1", [shell])]).length, 0);
+        const historicalContinuation: UiToolCall = {
+            id: "legacy-continue",
+            name: "agentContinue",
+            args: { subSessionId: "sub-legacy", prompt: "continue" },
+            status: "ok",
+            details: { subSessionId: "sub-legacy" },
+        };
+        assert.equal(
+            deriveSubagents([asst("m1", [shell, historicalContinuation])]).length,
+            0,
+            "removed tools remain ordinary history, not subagent topology",
+        );
     });
 
     it("跳过 user / system / tool 类型消息", () => {
@@ -138,62 +149,6 @@ describe("deriveSubagents — 状态映射", () => {
     it("details 存在但 subSessionId 非字符串 → detached", () => {
         const out = deriveSubagents([asst("m1", [agentTool({ details: { subSessionId: 42 } })])]);
         assert.equal(out[0]?.status, "detached");
-    });
-});
-
-describe("deriveSubagents — agentContinue 去重", () => {
-    it("同 subSessionId 合并为一条，取首次的 description、末次的 status", () => {
-        const out = deriveSubagents([
-            asst("m1", [
-                agentTool({
-                    id: "c1",
-                    status: "ok",
-                    args: { subagent_type: "Explore", description: "首次描述", prompt: "P1" },
-                }),
-            ]),
-            asst("m2", [
-                {
-                    id: "c2",
-                    name: "agentContinue",
-                    args: { subSessionId: "sub-1", prompt: "P2" },
-                    status: "running",
-                    details: { subSessionId: "sub-1" },
-                },
-            ]),
-        ]);
-        assert.equal(out.length, 1);
-        assert.equal(out[0]?.description, "首次描述");
-        assert.equal(out[0]?.prompt, "P1");
-        assert.equal(out[0]?.status, "running");
-        assert.equal(out[0]?.firstToolCallId, "c1");
-    });
-
-    it("agentContinue 独立出现（父卡片不在本分支）也建条目", () => {
-        const out = deriveSubagents([
-            asst("m1", [
-                {
-                    id: "c1",
-                    name: "agentContinue",
-                    args: { subSessionId: "sub-9", prompt: "继续" },
-                    status: "ok",
-                    details: { subSessionId: "sub-9" },
-                },
-            ]),
-        ]);
-        assert.equal(out.length, 1);
-        assert.equal(out[0]?.subSessionId, "sub-9");
-        assert.equal(out[0]?.agentType, "agent");
-        assert.equal(out[0]?.description, "");
-    });
-
-    it("多个 detached 各自成行，不互相合并", () => {
-        const out = deriveSubagents([
-            asst("m1", [
-                agentTool({ id: "c1", details: undefined }),
-                agentTool({ id: "c2", details: undefined }),
-            ]),
-        ]);
-        assert.equal(out.length, 2);
     });
 });
 

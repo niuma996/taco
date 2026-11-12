@@ -1083,7 +1083,7 @@
       "ccBypassImNotice": "跳过权限后没有任何拦截。如果这个子助手会在 IM 聊天里被调用，渠道对端的消息就能驱动它在关联目录内无审批地执行任意操作。仅在信任该渠道所有发送者时使用，否则请改用 acceptEdits 或 dontAsk。",
       "ccRuleEngine": "在本机 Claude Code CLI 上运行，需要已安装并登录 `claude`；在下方设置的运行目录里运行，未设置时为当前工作区。",
       "ccRulePermissions": "工具与权限由 Claude Code 自己管理；需要人工审批的操作会被直接拒绝，taco 无法代为确认。",
-      "ccRuleContext": "始终从空白上下文开始，看不到父聊天；运行结束后不能用 agentContinue 续跑。",
+      "ccRuleContext": "使用独立上下文，支持通过 chatToAgent 续聊。后续父聊天中的消息需主动发送，不会自动共享。",
       "ccRuleCheckpoints": "它直接改写文件，不在 taco 检查点内，无法用检查点回滚。",
       "ccTools": "工具（可选）",
       "ccToolsHint": "留空使用 Claude Code 全套工具；填写则只开放列出的工具，逗号分隔。",

@@ -65,6 +65,7 @@ export function formatDeferredToolsForSystemPrompt(
 export function formatAgentsForSystemPrompt(types: ReadonlyArray<AgentTypeCatalogEntry>): string {
     if (types.length === 0) return "";
     const lines = [
+        "This catalog lists agent types, not existing session instances.",
         "Delegate with the `agent` tool. Pick `subagent_type` by capability, not by tool overlap.",
         "",
         "<available_agents>",

@@ -10,6 +10,7 @@ import { EventEmitter } from "node:events";
 import { mkdir, stat } from "node:fs/promises";
 import { dirname } from "node:path";
 import { asSessionId, type SessionId, type WorkspaceId } from "@taco-ai/protocol";
+import type { AgentChatArgs, AgentChatResult } from "../../agents/agentConversationTypes.ts";
 import {
     type AgentToolPolicy,
     agentToolPolicy,
@@ -47,13 +48,15 @@ import { findBranchEntries, MAIN_BRANCH } from "../session/sessionBranch.ts";
 import {
     readSessionFacts,
     resolveParentDepth,
-    type SessionFacts,
     writeSessionFacts,
 } from "../session/sessionFacts.ts";
 import type { AttachOptions, SessionRegistry } from "../session/sessionRegistry.ts";
+import { type AgentMessageRecord, agentMessageEnvelope } from "./agentConversation.ts";
+import { AgentConversationRuntime } from "./agentConversationRuntime.ts";
 import { type ChildAttachDeps, prepareChildAttach } from "./childAttach.ts";
 import { runClaudeCodeSubagent } from "./claudeCode/claudeCodeRunner.ts";
 import { findClaudeExecutable, loadClaudeAgentSdk } from "./claudeCode/claudeCodeSdk.ts";
+import { readClaudeCodeState, writeClaudeCodeState } from "./claudeCode/claudeCodeState.ts";
 import { deliverSubagentResult, deliverSubagentResultDetailed } from "./subagentDelivery.ts";
 import {
     addPendingSubagentResult,
@@ -62,6 +65,7 @@ import {
 } from "./subagentPending.ts";
 import type { SubagentResumability } from "./subagentProgress.ts";
 import { subagentResultPath } from "./subagentResultsDir.ts";
+import { type ResumeSubagentArgs, runSubagentResume } from "./subagentResume.ts";
 import { runAttachedSubagent, type SubagentRunResult } from "./subagentRunner.ts";
 
 const log = createLogger("sidecar.agentSpawner");
@@ -272,7 +276,7 @@ export interface SubagentSessionArgs {
      * Pre-rendered `<forked_context>` block, or undefined when this child runs
      * independent. Computed by `spawnSubagent` from the parent branch before
      * delegating; injected ahead of few-shots/role and persisted into the child
-     * metadata so `agentContinue` resumes byte-identically.
+     * metadata so chatToAgent resumes byte-identically.
      */
     forkedContext?: string;
     /**
@@ -285,7 +289,7 @@ export interface SubagentSessionArgs {
     /** Calling tool's `onUpdate` sink — see subagentRunner for what it emits. */
     onUpdate?: SubagentProgressSink;
     /**
-     * Whether `agentContinue` can resume this child. `agent` spawns pass
+     * Whether chatToAgent can resume this child. `agent` spawns pass
      * `resumable`; skill subagents must not, because their `skill:<name>`
      * agentType has no entry in the agent registry and `runResume` fails closed
      * on a missing definition.
@@ -293,6 +297,9 @@ export interface SubagentSessionArgs {
     resumability?: SubagentResumability;
     /** Engine for this run; absent = "standard". */
     runtime?: SubagentRuntime;
+    executionId?: string;
+    resume?: boolean;
+    backgroundLifecycle?: boolean;
 }
 
 export class AgentSpawner extends EventEmitter {
@@ -312,6 +319,17 @@ export class AgentSpawner extends EventEmitter {
     /** Claude Code SDK/CLI lookup. Fields rather than imports so tests can swap them. */
     private loadClaudeCodeSdk = loadClaudeAgentSdk;
     private findClaudeCode = findClaudeExecutable;
+    readonly conversation: AgentConversationRuntime;
+    private readonly chatRuns = new Map<
+        string,
+        {
+            parentSessionId: SessionId;
+            parentToolCallId: string;
+            subSessionId: SessionId;
+            agentType: string;
+            runId: string;
+        }
+    >();
 
     constructor(options: AgentSpawnerOptions) {
         super();
@@ -351,6 +369,11 @@ export class AgentSpawner extends EventEmitter {
         this.backgroundRuns = new Set();
         this.subagentControllers = new Map();
         this.controllerWaiters = new Map();
+        this.conversation = new AgentConversationRuntime({
+            registry: this.sessionRegistry,
+            findAgent: (name) => this.findAgent(name),
+            start: (message, args) => this.startConversationRun(message, args),
+        });
         // Detached parents retry on attach; busy parents retry after their lane
         // has settled. Neither signal may wait for a model notification to finish.
         const flushPending = ({ sessionId }: { sessionId: SessionId }): void => {
@@ -493,7 +516,8 @@ export class AgentSpawner extends EventEmitter {
      * on a child that has in fact finished: an entry that vanished without
      * resolving its waiter would strand the caller until its own timeout.
      */
-    private releaseController(subSessionId: string): void {
+    private releaseController(subSessionId: string, expected?: AbortController): void {
+        if (expected && this.subagentControllers.get(subSessionId)?.controller !== expected) return;
         this.subagentControllers.delete(subSessionId);
         const waiters = this.controllerWaiters.get(subSessionId);
         if (!waiters) return;
@@ -627,22 +651,41 @@ export class AgentSpawner extends EventEmitter {
      * instead of dying in `.catch` as a log line.
      */
     async executeSubagentSession(args: SubagentSessionArgs): Promise<SubagentRunResult> {
-        return this.trackInFlight(args.parentSessionId, args.parentToolCallId, async () => {
-            try {
-                return await this.runSubagentSession(args);
-            } catch (e) {
-                // Background spawns pre-generate `childSessionId` so a create/attach
-                // failure can still settle as `{ isError: true }` and notify the
-                // parent. The synchronous path has no such id — rethrow so the
-                // caller does not get a fabricated session handle.
-                if (args.childSessionId === undefined) throw e;
-                return {
-                    subSessionId: args.childSessionId,
-                    resultText: e instanceof Error ? e.message : String(e),
-                    isError: true,
-                };
-            }
-        });
+        const childSessionId = args.childSessionId ?? asSessionId(uuidv7());
+        const runId = args.executionId ?? uuidv7();
+        if (!this.conversation.state(childSessionId))
+            this.conversation.begin(childSessionId, {
+                runId,
+                parentSessionId: args.parentSessionId,
+                phase: "preparing",
+            });
+        let result: SubagentRunResult | undefined;
+        try {
+            result = await this.trackInFlight(
+                args.parentSessionId,
+                args.parentToolCallId,
+                async () => {
+                    try {
+                        return await this.runSubagentSession({
+                            ...args,
+                            childSessionId,
+                            executionId: runId,
+                        });
+                    } catch (error) {
+                        return {
+                            subSessionId: childSessionId,
+                            resultText: error instanceof Error ? error.message : String(error),
+                            isError: true,
+                        };
+                    }
+                },
+            );
+            return result;
+        } finally {
+            this.conversation.settling(childSessionId);
+            if (!args.backgroundLifecycle)
+                await this.conversation.end(childSessionId, runId, result);
+        }
     }
 
     /** `executeSubagentSession` body, wrapped by it for in-flight tracking. */
@@ -890,13 +933,84 @@ export class AgentSpawner extends EventEmitter {
             parentSessionId: args.parentSessionId,
         });
         try {
+            const native = args.resume
+                ? await this.sessionRegistry.withSession(childSessionId, readClaudeCodeState)
+                : undefined;
+            if (args.resume && !native)
+                return {
+                    subSessionId: childSessionId,
+                    isError: true,
+                    resultText:
+                        "This Claude Code session cannot be resumed: its native session mapping was not saved. Create a fresh agent explicitly.",
+                };
+            const cwd = args.claudeCodeCwd ?? this.env.cwd;
+            if (
+                native &&
+                (native.cwd !== cwd ||
+                    native.configDir !== process.env.CLAUDE_CONFIG_DIR ||
+                    JSON.stringify(native.tools) !== JSON.stringify(args.claudeCodeTools) ||
+                    native.permissionMode !== args.permissionMode)
+            )
+                return {
+                    subSessionId: childSessionId,
+                    isError: true,
+                    resultText:
+                        "Claude Code continuation requires the original cwd, storage environment, tools and permission mode. The profile changed; create a new agent explicitly.",
+                };
+            const communicationNames = (["chatToAgent", "listAgentSessions"] as const).filter(
+                (name) =>
+                    args.claudeCodeTools === undefined ||
+                    args.claudeCodeTools.includes(name) ||
+                    args.claudeCodeTools.includes(`mcp__taco__${name}`),
+            );
+            const nativeTools = args.claudeCodeTools?.filter(
+                (name) =>
+                    ![
+                        "chatToAgent",
+                        "listAgentSessions",
+                        "mcp__taco__chatToAgent",
+                        "mcp__taco__listAgentSessions",
+                    ].includes(name),
+            );
             return await runClaudeCodeSubagent({
                 subSessionId: childSessionId,
+                resumeSessionId: native?.nativeSessionId,
+                onSessionId: (nativeSessionId) =>
+                    this.sessionRegistry.withSession(childSessionId, (session) =>
+                        writeClaudeCodeState(session, {
+                            nativeSessionId,
+                            cwd,
+                            configDir: process.env.CLAUDE_CONFIG_DIR,
+                            tools: args.claudeCodeTools,
+                            permissionMode: args.permissionMode,
+                        }),
+                    ),
+                onInputReady: (input) => this.conversation.setInput(childSessionId, input),
+                ...(communicationNames.length
+                    ? {
+                          communicationTools: {
+                              allowedNames: communicationNames,
+                              chat: (input: {
+                                  subSessionId: string;
+                                  prompt: string;
+                                  delivery?: "steer" | "followUp";
+                                  background?: boolean;
+                                  inReplyTo?: string;
+                              }) =>
+                                  this.chatToAgent(childSessionId, {
+                                      ...input,
+                                      subSessionId: asSessionId(input.subSessionId),
+                                      parentToolCallId: `cc-message:${uuidv7()}`,
+                                  }),
+                              list: () => this.listAgentSessions(childSessionId),
+                          },
+                      }
+                    : {}),
                 agentType: args.agentType,
                 prompt: args.prompt,
                 rolePrompt: args.rolePrompt,
                 maxTurns: args.maxTurns,
-                tools: args.claudeCodeTools,
+                tools: nativeTools,
                 permissionMode: args.permissionMode,
                 cwd: args.claudeCodeCwd ?? this.env.cwd,
                 abortController: controller,
@@ -916,7 +1030,7 @@ export class AgentSpawner extends EventEmitter {
             });
         } finally {
             args.signal?.removeEventListener("abort", follow);
-            this.releaseController(childSessionId);
+            this.releaseController(childSessionId, controller);
         }
     }
 
@@ -1147,7 +1261,9 @@ export class AgentSpawner extends EventEmitter {
         // which is the same "receipt now, truth later" trade-off `background`
         // makes everywhere else. The background slot was reserved by
         // `spawnSubagent` before any await; this method must not add it again.
-        const childSessionId = asSessionId(uuidv7());
+        const childSessionId = sessionArgs.childSessionId ?? asSessionId(uuidv7());
+        const runId = sessionArgs.executionId ?? uuidv7();
+        this.conversation.begin(childSessionId, { runId, parentSessionId, phase: "preparing" });
         // Computed at launch, not at settle: the receipt below carries it, so
         // the model holds the exact path from the moment it delegates. That is
         // what makes the result recoverable when the completion notice never
@@ -1155,7 +1271,12 @@ export class AgentSpawner extends EventEmitter {
         // the file on its own, and a missing file is itself the "still running"
         // answer. Deriving it here also keeps the path a single source of truth
         // shared by the receipt and the write.
-        const resultPath = subagentResultPath(parentSessionId, childSessionId, this.sessionsRoot);
+        const resultPath = subagentResultPath(
+            parentSessionId,
+            childSessionId,
+            this.sessionsRoot,
+            sessionArgs.resume ? runId : undefined,
+        );
         // Registered at launch (not when the run starts) so a stop request
         // that arrives during setup still reaches the run: the runner's
         // pre-aborted check turns it into an immediate interruption.
@@ -1180,9 +1301,25 @@ export class AgentSpawner extends EventEmitter {
         let workAttemptId: string | undefined;
         const execute = async (attemptId?: string) => {
             workAttemptId = attemptId;
+            if (sessionArgs.resume)
+                return this.trackInFlight(parentSessionId, parentToolCallId, () =>
+                    this.runResume({
+                        parentSessionId,
+                        parentToolCallId,
+                        subSessionId: childSessionId,
+                        prompt: sessionArgs.prompt,
+                        signal: controller.signal,
+                        onUpdate: sessionArgs.onUpdate,
+                        newTask: true,
+                        managedExternally: true,
+                        budget: sessionArgs.budget,
+                    }),
+                );
             return this.executeSubagentSession({
                 ...sessionArgs,
                 childSessionId,
+                executionId: runId,
+                backgroundLifecycle: true,
                 signal: controller.signal,
                 abortController: controller,
             });
@@ -1191,8 +1328,11 @@ export class AgentSpawner extends EventEmitter {
             workId && this.workHooks?.run && sessionArgs.runtime !== "claude-code"
                 ? this.workHooks.run(workId, childSessionId, execute)
                 : execute();
+        let settledResult: SubagentRunResult | undefined;
         const run = execution
             .then(async (result) => {
+                settledResult = { ...result, aborted: controller.signal.aborted || result.aborted };
+                this.conversation.settling(childSessionId);
                 if (result.waiting) {
                     if (workId !== undefined)
                         await this.workHooks?.onWaiting?.(workId, result.waiting, workAttemptId);
@@ -1341,11 +1481,12 @@ export class AgentSpawner extends EventEmitter {
                     });
                 }
             })
-            .finally(() => {
+            .finally(async () => {
+                await this.conversation.end(childSessionId, runId, settledResult);
                 clearTimeout(timer);
                 this.backgroundInFlight.delete(parentToolCallId);
                 this.backgroundRuns.delete(run);
-                this.releaseController(childSessionId);
+                this.releaseController(childSessionId, controller);
                 // Safe here, not in emitSettled: by the time this whole chain
                 // settles, both the `.then` and `.catch` branches (the only
                 // callers) have already run to completion, so no later call
@@ -1631,6 +1772,13 @@ export class AgentSpawner extends EventEmitter {
     ): void {
         if (this.settledEmitted.has(args.parentToolCallId)) return;
         this.settledEmitted.add(args.parentToolCallId);
+        const chatRunId = args.parentToolCallId.startsWith("chat:")
+            ? args.parentToolCallId.slice(5)
+            : undefined;
+        if (chatRunId && this.chatRuns.has(chatRunId)) {
+            this.settleChatRun(chatRunId, args.outcome);
+            return;
+        }
         this.emit("subagent.settled", {
             parentSessionId: args.parentSessionId,
             parentToolCallId: args.parentToolCallId,
@@ -1849,6 +1997,165 @@ export class AgentSpawner extends EventEmitter {
             : { text: latestAssistantText, isEmpty: false };
     }
 
+    activeSubagentChatRuns(parentSessionId: SessionId) {
+        return [...this.chatRuns.values()].filter((run) => run.parentSessionId === parentSessionId);
+    }
+
+    private settleChatRun(runId: string, outcome: "completed" | "error" | "aborted"): void {
+        const run = this.chatRuns.get(runId);
+        if (!run) return;
+        this.chatRuns.delete(runId);
+        this.emit("subagent.settled", { ...run, outcome });
+    }
+
+    async dispose(): Promise<void> {
+        for (const { controller } of this.subagentControllers.values()) controller.abort();
+        await this.conversation.dispose();
+        await this.whenBackgroundRunsSettle();
+        this.removeAllListeners();
+    }
+
+    chatToAgent(callerSessionId: SessionId, args: AgentChatArgs): Promise<AgentChatResult> {
+        return this.conversation.chat(callerSessionId, args);
+    }
+
+    listAgentSessions(callerSessionId: SessionId) {
+        return this.conversation.list(callerSessionId);
+    }
+
+    private async startConversationRun(message: AgentMessageRecord, args: AgentChatArgs) {
+        const facts = await this.sessionRegistry.withSession(
+            message.targetSessionId,
+            readSessionFacts,
+        );
+        const def = facts.agentType ? this.findAgent(facts.agentType) : undefined;
+        if (!def)
+            throw new Error(
+                "The original agent profile is unavailable; create a new agent explicitly.",
+            );
+        if ((facts.runtime ?? "standard") !== (def.runtime ?? "standard")) {
+            throw new Error(
+                "The agent profile changed execution engine; the existing conversation cannot switch engines.",
+            );
+        }
+        if (
+            facts.runtime === "claude-code" &&
+            !(await this.sessionRegistry.withSession(message.targetSessionId, readClaudeCodeState))
+        ) {
+            throw new Error(
+                "This Claude Code session cannot be resumed because it has no saved native session. Create a fresh agent explicitly.",
+            );
+        }
+        const runId = uuidv7();
+        const started = {
+            parentSessionId: message.ownerParentSessionId,
+            parentToolCallId: facts.parentToolCallId ?? args.parentToolCallId,
+            subSessionId: message.targetSessionId,
+            agentType: def.agentType,
+            runId,
+        };
+        const announce = () => {
+            this.chatRuns.set(runId, started);
+            this.emit("subagent.started", started);
+        };
+        const prompt = message.queueEntryId
+            ? `Process the queued agent message ${message.messageId}. Its content is in the native message queue.`
+            : agentMessageEnvelope(message);
+        const receipt: AgentChatResult = {
+            subSessionId: message.targetSessionId,
+            messageId: message.messageId,
+            runId,
+            status: "started",
+            effectiveDelivery: facts.runtime === "claude-code" ? "nextTurn" : message.delivery,
+            resultText:
+                "The existing agent conversation is continuing. Completion will be reported to its original parent.",
+            isError: false,
+        };
+        if (message.background) {
+            if (this.backgroundInFlight.size >= MAX_CONCURRENT_BACKGROUND_SUBAGENTS)
+                throw new Error("Too many background subagents already running.");
+            const parentToolCallId = `chat:${runId}`;
+            this.backgroundInFlight.add(parentToolCallId);
+            announce();
+            const launched = await this.spawnBackgroundSubagent(
+                {
+                    parentSessionId: message.ownerParentSessionId,
+                    parentToolCallId,
+                    childSessionId: message.targetSessionId,
+                    executionId: runId,
+                    resume: true,
+                    agentType: def.agentType,
+                    prompt,
+                    tools: [],
+                    runtime: facts.runtime,
+                    budget: {
+                        turnsUsed: 0,
+                        startedAt: Date.now(),
+                        ...(def.maxTurns !== undefined ? { maxTurns: def.maxTurns } : {}),
+                    },
+                },
+                def,
+                message.prompt.slice(0, 160),
+            );
+            return { result: { ...receipt, resultPath: launched.resultPath } };
+        }
+        announce();
+        this.conversation.begin(message.targetSessionId, {
+            runId,
+            parentSessionId: message.ownerParentSessionId,
+            phase: "preparing",
+        });
+        const completion = this.trackInFlight(
+            message.ownerParentSessionId,
+            args.parentToolCallId,
+            () =>
+                this.runResume({
+                    parentSessionId: message.ownerParentSessionId,
+                    parentToolCallId: args.parentToolCallId,
+                    subSessionId: message.targetSessionId,
+                    prompt,
+                    signal: args.signal,
+                    onUpdate: args.onUpdate,
+                    newTask: true,
+                    managedExternally: true,
+                }),
+        ).then(
+            async (result) => {
+                this.settleChatRun(
+                    runId,
+                    result.aborted ? "aborted" : result.isError ? "error" : "completed",
+                );
+                await this.conversation.end(message.targetSessionId, runId, result);
+                return {
+                    ...receipt,
+                    status: result.aborted
+                        ? ("aborted" as const)
+                        : result.isError
+                          ? ("error" as const)
+                          : ("completed" as const),
+                    resultText: result.resultText,
+                    isError: result.isError && !result.aborted,
+                };
+            },
+            async (error: unknown) => {
+                const result = {
+                    subSessionId: message.targetSessionId,
+                    resultText: String(error),
+                    isError: true,
+                };
+                this.settleChatRun(runId, "error");
+                await this.conversation.end(message.targetSessionId, runId, result);
+                return {
+                    ...receipt,
+                    status: "error" as const,
+                    resultText: String(error),
+                    isError: true,
+                };
+            },
+        );
+        return { result: receipt, completion };
+    }
+
     /**
      * Resume an existing subagent by `subSessionId`. The caller MUST be the
      * same parent session that originally spawned it (verified via JSONL
@@ -1872,6 +2179,30 @@ export class AgentSpawner extends EventEmitter {
         isError: boolean;
         aborted?: boolean;
     }> {
+        try {
+            const facts = await this.sessionRegistry.withSession(
+                args.subSessionId,
+                readSessionFacts,
+            );
+            if (facts.kind !== "subagent")
+                return {
+                    subSessionId: args.subSessionId,
+                    resultText: `cannot continue: session ${args.subSessionId} is not a subagent`,
+                    isError: true,
+                };
+            if (facts.parentSessionId !== args.parentSessionId)
+                return {
+                    subSessionId: args.subSessionId,
+                    resultText: "cannot continue: subagent belongs to a different parent session",
+                    isError: true,
+                };
+        } catch (error) {
+            return {
+                subSessionId: args.subSessionId,
+                resultText: error instanceof Error ? error.message : String(error),
+                isError: true,
+            };
+        }
         // Single-flight: a second concurrent call with the same subSessionId
         // reuses the in-flight promise rather than racing to re-attach and
         // interleave user messages on the same branch. The cache entry is
@@ -1883,10 +2214,32 @@ export class AgentSpawner extends EventEmitter {
         // cache still hands this promise to a concurrent caller while `inFlight`
         // already reports the run as finished — an attach in that window would see
         // a live subagent as an orphan.
-        const promise = this.trackInFlight(args.parentSessionId, args.parentToolCallId, () =>
-            this.runResume(args).finally(() => {
-                this.resumeInFlight.delete(args.subSessionId);
-            }),
+        if (this.conversation.state(args.subSessionId))
+            return {
+                subSessionId: args.subSessionId,
+                isError: true,
+                resultText:
+                    "This agent is already running. Send additional instructions with chatToAgent instead.",
+            };
+        const runId = uuidv7();
+        this.conversation.begin(args.subSessionId, {
+            runId,
+            parentSessionId: args.parentSessionId,
+            phase: "preparing",
+        });
+        let result: SubagentRunResult | undefined;
+        const promise = this.trackInFlight(
+            args.parentSessionId,
+            args.parentToolCallId,
+            async () => {
+                try {
+                    result = await this.runResume(args);
+                    return result;
+                } finally {
+                    await this.conversation.end(args.subSessionId, runId, result);
+                    this.resumeInFlight.delete(args.subSessionId);
+                }
+            },
         );
         this.resumeInFlight.set(args.subSessionId, promise);
         return promise;
@@ -1937,182 +2290,39 @@ export class AgentSpawner extends EventEmitter {
         }
     }
 
-    private async runResume(args: {
-        parentSessionId: SessionId;
-        parentToolCallId: string;
-        subSessionId: SessionId;
-        prompt: string;
-        signal?: AbortSignal;
-        onUpdate?: SubagentProgressSink;
-    }): Promise<{ subSessionId: SessionId; resultText: string; isError: boolean }> {
-        // 1. Open the child session and read its facts. Verify it exists, is a
-        //    subagent, and was spawned by the same parent that's now trying to
-        //    resume. This is a trust boundary, so the checks below must run
-        //    against persisted state, never a caller-supplied value.
-        let md: SessionFacts;
-        try {
-            md = await this.sessionRegistry.withSession(args.subSessionId, (session) =>
-                readSessionFacts(session),
-            );
-        } catch (e) {
-            return {
-                subSessionId: args.subSessionId,
-                resultText: e instanceof Error ? e.message : String(e),
-                isError: true,
-            };
-        }
-        if (md?.kind !== "subagent") {
-            return {
-                subSessionId: args.subSessionId,
-                resultText: `cannot continue: session ${args.subSessionId} is not a subagent`,
-                isError: true,
-            };
-        }
-        if (md?.parentSessionId !== args.parentSessionId) {
-            // A different parent (or a stale tool_call_id) trying to reach
-            // into someone else's subagent would cross security boundaries
-            // and break the implicit "same parent, same conversation" contract.
-            return {
-                subSessionId: args.subSessionId,
-                resultText: "cannot continue: subagent belongs to a different parent session",
-                isError: true,
-            };
-        }
-
-        const agentType = typeof md.agentType === "string" ? md.agentType : undefined;
-        const def = agentType ? this.findAgent(agentType) : undefined;
-        if (agentType === undefined || !def) {
-            // The original profile (agentType) is gone — either the file was
-            // deleted, or the agentType string was renamed. Falling back to
-            // the parent's full toolset here would grant the resumed subagent
-            // more capabilities than it had at spawn time (e.g. a read-only
-            // explorer gaining shell / write). Fail closed instead: the user
-            // must spawn a fresh subagent under a valid profile. Conversation
-            // history is preserved on disk but no longer reachable from here.
-            return {
-                subSessionId: args.subSessionId,
-                resultText: `cannot continue: agent definition for "${agentType ?? "unknown"}" is no longer available. Re-spawn the subagent to continue.`,
-                isError: true,
-            };
-        }
-        if (def.runtime === "claude-code") {
-            return {
-                subSessionId: args.subSessionId,
-                resultText: `cannot continue: "${agentType}" runs on Claude Code, which cannot be resumed. Spawn a new subagent instead.`,
-                isError: true,
-            };
-        }
-        // 2. Compute remaining turn budget. We don't have a turn_end counter
-        //    on disk — assistant messages count one-per-turn and survive across
-        //    resumes. Subtract from `def.maxTurns`; fail fast when depleted
-        //    rather than burn one more LLM round to discover the cap.
-        let maxTurns = def.maxTurns;
-        if (maxTurns !== undefined) {
-            const used = await this.countAssistantTurns(args.subSessionId);
-            const remaining = maxTurns - used;
-            if (remaining <= 0) {
-                return {
-                    subSessionId: args.subSessionId,
-                    resultText: `cannot continue: subagent exhausted its ${maxTurns}-turn budget (used ${used})`,
-                    isError: true,
-                };
-            }
-            maxTurns = remaining;
-        }
-
-        // 3. Rebuild the system prompt from the original agentType's profile
-        //    + few-shots, filtered through the same toolset the spawn used.
-        //    def is guaranteed non-undefined by the early return above.
-        const childDepth = typeof md.depth === "number" ? md.depth : Number(md.depth ?? 0);
-        const {
-            tools: attachedChildTools,
-            taskState: childTaskState,
-            systemPrompt: childSystemPrompt,
-        } = await prepareChildAttach(this.childAttachDeps, {
-            sessionId: args.subSessionId,
-            agentType,
-            childDepth,
-            allowedTools: filterToolsForAgent(this.getTools(), def.tools, childDepth),
-            toolPolicy: agentToolPolicy(def.tools, childDepth),
-            rolePrompt: def.systemPrompt,
-            fewShots: def.fewShots,
-            // Re-inject the fork transcript from the spawn-time snapshot so a
-            // resume sees the same context the child started with, even if the
-            // parent has since compacted or continued.
-            forkedContext: typeof md.forkedContext === "string" ? md.forkedContext : undefined,
-            modelIdentity: this.defaultModelIdentity,
+    private runResume(args: ResumeSubagentArgs): Promise<SubagentRunResult> {
+        return runSubagentResume(args, {
+            registry: this.sessionRegistry,
+            findAgent: (name) => this.findAgent(name),
+            getTools: this.getTools,
+            childAttachDeps: this.childAttachDeps,
+            defaultModelIdentity: this.defaultModelIdentity,
+            workHooks: this.workHooks,
+            countAssistantTurns: (id) => this.countAssistantTurns(id),
+            readLastAssistantText: (id) => this.extractLastAssistantText(id),
+            reportResumeStart: (id) => this.reportResumeStart(id),
+            reportResumeSettle: (id, result, handle) => this.reportResumeSettle(id, result, handle),
+            registerController: (id, controller, parentSessionId) =>
+                this.subagentControllers.set(id, { controller, parentSessionId }),
+            releaseController: (id, controller) => this.releaseController(id, controller),
+            runClaudeCode: (request, def) =>
+                this.runClaudeCodeChild(request.subSessionId, {
+                    parentSessionId: request.parentSessionId,
+                    parentToolCallId: request.parentToolCallId,
+                    agentType: def.agentType,
+                    prompt: request.prompt,
+                    tools: [],
+                    runtime: "claude-code",
+                    resume: true,
+                    rolePrompt: def.systemPrompt,
+                    maxTurns: def.maxTurns,
+                    claudeCodeTools: def.tools,
+                    permissionMode: def.permissionMode,
+                    claudeCodeCwd: def.cwd,
+                    signal: request.signal,
+                    onUpdate: request.onUpdate,
+                }),
         });
-
-        // A resume gets its own budget object: the remaining turn count is
-        // what this run may still take, and the counter starts fresh from
-        // here. One object, shared with the runner that updates it.
-        const resumeBudget: SubagentBudgetState = {
-            turnsUsed: 0,
-            startedAt: Date.now(),
-            ...(maxTurns !== undefined ? { maxTurns } : {}),
-        };
-
-        // 4. Attach (returns the existing AttachedSession if still attached).
-        let attached: AttachedSession;
-        try {
-            attached = await this.sessionRegistry.attachChild(
-                args.subSessionId,
-                {
-                    thinkingLevel: "off",
-                    toolLoadPolicy: agentToolPolicy(def.tools, childDepth),
-                    getSubagentBudget: () => resumeBudget,
-                },
-                attachedChildTools,
-                childTaskState,
-                childSystemPrompt,
-            );
-        } catch (e) {
-            return {
-                subSessionId: args.subSessionId,
-                resultText: e instanceof Error ? e.message : String(e),
-                isError: true,
-            };
-        }
-
-        // Same per-child controller as the fresh-spawn sync path: the caller's
-        // signal bounds the run, and the registry entry lets `abortSubagentRun`
-        // stop this child without aborting the parent's turn.
-        const controller = new AbortController();
-        if (args.signal?.aborted) controller.abort();
-        const link = (): void => controller.abort();
-        args.signal?.addEventListener("abort", link, { once: true });
-        this.subagentControllers.set(args.subSessionId, {
-            controller,
-            parentSessionId: args.parentSessionId,
-        });
-        try {
-            // Reopen an interrupted Work before the run so the overview stops
-            // showing it as stopped while it is working again.
-            const handle = await this.reportResumeStart(args.subSessionId);
-            const execute = () =>
-                runAttachedSubagent({
-                    subSessionId: args.subSessionId,
-                    attached,
-                    prompt: args.prompt,
-                    agentType,
-                    maxTurns,
-                    budget: resumeBudget,
-                    signal: controller.signal,
-                    onUpdate: args.onUpdate,
-                    // Reached here only after the profile resolved, so it can be resumed again.
-                    resumability: "resumable",
-                    readLastAssistantText: (id) => this.extractLastAssistantText(id),
-                });
-            const result =
-                handle && this.workHooks?.run
-                    ? await this.workHooks.run(handle.workId, args.subSessionId, execute)
-                    : await execute();
-            await this.reportResumeSettle(args.subSessionId, result, handle);
-            return result;
-        } finally {
-            args.signal?.removeEventListener("abort", link);
-            this.releaseController(args.subSessionId);
-        }
     }
 
     /**
@@ -2248,7 +2458,7 @@ export class AgentSpawner extends EventEmitter {
             model: modelOverride,
             signal: args.signal,
             onUpdate: args.onUpdate,
-            // `skill:<name>` is not an agent-registry type, so agentContinue
+            // `skill:<name>` is not an agent-registry type, so chatToAgent
             // cannot resume this child — say so rather than defaulting silently.
             resumability: "not_resumable",
             childDepth,

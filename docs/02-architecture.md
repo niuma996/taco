@@ -7,7 +7,7 @@
 
 What Taco adds on top of Pi's harness, from the code:
 
-- **`agent` tool — subagents with fan-out.** Per-type tool whitelist, `agent/<type>` namespace, depth-bounded recursion, `executionMode: "parallel"` for concurrent calls.
+- **Agent conversations.** `agent` creates child sessions with per-type tool whitelists and depth-bounded recursion. `chatToAgent` messages or resumes an existing session; `listAgentSessions` discovers communicable instances and their status, resumability, and delivery capability. A parent sees its children; a child sees only siblings with the same parent, excluding itself.
 - **`skill` tool — inline or subagent.** Loads by name; inline enqueues a `<skill_body name="NAME">` message protected by `skillReinjector`, subagent mode spawns a fresh session via `spawnSkillSubagent`.
 - **Plan mode with a hard gate.** `planEnter` opens `.taco/plans/<slug>.md`; only read / askUser / write-the-plan are allowed; `planExit` returns the plan for approval.
 - **Prompt tag system.** Each `<tag>` block carries a `compression` policy (`pin` / `pinOnce` / `summarize` / `drop`) and `tuiVisibility` (`visible` / `hidden` / `ephemeral`); the pin-aware compact hook reads that registry.
@@ -182,7 +182,7 @@ with other tooling.
 - Owns `NodeExecutionEnv` (cwd-bound file system + shell)
 - Owns a `JsonlSessionRepo`, listing historical `.jsonl` per cwd
 - Owns `SessionRegistry`, which manages all attached sessions
-- Owns `AgentSpawner` (subagent creation + `agentContinue` resume)
+- Owns `AgentSpawner` (child creation and execution) and agent conversation admission/routing for `chatToAgent` / `listAgentSessions`
 - Owns `ModelRegistry` (built-in + custom + MCP tool candidates)
 - Owns `PermissionBroker` (5-level risk classification + rule-based allow/deny)
 - Owns `Checkpoints` (turn-scoped pre-write file snapshots)
@@ -207,6 +207,46 @@ class WorkspaceRuntime {
 `_metadataCache` caches the workspace's session metadata. **Only
 invalidated after explicit mutate** (create / delete / rename); read
 operations (e.g. `session.list`) hit the cache.
+
+### 2.2.1 Agent conversation delivery
+
+`agent` creates a session; `chatToAgent` addresses an existing `subSessionId`.
+Messages default to `background: true` and `delivery: "steer"`. A queued or
+started receipt acknowledges acceptance, not completion. `background: false`
+is supported only when a parent addresses its own idle child. In the standard
+engine, steer is delivered at the next tool batch; `followUp` waits until the
+current run finishes. Completion notification still goes to the original parent.
+A result file that is absent means output is unavailable, not proof of a running
+agent; use the latest receipt, notification, or status snapshot as evidence.
+
+`listAgentSessions` lists instances, while `<available_agents>` lists types.
+Children can message same-parent siblings, never themselves or their parent.
+Messaging grants neither recursive spawning nor permission to abort siblings.
+A peer's message is collaboration data, not a user instruction or new approval.
+Later parent context is not synchronized to children: send any needed changes
+explicitly, including after a fork. Prompt communication guidance is included
+only for tools actually available in the session.
+
+Runtime-delivered messages use an `<agent_message>` envelope registered as
+`hidden` + `summarize`: the model receives it as ordinary conversation context,
+the UI hides the routing wrapper, and compaction can summarize it. Outbound
+agent text neutralizes this and other control-tag shapes to prevent forged
+runtime envelopes. `agentContinue` has been removed; its historical calls are
+ordinary tool records and do not drive topology or execution recovery.
+
+### 2.2.2 Claude Code conversations and retention
+
+Claude Code children use native resume through the Agent SDK, with persisted
+native session state and a mapping to Taco's display session. During a running
+conversation, effective delivery is `nextTurn`; it does not guarantee interruption
+of an active tool. Old CC sessions that lack the native mapping/state cannot be
+retroactively resumed from their Taco transcript alone.
+
+Native Claude logging is enabled to support resume. Taco does not actively
+delete Claude Code's native session records when its own display session is
+deleted. Native records follow Claude Code's storage configuration and retention
+behavior, and are managed or cleaned up by Claude Code or the user. The two
+histories therefore have separate lifecycles.
 
 ### 2.3 AgentHarness event flow (push channel)
 

@@ -408,6 +408,7 @@ The server pushes frames asynchronously.  Clients should route by `method`.
 | `command_permission.requested` | CommandPermissionRequested |
 | `command_permission.resolved` | CommandPermissionResolved |
 | `subagent.spawned` | SubagentSpawned |
+| `subagent.started` | SubagentStarted |
 | `subagent.settled` | SubagentSettled |
 | `session.error` | Error |
 | `session.compaction_started` | CompactionStarted |

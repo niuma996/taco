@@ -17,6 +17,7 @@ import type {
     SessionListCursor,
     SessionListEntry,
     SessionRenameResult,
+    SubagentStartedPayload,
 } from "@taco-ai/protocol";
 import {
     asSessionId,
@@ -203,6 +204,14 @@ export function registerSessionLifecycleHandlers(): void {
                 settledBackgroundSubSessionIds: await workspace.settledBackgroundSubSessionIds(
                     params.sessionId,
                 ),
+                ...(() => {
+                    const activeSubagentChatRuns = (
+                        workspace as {
+                            activeSubagentChatRuns?: (sid: SessionId) => SubagentStartedPayload[];
+                        }
+                    ).activeSubagentChatRuns?.(params.sessionId);
+                    return activeSubagentChatRuns === undefined ? {} : { activeSubagentChatRuns };
+                })(),
             };
             return result;
         },

@@ -34,6 +34,7 @@ import type {
     sessionTasksGetSchema,
     subagentAbortSchema,
 } from "./schemas/session.js";
+import type { SubagentStartedPayload } from "./tools.js";
 
 export interface SessionMeta {
     id: SessionId;
@@ -198,6 +199,7 @@ export interface SessionRuntimeSnapshot {
     inFlightAgentToolCallIds: string[];
     settledBackgroundSubSessionIds: string[];
     pendingAskUserToolCallIds: string[];
+    activeSubagentChatRuns?: SubagentStartedPayload[];
 }
 
 /**

@@ -11,8 +11,8 @@ import type { AgentHarnessToolUpdateCallback } from "../runtime/pi/types.ts";
  * Progress sink forwarded from a tool down to the subagent runner.
  *
  * Typed over `never`, not over a payload type: pi types a tool's updates as
- * carrying that tool's own result details, but all three subagent-backed tools
- * (`agent`, `agentContinue`, subagent-mode `skill`) share one runner and one
+ * carrying that tool's own result details, but the subagent-backed tools
+ * (`agent`, `chatToAgent`, and subagent-mode `skill`) share one
  * payload shape, which is not assignable to each tool's own details type.
  * Contravariance makes every tool callback assignable to this sink; the runner
  * asserts the payload it publishes (see subagentRunner).
@@ -42,8 +42,9 @@ export type SubagentContextMode = "independent" | "fork";
  * - `standard` — taco's own harness. The default when frontmatter omits it.
  * - `claude-code` — the whole run is delegated to the user's local Claude
  *   Code CLI through the Agent SDK: Claude Code's own tools and permission
- *   system rather than taco's, always `independent`, and not resumable with
- *   `agentContinue`.
+ *   system rather than taco's, always `independent`. `chatToAgent` continues
+ *   it through native resume when saved native session state is available;
+ *   old display-only history without a native mapping cannot be restored.
  */
 export type SubagentRuntime = "standard" | "claude-code";
 
@@ -117,7 +118,7 @@ export interface AgentDefinition {
     filePath: string;
 }
 
-/** Narrow interface WorkspaceRuntime injects into the agent tool: only spawn and continue. */
+/** Narrow interface WorkspaceRuntime injects into the agent tool. */
 export interface SubagentSpawnContext {
     /** `subSessionId` is absent when the spawn failed before a child session existed. */
     spawn(args: {
@@ -162,25 +163,6 @@ export interface SubagentSpawnContext {
          * by reading the file if the completion notice never arrives.
          */
         resultPath?: string;
-    }>;
-    /**
-     * Resume an existing subagent by `subSessionId`. The caller MUST be the
-     * same parent session that originally spawned it (verified via JSONL
-     * metadata). Concurrent calls with the same `subSessionId` share the
-     * single in-flight result.
-     */
-    continue(args: {
-        parentToolCallId: string;
-        subSessionId: SessionId;
-        prompt: string;
-        signal?: AbortSignal;
-        /** Tool progress sink — forwarded from the calling tool's own `onUpdate`. */
-        onUpdate?: SubagentProgressSink;
-    }): Promise<{
-        subSessionId: SessionId;
-        resultText: string;
-        isError: boolean;
-        aborted?: boolean;
     }>;
     /**
      * Stop a running subagent by `subSessionId` without aborting the parent

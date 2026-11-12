@@ -12,6 +12,7 @@ import type {
     CommandPermissionRequest,
     PlanStateUpdatedParams,
     SessionSnapshot,
+    SubagentStartedPayload,
     TaskItem,
     TaskListMeta,
     TasksUpdatedParams,
@@ -90,6 +91,8 @@ export interface WorkspaceState {
     >;
     agentToolPending: Record<string, true>;
     backgroundSubagents: Record<string, BackgroundSubagentState>;
+    /** Optional for legacy workspace fixtures; canonical session state always initializes it. */
+    backgroundRunIds?: Record<string, string>;
     listCursor?: { updatedAt: string; id: string };
     listTotal?: number;
     loadingSessionId?: string;
@@ -134,6 +137,7 @@ export function createEmptyWorkspace(cwd: string, active = false): WorkspaceStat
         pendingCommandPermissions: {},
         agentToolPending: {},
         backgroundSubagents: {},
+        backgroundRunIds: {},
         pendingBySessionId: {},
         queuedBySessionId: {},
         taskSnapshotsBySessionId: {},
@@ -187,6 +191,8 @@ export type WorkspaceAction =
           inFlightAgentToolCallIds?: readonly string[];
           /** Child session ids that already produced a result file. */
           settledBackgroundSubSessionIds?: readonly string[];
+          /** Active continuation runs restored after history. */
+          activeSubagentChatRuns?: readonly SubagentStartedPayload[];
       }
     | { type: "SELECT_SESSION"; cwd: string; sid: string }
     | {
@@ -262,6 +268,16 @@ export type WorkspaceAction =
           parentSessionId?: string;
           parentToolCallId: string;
           outcome: Exclude<BackgroundSubagentState, "running">;
+          runId?: string;
+      }
+    | {
+          type: "SUBAGENT_STARTED";
+          cwd: string;
+          parentSessionId: string;
+          parentToolCallId: string;
+          subSessionId: string;
+          agentType: string;
+          runId: string;
       }
     | {
           type: "CHILD_MESSAGE_EVENT";
@@ -452,6 +468,55 @@ function patchSession(
         sessionStatesById: {
             ...ws.sessionStatesById,
             [sid]: { ...updated, ...patch, executionRevision, lastAccess },
+        },
+    };
+}
+
+function applyStartedRun(
+    session: SessionState,
+    owner: SubagentStartedPayload,
+): SessionState | undefined {
+    if (!owner.runId || session.backgroundRunIds[owner.parentToolCallId] === owner.runId)
+        return undefined;
+    const card = session.messages
+        .flatMap((message) => (message.kind === "assistant" ? message.tools : []))
+        .find((tool) => tool.id === owner.parentToolCallId);
+    if (!card || !AGENT_TOOL_NAMES.has(card.name)) return undefined;
+    const details = (card.details ?? {}) as { subSessionId?: unknown };
+    if (typeof details.subSessionId === "string" && details.subSessionId !== owner.subSessionId)
+        return undefined;
+    const messages = session.messages.map((message) =>
+        message.kind !== "assistant"
+            ? message
+            : {
+                  ...message,
+                  tools: message.tools.map((tool) =>
+                      tool.id !== owner.parentToolCallId
+                          ? tool
+                          : {
+                                ...tool,
+                                status: "running" as const,
+                                details: {
+                                    ...((tool.details ?? {}) as object),
+                                    subSessionId: owner.subSessionId,
+                                    agentType: owner.agentType,
+                                    runId: owner.runId,
+                                    status: "started",
+                                },
+                            },
+                  ),
+              },
+    );
+    return {
+        ...session,
+        messages,
+        backgroundSubagents: {
+            ...session.backgroundSubagents,
+            [owner.parentToolCallId]: "running",
+        },
+        backgroundRunIds: {
+            ...session.backgroundRunIds,
+            [owner.parentToolCallId]: owner.runId,
         },
     };
 }
@@ -690,6 +755,14 @@ export function workspacesReducer(
                         action.settledBackgroundSubSessionIds,
                     ),
                 };
+                let restoredWithRuns = restored;
+                for (const run of action.activeSubagentChatRuns ?? []) {
+                    const next = applyStartedRun(restoredWithRuns, run);
+                    if (next) {
+                        restoredWithRuns = next;
+                        backgroundSubagents[run.parentToolCallId] = "running";
+                    }
+                }
                 for (const [id, value] of Object.entries(session.backgroundSubagents))
                     if (value !== "running") backgroundSubagents[id] = value;
                 if (
@@ -715,9 +788,10 @@ export function workspacesReducer(
                         : undefined;
                 return {
                     ...patchSession(ws, action.sid, {
-                        ...restored,
+                        ...restoredWithRuns,
                         askUserPending,
                         backgroundSubagents,
+                        backgroundRunIds: restoredWithRuns.backgroundRunIds,
                         ...(execution ? { execution } : {}),
                     }),
                     ...(execution === undefined
@@ -893,31 +967,121 @@ export function workspacesReducer(
                     },
                 };
             });
+        case "SUBAGENT_STARTED":
+            return updateWs(state, action.cwd, (ws) => {
+                const session = getSessionState(ws, action.parentSessionId);
+                if (
+                    !action.runId ||
+                    !session ||
+                    session.backgroundRunIds[action.parentToolCallId] === action.runId
+                )
+                    return undefined;
+                const spawned =
+                    ws.subagentSpawned[
+                        subagentKey(action.parentSessionId, action.parentToolCallId)
+                    ];
+                const card = session.messages
+                    .flatMap((message) => (message.kind === "assistant" ? message.tools : []))
+                    .find((tool) => tool.id === action.parentToolCallId);
+                if (!card || !AGENT_TOOL_NAMES.has(card.name)) return undefined;
+                const details = (card.details ?? {}) as { subSessionId?: unknown };
+                if (
+                    typeof details.subSessionId === "string" &&
+                    details.subSessionId !== action.subSessionId
+                )
+                    return undefined;
+                if (spawned && spawned.subSessionId !== action.subSessionId) return undefined;
+                const messages = session.messages.map((message) =>
+                    message.kind !== "assistant"
+                        ? message
+                        : {
+                              ...message,
+                              tools: message.tools.map((tool) =>
+                                  tool.id !== action.parentToolCallId
+                                      ? tool
+                                      : {
+                                            ...tool,
+                                            status: "running" as const,
+                                            details: {
+                                                ...((tool.details ?? {}) as object),
+                                                subSessionId: action.subSessionId,
+                                                agentType: action.agentType,
+                                                runId: action.runId,
+                                                status: "started",
+                                            },
+                                        },
+                              ),
+                          },
+                );
+                return patchSession(ws, action.parentSessionId, {
+                    messages,
+                    backgroundSubagents: {
+                        ...session.backgroundSubagents,
+                        [action.parentToolCallId]: "running",
+                    },
+                    backgroundRunIds: {
+                        ...session.backgroundRunIds,
+                        [action.parentToolCallId]: action.runId,
+                    },
+                });
+            });
         case "SUBAGENT_SETTLED":
             return updateWs(state, action.cwd, (ws) => {
-                const matches = action.parentSessionId
-                    ? [action.parentSessionId]
-                    : Object.keys(ws.sessionStatesById ?? {}).filter((sid) => {
-                          const s = ws.sessionStatesById?.[sid];
-                          return (
-                              s?.agentToolPending[action.parentToolCallId] ||
-                              s?.backgroundSubagents[action.parentToolCallId] !== undefined
-                          );
-                      });
-                const sid =
-                    matches.length === 1
-                        ? matches[0]
-                        : matches.length === 0
-                          ? ws.activeSession
-                          : undefined;
+                // A later chatToAgent run can settle under the original spawn's
+                // owner. Without run identity it must not rewrite a terminal run.
+                const matches = Object.keys(ws.sessionStatesById ?? {}).filter((sid) => {
+                    if (action.parentSessionId && sid !== action.parentSessionId) return false;
+                    const s = ws.sessionStatesById?.[sid];
+                    return (
+                        s?.agentToolPending[action.parentToolCallId] ||
+                        s?.backgroundSubagents[action.parentToolCallId] === "running"
+                    );
+                });
+                const sid = matches.length === 1 ? matches[0] : undefined;
                 if (!sid) return undefined;
                 const session = getSessionState(ws, sid) ?? createSessionState();
+                const runId = action.runId;
+                const activeRunId = session.backgroundRunIds[action.parentToolCallId];
+                if (activeRunId !== undefined && runId !== activeRunId) return undefined;
+                const messages = session.messages.map((message) =>
+                    message.kind !== "assistant"
+                        ? message
+                        : {
+                              ...message,
+                              tools: message.tools.map((tool) =>
+                                  tool.id !== action.parentToolCallId
+                                      ? tool
+                                      : {
+                                            ...tool,
+                                            status: (action.outcome === "error" ? "error" : "ok") as
+                                                | "running"
+                                                | "ok"
+                                                | "error",
+                                            details: {
+                                                ...((tool.details ?? {}) as object),
+                                                status: action.outcome,
+                                                ...(runId ? { runId } : {}),
+                                            },
+                                        },
+                              ),
+                          },
+                );
                 return patchSession(ws, sid, {
+                    messages,
                     agentToolPending: omitKey(session.agentToolPending, action.parentToolCallId),
                     backgroundSubagents: {
                         ...session.backgroundSubagents,
                         [action.parentToolCallId]: action.outcome,
                     },
+                    // Keep the terminal identity so a replayed started frame
+                    // cannot resurrect a run that has already settled.
+                    backgroundRunIds:
+                        runId === undefined
+                            ? session.backgroundRunIds
+                            : {
+                                  ...session.backgroundRunIds,
+                                  [action.parentToolCallId]: runId,
+                              },
                 });
             });
         case "CHILD_MESSAGE_EVENT":
@@ -948,9 +1112,23 @@ export function workspacesReducer(
                     for (const request of runtime.pendingCommandPermissions)
                         permissions[request.requestId] = request;
                     const queued = queuedItemsFromEvent({ queues: runtime.queues });
+                    let restoredWithRuns: SessionState = {
+                        ...(getSessionState(ws, action.sid) ?? createSessionState()),
+                        messages,
+                        backgroundSubagents: rebuildBackgroundSubagents(
+                            messages,
+                            runtime.inFlightAgentToolCallIds,
+                            runtime.settledBackgroundSubSessionIds,
+                        ),
+                        backgroundRunIds: {},
+                    };
+                    for (const run of runtime.activeSubagentChatRuns ?? []) {
+                        const next = applyStartedRun(restoredWithRuns, run);
+                        if (next) restoredWithRuns = next;
+                    }
                     return {
                         ...patchSession(ws, action.sid, {
-                            messages,
+                            ...restoredWithRuns,
                             kind: action.sessionKind,
                             execution,
                             operation: runtime.operation,
@@ -963,11 +1141,6 @@ export function workspacesReducer(
                             ),
                             agentToolPending: Object.fromEntries(
                                 runtime.inFlightAgentToolCallIds.map((id) => [id, true as const]),
-                            ),
-                            backgroundSubagents: rebuildBackgroundSubagents(
-                                messages,
-                                runtime.inFlightAgentToolCallIds,
-                                runtime.settledBackgroundSubSessionIds,
                             ),
                         }),
                         pendingCommandPermissions: permissions,

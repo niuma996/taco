@@ -247,6 +247,7 @@ export type {
     SessionRenamedParams,
     SubagentSettledParams,
     SubagentSpawnedParams,
+    SubagentStartedParams,
     TaskItem,
     TaskListMeta,
     TasksUpdatedParams,
@@ -330,6 +331,7 @@ export type {
 } from "./rpcContract/workspace.js";
 // RPC param schemas (typebox) — wire validators consumed by registerMethod.
 export * from "./schemas/index.js";
+export { pushSchemas } from "./schemas/push.js";
 // session.* RPC types (lifecycle / turn / runtime / snapshot / read).
 export type {
     AbortParams,
@@ -380,10 +382,10 @@ export type {
 export { SESSION_LIST_DEFAULT_LIMIT, SESSION_LIST_MAX_LIMIT } from "./session.js";
 // Tools / skills / agents / askUser / subagent RPC types.
 export type {
-    AgentContinueToolDetails,
     AgentEntry,
     AgentRuntime,
     AgentScope,
+    AgentSessionDescriptor,
     AgentsContentParams,
     AgentsContentResult,
     AgentsDeleteParams,
@@ -397,6 +399,7 @@ export type {
     AskUserQuestion,
     AskUserToolDetails,
     CatalogScope,
+    ChatToAgentToolDetails,
     ClaudeCodePermissionMode,
     QuestionOption,
     SkillContentParams,
@@ -409,6 +412,7 @@ export type {
     SubagentProgressDetails,
     SubagentSettledPayload,
     SubagentSpawnedPayload,
+    SubagentStartedPayload,
     SubmitAnswersParams,
     ToolEntry,
     ToolsListParams,

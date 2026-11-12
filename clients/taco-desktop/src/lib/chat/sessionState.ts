@@ -14,6 +14,7 @@ export interface SessionState {
     askUserPending: Record<string, true>;
     agentToolPending: Record<string, true>;
     backgroundSubagents: Record<string, BackgroundSubagentState>;
+    backgroundRunIds: Record<string, string>;
     execution: SessionExecution;
     sync: SessionSync;
     kind: "main" | "subagent";
@@ -61,6 +62,7 @@ export function createSessionState(): SessionState {
         askUserPending: {},
         agentToolPending: {},
         backgroundSubagents: {},
+        backgroundRunIds: {},
         execution: "unknown",
         sync: "recovering",
         kind: "main",

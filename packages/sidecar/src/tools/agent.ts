@@ -86,8 +86,9 @@ export function createAgentTool(
                     "a launch receipt immediately and can keep working. When it finishes you are " +
                     "notified with the path its output was written to; read that file when you need " +
                     "the detail. The launch receipt names that path up front, so you can also read " +
-                    "it yourself to check whether the subagent has finished — a missing file means " +
-                    "still running. Use this only when the result does not affect your next few steps: " +
+                    "it yourself when asked for status. A missing file means the result is unavailable; " +
+                    "absence alone does not establish that the subagent is still running. " +
+                    "Use this only when the result does not affect your next few steps: " +
                     "if you need the answer to decide what to do next, run it synchronously instead " +
                     "rather than launching it and waiting. Do NOT call `agent` again for the same " +
                     "task while it is running, and do not poll for it. Background subagents should " +
@@ -153,8 +154,8 @@ export function createAgentTool(
                 // exist yet. That is deliberate: it makes the result
                 // self-recoverable. If the completion notice never arrives (the
                 // parent was mid-compaction, the process restarted), the model
-                // still holds the exact path, and the file's absence is itself
-                // the answer to "has it finished yet?" — no polling tool needed.
+                // still holds the exact path. Absence means unavailable output,
+                // not proof that the child is still running.
                 const text = isError
                     ? `failed to launch background subagent: ${resultText}`
                     : `Subagent ${params.subagent_type} launched in background as session ${subSessionId}. ` +
@@ -166,9 +167,10 @@ export function createAgentTool(
                             "is done and no completion notice has arrived, read that path with the " +
                             "`read` tool rather than probing for it with `shell`, which costs the " +
                             "user an approval each time: if it reads, the subagent finished and that " +
-                            "is its result; if it does not exist, it is still running. Do not poll. " +
-                            "If this turn has nothing else to do, end the turn and report that it is " +
-                            "still running — the completion notice arrives on its own."
+                            "is its result. If it does not exist, the result is unavailable; absence alone does not establish " +
+                            "that the subagent is still running. Do not poll. If this turn has nothing " +
+                            "else to do, report the last supported status and end the turn — " +
+                            "the completion notice arrives on its own."
                           : "");
                 return {
                     content: [{ type: "text", text }],
@@ -192,7 +194,7 @@ export function createAgentTool(
                 };
             }
             const body = isError ? `subagent error: ${resultText}` : resultText;
-            // `details` never reaches the model, so the id `agentContinue`
+            // `details` never reaches the model, so the id `chatToAgent`
             // and `agentAbort` need has to ride in the text. Without it a
             // synchronous call left the model unable to follow up, and it
             // would guess an id instead.

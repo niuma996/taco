@@ -353,6 +353,7 @@ export class AttachedSession extends EventEmitter {
     /** Converges the toolset + system prompt at the start of a turn; no-op when
      *  the workspace supplied no refresher (subagents, tests). */
     private applyToolsetRefresh?: () => Promise<void>;
+    private agentToolState?: SessionToolState;
     /**
      * The system-prompt cell the harness thunk reads. A resume re-attaches to
      * this mounted session without re-running create(), so a profile edited
@@ -365,7 +366,7 @@ export class AttachedSession extends EventEmitter {
     /**
      * Live budget thunk. A resumed run re-attaches to this same handle, so the
      * hook must read the *current* thunk rather than the one captured at
-     * create time — otherwise every `agentContinue` would report the previous
+     * create time — otherwise every `chatToAgent` would report the previous
      * run's frozen counters.
      */
     private subagentBudgetThunk?: () => SubagentBudgetState | undefined;
@@ -450,6 +451,18 @@ export class AttachedSession extends EventEmitter {
      * `AttachedSession.create`, so a profile edited between runs would
      * otherwise keep its old, looser load surface.
      */
+    async syncAgentCommunicationTools(tools: readonly TacoTool[]): Promise<void> {
+        const names = new Set(["chatToAgent", "listAgentSessions"]);
+        const next = tools.filter((tool) => names.has(tool.name));
+        await this.agentToolState?.update((current) => ({
+            tools: [...current.tools.filter((tool) => !names.has(tool.name)), ...next],
+            activeNames: [
+                ...current.activeNames.filter((name) => !names.has(name)),
+                ...next.map((tool) => tool.name),
+            ],
+        }));
+    }
+
     setToolLoadPolicy(policy: AgentToolPolicy): Promise<boolean> {
         if (!this.toolController) return Promise.resolve(false);
         return this.toolController.setLoadPolicy(policy);
@@ -740,6 +753,7 @@ export class AttachedSession extends EventEmitter {
             args.sessionKind,
         );
         attachedCell.current = attached;
+        attached.agentToolState = toolState;
         attached.subagentBudgetThunk = args.getSubagentBudget;
         attached.systemPromptCell = systemPromptCell;
         // Per-turn toolset convergence. Assigned here rather than threaded

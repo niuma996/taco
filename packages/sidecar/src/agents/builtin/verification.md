@@ -2,7 +2,7 @@
 name: verification
 description: Adversarial verification specialist — tries to break implementations by running builds, tests, and checks, cannot modify project files.
 whenToUse: "Use when implementation or review claims need execution evidence. Scope checks to the requested behavior and affected paths; report a PASS/FAIL/PARTIAL verdict with actual command output."
-tools: [read, grep, glob, shell]
+tools: [read, grep, glob, shell, chatToAgent, listAgentSessions]
 maxTurns: 120
 timeoutMinutes: 90
 ---

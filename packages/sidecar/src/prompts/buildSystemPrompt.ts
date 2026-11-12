@@ -11,6 +11,7 @@
 import { buildPlatformPrompt } from "./buildPlatformPrompt.ts";
 import { fillPlaceholders } from "./fillPlaceholders.ts";
 import {
+    AGENT_COMMUNICATION_BLOCK,
     CORE_TEMPLATE,
     DECISION_RULE_MAIN,
     DECISION_RULE_MAIN_NO_ASK_USER,
@@ -105,7 +106,7 @@ export function filterContributorsForTools(
  * actually available in this session. Empty guidance returns the empty string
  * so we never emit a bare `<session_guidance>` heading.
  */
-function buildSessionGuidanceSection(toolNames: readonly string[]): string {
+function buildSessionGuidanceSection(toolNames: readonly string[], isMain: boolean): string {
     const tools = new Set(toolNames);
     const lines: string[] = [];
 
@@ -123,6 +124,20 @@ function buildSessionGuidanceSection(toolNames: readonly string[]): string {
         // whole budget there instead of returning the finding.
         lines.push(
             "- An agent marked <read_only> cannot write files. Ask it for the content and write it yourself — do not name an output path for it.",
+        );
+    }
+    if (tools.has("listAgentSessions")) {
+        lines.push(
+            isMain
+                ? "- Use `listAgentSessions` to discover existing child session instances, their status, resumability, and delivery capability; agent types are a separate catalog."
+                : "- Use `listAgentSessions` to discover sibling session instances with the same parent, never yourself; check their status, resumability, and delivery capability.",
+        );
+    }
+    if (tools.has("chatToAgent")) {
+        lines.push(
+            isMain
+                ? "- You can message your own children. `background: false` is supported only from a parent to its own idle child. The completion notice still goes to the original parent; a message receipt does not replace it."
+                : "- You can message only sibling agents with the same parent, never yourself or the parent. Communication does not grant permission to abort siblings or recursively spawn agents. Synchronous messaging is unavailable to a child; keep the default background receipt.",
         );
     }
     if (tools.has("planEnter") || tools.has("planExit")) {
@@ -236,7 +251,7 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
     });
     const platform = buildPlatformPrompt(options.platform, toolNames, options.readOnlyShell);
     const toolSummary = toolSummaryForPrompt(options.tools);
-    const sessionGuidance = buildSessionGuidanceSection(toolNames);
+    const sessionGuidance = buildSessionGuidanceSection(toolNames, isMain);
     const projectContext = options.projectContext ?? "";
 
     const environmentSection = options.environmentContext
@@ -250,6 +265,7 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
     if (environmentSection) parts.push(environmentSection);
     if (toolSummary) parts.push(toolSummary);
     if (sessionGuidance) parts.push(sessionGuidance);
+    if (toolNames.includes("chatToAgent")) parts.push(AGENT_COMMUNICATION_BLOCK);
     if (projectContext) parts.push(projectContext);
     parts.push(platform);
 

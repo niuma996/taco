@@ -711,7 +711,8 @@ export class WorkspaceRuntime extends EventEmitter {
             compaction: this.compaction,
             skillAuthoringGuidance: this.skillAuthoringGuidance,
             spawnSubagent: (args) => this.agentSpawner.spawnSubagent(args),
-            resumeSubagent: (args) => this.agentSpawner.resumeSubagent(args),
+            chatToAgent: (caller, args) => this.agentSpawner.chatToAgent(caller, args),
+            listAgentSessions: (caller) => this.agentSpawner.listAgentSessions(caller),
             spawnSkillSubagent: (opts) => this.agentSpawner.spawnSkillSubagent(opts),
             abortSubagentRun: (subSessionId, forParentSessionId) =>
                 this.agentSpawner.abortSubagentRun(subSessionId, forParentSessionId),
@@ -832,6 +833,7 @@ export class WorkspaceRuntime extends EventEmitter {
         ]);
         forwardEvents(this.agentSpawner, this, [
             "subagent.spawned",
+            "subagent.started",
             "subagent.settled",
             "session.event",
         ]);
@@ -1493,6 +1495,10 @@ export class WorkspaceRuntime extends EventEmitter {
      * file — i.e. background children known to have settled at some point,
      * including before this process started. See `settledSubagentResultIds`.
      */
+    activeSubagentChatRuns(parentSessionId: SessionId) {
+        return this.agentSpawner.activeSubagentChatRuns(parentSessionId);
+    }
+
     async settledBackgroundSubSessionIds(parentSessionId: SessionId): Promise<string[]> {
         return settledSubagentResultIds(parentSessionId, this.sessionsRoot);
     }
@@ -1522,9 +1528,7 @@ export class WorkspaceRuntime extends EventEmitter {
             () => {
                 this.permissionBroker.cleanupAll();
             },
-            () => {
-                this.agentSpawner.removeAllListeners();
-            },
+            () => this.agentSpawner.dispose(),
             () => this.skillHotReload.dispose(),
             () => this.sessionRegistry.dispose(),
             () => this.toolRegistry.dispose?.(),
@@ -1549,6 +1553,7 @@ export type WorkspaceEvent =
     | "session.deleted"
     | "session.renamed"
     | "subagent.spawned"
+    | "subagent.started"
     | "subagent.settled";
 
 /**

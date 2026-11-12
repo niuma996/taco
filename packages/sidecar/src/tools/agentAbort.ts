@@ -5,7 +5,7 @@
  * session's own children).
  *
  * The stop is asynchronous: this tool only fires the child's abort
- * controller. A synchronous subagent's `agent`/`agentContinue` call returns
+ * controller. A synchronous subagent's `agent`/`chatToAgent` call returns
  * an interruption result explaining the stop; a background one settles with
  * outcome "aborted" and its notice says so.
  */

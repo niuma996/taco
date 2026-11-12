@@ -2,7 +2,7 @@
 name: explorer
 description: Read-only codebase search specialist — fast scoped lookup and thorough code tracing, cannot modify anything.
 whenToUse: "Use when the task is to find, search, locate, or trace code — understanding structure, finding symbols, tracing call chains, mapping dependencies, identifying all occurrences of a pattern. Read-only: do NOT modify files."
-tools: [read, grep, glob, shell]
+tools: [read, grep, glob, shell, chatToAgent, listAgentSessions]
 maxTurns: 150
 ---
 

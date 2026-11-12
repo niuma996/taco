@@ -75,6 +75,9 @@ export function subagentResultPath(
     parentSessionId: SessionId,
     subSessionId: SessionId,
     sessionsRoot: string,
+    runId?: string,
 ): string {
-    return join(subagentResultsDir(parentSessionId, sessionsRoot), `${subSessionId}.md`);
+    return runId
+        ? join(subagentResultsDir(parentSessionId, sessionsRoot), subSessionId, `${runId}.md`)
+        : join(subagentResultsDir(parentSessionId, sessionsRoot), `${subSessionId}.md`);
 }

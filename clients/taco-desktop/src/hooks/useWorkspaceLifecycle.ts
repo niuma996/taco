@@ -321,6 +321,7 @@ export function useWorkspaceLifecycle({
             }
             const inFlightAgentToolCallIds = attachResult?.inFlightAgentToolCallIds;
             const settledBackgroundSubSessionIds = attachResult?.settledBackgroundSubSessionIds;
+            const activeSubagentChatRuns = attachResult?.activeSubagentChatRuns;
             let hist: Awaited<ReturnType<typeof client.sessionHistory>>;
             try {
                 hist = await client.sessionHistory({
@@ -349,6 +350,7 @@ export function useWorkspaceLifecycle({
                 pendingAskUserIds: findPendingAskUserIds(messages),
                 inFlightAgentToolCallIds,
                 settledBackgroundSubSessionIds,
+                activeSubagentChatRuns,
                 execution: attachResult?.execution,
                 executionRevision,
                 makeActive: navigationIsCurrent(),

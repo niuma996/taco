@@ -100,11 +100,6 @@ function makeSessionRegistry(): SessionRegistry {
             resultText: "",
             isError: true,
         }),
-        resumeSubagent: async () => ({
-            subSessionId: asSessionId("stub"),
-            resultText: "",
-            isError: true,
-        }),
         spawnSkillSubagent: async () => ({ subSessionId: "", resultText: "", isError: true }),
         availableAgentTypes: [],
         skills: [],
@@ -252,11 +247,6 @@ describe("ModelRegistry — pi-native all-resident catalog", () => {
             resources: {},
             streamOptions: {},
             spawnSubagent: async () => ({
-                subSessionId: asSessionId("stub"),
-                resultText: "",
-                isError: true,
-            }),
-            resumeSubagent: async () => ({
                 subSessionId: asSessionId("stub"),
                 resultText: "",
                 isError: true,

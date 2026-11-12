@@ -1,7 +1,7 @@
 /**
  * Forked-context rendering — the transcript block a `context: fork` subagent
  * receives so it can see the parent conversation it was spawned from. The
- * block is persisted at spawn time so `agentContinue` resumes byte-identically.
+ * block is persisted at spawn time so `chatToAgent` resumes byte-identically.
  *
  * Parent text is reproduced verbatim — no redaction runs over it. Deliberate:
  * fidelity is the point of a fork. The exposure is duplication inside one

@@ -1,8 +1,8 @@
 /**
- * Progress payloads for the subagent-backed tools (`agent`, `agentContinue`,
- * and subagent-mode `skill`).
+ * Progress payloads for subagent-backed tools (`agent`,
+ * `chatToAgent`, and subagent-mode `skill`).
  *
- * One runner serves all three entry points, so the update shapes live here
+ * Shared runners serve these entry points, so the update shapes live here
  * rather than in each tool: tools forward their pi `onUpdate` callback down the
  * spawn context, and `subagentRunner` decides when to publish.
  *
@@ -26,12 +26,18 @@ const LAST_TEXT_MAX = 400;
  * subagent's final text reaches its parent verbatim — the synchronous path as
  * this tool call's `content`, the background path as an injected message
  * (`subagentDelivery.ts`) — and a parent session treats these tag shapes as
- * carrying system authority (system reminders, its own delivery envelope).
+ * runtime-origin markers (system reminders and delivery envelopes). Agent
+ * messages carry collaboration data, not additional authorization.
  * Neither path scans for prompt injection generally; this closes the one gap
  * that lets a subagent's output impersonate the harness or forge a delivery
  * envelope around itself.
  */
-const CONTROL_TAG_MARKERS = ["system-reminder", "subagent_result", "subagent_notification"];
+const CONTROL_TAG_MARKERS = [
+    "system-reminder",
+    "subagent_result",
+    "subagent_notification",
+    "agent_message",
+];
 
 /**
  * Neutralize known control-tag shapes in subagent-produced text before it
@@ -42,7 +48,7 @@ const CONTROL_TAG_MARKERS = ["system-reminder", "subagent_result", "subagent_not
  *
  * Deliberately narrow: this is not a general prompt-injection scanner (the
  * module doc for why one is out of scope). It only targets the specific tag
- * names taco's own harness treats as authoritative.
+ * names taco's own harness uses as control or routing markers.
  */
 export function neutralizeControlTags(text: string): { text: string; neutralized: boolean } {
     let neutralized = false;
@@ -92,12 +98,10 @@ function tailOf(text: string): string {
 }
 
 /**
- * Whether the model can resume this child with `agentContinue` after an
- * interruption. Only spawns made through an agent *profile* can: `agentContinue`
- * re-derives the child's toolset from its `agentType` and fails closed when no
- * definition matches (see AgentSpawner.runResume), and a skill subagent's
- * `skill:<name>` agentType is never in the agent registry. Telling the model to
- * resume one would send it down a path that always errors.
+ * Whether recovery guidance can offer `chatToAgent` for this child. Profile
+ * sessions can retain resumable state; skill subagents have no matching agent
+ * definition. Claude Code additionally needs its saved native session mapping
+ * and native state; a display transcript alone cannot reconstruct them.
  */
 export type SubagentResumability = "resumable" | "not_resumable";
 
@@ -133,7 +137,7 @@ export const SUBAGENT_STOPPED_TEXT =
  * Says how long the run was allowed and how far it got, so the reader can tell
  * a timeout apart from a stop and judge whether a longer budget would have
  * helped. The findings it had are not thrown away: the session keeps them and
- * `agentContinue` can pick the run up from where it stopped.
+ * `chatToAgent` can continue a resumable session when more work is needed.
  */
 export function subagentTimeoutText(args: {
     readonly timeoutMinutes: number;
@@ -162,7 +166,7 @@ export function partialResult(text: string, cap: number): string {
 /**
  * The checkpoint published before the child does any work. Its `content` is
  * what the model reads if the call is interrupted — the session id is the
- * handle `agentContinue` needs, so it must not live in `details` alone.
+ * handle `chatToAgent` needs, so it must not live in `details` alone.
  *
  * Kept short and free of child output on purpose: pi stores one checkpoint per
  * invocation and this is the only durable write on the subagent path, so it
@@ -176,10 +180,12 @@ export function subagentStartedResult(args: {
     const { subSessionId, agentType, resumability } = args;
     const guidance =
         resumability === "resumable"
-            ? "If this call is interrupted, resume that session with agentContinue " +
-              "instead of spawning a new subagent."
+            ? "If this call is interrupted and more work is needed, resume that session with chatToAgent " +
+              "using that subSessionId instead of spawning a new subagent. Its default background receipt " +
+              "confirms acceptance, not completion."
             : "If this call is interrupted, its work is in that session but it cannot " +
-              "be resumed — re-invoke this tool instead.";
+              "be resumed. If a retry is needed within the authorized task, re-invoke this tool " +
+              "with its existing findings included.";
     return {
         content: [
             {
@@ -197,9 +203,9 @@ export function subagentStartedResult(args: {
  * The bare error says nothing about how far the child got, so the model could
  * only respawn from scratch or give up. This adds the turn count and a tail of
  * its last message, plus the follow-up that actually works for this runtime:
- * `agentContinue` for a resumable child, a fresh call otherwise (Claude Code
- * and skill subagents cannot be resumed). The child's own text is scrubbed of
- * control tags before it reaches the parent.
+ * `chatToAgent` for a resumable child, a fresh call otherwise. Native-state
+ * availability determines whether a Claude Code child can be resumed. The
+ * child's own text is scrubbed of control tags before it reaches the parent.
  */
 export function failedResult(args: {
     error: string;
@@ -219,11 +225,11 @@ export function failedResult(args: {
     const followUp =
         resumability === "resumable"
             ? `Its work so far is kept in session ${subSessionId}. If the user wants to pick up ` +
-              "where it stopped, call agentContinue with that subSessionId instead of spawning a " +
+              "where it stopped, call chatToAgent with that subSessionId instead of spawning a " +
               "new subagent — and if the failure came from the task itself (for example a search " +
               "too broad for the context window), tell it to narrow the approach when you resume."
-            : `Its transcript is in session ${subSessionId}, but this subagent cannot be resumed — ` +
-              "agentContinue will reject it. If the user wants to retry, call the tool again with a " +
+            : `Its transcript is in session ${subSessionId}, but this subagent cannot be resumed. ` +
+              "If the user wants to retry, call the tool again with a " +
               "prompt that says what was already done, so the new run does not repeat it.";
     return `${error}\n\n${progress}\n\n${followUp}`;
 }

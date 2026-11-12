@@ -3,8 +3,10 @@
  * askUser payload, subagent.spawned push. All workspace-scoped.
  */
 
+import type { Static } from "typebox";
 import type { SessionId } from "./frames.js";
 import type { ParamsOf } from "./rpcContract/types.js";
+import type { subagentStartedSchema } from "./schemas/push.js";
 import type { sessionSubmitAnswersSchema } from "./schemas/session.js";
 import type {
     agentsContentSchema,
@@ -275,7 +277,11 @@ export interface SubagentSpawnedPayload {
     parentToolCallId: string;
     subSessionId: SessionId;
     agentType: string;
+    runId?: string;
 }
+
+/** An existing child starts another execution under its original spawn owner. */
+export type SubagentStartedPayload = Static<typeof subagentStartedSchema>;
 
 /**
  * `subagent.settled` push params — a `background: true` subagent reached a
@@ -295,6 +301,7 @@ export interface SubagentSettledPayload {
      * `agentAbort`, or its own wall-clock timeout), which is not a failure.
      */
     outcome: "completed" | "error" | "aborted";
+    runId?: string;
 }
 
 /**
@@ -323,7 +330,7 @@ export type AgentToolDetails =
 
 /**
  * Shape of the `details` field on a subagent tool's **live progress** update
- * (`agent`, `agentContinue`, and subagent-mode `skill` all publish this).
+ * (`agent`, `chatToAgent`, and subagent-mode `skill` all publish this).
  *
  * Deliberately separate from {@link AgentToolDetails}: progress and final
  * results travel the same tool card but mean different things, and only
@@ -339,11 +346,24 @@ export interface SubagentProgressDetails {
     turns?: number;
 }
 
-/** Shape of the `details` field on the `agentContinue` tool's result. */
-export interface AgentContinueToolDetails {
+/** A message receipt; only terminal statuses describe the run's outcome. */
+export interface ChatToAgentToolDetails {
     subSessionId: SessionId;
-    /** Set when the resumed run was stopped on purpose, not when it failed. */
-    status?: "aborted";
+    messageId: string;
+    status: "queued" | "started" | "completed" | "error" | "aborted";
+    effectiveDelivery: "steer" | "followUp" | "nextTurn";
+    runId?: string;
+    resultPath?: string;
+}
+
+/** A communicable session instance, without its conversation or runtime internals. */
+export interface AgentSessionDescriptor {
+    subSessionId: SessionId;
+    agentType: string;
+    description?: string;
+    status: "running" | "idle" | "preparing" | "settling";
+    canResume: boolean;
+    delivery: "steer" | "nextTurn";
 }
 
 // askUser tool

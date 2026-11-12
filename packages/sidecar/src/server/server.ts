@@ -40,6 +40,7 @@ import {
     type SessionId,
     type SidecarCapabilities,
     type SkillDiagnosticEntry,
+    type SubagentStartedPayload,
     type SupportedLocale,
     WORKSPACE_ANY,
     type WorkspaceAssociationKey,
@@ -1395,6 +1396,9 @@ export class SidecarServer implements ServerRpcSurface {
             // otherwise the row shows chatId until the user opens the session.
             if (workspaceKey.startsWith(IM_CWD_PREFIX)) this.broadcastConversationsChanged();
         });
+        ws.on("subagent.started", (e: SubagentStartedPayload) => {
+            this.emitPush(PushMethods.SubagentStarted, workspaceKey, e.parentSessionId, e);
+        });
         ws.on(
             "subagent.settled",
             (e: {
@@ -1403,6 +1407,7 @@ export class SidecarServer implements ServerRpcSurface {
                 subSessionId: SessionId;
                 agentType: string;
                 outcome: "completed" | "error" | "aborted";
+                runId?: string;
             }) => {
                 this.emitPush(PushMethods.SubagentSettled, workspaceKey, e.parentSessionId, {
                     parentSessionId: e.parentSessionId,
@@ -1410,6 +1415,7 @@ export class SidecarServer implements ServerRpcSurface {
                     subSessionId: e.subSessionId,
                     agentType: e.agentType,
                     outcome: e.outcome,
+                    ...(e.runId ? { runId: e.runId } : {}),
                 });
             },
         );
@@ -1420,12 +1426,14 @@ export class SidecarServer implements ServerRpcSurface {
                 parentToolCallId: string;
                 subSessionId: SessionId;
                 agentType: string;
+                runId?: string;
             }) => {
                 this.emitPush(PushMethods.SubagentSpawned, workspaceKey, e.parentSessionId, {
                     parentSessionId: e.parentSessionId,
                     parentToolCallId: e.parentToolCallId,
                     subSessionId: e.subSessionId,
                     agentType: e.agentType,
+                    ...(e.runId ? { runId: e.runId } : {}),
                 });
             },
         );

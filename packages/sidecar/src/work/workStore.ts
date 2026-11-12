@@ -245,7 +245,7 @@ export class WorkStore {
 
     /**
      * The Work a child session belongs to, if any. Used to close the loop when a
-     * resumed subagent finishes: `agentContinue` has no launch tool call, so the
+     * resumed subagent finishes: `chatToAgent` has no launch tool call, so the
      * child session id is the only key back to the record.
      */
     async findByChildSessionId(

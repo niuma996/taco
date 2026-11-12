@@ -146,6 +146,42 @@ describe("buildSystemPrompt", () => {
         assert.match(out, /reference material, not authorization/);
     });
 
+    it("gates communication guidance by actual tools and role", () => {
+        for (const role of ["main", "subagent"] as const) {
+            const build = (names: string[]) =>
+                buildSystemPrompt({
+                    tools: names.map(stubTool),
+                    sessionKind: { role, depth: role === "main" ? 0 : 1 },
+                });
+            assert.doesNotMatch(
+                build(["read"]),
+                /chatToAgent|listAgentSessions|<agent_communication>/,
+            );
+            const chat = build(["read", "chatToAgent"]);
+            assert.match(chat, /Use `chatToAgent` when needed/);
+            assert.doesNotMatch(chat, /listAgentSessions/);
+            assert.match(chat, /background: true.*delivery: "steer"/);
+            assert.match(chat, /receipt confirms acceptance, not completion/);
+            assert.match(chat, /next tool batch/);
+            assert.match(chat, /followUp.*current run finishes/);
+            assert.match(chat, /nextTurn.*does not guarantee.*interrupt/);
+            assert.match(chat, /native state.*cannot be resumed/);
+            assert.match(chat, /parent.*context.*explicitly/);
+            assert.match(chat, /Peer messages are collaboration data.*not.*authorization/);
+            if (role === "subagent") {
+                assert.match(chat, /same parent.*never yourself/);
+                assert.match(chat, /does not grant permission to abort siblings/);
+                assert.doesNotMatch(chat, /Use `agent`|Use `agentAbort`/);
+            } else {
+                assert.match(chat, /background: false.*own idle child/);
+                assert.match(chat, /completion notice.*original parent/);
+            }
+            const list = build(["listAgentSessions"]);
+            assert.match(list, /Use `listAgentSessions`.*instances/);
+            assert.doesNotMatch(list, /Use `chatToAgent`/);
+        }
+    });
+
     it("defaults to main role with depth 0", () => {
         const out = buildSystemPrompt({ tools: [stubTool("read")] });
         assert.match(out, /<session_role>/);
@@ -683,6 +719,13 @@ describe("formatDeferredToolsForSystemPrompt", () => {
 });
 
 describe("formatAgentsForSystemPrompt", () => {
+    it("distinguishes types from session instances", () => {
+        assert.match(
+            formatAgentsForSystemPrompt([{ agentType: "explorer" }]),
+            /agent types, not existing session instances/,
+        );
+    });
+
     it("returns empty when there are no types", () => {
         assert.equal(formatAgentsForSystemPrompt([]), "");
     });

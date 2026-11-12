@@ -288,6 +288,27 @@ describe("visibility policy", () => {
     });
 });
 
+describe("agent message envelope", () => {
+    it("hides the envelope but retains collaboration data in model context", () => {
+        const spec = tagRegistry.agent_message;
+        assert.ok(spec, "agent_message must be registered");
+        assert.equal(spec.scope, "user-context");
+        assert.equal(spec.compression.kind, "summarize");
+        assert.equal(spec.tuiVisibility, "hidden");
+        const envelope = tagWrap("agent_message", "Peer found the caller in api.ts", {
+            "sender-session": "peer-1",
+        });
+        assert.equal(stripHiddenTagsInMarkdown(envelope, [spec.name]), "");
+        const [message] = stripDropTagsFromMessages([
+            { role: "user", content: [{ type: "text", text: envelope }] },
+        ]);
+        assert.deepEqual(message, {
+            role: "user",
+            content: [{ type: "text", text: envelope }],
+        });
+    });
+});
+
 describe("askUser context parsing", () => {
     it("extracts questions and answers from a balanced injection block", () => {
         const text = `${lt}ask_user_context${gt}The user has answered your askUser questions.\nquestions (JSON):\n${JSON.stringify([{ question: "q1", header: "h", options: [], multiSelect: false }])}\nanswers (JSON):\n${JSON.stringify({ q1: "answer-A" })}${lt}/ask_user_context${gt}`;

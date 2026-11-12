@@ -5,7 +5,13 @@
  * interact with the harness turn loop.
  */
 
-import type { AttachParams, SessionHistory, SessionId, SessionSnapshot } from "@taco-ai/protocol";
+import type {
+    AttachParams,
+    SessionHistory,
+    SessionId,
+    SessionSnapshot,
+    SubagentStartedPayload,
+} from "@taco-ai/protocol";
 import { ErrorCodes } from "@taco-ai/protocol";
 import { viewUserContent } from "../../attachments/userMessageView.ts";
 import type { AttachedSession } from "../../runtime/harness/attachedSession.ts";
@@ -148,6 +154,13 @@ export function registerSessionReadHandlers(): void {
                             ),
                         },
                     );
+                    const activeSubagentChatRuns = (
+                        workspace as {
+                            activeSubagentChatRuns?: (sid: SessionId) => SubagentStartedPayload[];
+                        }
+                    ).activeSubagentChatRuns?.(params.sessionId);
+                    if (activeSubagentChatRuns !== undefined)
+                        runtime.activeSubagentChatRuns = activeSubagentChatRuns;
                 }
                 const tasks =
                     sessionKind === "main" && attached

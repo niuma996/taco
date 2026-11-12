@@ -269,7 +269,7 @@ describe("subagentRunner", () => {
             assert.equal(updates[0]?.checkpoint, true);
             assert.match(updates[0]?.text ?? "", /sub-1/);
             assert.deepEqual(updates[0]?.details, { subSessionId: "sub-1", agentType: "explorer" });
-            assert.match(updates[0]?.text ?? "", /agentContinue/);
+            assert.match(updates[0]?.text ?? "", /chatToAgent/);
             assert.equal(result.resultText, "final answer");
             assert.equal(result.isError, false);
         });
@@ -307,7 +307,7 @@ describe("subagentRunner", () => {
             assert.equal(reads, 1);
         });
 
-        it("tells a non-resumable child to re-invoke instead of calling agentContinue", async () => {
+        it("tells a non-resumable child to re-invoke instead of calling chatToAgent", async () => {
             const attached = new FakeAttached();
             const { updates, onUpdate } = collect();
             const run = runAttachedSubagent({
@@ -325,7 +325,7 @@ describe("subagentRunner", () => {
 
             assert.equal(updates[0]?.checkpoint, true);
             assert.match(updates[0]?.text ?? "", /sub-4/);
-            assert.doesNotMatch(updates[0]?.text ?? "", /agentContinue/);
+            assert.doesNotMatch(updates[0]?.text ?? "", /chatToAgent/);
             assert.match(updates[0]?.text ?? "", /cannot\s+be\s+resumed/);
         });
 
@@ -617,11 +617,11 @@ describe("subagentRunner", () => {
             assert.match(result.resultText, /ran 2 turns/);
             // The empty failing turn must not hide the last useful message.
             assert.match(result.resultText, /src\/a\.ts:42/);
-            assert.match(result.resultText, /agentContinue/);
+            assert.match(result.resultText, /chatToAgent/);
             assert.match(result.resultText, /sub-6/);
         });
 
-        it("does not offer agentContinue for a non-resumable child that failed", async () => {
+        it("does not offer chatToAgent for a non-resumable child that failed", async () => {
             const attached = new FakeAttached();
             attached.prompt = async () => {
                 attached.emit(turnEnd("partway"));
@@ -637,7 +637,7 @@ describe("subagentRunner", () => {
             });
 
             assert.match(result.resultText, /cannot be resumed/);
-            assert.match(result.resultText, /agentContinue will reject it/);
+            assert.doesNotMatch(result.resultText, /chatToAgent/);
             assert.match(result.resultText, /call the tool again/);
         });
 

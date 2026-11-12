@@ -41,7 +41,7 @@ export interface RunAttachedSubagentArgs {
     /** Metadata agentType / event agentType (must be consistent). Labels progress updates. */
     readonly agentType: string;
     /**
-     * Whether `agentContinue` can resume this child. Drives what the durable
+     * Whether chatToAgent can resume this child. Drives what the durable
      * checkpoint tells the model to do after an interruption; see
      * SubagentResumability. Defaults to `not_resumable` so a new caller has to
      * opt in rather than inherit guidance that may not hold for it.

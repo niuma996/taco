@@ -14,6 +14,7 @@ import type {
     SessionRenamedParams,
     SubagentSettledPayload,
     SubagentSpawnedPayload,
+    SubagentStartedPayload,
     TaskListMeta,
     TasksUpdatedParams,
     ToolCallEndParams,
@@ -72,6 +73,16 @@ export type SidecarAction =
           subSessionId: string;
           agentType: string;
           outcome: "completed" | "error" | "aborted";
+          runId?: string;
+      }
+    | {
+          type: "SUBAGENT_STARTED";
+          cwd: string;
+          parentSessionId: string;
+          parentToolCallId: string;
+          subSessionId: string;
+          agentType: string;
+          runId: string;
       }
     | { type: "ATTACHED"; cwd: string; sid: string }
     | {
@@ -326,6 +337,25 @@ export function normalizePushFrame(p: ServerPush, dispatch: (a: SidecarAction) =
                         : params.outcome === "error"
                           ? "error"
                           : "completed",
+                ...(typeof params.runId === "string" ? { runId: params.runId } : {}),
+            });
+        }
+        case PushMethods.SubagentStarted: {
+            const params = (p.params ?? {}) as Partial<SubagentStartedPayload>;
+            if (
+                typeof params.parentToolCallId !== "string" ||
+                typeof params.subSessionId !== "string" ||
+                typeof params.runId !== "string"
+            )
+                return;
+            return void dispatch({
+                type: "SUBAGENT_STARTED",
+                cwd: p.workspace,
+                parentSessionId: p.session,
+                parentToolCallId: params.parentToolCallId,
+                subSessionId: params.subSessionId,
+                agentType: typeof params.agentType === "string" ? params.agentType : "agent",
+                runId: params.runId,
             });
         }
         case PushMethods.TasksUpdated: {

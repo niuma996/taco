@@ -37,9 +37,11 @@ pnpm dev:sidecar   # tsx watch packages/sidecar/src/index.ts
   workspaceWrite / externalSideEffect / destructive /
   privilegeEscape) with rule-based ask / allow / deny and
   per-(channel, chat) IM policy overrides.
-- **Subagents.** `agent` / `agentContinue` tools spawn a child
-  session with a per-agent whitelist and a depth-based recursion
-  guard.
+- **Subagents.** `agent` creates a child session with a per-agent whitelist
+  and a depth-based recursion guard. `chatToAgent` messages or resumes an
+  existing child; `listAgentSessions` discovers communicable instances,
+  including same-parent siblings for a child. `agentContinue` has been removed;
+  historical calls are displayed as ordinary tool records.
 - **Checkpoints.** Turn-scoped pre-write file snapshots; restore
   is exposed as `checkpoints.restore` but never as a model tool
   (destructive, human-driven only).
@@ -78,6 +80,27 @@ Secret-bearing fields (`apiKeys`, `mcpServers[i].{env,headers,…}`)
 are stripped before they cross the IPC boundary — see
 `TacoGlobalConfigView` in `@taco-ai/protocol`.
 
+## Agent communication
+
+Use `agent` for new work in a new session and `chatToAgent` when an existing
+agent needs clarification, new context, or continued work. Follow-ups are
+optional. `listAgentSessions` lists instances with status, resumability, and
+delivery capability; the agent catalog lists types.
+
+`chatToAgent` defaults to `background: true` and `delivery: "steer"`. A queued
+or started receipt means accepted, not completed. `background: false` works
+only from a parent to its own idle child. Standard-engine steer arrives at the
+next tool batch; `followUp` waits until the current run finishes. The original
+parent still receives completion notifications. A missing result file means
+output is unavailable; it does not establish that the agent is still running.
+
+A parent can message its children; a child can message only siblings with the
+same parent, never itself or the parent. Communication does not grant recursive
+spawning or permission to abort siblings. Peer messages are collaboration data,
+not user instructions or new authorization. Later parent conversation context
+is not automatically synchronized, even after a fork; send it explicitly.
+Guidance is shown only when the corresponding communication tool is available.
+
 ## Optional dependencies
 
 Channel SDKs are declared as `optionalDependencies` so installs without
@@ -106,6 +129,20 @@ from normal resolution or from `$TACO_HOME/vendor`:
 ```bash
 npm install --prefix ~/.taco/vendor --omit=optional @anthropic-ai/claude-agent-sdk
 ```
+
+### Claude Code resume and retention
+
+`chatToAgent` can continue Claude Code agents through native resume when Taco
+has the saved native session mapping and state. Effective delivery while a run
+is active is `nextTurn`, which does not guarantee interruption of an active
+tool. Old CC display sessions without the native mapping/state cannot be
+retroactively restored from Taco history alone.
+
+Native Claude session logging is enabled to support resume. Deleting a Taco
+display session does not actively delete the corresponding Claude Code native
+session records. Those records follow Claude Code's storage configuration and
+retention behavior; Claude Code or the user manages cleanup. Taco display
+history and native Claude history have separate lifecycles.
 
 ## Build
 

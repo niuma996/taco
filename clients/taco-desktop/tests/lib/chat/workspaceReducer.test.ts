@@ -813,6 +813,159 @@ describe("workspacesReducer — APPEND_ASSISTANT_FINAL", () => {
 });
 
 describe("subagent actions", () => {
+    it("ignores settlement without an existing owner instead of falling back to the active session", () => {
+        for (const parentSessionId of [undefined, "main-1", "unknown-parent"]) {
+            const state = { "/ws": baseWs({ activeSession: "main-1" }) };
+            const next = workspacesReducer(state, {
+                type: "SUBAGENT_SETTLED",
+                cwd: "/ws",
+                parentSessionId,
+                parentToolCallId: "send-1",
+                outcome: "completed",
+            });
+            assert.deepEqual(next, state);
+        }
+    });
+
+    it("does not attribute an unidentified later run to an already settled spawn", () => {
+        const state = {
+            "/ws": baseWs({
+                activeSession: "main-1",
+                backgroundSubagents: { "tc-1": "completed" },
+            }),
+        };
+        const next = workspacesReducer(state, {
+            type: "SUBAGENT_SETTLED",
+            cwd: "/ws",
+            parentSessionId: "main-1",
+            parentToolCallId: "tc-1",
+            outcome: "error",
+        });
+        assert.deepEqual(next, state);
+    });
+
+    it("settles the original background owner while another session is active", () => {
+        for (const parentSessionId of [undefined, "main-1"]) {
+            const state = workspacesReducer(
+                {
+                    "/ws": baseWs({
+                        activeSession: "main-1",
+                        backgroundSubagents: { "tc-bg": "running" },
+                    }),
+                },
+                { type: "SELECT_SESSION", cwd: "/ws", sid: "other" },
+            );
+            const next = workspacesReducer(state, {
+                type: "SUBAGENT_SETTLED",
+                cwd: "/ws",
+                parentSessionId,
+                parentToolCallId: "tc-bg",
+                outcome: "aborted",
+            });
+            assert.deepEqual(getSessionState(next["/ws"], "main-1")?.backgroundSubagents, {
+                "tc-bg": "aborted",
+            });
+            assert.deepEqual(next["/ws"]?.backgroundSubagents, {});
+            assert.deepEqual(next["/ws"]?.subagentSpawned, {});
+        }
+    });
+
+    for (const status of ["queued", "started", "completed", "error", "aborted"] as const) {
+        it(`chatToAgent ${status} does not mark the parent busy or create background execution`, () => {
+            const state = {
+                "/ws": baseWs({
+                    activeSession: "main-1",
+                    backgroundSubagents: { "tc-bg": "running" },
+                    messages: [
+                        {
+                            id: "send-call",
+                            kind: "assistant",
+                            ts: 1,
+                            text: "",
+                            thinking: [],
+                            tools: [
+                                {
+                                    id: "send-1",
+                                    name: "chatToAgent",
+                                    args: { subSessionId: "sub-1", prompt: "continue" },
+                                    status: "running",
+                                },
+                            ],
+                        },
+                    ],
+                }),
+            };
+            const next = workspacesReducer(state, {
+                type: "APPLY_EVENT",
+                cwd: "/ws",
+                sid: "main-1",
+                now: 3,
+                suppressedThinking: false,
+                ev: {
+                    type: "tool_end",
+                    toolCallId: "send-1",
+                    toolName: "chatToAgent",
+                    isError: false,
+                    result: {
+                        details: {
+                            subSessionId: "sub-1",
+                            messageId: "msg-1",
+                            status,
+                            effectiveDelivery: "nextTurn",
+                            runId: "run-1",
+                        },
+                    },
+                },
+            });
+            assert.deepEqual(next["/ws"]?.backgroundSubagents, { "tc-bg": "running" });
+            assert.deepEqual(next["/ws"]?.agentToolPending, {});
+            assert.deepEqual(next["/ws"]?.subagentSpawned, {});
+            const message = next["/ws"]?.messages[0];
+            if (message?.kind !== "assistant") return assert.fail("missing send call");
+            assert.equal(message.tools[0]?.status, status === "error" ? "error" : "ok");
+            assert.equal((message.tools[0]?.details as { status: string }).status, status);
+        });
+    }
+
+    it("does not rebuild execution from queued or started sends on attach", () => {
+        const messages: UiMessage[] = [
+            {
+                id: "send",
+                kind: "assistant",
+                ts: 1,
+                text: "",
+                thinking: [],
+                tools: ["queued", "started"].map((status) => ({
+                    id: `send-${status}`,
+                    name: "chatToAgent",
+                    args: { subSessionId: "sub-1", prompt: "continue" },
+                    status: "ok",
+                    details: {
+                        subSessionId: "sub-1",
+                        status,
+                        messageId: status,
+                        effectiveDelivery: "nextTurn",
+                        runId: "run-1",
+                    },
+                })),
+            },
+        ];
+        const next = workspacesReducer(
+            { "/ws": baseWs({ activeSession: "other", loadingSessionId: "main-1" }) },
+            {
+                type: "ATTACH",
+                cwd: "/ws",
+                sid: "main-1",
+                messages,
+                inFlightAgentToolCallIds: ["send-started"],
+                settledBackgroundSubSessionIds: ["sub-1"],
+            },
+        );
+        assert.deepEqual(next["/ws"]?.backgroundSubagents, {});
+        assert.deepEqual(next["/ws"]?.subagentSpawned, {});
+        assert.deepEqual(next["/ws"]?.agentToolPending, {});
+    });
+
     // agentToolPending gates the send/stop button. Only an `agent` tool ending
     // without error resolves via the subagentSpawned reverse-lookup; an errored
     // agent and a skill-spawned subagent never match it, so both must clear

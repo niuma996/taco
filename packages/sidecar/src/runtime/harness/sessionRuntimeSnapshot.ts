@@ -30,7 +30,8 @@ export function toSessionRuntimeSnapshot(
     related: Pick<
         SessionRuntimeSnapshot,
         "pendingCommandPermissions" | "inFlightAgentToolCallIds" | "settledBackgroundSubSessionIds"
-    >,
+    > &
+        Partial<Pick<SessionRuntimeSnapshot, "activeSubagentChatRuns">>,
 ): SessionRuntimeSnapshot {
     const operation = snapshot.operation;
     const runtime: SessionRuntimeSnapshot = {

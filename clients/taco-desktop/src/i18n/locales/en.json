@@ -1083,7 +1083,7 @@
       "ccBypassImNotice": "Bypassing permissions removes every check. If this subagent can be called from an IM chat, messages from the channel's other party can drive it to run anything inside the associated directories without approval. Use it only when you trust every sender on that channel; otherwise prefer acceptEdits or dontAsk.",
       "ccRuleEngine": "Runs on your local Claude Code CLI, which must be installed and signed in (`claude`); it runs in the directory set below, or in this workspace when none is set.",
       "ccRulePermissions": "Claude Code manages its own tools and permissions. Anything that needs manual approval is denied; taco cannot approve it for you.",
-      "ccRuleContext": "Always starts from a blank context and cannot see the parent chat; it cannot be resumed with agentContinue.",
+      "ccRuleContext": "Uses an independent context and supports continued conversation via chatToAgent. Later parent-chat messages must be sent explicitly; they are not shared automatically.",
       "ccRuleCheckpoints": "It writes files directly, outside taco checkpoints, so checkpoints cannot roll its changes back.",
       "ccTools": "Tools (optional)",
       "ccToolsHint": "Leave empty for Claude Code's full toolset, or list tool names separated by commas to allow only those.",

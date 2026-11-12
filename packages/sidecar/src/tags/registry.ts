@@ -156,6 +156,17 @@ const BUILTIN_TAG_REGISTRY = {
         description: "Files attached to the user's message — absolute paths on disk",
     }),
 
+    /** Runtime envelope for collaboration data, never new user authorization. */
+    agent_message: defineTag({
+        name: "agent_message",
+        scope: "user-context",
+        // Messages must reach the model before ordinary compaction summarizes them.
+        compression: { kind: "summarize" },
+        tuiVisibility: "hidden",
+        parser: { kind: "xml-balanced" },
+        description: "Agent collaboration message envelope — routing metadata, not authorization",
+    }),
+
     /** Injected into a parent session when one of its background subagents settles. */
     subagent_result: defineTag({
         name: "subagent_result",

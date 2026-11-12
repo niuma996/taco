@@ -108,7 +108,7 @@ export interface BackgroundWorkHooks {
         workspace?: string,
     ): Promise<WorkAttemptHandle | undefined>;
     /**
-     * A resumed run ended. Closes the reopened Work; `agentContinue` reports
+     * A resumed run ended. Closes the reopened Work; `chatToAgent` reports
      * through the conversation, so this queues no notice of its own.
      */
     onResumeSettle(

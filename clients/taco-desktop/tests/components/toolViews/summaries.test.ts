@@ -153,7 +153,7 @@ describe("default summary never dumps JSON", () => {
     /** Tools with no registry entry at all, so they exercise the default. */
     const UNREGISTERED = [
         "memory",
-        "agentContinue",
+        "chatToAgent",
         "addTools",
         "jobsCreate",
         "jobsUpdate",
@@ -177,6 +177,7 @@ describe("default summary never dumps JSON", () => {
             { job: { name: "nightly-sync", schedule: { kind: "cron", expr: "0 3 * * *" } } },
             { toolNames: "grep, glob" },
             { subSessionId: "s-1", prompt: "keep going" },
+            { subSessionId: "s-1", prompt: "keep going", delivery: "followUp" },
             {},
         ];
         for (const args of cases) {

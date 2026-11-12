@@ -7,7 +7,11 @@
 import type { ChannelStatusChangedParams } from "./channels.js";
 import type { CommandPermissionDenialReason } from "./config.js";
 import type { CompactionFailureReason, SessionId, ToolCallId, WorkspaceId } from "./frames.js";
-import type { SubagentSettledPayload } from "./tools.js";
+import type {
+    SubagentSettledPayload,
+    SubagentSpawnedPayload,
+    SubagentStartedPayload,
+} from "./tools.js";
 import type { WorkChangedParams } from "./work.js";
 import type { WorkspaceAssociationKey } from "./workspace.js";
 
@@ -53,6 +57,8 @@ export const PushMethods = {
      */
     CommandPermissionResolved: "command_permission.resolved",
     SubagentSpawned: "subagent.spawned",
+    /** An existing child starts a new execution; ownership does not change. */
+    SubagentStarted: "subagent.started",
     /**
      * Emitted when a `background: true` subagent reaches a terminal state.
      * Synchronous spawns do not need it: their `tool_call_end` already marks
@@ -372,12 +378,8 @@ export interface CommandPermissionResolvedParams {
 /** `subagent.spawned` params — runtime emits when a parent session spawns
  *  a sub-session via the `agent` tool. The desktop renders a breadcrumb
  *  linking back to the parent turn. */
-export interface SubagentSpawnedParams {
-    parentSessionId: SessionId;
-    parentToolCallId: string;
-    subSessionId: SessionId;
-    agentType: string;
-}
+export type SubagentSpawnedParams = SubagentSpawnedPayload;
+export type SubagentStartedParams = SubagentStartedPayload;
 
 /**
  * `subagent.settled` params — runtime emits when a background subagent
@@ -473,6 +475,7 @@ export interface PushParamsByMethod {
     [PushMethods.CommandPermissionRequested]: CommandPermissionRequestedParams;
     [PushMethods.CommandPermissionResolved]: CommandPermissionResolvedParams;
     [PushMethods.SubagentSpawned]: SubagentSpawnedParams;
+    [PushMethods.SubagentStarted]: SubagentStartedParams;
     [PushMethods.SubagentSettled]: SubagentSettledParams;
     [PushMethods.Error]: ErrorParams;
     [PushMethods.CompactionStarted]: SessionCompactionStartedParams;

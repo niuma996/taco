@@ -12,6 +12,7 @@
 import { existsSync } from "node:fs";
 import { delimiter, join } from "node:path";
 import { pathToFileURL } from "node:url";
+import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { tacoHome } from "../../../config/tacoHome.ts";
 
 export const CLAUDE_CODE_SDK_PACKAGE = "@anthropic-ai/claude-agent-sdk";
@@ -52,8 +53,20 @@ export type SdkMessage =
           result?: string;
           errors?: string[];
           num_turns: number;
+          user_message_uuid?: string;
+          user_message_uuids?: string[];
+          queued_turn_count?: number;
       }
-    | { type: "system"; subtype: string };
+    | { type: "system"; subtype: string; session_id?: string };
+
+/** Streaming input slice of the SDK's SDKUserMessage. */
+export interface SdkUserMessage {
+    type: "user";
+    message: { role: "user"; content: string };
+    parent_tool_use_id: null;
+    uuid: string;
+    session_id?: string;
+}
 
 export type SdkPermissionMode =
     | "default"
@@ -74,8 +87,10 @@ export interface SdkQueryOptions {
     /** `"none"`: nothing reaches a host prompt; asks are denied in-process. */
     permissionPrompts?: "host" | "none";
     persistSession: boolean;
+    resume?: string;
     strictMcpConfig: boolean;
-    mcpServers: Record<string, never>;
+    mcpServers: Record<string, { type: "sdk"; name: string; instance: McpServer }>;
+    allowedTools?: string[];
     tools: string[] | { type: "preset"; preset: "claude_code" };
     /** Removed from the toolset entirely, even when listed in `tools`. */
     disallowedTools?: string[];
@@ -87,7 +102,10 @@ export interface SdkQueryOptions {
 }
 
 export interface ClaudeAgentSdk {
-    query(params: { prompt: string; options: SdkQueryOptions }): AsyncIterable<SdkMessage>;
+    query(params: {
+        prompt: string | AsyncIterable<SdkUserMessage>;
+        options: SdkQueryOptions;
+    }): AsyncIterable<SdkMessage> & { close?: () => void };
 }
 
 /** The SDK package is not installed where the sidecar can find it. */

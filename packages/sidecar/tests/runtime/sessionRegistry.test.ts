@@ -59,11 +59,6 @@ function makeRegistry(overrides: Partial<SessionRegistryOptions> = {}): SessionR
             resultText: "",
             isError: true,
         }),
-        resumeSubagent: async () => ({
-            subSessionId: asSessionId("stub-sub"),
-            resultText: "",
-            isError: true,
-        }),
         spawnSkillSubagent: async () => ({
             subSessionId: "stub-sub",
             resultText: "",
@@ -1265,11 +1260,6 @@ describe("SessionRegistry system-prompt thunk", () => {
             resources: {},
             streamOptions: {},
             spawnSubagent: async () => ({
-                subSessionId: asSessionId("stub"),
-                resultText: "",
-                isError: true,
-            }),
-            resumeSubagent: async () => ({
                 subSessionId: asSessionId("stub"),
                 resultText: "",
                 isError: true,

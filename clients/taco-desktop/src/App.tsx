@@ -229,8 +229,13 @@ export default function App() {
     // Subagent list for the session-bar awareness dot. Derived here as well as
     // inside SubagentPanel because the dot must render while the panel is shut.
     const subagentEntries = useMemo(
-        () => deriveSubagents(ws?.messages ?? [], ws?.backgroundSubagents ?? {}),
-        [ws?.messages, ws?.backgroundSubagents],
+        () =>
+            deriveSubagents(
+                ws?.messages ?? [],
+                ws?.backgroundSubagents ?? {},
+                ws?.backgroundRunIds ?? {},
+            ),
+        [ws?.messages, ws?.backgroundSubagents, ws?.backgroundRunIds],
     );
 
     // Drop the panel's selection when the session or workspace changes: the id
@@ -1073,6 +1078,7 @@ export default function App() {
                                         <SubagentPanel
                                             messages={ws?.messages ?? []}
                                             backgroundSubagents={ws?.backgroundSubagents ?? {}}
+                                            backgroundRunIds={ws?.backgroundRunIds ?? {}}
                                             open={rightPanel.panel === "subagents"}
                                             selectedSubSessionId={selectedSubSessionId}
                                             onSelect={setSelectedSubSessionId}

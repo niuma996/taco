@@ -157,7 +157,7 @@ Return: the root cause, proposed changes with file:line references, and any rema
 
 **Failures:**
 - `agent.test.ts`: 3 failures (timing issues)
-- `agentContinue.test.ts`: 2 failures (tools not executing)
+- `chatToAgent.test.ts`: 2 failures (tools not executing)
 - `sessionSnapshot.test.ts`: 1 failure (execution count = 0)
 
 **Decision:** independent domains — abort logic separate from batch completion separate from race conditions.
@@ -166,7 +166,7 @@ Return: the root cause, proposed changes with file:line references, and any rema
 
 ```
 agent(subagent_type=explorer, description="diag agent.test.ts timing", prompt="...paste failing test names + paths...")
-agent(subagent_type=explorer, description="diag agentContinue batch", prompt="...paste failing test names + paths...")
+agent(subagent_type=explorer, description="diag chatToAgent batch", prompt="...paste failing test names + paths...")
 agent(subagent_type=explorer, description="diag sessionSnapshot count", prompt="...paste failing test names + paths...")
 ```
 

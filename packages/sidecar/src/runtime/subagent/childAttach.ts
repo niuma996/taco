@@ -99,7 +99,13 @@ export async function prepareChildAttach(
     // sessions.
     const allowedNames = new Set(args.allowedTools.map((tool) => tool.name));
     const { tools: rawTools, taskState } = await deps.toolsForChildSession(args.sessionId);
-    const tools = rawTools.filter((tool) => allowedNames.has(tool.name));
+    const tools = rawTools.filter(
+        (tool) =>
+            allowedNames.has(tool.name) ||
+            ((tool.name === "chatToAgent" || tool.name === "listAgentSessions") &&
+                !(args.toolPolicy?.denied.has(tool.name) ?? false) &&
+                (args.toolPolicy?.allowed === undefined || args.toolPolicy.allowed.has(tool.name))),
+    );
 
     // Read-only profiles get an isolated-broker shell so the user's
     // root-session allowlist cannot leak in. Membership in

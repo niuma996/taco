@@ -243,8 +243,8 @@ export interface UiToolCall {
     details?: unknown;
 }
 
-/** Tool names that spawn (or continue) a subagent child session. */
-export const AGENT_TOOL_NAMES: ReadonlySet<string> = new Set(["agent", "agentContinue"]);
+/** Child topology tools. chatToAgent sends messages and is not a child topology event. */
+export const AGENT_TOOL_NAMES: ReadonlySet<string> = new Set(["agent"]);
 
 /** The subagent outcome is authoritative when the generic harness flag is stale. */
 export function toolResultIsError(
@@ -254,7 +254,7 @@ export function toolResultIsError(
 ): boolean {
     if (isError === true) return true;
     return (
-        AGENT_TOOL_NAMES.has(toolName) &&
+        (AGENT_TOOL_NAMES.has(toolName) || toolName === "chatToAgent") &&
         typeof details === "object" &&
         details !== null &&
         (details as { status?: unknown }).status === "error"
@@ -508,7 +508,7 @@ export function summarizeKnownArgFields(args: unknown): string {
  * Three roles:
  *   user: text row
  *   assistant: text + 0..N tool-call cards (status starts as `running`)
- *   toolResult: locate the matching tool in the most recent assistant and
+ *   toolResult: locate the most recent assistant carrying the matching tool and
  *               set status / resultText.
  */
 export function historyToUiMessages(
@@ -570,7 +570,7 @@ export function historyToUiMessages(
                 isError?: boolean;
                 details?: unknown;
             };
-            const assistant = findLastAssistant(out);
+            const assistant = findLastAssistant(out, tm.toolCallId);
             const resultText = foldContent(tm.content);
             if (assistant) {
                 const t = assistant.tools.find((x) => x.id === tm.toolCallId);
@@ -629,11 +629,11 @@ export interface HistoryToUiMessagesOpts {
 }
 
 /**
- * Tools that spawn a child session and report back only when it finishes. Their
- * toolResult can trail the parent assistant message by minutes, so its absence
+ * Tools that may wait for child execution before returning, including awaited
+ * messages. Their toolResult can trail the assistant message by minutes, so its absence
  * from a history read carries no information about whether they are still alive.
  */
-const LONG_RUNNING_TOOLS = new Set(["agent", "agentContinue", "skill"]);
+const LONG_RUNNING_TOOLS = new Set(["agent", "chatToAgent", "skill"]);
 
 /**
  * History replay seeds every toolCall as "running" and only the matching
@@ -852,10 +852,15 @@ export function extractImageParts(content: unknown): ImageInput[] {
 
 export function findLastAssistant(
     arr: UiMessage[],
+    toolCallId?: string,
 ): Extract<UiMessage, { kind: "assistant" }> | undefined {
     for (let i = arr.length - 1; i >= 0; i--) {
         const m = arr[i];
-        if (m.kind === "assistant") return m;
+        if (
+            m.kind === "assistant" &&
+            (toolCallId === undefined || m.tools.some((tool) => tool.id === toolCallId))
+        )
+            return m;
     }
     return undefined;
 }

@@ -24,7 +24,10 @@ const subSessionId = asSessionId("child-1");
 
 function fakeSdk(
     frames: (options: SdkQueryOptions) => AsyncIterable<SdkMessage>,
-    seen: { options?: SdkQueryOptions; prompt?: string } = {},
+    seen: {
+        options?: SdkQueryOptions;
+        prompt?: Parameters<ClaudeAgentSdk["query"]>[0]["prompt"];
+    } = {},
 ): ClaudeAgentSdk {
     return {
         query({ prompt, options }) {
@@ -82,7 +85,10 @@ describe("runClaudeCodeSubagent", () => {
     });
 
     it("passes Claude Code's own toolset and permission system to the SDK", async () => {
-        const seen: { options?: SdkQueryOptions; prompt?: string } = {};
+        const seen: {
+            options?: SdkQueryOptions;
+            prompt?: Parameters<ClaudeAgentSdk["query"]>[0]["prompt"];
+        } = {};
         await runClaudeCodeSubagent({
             ...baseArgs(fakeSdk(() => reply("ok"), seen)),
             rolePrompt: "be brief",
@@ -99,13 +105,13 @@ describe("runClaudeCodeSubagent", () => {
         // blocked even when a definition's tool list names it.
         assert.deepEqual(o.disallowedTools, ["AskUserQuestion"]);
         assert.deepEqual(o.settingSources, ["user"]);
-        assert.equal(o.persistSession, false);
+        assert.equal(o.persistSession, true);
         assert.equal(o.strictMcpConfig, true);
         assert.deepEqual(o.mcpServers, {});
         assert.equal(o.cwd, "/work");
         assert.equal(o.maxTurns, DEFAULT_CLAUDE_CODE_MAX_TURNS);
         assert.equal(o.systemPrompt.append, "be brief");
-        assert.equal(seen.prompt, "do it");
+        assert.equal(typeof seen.prompt, "object");
     });
 
     it("narrows tools to an explicit list when the definition names one", async () => {
@@ -214,7 +220,7 @@ describe("runClaudeCodeSubagent", () => {
         assert.match(r.resultText, /deliberate interruption/);
     });
 
-    it("reports progress on a mid-run failure without offering agentContinue", async () => {
+    it("reports progress on a mid-run failure without offering chatToAgent", async () => {
         async function* failsLate(): AsyncIterable<SdkMessage> {
             yield {
                 type: "assistant",
@@ -233,7 +239,7 @@ describe("runClaudeCodeSubagent", () => {
         assert.match(r.resultText, /529 overloaded/);
         assert.match(r.resultText, /ran 1 turn before failing/);
         assert.match(r.resultText, /patched src\/b\.ts/);
-        // Claude Code runs are never resumable; agentContinue rejects them.
+        // Claude Code runs are never resumable; chatToAgent rejects them.
         assert.match(r.resultText, /cannot be resumed/);
         assert.match(r.resultText, /call the tool again/);
     });

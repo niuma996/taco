@@ -965,7 +965,7 @@ describe("AgentSpawner — runtime: claude-code", () => {
         assert.equal(facts.forkedContext, undefined);
     });
 
-    it("refuses agentContinue on a claude-code child", async () => {
+    it("refuses chatToAgent on a claude-code child", async () => {
         frames = readThenAnswer;
         const parent = await seedParent();
         const first = await ws.agentSpawner.spawnSubagent({
@@ -1314,6 +1314,14 @@ describe("AgentSpawner.resumeSubagent — validation", () => {
         // single result and the cache entry is created exactly once). We probe
         // via a counter the stub increments — if the cache didn't share, the
         // counter would be 2.
+        await seedSessionResume("p");
+        await seedSessionResume("same-sub", {
+            kind: "subagent",
+            parentSessionId: "p",
+            agentType: "explorer",
+            depth: 1,
+        });
+        ws.sessionRegistry.invalidateListCache();
         let runResumeCalls = 0;
         const originalRunResume = (
             ws.agentSpawner as unknown as {

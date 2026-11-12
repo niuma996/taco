@@ -2,7 +2,7 @@
 name: reviewer
 description: Code review specialist — reviews changes made in this conversation, flagging correctness, security, and style issues. Cannot modify files.
 whenToUse: "Use after substantial work is done in this conversation to get an independent review that weighs the result against the original intent. Good for multi-file changes, refactors, or anything touching security/permissions. Read-only: do NOT modify files."
-tools: [read, grep, glob, shell]
+tools: [read, grep, glob, shell, chatToAgent, listAgentSessions]
 maxTurns: 200
 timeoutMinutes: 120
 context: fork
