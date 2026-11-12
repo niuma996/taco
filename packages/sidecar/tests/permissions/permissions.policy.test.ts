@@ -229,6 +229,33 @@ describe("commandPolicy", () => {
             }
         });
 
+        it("keeps recursive force rm on the risk floor through argv and opaque payloads", () => {
+            // argv layer: combined, split and long-form flags all classify.
+            for (const cmd of [
+                "rm -rf build",
+                "rm -fr ~",
+                "rm -r -f ~",
+                "rm -R --force dir",
+                "rm --recursive --force dir",
+                "rm -rf -- dir",
+            ]) {
+                const result = evaluateCommand(cmd, { mode: "auto", allow: [], deny: [] });
+                assert.equal(result.behavior, "ask", cmd);
+                assert.equal(result.risk, "destructive", cmd);
+            }
+
+            // Text layer: a wrapper hides the argv of the inner command, so the
+            // phrase scan is what keeps the intent on the risk floor. Removing
+            // it would downgrade these to workspaceWrite.
+            for (const cmd of ["bash -c 'rm -rf /tmp/demo'", "find . -exec sh -c 'rm -rf ~' ';'"]) {
+                assert.equal(
+                    evaluateCommand(cmd, { mode: "auto", allow: [], deny: [] }).risk,
+                    "destructive",
+                    cmd,
+                );
+            }
+        });
+
         it("keeps PowerShell destructive and upload commands on the built-in denylist", () => {
             for (const cmd of [
                 "Remove-Item -Recurse -Force build",

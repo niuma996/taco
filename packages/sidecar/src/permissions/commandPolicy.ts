@@ -117,6 +117,14 @@ const GIT_DUAL_USE_MUTATING_TOKENS: ReadonlySet<string> = new Set([
     "set-head",
 ]);
 
+/**
+ * Phrase-level destructive patterns. They run on the canonical argv string,
+ * whose quotes are already decoded, so they also see inside payloads the
+ * structured checks cannot reach — `bash -c 'rm -rf /'`, `find -exec sh -c …`.
+ * The `rm` row is therefore NOT redundant with {@link argvRisk}: argv covers
+ * combined/split/long flag forms of a direct `rm`, the text row keeps a
+ * destructive intent wrapped in an opaque command on the risk floor.
+ */
 const DESTRUCTIVE: Array<[RegExp, string]> = [
     [/\bgit\s+reset\s+--hard\b/, "may discard uncommitted changes"],
     [/\bgit\s+clean\b[^\n;&|]*-[a-zA-Z]*f/, "may permanently delete untracked files"],
