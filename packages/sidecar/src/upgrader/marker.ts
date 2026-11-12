@@ -13,9 +13,10 @@
  * which side wrote it). Atomic via .tmp + rename.
  */
 
-import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
+import { mkdir, readFile, unlink } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { createLogger } from "../lib/logger.ts";
+import { writeTextAtomic } from "../store/atomicFile.ts";
 import type { UpgradeMarker } from "./types.ts";
 
 const log = createLogger("sidecar.upgrader.marker");
@@ -53,9 +54,7 @@ export async function readUpgradeMarker(path: string): Promise<UpgradeMarker | n
 /** Persist a marker atomically. Creates the parent dir if missing. */
 export async function writeUpgradeMarker(path: string, marker: UpgradeMarker): Promise<void> {
     await mkdir(dirname(path), { recursive: true });
-    const tmp = `${path}.tmp`;
-    await writeFile(tmp, JSON.stringify(marker, null, JSON_INDENT), "utf8");
-    await rename(tmp, path);
+    await writeTextAtomic(path, JSON.stringify(marker, null, JSON_INDENT));
 }
 
 /** Delete a marker — used by `taco upgrade --apply` after the swap lands. */

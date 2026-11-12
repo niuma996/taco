@@ -18,6 +18,7 @@ import { tacoHome } from "../config/tacoHome.ts";
 import { restrictOwner } from "../lib/fsPermissions.ts";
 import { createLogger } from "../lib/logger.ts";
 import { checkGrantRootSafety } from "../permissions/grantRootSafety.ts";
+import { writeTextAtomic } from "../store/atomicFile.ts";
 import {
     chatPolicyKey,
     DEFAULT_IM_WORKSPACE_POLICY,
@@ -233,17 +234,10 @@ export class ImWorkspacePolicyStore {
         const run = this.chain.then(async () => {
             const filePath = imWorkspacePoliciesPath(channelId, this.home);
             await fs.promises.mkdir(this.policiesDir, { recursive: true, mode: 0o700 });
-            const tmp = `${filePath}.tmp-${process.pid}`;
             const stamped = { ...doc, version: IM_POLICY_DOCUMENT_VERSION };
-            await fs.promises.writeFile(tmp, `${JSON.stringify(stamped, null, 2)}\n`, {
-                mode: 0o600,
+            await writeTextAtomic(filePath, `${JSON.stringify(stamped, null, 2)}\n`, {
+                secure: true,
             });
-            try {
-                await fs.promises.rename(tmp, filePath);
-            } catch (e) {
-                await fs.promises.rm(tmp, { force: true });
-                throw e;
-            }
         });
         this.chain = run.catch(() => {});
         return run;
@@ -268,15 +262,9 @@ export class ImWorkspacePolicyStore {
             for (const k of this.notified) data[k] = true;
             await fs.promises.mkdir(this.policiesDir, { recursive: true });
             await restrictOwner(this.policiesDir, 0o700);
-            const tmp = `${this.notifiedFile}.tmp-${process.pid}`;
-            await fs.promises.writeFile(tmp, `${JSON.stringify(data, null, 2)}\n`);
-            await restrictOwner(tmp, 0o600);
-            try {
-                await fs.promises.rename(tmp, this.notifiedFile);
-            } catch (e) {
-                await fs.promises.rm(tmp, { force: true });
-                throw e;
-            }
+            await writeTextAtomic(this.notifiedFile, `${JSON.stringify(data, null, 2)}\n`, {
+                secure: true,
+            });
         });
         this.chain = run.catch(() => {});
         return run;

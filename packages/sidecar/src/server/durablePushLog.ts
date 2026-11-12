@@ -17,10 +17,11 @@
  */
 
 import { createHash } from "node:crypto";
-import { mkdir, readdir, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, stat, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { ServerPush, SessionId, WorkspaceId } from "@taco-ai/protocol";
 import { createLogger } from "../lib/logger.ts";
+import { writeTextAtomic } from "../store/atomicFile.ts";
 
 const log = createLogger("sidecar.durablePushLog");
 
@@ -315,9 +316,7 @@ export class DurablePushLog {
             // tail before new JSON could be welded onto it.
             const merged = [...completeLines(await readTail(path)), ...lines];
             const kept = `${merged.slice(-this.keep).join("\n")}\n`;
-            const tmp = `${path}.tmp`;
-            await writeFile(tmp, kept, "utf8");
-            await rename(tmp, path);
+            await writeTextAtomic(path, kept);
             state.disk = this.measure(kept);
             return;
         }

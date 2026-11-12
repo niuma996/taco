@@ -24,13 +24,13 @@ import type {
 } from "@taco-ai/protocol";
 import { IM_CWD_PREFIX, makeImPeerAssociationId, parseImCwd } from "@taco-ai/protocol";
 import { tacoHome } from "../config/tacoHome.ts";
-import { restrictOwner } from "../lib/fsPermissions.ts";
 import { createLogger } from "../lib/logger.ts";
 import {
     checkGrantRootSafety,
     isSameOrInside,
     realpathBestEffort,
 } from "../permissions/grantRootSafety.ts";
+import { writeTextAtomic } from "../store/atomicFile.ts";
 
 const log = createLogger("workspace:associations");
 
@@ -355,15 +355,7 @@ export class WorkspaceAssociationStore {
 
     private async persist(doc: WorkspaceAssociationsDocument): Promise<void> {
         await fs.promises.mkdir(path.dirname(this.filePath), { recursive: true, mode: 0o700 });
-        const tmp = `${this.filePath}.tmp-${process.pid}-${randomUUID()}`;
-        await fs.promises.writeFile(tmp, `${JSON.stringify(doc, null, 2)}\n`, { mode: 0o600 });
-        await restrictOwner(tmp, 0o600);
-        try {
-            await fs.promises.rename(tmp, this.filePath);
-        } catch (e) {
-            await fs.promises.rm(tmp, { force: true });
-            throw e;
-        }
+        await writeTextAtomic(this.filePath, `${JSON.stringify(doc, null, 2)}\n`, { secure: true });
     }
 
     /**

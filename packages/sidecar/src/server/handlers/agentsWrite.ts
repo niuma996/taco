@@ -11,7 +11,7 @@
  */
 
 import { existsSync } from "node:fs";
-import { mkdir, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, realpath, rm, stat } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import {
     AGENT_TOOL_NAME_PATTERN,
@@ -22,6 +22,7 @@ import {
 import { parseAgentMarkdown } from "../../agents/loadAgents.ts";
 import { type AgentDefinition, DEFAULT_SUBAGENT_RUNTIME } from "../../agents/types.ts";
 import { tacoHome } from "../../config/tacoHome.ts";
+import { writeTextAtomic } from "../../store/atomicFile.ts";
 
 export class AgentWriteError extends Error {
     constructor(message: string) {
@@ -254,9 +255,7 @@ export async function writeUserAgent(
     }
 
     await mkdir(dirname(targetPath), { recursive: true });
-    const tmpPath = `${targetPath}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    await writeFile(tmpPath, renderAgentMarkdown(params), "utf-8");
-    await rename(tmpPath, targetPath);
+    await writeTextAtomic(targetPath, renderAgentMarkdown(params));
     if (previousPath !== undefined && previousPath !== targetPath) {
         await rm(previousPath, { force: true });
     }

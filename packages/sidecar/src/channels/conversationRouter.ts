@@ -11,10 +11,10 @@ import {
     parseImCwd,
     RPC,
 } from "@taco-ai/protocol";
-import { restrictOwner } from "../lib/fsPermissions.ts";
 import { createLogger } from "../lib/logger.ts";
 import { uuidv7 } from "../runtime/pi/values.ts";
 import type { ServerRpcSurface } from "../runtime/serverRpcSurface.ts";
+import { writeTextAtomic } from "../store/atomicFile.ts";
 
 const log = createLogger("channel:router");
 
@@ -37,8 +37,8 @@ export class ConversationRouter extends EventEmitter {
     /** Debounce timer for the reuse path — a chatty peer would otherwise
      *  rewrite routing.json on every inbound message. */
     private persistTimer: ReturnType<typeof setTimeout> | undefined;
-    /** Serializes persist() so concurrent callers cannot interleave on the
-     *  shared `.tmp` path. See persist(). */
+    /** Serializes persist() so a debounced write and a direct write cannot
+     *  interleave their read-modify-write cycle. See persist(). */
     private chain: Promise<void> = Promise.resolve();
 
     private constructor(tacoHome: string) {
@@ -283,18 +283,16 @@ export class ConversationRouter extends EventEmitter {
     /**
      * Serialized through a promise chain (same pattern as
      * FileChannelConfigStore): the debounced reuse-path timer and the
-     * new-session path are independent callers, and they share one `.tmp`
-     * path. Overlapping writes would let one rename() publish another's
-     * half-written file, defeating the point of writing via tmp+rename.
+     * new-session path are independent callers, and each rewrites the whole
+     * route table from `this.routes`.
      */
     private persist(): Promise<void> {
         const run = this.chain.then(async () => {
             const data = Object.fromEntries(this.routes);
-            const tmp = `${this.persistPath}.tmp`;
             await fs.promises.mkdir(path.dirname(this.persistPath), { recursive: true });
-            await fs.promises.writeFile(tmp, JSON.stringify(data, null, 2));
-            await restrictOwner(tmp, 0o600);
-            await fs.promises.rename(tmp, this.persistPath);
+            await writeTextAtomic(this.persistPath, JSON.stringify(data, null, 2), {
+                secure: true,
+            });
         });
         // Keep the chain alive on failure so one rejected write does not poison
         // every subsequent persist.

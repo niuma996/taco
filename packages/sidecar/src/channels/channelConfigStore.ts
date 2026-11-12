@@ -12,6 +12,7 @@ import * as path from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { tacoHome } from "../config/tacoHome.ts";
 import { restrictOwner } from "../lib/fsPermissions.ts";
+import { writeTextAtomic } from "../store/atomicFile.ts";
 import { isValidChannelId } from "./configValidator.ts";
 import type { ChannelConfigStore } from "./types.ts";
 
@@ -185,18 +186,12 @@ export class FileChannelConfigStore implements ChannelConfigStore {
         const dir = path.dirname(this.filePath);
         await fs.promises.mkdir(dir, { recursive: true });
         await restrictOwner(dir, 0o700);
-        const tmp = `${this.filePath}.tmp-${process.pid}`;
         const persisted = { ...data };
         if (this.seed[CREDENTIALS_KEY] != null && data[CREDENTIALS_KEY] === undefined) {
             persisted[CREDENTIALS_KEY] = null;
         }
-        await fs.promises.writeFile(tmp, `${JSON.stringify(persisted, null, 2)}\n`);
-        await restrictOwner(tmp, 0o600);
-        try {
-            await fs.promises.rename(tmp, this.filePath);
-        } catch (e) {
-            await fs.promises.rm(tmp, { force: true });
-            throw e;
-        }
+        await writeTextAtomic(this.filePath, `${JSON.stringify(persisted, null, 2)}\n`, {
+            secure: true,
+        });
     }
 }
