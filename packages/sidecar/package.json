@@ -50,11 +50,11 @@
     "test:memory": "tsx --import ./tests/_helpers/testSetup.ts --test tests/memory/memory.test.ts tests/server/handlers/handlers.workspace.test.ts tests/runtime/attachedSession.state.test.ts tests/tools/tools.builtin.test.ts"
   },
   "dependencies": {
-    "@earendil-works/chord": "1.5.0",
-    "@earendil-works/pi-ai": "1.5.0",
-    "@earendil-works/pi-telemetry": "1.5.0",
+    "@earendil-works/chord": "1.5.2",
+    "@earendil-works/pi-ai": "1.5.2",
+    "@earendil-works/pi-telemetry": "1.5.2",
     "@modelcontextprotocol/sdk": "1.30.0",
-    "@taco-ai/pi-harness": "0.1.1",
+    "@taco-ai/pi-harness": "0.2.0",
     "@taco-ai/protocol": "workspace:*",
     "@taco-ai/shared": "workspace:*",
     "chokidar": "4.0.3",
