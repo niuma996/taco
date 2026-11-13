@@ -185,13 +185,16 @@
     gap: var(--space-1);
 }
 
-/* Fixed width: the base .ui-modal is content-sized, so switching the runtime
-   hint or showing a field error would otherwise resize the dialog. Height cap
-   only — scrolling is the shared .ui-modal-body's job. */
+/* Viewport-proportional width. The base .ui-modal is content-sized, so
+   switching the runtime hint or showing a field error would otherwise resize
+   the dialog; a width keeps that stable. Proportional rather than fixed
+   because the Codex engine grid and the install command both need horizontal
+   room, and a fixed 600px wrapped the command into three ragged lines.
+   Height cap only — scrolling is the shared .ui-modal-body's job. */
 .agent-form-modal {
-    width: 600px;
-    max-width: calc(100vw - 4rem);
-    max-height: 85vh;
+    width: min(880px, 92vw);
+    max-width: 92vw;
+    max-height: 88vh;
 }
 
 .agent-form-modal .ui-textarea {
@@ -271,4 +274,185 @@
 
 .agent-form-notice--warn {
     border-color: var(--warning);
+}
+
+/* ── Engine settings block ────────────────────────────────────────
+   A titled section whose fields sit side by side, so the extra width
+   buys columns instead of longer empty rows. `align-items: start`
+   keeps a field with an error message from stretching its neighbour. */
+.agent-form-section {
+    margin: 0 0 var(--space-4) 0;
+    padding: var(--space-3) var(--space-4);
+    background: var(--surface-tint);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+}
+
+.agent-form-section-head {
+    margin-bottom: var(--space-3);
+}
+
+.agent-form-section-title {
+    margin: 0;
+    font-size: var(--text-sm);
+    font-weight: var(--weight-title);
+    color: var(--fg);
+}
+
+.agent-form-section-hint {
+    margin: var(--space-1) 0 0;
+    font-size: var(--text-xs);
+    color: var(--fg-dim);
+    line-height: var(--leading-normal);
+}
+
+.agent-form-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: start;
+    column-gap: var(--space-4);
+}
+
+.agent-form-grid > .ui-form-field {
+    margin-bottom: var(--space-3);
+}
+
+/* A field that needs the full row (a long path, a wide explanation). */
+.agent-form-grid-full {
+    grid-column: 1 / -1;
+}
+
+/* One column once two fields no longer fit side by side. */
+@media (max-width: 720px) {
+    .agent-form-grid {
+        grid-template-columns: minmax(0, 1fr);
+    }
+}
+
+/* Rules that live inside a section: same list, no second box around it. */
+.agent-form-rules--plain {
+    margin: var(--space-3) 0 0 0;
+    padding: 0 0 0 var(--space-4);
+    background: none;
+    border: none;
+    font-size: var(--text-xs);
+}
+
+/* ── Codex runtime setup card ─────────────────────────────────────
+   One card for the whole runtime state: a title, a status chip, the
+   sentence that says what to do, and the command when a terminal is
+   the only way forward. */
+.codex-runtime-notice {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    margin: 0 0 var(--space-4) 0;
+}
+
+.codex-setup-card {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    padding: var(--space-3);
+    background: var(--surface-tint);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+}
+
+.codex-setup-card--warn {
+    border-color: color-mix(in srgb, var(--warning) 40%, transparent);
+    background: color-mix(in srgb, var(--warning) 6%, transparent);
+}
+
+.codex-setup-card--ok {
+    border-color: color-mix(in srgb, var(--success) 35%, transparent);
+}
+
+.codex-setup-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-2);
+}
+
+.codex-setup-title {
+    font-size: var(--text-sm);
+    font-weight: var(--weight-title);
+    color: var(--fg);
+}
+
+.codex-setup-chip {
+    flex-shrink: 0;
+    padding: 1px var(--space-2);
+    font-size: var(--text-xs);
+    line-height: var(--leading-normal);
+    color: var(--fg-dim);
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-pill);
+}
+
+.codex-setup-chip--ok {
+    color: var(--success);
+    background: var(--success-bg);
+    border-color: color-mix(in srgb, var(--success) 35%, transparent);
+}
+
+.codex-setup-chip--warn {
+    color: var(--warning);
+    background: color-mix(in srgb, var(--warning) 12%, transparent);
+    border-color: color-mix(in srgb, var(--warning) 35%, transparent);
+}
+
+.codex-setup-text {
+    margin: 0;
+    font-size: var(--text-sm);
+    color: var(--fg-dim);
+    line-height: var(--leading-normal);
+}
+
+/* Elapsed time while the install runs, so a slow download reads as
+   progress rather than a frozen button. */
+.codex-setup-elapsed {
+    margin: 0;
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    color: var(--fg-dim);
+}
+
+/* The action row sits below the sentence and the command, so the button
+   never crowds the text above it. */
+.codex-setup-actions {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    margin-top: var(--space-1);
+}
+
+.agent-form-command {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    margin-top: var(--space-2);
+}
+
+.agent-form-command code {
+    flex: 1;
+    min-width: 0;
+    padding: var(--space-2);
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    line-height: var(--leading-normal);
+    /* Wrap between tokens, and only break inside one when it cannot fit
+       on a line of its own — a mid-word break reads as a typo. */
+    white-space: pre-wrap;
+    overflow-wrap: break-word;
+    color: var(--fg);
+    background: var(--input-bg);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+}
+
+.agent-form-command .ui-button {
+    flex-shrink: 0;
 }

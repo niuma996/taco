@@ -642,6 +642,12 @@ export default function App() {
         agentContentLoading,
         agentContentError,
         agentSaving,
+        codexRuntimeStatus,
+        codexStatusLoading,
+        codexInstalling,
+        codexInstallError,
+        refreshCodexRuntime,
+        installCodexRuntime,
         saveAgent,
         deleteAgent,
     } = useAgentsPane(client, mainView === "agents", agentsConfig.targetCwd, agentsConfig.scope);
@@ -1156,6 +1162,12 @@ export default function App() {
                                         !agentsConfig.targetCwd.startsWith(IM_CWD_PREFIX)
                                     }
                                     cwdChoices={agentCwdChoices}
+                                    codexRuntimeStatus={codexRuntimeStatus}
+                                    codexStatusLoading={codexStatusLoading}
+                                    codexInstalling={codexInstalling}
+                                    codexInstallError={codexInstallError}
+                                    onRefreshCodexRuntime={() => void refreshCodexRuntime()}
+                                    onInstallCodex={() => void installCodexRuntime()}
                                     onSaveAgent={saveAgent}
                                     onDeleteAgent={deleteAgent}
                                 />

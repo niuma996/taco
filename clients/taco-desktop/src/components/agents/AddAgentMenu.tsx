@@ -12,6 +12,7 @@ import { IconButton } from "../ui/IconButton.tsx";
 const KINDS: ReadonlyArray<{ runtime: AgentRuntime; labelKey: string; hintKey: string }> = [
     { runtime: "standard", labelKey: "agents.addStandard", hintKey: "agents.addStandardHint" },
     { runtime: "claude-code", labelKey: "agents.addCc", hintKey: "agents.addCcHint" },
+    { runtime: "codex", labelKey: "agents.addCodex", hintKey: "agents.addCodexHint" },
 ];
 
 export function AddAgentMenu({ onPick }: { onPick: (runtime: AgentRuntime) => void }) {

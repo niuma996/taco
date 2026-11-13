@@ -18,7 +18,11 @@ import {
     AGENT_TYPE_PATTERN,
     type AgentRuntime,
     type AgentScope,
+    type AgentsRuntimeStatusResult,
     type ClaudeCodePermissionMode,
+    type CodexAgentConfig,
+    type CodexApprovalPolicy,
+    type CodexSandboxMode,
 } from "@taco-ai/protocol";
 import { useState } from "react";
 import { useT } from "../../i18n/useI18n.ts";
@@ -29,6 +33,7 @@ import { Select } from "../ui/Select.tsx";
 import { Switch } from "../ui/Switch.tsx";
 import { Textarea } from "../ui/Textarea.tsx";
 import { TextInput } from "../ui/TextInput.tsx";
+import { CodexRuntimeNotice } from "./CodexRuntimeNotice.tsx";
 
 /** Claude Code tool names, as the sidecar validates them. */
 const TOOL_NAME_PATTERN = AGENT_TOOL_NAME_PATTERN;
@@ -36,10 +41,9 @@ const TOOL_NAME_PATTERN = AGENT_TOOL_NAME_PATTERN;
 /** Never available to a subagent: it would open a prompt no one can answer. */
 const BLOCKED_CC_TOOLS = new Set(["AskUserQuestion"]);
 
-/** Turn cap a new definition starts with; Claude Code matches the sidecar's runner default. */
 /**
- * Turn budget a new definition starts with. The same for both runtimes: the
- * budget is about how much work the task needs, not about which engine runs it.
+ * Initial turn budget required by the definition schema. Standard and Claude
+ * Code enforce it; the Codex adapter currently uses the SDK turn lifecycle.
  */
 export function defaultMaxTurns(): number {
     return 100;
@@ -56,6 +60,17 @@ const PERMISSION_MODES: ReadonlyArray<ClaudeCodePermissionMode> = [
 ];
 
 const SCOPES: ReadonlyArray<AgentScope> = ["global", "workspace"];
+const CODEX_SANDBOXES: ReadonlyArray<CodexSandboxMode> = [
+    "read-only",
+    "workspace-write",
+    "danger-full-access",
+];
+const CODEX_APPROVALS: ReadonlyArray<CodexApprovalPolicy> = [
+    "untrusted",
+    "on-failure",
+    "on-request",
+    "never",
+];
 
 /** What the form produces; the pane adds `previousAgentType`. */
 export interface AgentFormValue {
@@ -72,6 +87,8 @@ export interface AgentFormValue {
     permissionMode?: ClaudeCodePermissionMode;
     /** `claude-code` only: the directory it runs in. */
     cwd?: string;
+    /** `codex` only: SDK engine settings. */
+    codex?: CodexAgentConfig;
 }
 
 export interface AgentFormProps {
@@ -93,6 +110,12 @@ export interface AgentFormProps {
      * existed), then its associated directories.
      */
     cwdChoices: ReadonlyArray<string>;
+    codexRuntimeStatus?: AgentsRuntimeStatusResult | null;
+    codexStatusLoading?: boolean;
+    codexInstalling?: boolean;
+    codexInstallError?: string | null;
+    onInstallCodex?: () => void;
+    onRefreshCodexRuntime?: () => void;
     /** Save errors (RPC-level) are shown in the form so the draft survives. */
     error?: string | null;
     onSave: (value: AgentFormValue) => void;
@@ -112,6 +135,7 @@ export function AgentForm(props: AgentFormProps) {
     const { t } = useT();
     const isEdit = props.existing !== undefined;
     const isCc = props.runtime === "claude-code";
+    const isCodex = props.runtime === "codex";
 
     const [scope, setScope] = useState<AgentScope>(
         props.existing?.scope ?? props.fixedScope ?? "global",
@@ -143,11 +167,25 @@ export function AgentForm(props: AgentFormProps) {
     // this field existed already runs in the workspace directory, so that is
     // what the picker states, and saving makes it explicit.
     const [cwd, setCwd] = useState<string>(props.existing?.cwd ?? props.cwdChoices[0] ?? "");
+    const [codexCwd, setCodexCwd] = useState<string>(
+        props.existing?.codex?.cwd ?? props.cwdChoices[0] ?? "",
+    );
+    const [codexModel, setCodexModel] = useState(props.existing?.codex?.model ?? "");
+    const [codexSandbox, setCodexSandbox] = useState<CodexSandboxMode>(
+        props.existing?.codex?.sandbox ?? "read-only",
+    );
+    const [codexApprovalPolicy, setCodexApprovalPolicy] = useState<CodexApprovalPolicy>(
+        props.existing?.codex?.approvalPolicy ?? "never",
+    );
     // A directory saved from another workspace is kept as a choice so editing
     // other fields here does not silently move the agent.
     const cwdOptions =
         cwd !== "" && !props.cwdChoices.includes(cwd)
             ? [cwd, ...props.cwdChoices]
+            : props.cwdChoices;
+    const codexCwdOptions =
+        codexCwd !== "" && !props.cwdChoices.includes(codexCwd)
+            ? [codexCwd, ...props.cwdChoices]
             : props.cwdChoices;
 
     const trimmedType = agentType.trim();
@@ -189,7 +227,8 @@ export function AgentForm(props: AgentFormProps) {
         timeoutValid &&
         (noRolePrompt || systemPrompt.trim() !== "") &&
         systemPrompt.trim().length <= 65536 &&
-        (!isCc || toolsError === undefined);
+        (!isCc || toolsError === undefined) &&
+        (!isCodex || codexModel.trim().length <= 256);
 
     const save = () => {
         if (!canSave) return;
@@ -203,16 +242,32 @@ export function AgentForm(props: AgentFormProps) {
             ...(timeoutValue !== undefined ? { timeoutMinutes: timeoutValue } : {}),
             systemPrompt: noRolePrompt ? "" : systemPrompt,
             ...(isCc ? { tools: toolList, permissionMode, ...(cwd !== "" ? { cwd } : {}) } : {}),
+            ...(isCodex
+                ? {
+                      codex: {
+                          ...(codexCwd !== "" ? { cwd: codexCwd } : {}),
+                          // No model means the user's own Codex configuration
+                          // decides — the same rule a Claude Code agent follows.
+                          ...(codexModel.trim() !== "" ? { model: codexModel.trim() } : {}),
+                          sandbox: codexSandbox,
+                          approvalPolicy: codexApprovalPolicy,
+                      },
+                  }
+                : {}),
         });
     };
 
-    const title = isCc
+    const title = isCodex
         ? isEdit
-            ? t("agents.form.editCcTitle")
-            : t("agents.form.newCcTitle")
-        : isEdit
-          ? t("agents.form.editTitle")
-          : t("agents.form.newTitle");
+            ? t("agents.form.editCodexTitle")
+            : t("agents.form.newCodexTitle")
+        : isCc
+          ? isEdit
+              ? t("agents.form.editCcTitle")
+              : t("agents.form.newCcTitle")
+          : isEdit
+            ? t("agents.form.editTitle")
+            : t("agents.form.newTitle");
 
     return (
         <Modal
@@ -250,6 +305,16 @@ export function AgentForm(props: AgentFormProps) {
                     <li>{t("agents.form.ccRuleAskUser")}</li>
                 </ul>
             )}
+            {isCodex && (
+                <CodexRuntimeNotice
+                    status={props.codexRuntimeStatus}
+                    loading={props.codexStatusLoading}
+                    installing={props.codexInstalling}
+                    error={props.codexInstallError}
+                    onInstall={props.onInstallCodex}
+                    onRefresh={props.onRefreshCodexRuntime}
+                />
+            )}
             {props.fixedScope === undefined && (
                 <FormField
                     label={t("agents.form.scope")}
@@ -274,24 +339,28 @@ export function AgentForm(props: AgentFormProps) {
             {shadowsGlobal && (
                 <div className="agent-form-notice">{t("agents.form.shadowsGlobal")}</div>
             )}
-            <FormField
-                label={t("agents.form.name")}
-                hint={t("agents.form.nameHint")}
-                error={trimmedType !== "" && !typeValid ? t("agents.form.nameInvalid") : undefined}
-            >
-                <TextInput
-                    value={agentType}
-                    onChange={(e) => setAgentType(e.target.value)}
-                    placeholder="code-reviewer"
-                />
-            </FormField>
-            <FormField label={t("agents.form.description")}>
-                <TextInput
-                    value={description}
-                    onChange={(e) => setDescription(e.target.value)}
-                    maxLength={1024}
-                />
-            </FormField>
+            <div className="agent-form-grid">
+                <FormField
+                    label={t("agents.form.name")}
+                    hint={t("agents.form.nameHint")}
+                    error={
+                        trimmedType !== "" && !typeValid ? t("agents.form.nameInvalid") : undefined
+                    }
+                >
+                    <TextInput
+                        value={agentType}
+                        onChange={(e) => setAgentType(e.target.value)}
+                        placeholder="code-reviewer"
+                    />
+                </FormField>
+                <FormField label={t("agents.form.description")}>
+                    <TextInput
+                        value={description}
+                        onChange={(e) => setDescription(e.target.value)}
+                        maxLength={1024}
+                    />
+                </FormField>
+            </div>
             <FormField label={t("agents.form.whenToUse")}>
                 <TextInput
                     value={whenToUse}
@@ -348,16 +417,110 @@ export function AgentForm(props: AgentFormProps) {
                     )}
                 </>
             )}
-            <FormField
-                label={t("agents.form.maxTurns")}
-                error={!turnsValid ? t("agents.form.maxTurnsInvalid") : undefined}
-            >
-                <TextInput
-                    value={maxTurns}
-                    onChange={(e) => setMaxTurns(e.target.value)}
-                    inputMode="numeric"
-                />
-            </FormField>
+            {isCodex && (
+                <section className="agent-form-section" aria-labelledby="codex-engine-title">
+                    <div className="agent-form-section-head">
+                        <h3 className="agent-form-section-title" id="codex-engine-title">
+                            {t("agents.form.codexEngineTitle")}
+                        </h3>
+                        <p className="agent-form-section-hint">
+                            {t("agents.form.codexEngineHint")}
+                        </p>
+                    </div>
+                    <div className="agent-form-grid">
+                        <FormField
+                            className="agent-form-grid-full"
+                            label={t("agents.form.codexCwd")}
+                            hint={t("agents.form.codexCwdHint")}
+                        >
+                            <Select
+                                value={codexCwd}
+                                onValueChange={setCodexCwd}
+                                options={codexCwdOptions.map((dir, i) => ({
+                                    value: dir,
+                                    label: dir,
+                                    ...(dir === props.cwdChoices[0] &&
+                                    i === codexCwdOptions.indexOf(dir)
+                                        ? { badge: t("agents.form.codexCwdWorkspace") }
+                                        : {}),
+                                }))}
+                                disabled={codexCwdOptions.length === 0}
+                                label={t("agents.form.codexCwd")}
+                            />
+                        </FormField>
+                        <FormField
+                            label={t("agents.form.codexModel")}
+                            hint={t("agents.form.codexModelHint")}
+                        >
+                            <TextInput
+                                value={codexModel}
+                                onChange={(e) => setCodexModel(e.target.value)}
+                                maxLength={256}
+                                placeholder={t("agents.form.codexModelPlaceholder")}
+                            />
+                        </FormField>
+                        <FormField
+                            label={t("agents.form.codexSandbox")}
+                            hint={t("agents.form.codexSandboxHint")}
+                        >
+                            <Select
+                                value={codexSandbox}
+                                onValueChange={(value) =>
+                                    setCodexSandbox(value as CodexSandboxMode)
+                                }
+                                options={CODEX_SANDBOXES.map((value) => ({
+                                    value,
+                                    label: t(`agents.form.codexSandboxMode.${value}`),
+                                }))}
+                                label={t("agents.form.codexSandbox")}
+                            />
+                        </FormField>
+                        <FormField
+                            className="agent-form-grid-full"
+                            label={t("agents.form.codexApproval")}
+                            hint={t("agents.form.codexApprovalHint")}
+                        >
+                            <Select
+                                value={codexApprovalPolicy}
+                                onValueChange={(value) =>
+                                    setCodexApprovalPolicy(value as CodexApprovalPolicy)
+                                }
+                                options={CODEX_APPROVALS.map((value) => ({
+                                    value,
+                                    label: t(`agents.form.codexApprovalMode.${value}`),
+                                }))}
+                                label={t("agents.form.codexApproval")}
+                            />
+                        </FormField>
+                    </div>
+                    {codexApprovalPolicy !== "never" && (
+                        <div className="agent-form-notice agent-form-notice--warn" role="note">
+                            {t("agents.form.codexApprovalNotice")}
+                        </div>
+                    )}
+                    <ul
+                        className="agent-form-rules agent-form-rules--plain"
+                        aria-label={t("agents.form.codexRulesLabel")}
+                    >
+                        <li>{t("agents.form.codexRuleEngine")}</li>
+                        <li>{t("agents.form.codexRuleContext")}</li>
+                        <li>{t("agents.form.codexRuleDelivery")}</li>
+                        <li>{t("agents.form.codexRuleAuth")}</li>
+                    </ul>
+                </section>
+            )}
+            {!isCodex && (
+                <FormField
+                    label={t("agents.form.maxTurns")}
+                    error={!turnsValid ? t("agents.form.maxTurnsInvalid") : undefined}
+                >
+                    <TextInput
+                        value={maxTurns}
+                        onChange={(e) => setMaxTurns(e.target.value)}
+                        inputMode="numeric"
+                    />
+                </FormField>
+            )}
             <FormField
                 label={t("agents.form.timeoutMinutes")}
                 hint={t("agents.form.timeoutMinutesHint")}

@@ -140,3 +140,42 @@ describe("AgentsPane — 浏览布局", () => {
         assert.ok(screen.getByRole("heading", { name: "Role", level: 2 }));
     });
 });
+
+describe("AgentsPane — Codex setup", () => {
+    it("shows install guidance on the detail of a Codex agent without opening the form", () => {
+        render(
+            <AgentsPane
+                agents={[
+                    {
+                        agentType: "codex-reviewer",
+                        description: "reviews",
+                        source: "user",
+                        editable: true,
+                        runtime: "codex",
+                    },
+                ]}
+                error={null}
+                selectedAgentType="codex-reviewer"
+                onSelect={() => {}}
+                content={null}
+                contentLoading={false}
+                contentError={null}
+                saving={false}
+                hasProjectDir={true}
+                cwdChoices={[]}
+                codexRuntimeStatus={{
+                    runtime: "codex",
+                    installed: false,
+                    auth: "unknown",
+                    installer: "missing",
+                    installCommand: "npm install @openai/codex-sdk@0.167.2",
+                }}
+                onSaveAgent={async () => {}}
+                onDeleteAgent={async () => {}}
+            />,
+        );
+        assert.ok(screen.getByText("agents.form.codexNpmMissing"));
+        assert.ok(screen.getByText("npm install @openai/codex-sdk@0.167.2"));
+        assert.equal(screen.queryByRole("dialog"), null);
+    });
+});

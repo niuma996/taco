@@ -7,11 +7,18 @@
  * Data fetching and mutations live in useAgentsPane (App.tsx).
  */
 
-import type { AgentEntry, AgentRuntime, AgentScope, AgentsContentResult } from "@taco-ai/protocol";
+import type {
+    AgentEntry,
+    AgentRuntime,
+    AgentScope,
+    AgentsContentResult,
+    AgentsRuntimeStatusResult,
+} from "@taco-ai/protocol";
 import { type ReactElement, useMemo, useState } from "react";
 import { AssistantMarkdown } from "../components/AssistantMarkdown";
 import { AddAgentMenu } from "../components/agents/AddAgentMenu";
 import { AgentForm, type AgentFormValue, defaultMaxTurns } from "../components/agents/AgentForm";
+import { CodexRuntimeNotice } from "../components/agents/CodexRuntimeNotice";
 import { ConfirmModal } from "../components/ConfirmModal";
 import { PaneHeader } from "../components/PaneHeader";
 import { Button } from "../components/ui/Button";
@@ -34,6 +41,12 @@ export interface AgentsPaneProps {
     hasProjectDir: boolean;
     /** Directories a Claude Code agent may run in; the first is the default. */
     cwdChoices: ReadonlyArray<string>;
+    codexRuntimeStatus?: AgentsRuntimeStatusResult | null;
+    codexStatusLoading?: boolean;
+    codexInstalling?: boolean;
+    codexInstallError?: string | null;
+    onRefreshCodexRuntime?: () => void;
+    onInstallCodex?: () => void;
     onSaveAgent: (
         input: AgentSaveInput,
         previousAgentType?: string,
@@ -55,6 +68,12 @@ export function AgentsPane({
     saving,
     hasProjectDir,
     cwdChoices,
+    codexRuntimeStatus = null,
+    codexStatusLoading = false,
+    codexInstalling = false,
+    codexInstallError = null,
+    onRefreshCodexRuntime = () => {},
+    onInstallCodex = () => {},
     onSaveAgent,
     onDeleteAgent,
 }: AgentsPaneProps): ReactElement {
@@ -124,6 +143,7 @@ export function AgentsPane({
                         <AddAgentMenu
                             onPick={(runtime) => {
                                 setFormError(null);
+                                if (runtime === "codex") onRefreshCodexRuntime();
                                 setFormOpen({ mode: "new", runtime });
                             }}
                         />
@@ -134,6 +154,23 @@ export function AgentsPane({
                         {error}
                     </div>
                 )}
+                {agents.some((agent) => agent.runtime === "codex") &&
+                    selectedAgent?.runtime !== "codex" &&
+                    (codexStatusLoading ||
+                        codexInstallError != null ||
+                        codexRuntimeStatus == null ||
+                        !codexRuntimeStatus.installed ||
+                        codexRuntimeStatus.auth !== "signed-in" ||
+                        codexRuntimeStatus.installer === "missing") && (
+                        <CodexRuntimeNotice
+                            status={codexRuntimeStatus}
+                            loading={codexStatusLoading}
+                            installing={codexInstalling}
+                            error={codexInstallError}
+                            onInstall={onInstallCodex}
+                            onRefresh={onRefreshCodexRuntime}
+                        />
+                    )}
                 <div className="agents-list-body">
                     {filtered.length === 0 ? (
                         <div className="ui-empty">
@@ -158,7 +195,9 @@ export function AgentsPane({
                                         <span className="agents-list-item-source">
                                             {a.runtime === "claude-code"
                                                 ? t("agents.runtimeCc")
-                                                : a.source}
+                                                : a.runtime === "codex"
+                                                  ? t("agents.runtimeCodex")
+                                                  : a.source}
                                         </span>
                                         {a.scope && (
                                             <span className="agents-list-item-source">
@@ -186,6 +225,9 @@ export function AgentsPane({
                                             disabled={saving || contentLoading || !content}
                                             onClick={() => {
                                                 setFormError(null);
+                                                if (selectedAgent?.runtime === "codex") {
+                                                    onRefreshCodexRuntime();
+                                                }
                                                 setFormOpen({ mode: "edit" });
                                             }}
                                         >
@@ -209,7 +251,9 @@ export function AgentsPane({
                                 <span className="agents-detail-tag">
                                     {selectedAgent.runtime === "claude-code"
                                         ? t("agents.runtimeCc")
-                                        : t("agents.runtimeStandard")}
+                                        : selectedAgent.runtime === "codex"
+                                          ? t("agents.runtimeCodex")
+                                          : t("agents.runtimeStandard")}
                                 </span>
                                 <span className="agents-detail-tag">
                                     {selectedAgent.scope !== undefined
@@ -238,6 +282,16 @@ export function AgentsPane({
                                         </span>
                                     )}
                             </div>
+                            {selectedAgent.runtime === "codex" && (
+                                <CodexRuntimeNotice
+                                    status={codexRuntimeStatus}
+                                    loading={codexStatusLoading}
+                                    installing={codexInstalling}
+                                    error={codexInstallError}
+                                    onInstall={onInstallCodex}
+                                    onRefresh={onRefreshCodexRuntime}
+                                />
+                            )}
                             <p className="agents-detail-description">{selectedAgent.description}</p>
                             {selectedAgent.whenToUse && (
                                 <p className="agents-detail-when-to-use">
@@ -292,6 +346,7 @@ export function AgentsPane({
                                   tools: content.tools,
                                   permissionMode: content.permissionMode,
                                   cwd: content.cwd,
+                                  codex: content.codex,
                               }
                             : undefined
                     }
@@ -299,6 +354,12 @@ export function AgentsPane({
                     hasProjectDir={hasProjectDir}
                     fixedScope={editorScope}
                     cwdChoices={cwdChoices}
+                    codexRuntimeStatus={codexRuntimeStatus}
+                    codexStatusLoading={codexStatusLoading}
+                    codexInstalling={codexInstalling}
+                    codexInstallError={codexInstallError}
+                    onInstallCodex={onInstallCodex}
+                    onRefreshCodexRuntime={onRefreshCodexRuntime}
                     shadowedTypes={
                         globalAgentTypes ??
                         agents.filter((a) => a.scope === "global").map((a) => a.agentType)

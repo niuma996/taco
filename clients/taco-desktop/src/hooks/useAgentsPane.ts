@@ -3,8 +3,10 @@ import {
     type AgentRuntime,
     type AgentScope,
     type AgentsContentResult,
+    type AgentsRuntimeStatusResult,
     asWorkspaceId,
     type ClaudeCodePermissionMode,
+    type CodexAgentConfig,
 } from "@taco-ai/protocol";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { TacoClient } from "../lib/clients/tacoClient.ts";
@@ -23,6 +25,7 @@ export interface AgentSaveInput {
     tools?: string[];
     permissionMode?: ClaudeCodePermissionMode;
     cwd?: string;
+    codex?: CodexAgentConfig;
 }
 
 export interface UseAgentsPaneResult {
@@ -36,6 +39,12 @@ export interface UseAgentsPaneResult {
     agentContentLoading: boolean;
     agentContentError: string | null;
     agentSaving: boolean;
+    codexRuntimeStatus: AgentsRuntimeStatusResult | null;
+    codexStatusLoading: boolean;
+    codexInstalling: boolean;
+    codexInstallError: string | null;
+    refreshCodexRuntime: () => Promise<void>;
+    installCodexRuntime: () => Promise<void>;
     saveAgent: (
         input: AgentSaveInput,
         previousAgentType?: string,
@@ -64,10 +73,44 @@ export function useAgentsPane(
     const [agentContentLoading, setAgentContentLoading] = useState(false);
     const [agentContentError, setAgentContentError] = useState<string | null>(null);
     const [agentSaving, setAgentSaving] = useState(false);
+    const [codexRuntimeStatus, setCodexRuntimeStatus] = useState<AgentsRuntimeStatusResult | null>(
+        null,
+    );
+    const [codexStatusLoading, setCodexStatusLoading] = useState(false);
+    const [codexInstalling, setCodexInstalling] = useState(false);
+    const [codexInstallError, setCodexInstallError] = useState<string | null>(null);
     const requestCounter = useRef(0);
     // A mutation must not revive an earlier target/layer, even after navigating back to it.
     const paneGeneration = useRef(0);
     const agents = useMemo(() => filterAgentScope(catalog, viewScope), [catalog, viewScope]);
+
+    const refreshCodexRuntime = useCallback(async () => {
+        setCodexStatusLoading(true);
+        try {
+            const status = await client.agentsRuntimeStatus({ runtime: "codex" });
+            setCodexRuntimeStatus(status);
+            setCodexInstallError(null);
+        } catch (error) {
+            setCodexRuntimeStatus(null);
+            setCodexInstallError(error instanceof Error ? error.message : String(error));
+        } finally {
+            setCodexStatusLoading(false);
+        }
+    }, [client]);
+
+    const installCodexRuntime = useCallback(async () => {
+        if (codexInstalling) return;
+        setCodexInstalling(true);
+        setCodexInstallError(null);
+        try {
+            await client.agentsInstallRuntime({ runtime: "codex" });
+            await refreshCodexRuntime();
+        } catch (error) {
+            setCodexInstallError(error instanceof Error ? error.message : String(error));
+        } finally {
+            setCodexInstalling(false);
+        }
+    }, [client, codexInstalling, refreshCodexRuntime]);
 
     const reload = useCallback(async () => {
         if (!activeCwd) return;
@@ -112,12 +155,13 @@ export function useAgentsPane(
                     failAgentsList(error);
                 });
             }
+            if (active) void refreshCodexRuntime();
         }
         return () => {
             paneGeneration.current += 1;
             requestCounter.current += 1;
         };
-    }, [active, activeCwd, reload, clearAgentsError, failAgentsList]);
+    }, [active, activeCwd, reload, clearAgentsError, failAgentsList, refreshCodexRuntime]);
 
     useEffect(() => {
         let cancelled = false;
@@ -207,6 +251,12 @@ export function useAgentsPane(
         agentContentLoading,
         agentContentError,
         agentSaving,
+        codexRuntimeStatus,
+        codexStatusLoading,
+        codexInstalling,
+        codexInstallError,
+        refreshCodexRuntime,
+        installCodexRuntime,
         saveAgent,
         deleteAgent,
     };
