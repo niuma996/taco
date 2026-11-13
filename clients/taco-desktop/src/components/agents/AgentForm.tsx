@@ -244,6 +244,10 @@ export function AgentForm(props: AgentFormProps) {
             ...(isCc ? { tools: toolList, permissionMode, ...(cwd !== "" ? { cwd } : {}) } : {}),
             ...(isCodex
                 ? {
+                      // There is no Codex tool picker; preserve the profile's whitelist verbatim.
+                      ...(props.existing?.tools !== undefined
+                          ? { tools: props.existing.tools }
+                          : {}),
                       codex: {
                           ...(codexCwd !== "" ? { cwd: codexCwd } : {}),
                           // No model means the user's own Codex configuration

@@ -72,6 +72,112 @@ const flush = async () => {
 };
 
 describe("workspace lifecycle isolation", () => {
+    it("keeps a newer attach locked after navigating to another workspace and back to the same target", async () => {
+        const firstSource = deferred<unknown>();
+        const secondSource = deferred<unknown>();
+        const original = createEmptyWorkspace("/w");
+        original.listTotal = 1;
+        const other = createEmptyWorkspace("/other");
+        other.listTotal = 0;
+        const h = setup(
+            {
+                sessionSnapshotGet: vi
+                    .fn()
+                    .mockReturnValueOnce(firstSource.promise)
+                    .mockReturnValueOnce(secondSource.promise),
+            },
+            { [original.cwd]: original, [other.cwd]: other },
+        );
+        const processor = new SessionPushProcessor({
+            getEvents: async () => ({ events: [], firstSeq: 1, lastSeq: 1, resetRequired: false }),
+            recoverSnapshot: (cwd, sid, kind, _after, _target, isCurrent) =>
+                h.result.current.restoreSessionSnapshot(cwd, sid, kind, isCurrent),
+            deliver: vi.fn(),
+            reportError: vi.fn(),
+            snapshotRetryDelaysMs: [],
+        });
+        const unbind = bindSessionSynchronization(h.client, processor);
+        const snapshot = {
+            history: { entries: [] },
+            sessionKind: "main",
+            snapshotSeq: 1,
+            runtime: {
+                operation: null,
+                tools: [],
+                queues: [],
+                pendingCommandPermissions: [],
+                pendingAskUserToolCallIds: [],
+                inFlightAgentToolCallIds: [],
+                settledBackgroundSubSessionIds: [],
+            },
+        };
+        try {
+            const first = h.result.current.attachSession("/w", "A");
+            await flush();
+            await h.result.current.switchWorkspace("/other");
+            await h.result.current.switchWorkspace("/w");
+            const second = h.result.current.attachSession("/w", "A");
+            await flush();
+            firstSource.resolve(snapshot);
+            await first;
+            expect(h.workspacesRef.current["/w"]?.loadingSessionId).toBe("A");
+            secondSource.resolve(snapshot);
+            await second;
+            expect(h.workspacesRef.current["/w"]?.loadingSessionId).toBeUndefined();
+            expect(h.workspacesRef.current["/w"]?.activeSession).toBe("A");
+        } finally {
+            unbind();
+        }
+    });
+
+    it("releases an abandoned snapshot attach's loading lock without selecting it", async () => {
+        const source = deferred<unknown>();
+        const h = setup({ sessionSnapshotGet: vi.fn(() => source.promise) });
+        const processor = new SessionPushProcessor({
+            getEvents: async () => ({ events: [], firstSeq: 1, lastSeq: 1, resetRequired: false }),
+            onSyncState: (cwd, sid, sync) => {
+                h.workspacesRef.current = workspacesReducer(h.workspacesRef.current, {
+                    type: "SET_SESSION_SYNC",
+                    cwd,
+                    sid,
+                    sync,
+                });
+            },
+            recoverSnapshot: (cwd, sid, kind, _after, _target, isCurrent) =>
+                h.result.current.restoreSessionSnapshot(cwd, sid, kind, isCurrent),
+            deliver: vi.fn(),
+            reportError: vi.fn(),
+            snapshotRetryDelaysMs: [],
+        });
+        const unbind = bindSessionSynchronization(h.client, processor);
+        try {
+            const opening = h.result.current.attachSession("/w", "A");
+            await flush();
+            h.result.current.markNavigationIntent();
+            source.resolve({
+                history: { entries: [] },
+                sessionKind: "main",
+                snapshotSeq: 1,
+                runtime: {
+                    operation: null,
+                    tools: [],
+                    queues: [],
+                    pendingCommandPermissions: [],
+                    pendingAskUserToolCallIds: [],
+                    inFlightAgentToolCallIds: [],
+                    settledBackgroundSubSessionIds: [],
+                },
+            });
+            await opening;
+            expect(h.workspacesRef.current["/w"]?.activeSession).toBeUndefined();
+            expect(h.workspacesRef.current["/w"]?.loadingSessionId).toBeUndefined();
+            expect(getSessionState(h.workspacesRef.current["/w"], "A")?.historyLoaded).toBe(true);
+            expect(getSessionState(h.workspacesRef.current["/w"], "A")?.sync).toBe("current");
+        } finally {
+            unbind();
+        }
+    });
+
     it("opens through the shared snapshot queue and replays new lifecycle frames without stealing a newer draft", async () => {
         let navigation = 0;
         const source = deferred<unknown>();

@@ -161,7 +161,7 @@ export default function App() {
         attachSession,
         deleteSession,
         renameSession,
-        beginPendingNewSession,
+        openNewSession,
         openImConversation,
         cancelQueued,
         abortPrompt,
@@ -797,9 +797,9 @@ export default function App() {
     // discard.
     // Tasks and subagents belong to the session being left; the file tree
     // belongs to the workspace, which the new chat shares, so it stays.
-    function startNewSession(cwd: string): void {
+    async function startNewSession(cwd: string): Promise<void> {
+        if (!(await openNewSession(cwd))) return;
         if (rightPanel.panel === "tasks" || rightPanel.panel === "subagents") rightPanel.close();
-        beginPendingNewSession(cwd);
     }
 
     function handleNewSession(): void {
@@ -809,7 +809,7 @@ export default function App() {
             setConfirmNewSession(true);
             return;
         }
-        startNewSession(activeCwd);
+        void startNewSession(activeCwd);
     }
 
     async function submitComposer(): Promise<void> {
@@ -927,9 +927,7 @@ export default function App() {
                                 }}
                                 onNewSession={(cwd) => {
                                     if (cwd === activeCwd) handleNewSession();
-                                    else {
-                                        void switchWorkspace(cwd).then(() => startNewSession(cwd));
-                                    }
+                                    else void startNewSession(cwd);
                                 }}
                                 onOpenFolder={() => void browseAndOpen()}
                                 onManageAssociations={setAssociationsTarget}
@@ -1048,9 +1046,7 @@ export default function App() {
                                                         !activeCwd.startsWith(IM_CWD_PREFIX)
                                                     }
                                                     onSelect={(cwd) => {
-                                                        void switchWorkspace(cwd).then(() =>
-                                                            startNewSession(cwd),
-                                                        );
+                                                        void startNewSession(cwd);
                                                     }}
                                                 />
                                             }
@@ -1376,7 +1372,7 @@ export default function App() {
                     setPendingNewSessionCwd(null);
                     if (pendingNewDraft.current) drafts.release(pendingNewDraft.current);
                     pendingNewDraft.current = null;
-                    startNewSession(cwd);
+                    void startNewSession(cwd);
                 }}
                 onCancel={() => {
                     setConfirmNewSession(false);

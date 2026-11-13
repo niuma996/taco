@@ -145,7 +145,7 @@ describe("initialize", () => {
             assert.equal(result.serverCapabilities.pushes.includes("sidecar.hello"), false);
             assert.deepEqual(result.protocolVersion, SIDECAR_PROTOCOL_VERSION);
             // Pinned separately: a bump must be a deliberate edit here too.
-            assert.deepEqual(SIDECAR_PROTOCOL_VERSION, { major: 2, minor: 17 });
+            assert.deepEqual(SIDECAR_PROTOCOL_VERSION, { major: 2, minor: 18 });
             assert.equal(typeof result.instanceId, "string");
             assert.equal(typeof result.pid, "number");
         });
@@ -194,8 +194,8 @@ describe("initialize", () => {
             if (!resp.ok) assert.equal(resp.error.code, "incompatible_protocol");
         });
 
-        it("a 2.17 client refuses a 2.16 daemon without layered memory", () => {
-            // Layered Memory reads and the IM memory policy must not degrade silently.
+        it("a 2.18 client refuses a 2.17 daemon without scoped memory reads", () => {
+            // A summary's source reference requires the memory.read RPC.
             assert.equal(isCompatibleSidecarProtocol({ major: 2, minor: 5 }), false);
             assert.equal(isCompatibleSidecarProtocol({ major: 2, minor: 6 }), false);
             assert.equal(isCompatibleSidecarProtocol({ major: 2, minor: 7 }), false);
@@ -206,9 +206,17 @@ describe("initialize", () => {
             assert.equal(isCompatibleSidecarProtocol({ major: 2, minor: 14 }), false);
             assert.equal(isCompatibleSidecarProtocol({ major: 2, minor: 15 }), false);
             assert.equal(isCompatibleSidecarProtocol({ major: 2, minor: 16 }), false);
-            assert.equal(isCompatibleSidecarProtocol({ major: 2, minor: 17 }), true);
+            assert.equal(isCompatibleSidecarProtocol({ major: 2, minor: 17 }), false);
+            assert.equal(isCompatibleSidecarProtocol({ major: 2, minor: 18 }), true);
             // A newer sidecar is additive; the client ignores methods it lacks.
+            assert.equal(isCompatibleSidecarProtocol({ major: 2, minor: 19 }), true);
             assert.equal(isCompatibleSidecarProtocol({ major: 2, minor: 11 }), false);
+        });
+
+        it("accepts a 2.17 client after adding scoped memory reads", async () => {
+            const { transport } = await bootServer();
+            const response = await sendLine(transport, initializeFrame("init-2-17", 17));
+            assert.equal(response.ok, true);
         });
 
         it("accepts an older compatible client minor", async () => {

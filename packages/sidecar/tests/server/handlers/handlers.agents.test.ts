@@ -596,6 +596,10 @@ describe("agents.write", () => {
         it("keeps an unchanged directory that is no longer a choice here", async () => {
             // Fixed from another workspace: editing it here must not force a move.
             const existing = def({ agentType: "keep", runtime: "claude-code", cwd: outside });
+            await writeUserAgent(params({ agentType: "keep", cwd: outside }), [], {
+                ...ctx(),
+                allowedCwds: [outside],
+            });
             await writeUserAgent(
                 params({
                     agentType: "keep",
@@ -724,6 +728,11 @@ describe("agents.write", () => {
                 runtime: "codex",
                 codex: { cwd: outside, model: "gpt-6" },
             });
+            await writeUserAgent(
+                params({ agentType: "cx-keep", runtime: "codex", codex: existing.codex }),
+                [],
+                { ...ctx(), allowedCwds: [outside] },
+            );
             await writeUserAgent(
                 params({
                     agentType: "cx-keep",

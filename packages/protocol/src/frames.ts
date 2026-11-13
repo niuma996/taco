@@ -101,8 +101,9 @@ export type CompactionFailureReason =
  *  2.14 adds layer-scoped Agent catalog reads/mutations and Skill provenance.
  *  2.15 adds peer-scoped IM directory associations.
  *  2.16 adds source-layer Skill reads and original builtin Agent reads.
- *  2.17 adds layered Memory reads and the IM Taco-system-memory opt-in. */
-export const SIDECAR_PROTOCOL_VERSION = { major: 2, minor: 17 } as const;
+ *  2.17 adds layered Memory reads and the IM Taco-system-memory opt-in.
+ *  2.18 adds scoped `memory.read` and opaque memory source references. */
+export const SIDECAR_PROTOCOL_VERSION = { major: 2, minor: 18 } as const;
 
 /**
  * Client-side gate for a sidecar's advertised protocol version. Semver-ish but

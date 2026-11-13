@@ -97,6 +97,8 @@ export interface UseWorkspacesApi {
     renameSession: (cwd: string, sid: string, name: string) => Promise<void>;
 
     // ── session lifecycle ──
+    /** Switch workspace and create a draft only if no newer navigation supersedes the request. */
+    openNewSession: (cwd: string) => Promise<boolean>;
     /**
      * Clear the current active session + messages without any backend call.
      * The first real send creates the session on the server and pulls the id

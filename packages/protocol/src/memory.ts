@@ -12,6 +12,7 @@ import type {
     memoryDreamRunSchema,
     memoryDreamUndoSchema,
     memoryListSchema,
+    memoryReadSchema,
     memoryRestoreTopicSchema,
     memoryUpsertSchema,
     memoryWriteSchema,
@@ -37,6 +38,13 @@ export interface MemorySource {
 
 /** `memory.list` / `memory.write` / `memory.deleteTopic` — workspace-scoped. */
 export type MemoryListParams = ParamsOf<typeof memoryListSchema>;
+
+/** Read one topic from a currently authorized source. No write or filesystem capability is granted. */
+export type MemoryReadParams = ParamsOf<typeof memoryReadSchema>;
+export interface MemoryReadResult {
+    sourceId: string;
+    topic: MemoryTopicEntry;
+}
 
 /** Which source layer supplied a topic in `memory.list`. */
 export type MemoryTopicLayer = "current" | "workspace" | "managed-global";
@@ -65,6 +73,8 @@ export interface MemoryTopicEntry {
     memoryLayer?: MemoryTopicLayer;
     /** Stable source identity when ids may collide across workspaces. */
     memoryLayerKey?: string;
+    /** Opaque source identity for `memory.read`; safe to pass in model context. */
+    sourceId?: string;
     /** Inherited layers cannot be edited, deleted, or consolidated here. */
     readOnly?: boolean;
 }

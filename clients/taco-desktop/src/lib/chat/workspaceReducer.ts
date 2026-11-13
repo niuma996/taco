@@ -173,6 +173,7 @@ export type WorkspaceAction =
     | { type: "ATTACH_START"; cwd: string; sid: string }
     /** Opening `sid` failed before any history arrived; fall back to what was shown. */
     | { type: "ATTACH_FAILED"; cwd: string; sid: string }
+    | { type: "ATTACH_FINISHED"; cwd: string; sid: string }
     | {
           /** Legacy callers without makeActive retain navigation race guards. */
           type: "ATTACH";
@@ -856,6 +857,10 @@ export function workspacesReducer(
                           loadingSessionId: undefined,
                       }
                     : undefined,
+            );
+        case "ATTACH_FINISHED":
+            return updateWs(state, action.cwd, (ws) =>
+                ws.loadingSessionId === action.sid ? { loadingSessionId: undefined } : undefined,
             );
         case "ATTACH":
             return updateWs(state, action.cwd, (ws) => {

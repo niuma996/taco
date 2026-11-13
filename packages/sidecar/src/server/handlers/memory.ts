@@ -19,6 +19,7 @@ import type {
     MemoryDreamState,
     MemoryDreamUndoResult,
     MemoryListResult,
+    MemoryReadResult,
     MemoryRestoreTopicResult,
     MemoryTopicEntry,
     MemoryUpsertResult,
@@ -43,7 +44,8 @@ import {
     readDreamReport,
     readLastDreamAt,
 } from "../../memory/dream/dreamState.ts";
-import { hashOf, LocalMemoryStore } from "../../memory/local/store.ts";
+import { hashOf, LocalMemoryStore, workspaceKey } from "../../memory/local/store.ts";
+import { readScopedMemoryTopic } from "../../memory/scopedRead.ts";
 import { resolveMemorySources } from "../../memory/sources.ts";
 import type { MemoryStore } from "../../memory/types.ts";
 import { MemoryConflictError, normalizeMemoryTopicId } from "../../memory/types.ts";
@@ -71,6 +73,7 @@ function toWireTopic(entry: {
     sources?: MemoryTopicEntry["sources"];
     memoryLayer?: MemoryTopicEntry["memoryLayer"];
     memoryLayerKey?: string;
+    sourceId?: string;
     readOnly?: boolean;
 }): MemoryTopicEntry {
     return {
@@ -88,6 +91,7 @@ function toWireTopic(entry: {
         ...(entry.sources ? { sources: entry.sources } : {}),
         ...(entry.memoryLayer ? { memoryLayer: entry.memoryLayer } : {}),
         ...(entry.memoryLayerKey ? { memoryLayerKey: entry.memoryLayerKey } : {}),
+        ...(entry.sourceId ? { sourceId: entry.sourceId } : {}),
         ...(entry.readOnly === undefined ? {} : { readOnly: entry.readOnly }),
     };
 }
@@ -174,6 +178,35 @@ function asConflict(error: unknown): RpcHandlerError {
 }
 
 export function registerMemoryHandlers(): void {
+    registerMethod("memoryRead", true, async ({ workspace, params }): Promise<MemoryReadResult> => {
+        try {
+            const inheritManagedGlobal = workspace.inheritsManagedGlobalMemory();
+            const topic = readScopedMemoryTopic(
+                {
+                    store: workspace.memoryStore,
+                    target: workspace.imRouting ? "channel" : "workspace",
+                    associatedRoots: workspace.associatedRoots(),
+                    inheritManagedGlobal,
+                    managedGlobalRoots: inheritManagedGlobal
+                        ? workspace.managedGlobalMemoryRoots()
+                        : [],
+                },
+                params,
+            );
+            return {
+                sourceId: params.sourceId,
+                topic: toWireTopic({
+                    ...topic,
+                    memoryLayer: params.memoryLayer,
+                    sourceId: params.sourceId,
+                    readOnly: params.memoryLayer !== "current",
+                }),
+            };
+        } catch (error) {
+            throw asConflict(error);
+        }
+    });
+
     registerMethod("memoryList", true, async ({ workspace, server }): Promise<MemoryListResult> => {
         const store = workspace.memoryStore;
         const target = workspace.imRouting ? "channel" : "workspace";
@@ -200,6 +233,7 @@ export function registerMemoryHandlers(): void {
                     ...entry,
                     memoryLayer: "current",
                     memoryLayerKey: workspace.workspaceKey,
+                    sourceId: sources.currentSourceId,
                     readOnly: false,
                 }),
             ),
@@ -209,6 +243,7 @@ export function registerMemoryHandlers(): void {
                         ...entry,
                         memoryLayer: "workspace",
                         memoryLayerKey: layer.key,
+                        sourceId: workspaceKey(layer.key),
                         readOnly: true,
                     }),
                 ),
@@ -219,6 +254,7 @@ export function registerMemoryHandlers(): void {
                         ...entry,
                         memoryLayer: "managed-global",
                         memoryLayerKey: layer.key,
+                        sourceId: workspaceKey(layer.key),
                         readOnly: true,
                     }),
                 ),

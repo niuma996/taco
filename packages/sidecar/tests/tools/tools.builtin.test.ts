@@ -521,7 +521,7 @@ describe("memory tool schema", () => {
             "with.dot",
             "with/slash",
         ]) {
-            const input = { ...VALID, id: badId };
+            const input: MemoryToolInput = { ...VALID, id: badId };
             assert.equal(
                 Value.Check(tool.parameters, input),
                 false,

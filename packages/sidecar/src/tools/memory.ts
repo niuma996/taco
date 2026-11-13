@@ -1,5 +1,5 @@
 /**
- * memory tool — let the model add / replace / remove a memory topic.
+ * memory tool — read an authorized topic or add / replace / remove a current topic.
  * Single tool with action dispatch (hermes builtin style).
  *
  * Routes through the `memory.upsert` RPC rather than the store directly — the
@@ -11,6 +11,7 @@
 
 import {
     MEMORY_CONTENT_MAX_CHARS,
+    memoryReadSelectorSchema,
     memoryTopicActionSchema,
     memoryTopicDescriptionSchema,
     memoryTopicIdSchema,
@@ -20,6 +21,7 @@ import {
 } from "@taco-ai/protocol";
 import type { Static } from "typebox";
 import { Type } from "typebox";
+import { Value } from "typebox/value";
 import { withMemoryWriteOrigin } from "../memory/writeOrigin.ts";
 import type { AgentHarnessTool } from "../runtime/pi/types.ts";
 import type { TacoToolContext } from "./context.ts";
@@ -31,12 +33,14 @@ import type { TacoToolContext } from "./context.ts";
 // self-RPC wrapper. Keep the shape flat (action at top level) so the model
 // does not have to nest {action: {action: ...}} — that's the trap the
 // previous nested schema kept falling into.
-const memoryToolSchema = Type.Object({
+const memoryWriteToolSchema = Type.Object({
     // The id / action / name / description / type fields are the wire
     // contract's own field schemas (`memory.upsert`): the tool reuses them
     // so the model and the server can never disagree about a shape.
     action: memoryTopicActionSchema,
     id: memoryTopicIdSchema,
+    memoryLayer: Type.Optional(Type.Never()),
+    sourceId: Type.Optional(Type.Never()),
     name: Type.Optional(memoryTopicNameSchema),
     description: Type.Optional(memoryTopicDescriptionSchema),
     // `content` is the one field the tool narrows: the wire leaves the
@@ -59,6 +63,27 @@ const memoryToolSchema = Type.Object({
     ),
 });
 
+// Provider adapters require root object properties. Conditions validate writes
+// locally even when a provider strips unsupported root validation keywords.
+const memoryToolSchema = Type.Object(
+    {
+        ...memoryWriteToolSchema.properties,
+        action: Type.Union([Type.Literal("read"), memoryTopicActionSchema]),
+        id: memoryReadSelectorSchema.properties.id,
+        memoryLayer: Type.Optional(memoryReadSelectorSchema.properties.memoryLayer),
+        sourceId: Type.Optional(memoryReadSelectorSchema.properties.sourceId),
+    },
+    {
+        if: Type.Object({ action: Type.Literal("read") }),
+        // biome-ignore lint/suspicious/noThenProperty: JSON Schema conditional keyword, not a callable Promise then.
+        then: Type.Object(
+            { action: Type.Literal("read"), ...memoryReadSelectorSchema.properties },
+            { additionalProperties: false },
+        ),
+        else: memoryWriteToolSchema,
+    },
+);
+
 export type MemoryToolInput = Static<typeof memoryToolSchema>;
 
 // ─── tool factory ────────────────────────────────────────────────────────────
@@ -71,7 +96,8 @@ export function createMemoryTool(): AgentHarnessTool<TacoToolContext> {
             "Save durable information to long-term memory that survives across sessions. " +
             "Storage: one topic file per memory under $TACO_HOME/memory/projects/<workspace-key>/. " +
             "Newest 100 topic summaries are injected into the LLM context as <memory> notes; " +
-            "use the read tool on the shown file path to fetch a note's full content. " +
+            "use action=read with the summary's memoryLayer, sourceId and id to fetch the full content. " +
+            "Inherited memory is read-only; writes always target the current conversation/workspace. " +
             "Default to no write. Write only for an explicit request to remember, a stable user preference, " +
             "a general correction, a confirmed decision, or a recurring reference useful across sessions. " +
             "Types: user (stable preference), feedback (general correction), project (confirmed decision), " +
@@ -83,7 +109,8 @@ export function createMemoryTool(): AgentHarnessTool<TacoToolContext> {
             "Existing sources identify sessions; use sessionRead to resolve ambiguity before rewriting. " +
             "Never store architecture overviews, directory layouts, code snippets, or command output: " +
             "write those to a doc in the repo and save a `reference` memory pointing at it. " +
-            "ACTIONS: add (new entry; REQUIRES name, content and type; fails if id exists; optional description field for relevance matching, defaults to name), " +
+            "ACTIONS: read (read-only; requires memoryLayer, sourceId and id from the context reference), " +
+            "add (new entry; REQUIRES name, content and type; fails if id exists; optional description field for relevance matching, defaults to name), " +
             "replace (update content and optional name/description; preserves createdAt, type and sources; " +
             "refreshes updatedAt only when content or metadata changes), " +
             "remove (delete by id; permanent). " +
@@ -93,7 +120,7 @@ export function createMemoryTool(): AgentHarnessTool<TacoToolContext> {
         executionMode: "sequential",
         taco: {
             promptSummary:
-                "Save or update a long-lived memory note (user / feedback / project / reference). Use sparingly — only for facts that survive the conversation.",
+                "Read scoped memory by its reference, or save/update a durable note on the current target. Inherited memory is read-only.",
             mutates: true,
         },
         async execute(
@@ -104,12 +131,38 @@ export function createMemoryTool(): AgentHarnessTool<TacoToolContext> {
         ): Promise<{ content: { type: "text"; text: string }[]; details: unknown }> {
             const { workspace, call } = ctx;
             if (!call) {
-                throw new Error("memory.upsert: no self-RPC dispatcher in this workspace");
+                throw new Error("memory: no self-RPC dispatcher in this workspace");
             }
+            if (params.action === "read") {
+                if (!params.memoryLayer || !params.sourceId) {
+                    throw new Error(
+                        "memory read requires memoryLayer, sourceId and id from the context reference",
+                    );
+                }
+                const result = await call(RPC.memoryRead, workspace, {
+                    workspace,
+                    memoryLayer: params.memoryLayer,
+                    sourceId: params.sourceId,
+                    id: params.id,
+                });
+                return {
+                    content: [{ type: "text", text: result.topic.content }],
+                    details: result,
+                };
+            }
+            if (params.memoryLayer !== undefined || params.sourceId !== undefined) {
+                throw new Error(
+                    "memory source selectors are only supported for read; inherited memory is read-only",
+                );
+            }
+            if (!Value.Check(memoryTopicIdSchema, params.id)) {
+                throw new Error("memory write id must be kebab-case, ≤64 chars");
+            }
+            const action = params.action;
             const result = await withMemoryWriteOrigin(ctx.sessionId, () =>
                 call(RPC.memoryUpsert, workspace, {
                     workspace,
-                    action: params.action,
+                    action,
                     id: params.id,
                     name: params.name,
                     description: params.description,

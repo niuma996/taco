@@ -13,7 +13,7 @@ import {
     Search,
     Settings2,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { SessionList } from "../components/SessionList";
 import type { WorkspaceMode } from "../components/WorkspaceModeTabs";
 import type { UseSessionSearchesResult } from "../hooks/useSessionSearch";
@@ -85,6 +85,8 @@ export function ConversationSidebar(props: ConversationSidebarProps) {
     const [failedGroups, setFailedGroups] = useState<Set<string>>(new Set());
     const [loadingMoreGroups, setLoadingMoreGroups] = useState<Set<string>>(new Set());
     const [failedMoreGroups, setFailedMoreGroups] = useState<Set<string>>(new Set());
+    const attemptedLoadsRef = useRef(new Set<string>());
+    const pendingLoadsRef = useRef(new Set<string>());
     const [channelFilter, setChannelFilter] = useState<string | null>(null);
     const workspaceOrderRef = useRef(new Map<string, number>());
     const nextWorkspaceOrderRef = useRef(0);
@@ -161,25 +163,54 @@ export function ConversationSidebar(props: ConversationSidebarProps) {
         }
     }, [workspaceGroups, props.activeCwd, props.mode]);
 
-    const loadWorkspaceGroup = (group: WorkspaceConversationGroup): void => {
-        setFailedGroups((current) => {
-            if (!current.has(group.key)) return current;
-            const next = new Set(current);
-            next.delete(group.key);
-            return next;
-        });
-        setLoadingGroups((current) => new Set(current).add(group.key));
-        void props
-            .onLoadWorkspace(group.cwd)
-            .catch(() => setFailedGroups((current) => new Set(current).add(group.key)))
-            .finally(() =>
-                setLoadingGroups((current) => {
-                    const next = new Set(current);
-                    next.delete(group.key);
-                    return next;
-                }),
-            );
-    };
+    const { onLoadWorkspace } = props;
+    const loadWorkspaceGroup = useCallback(
+        (group: WorkspaceConversationGroup): void => {
+            if (pendingLoadsRef.current.has(group.key)) return;
+            attemptedLoadsRef.current.add(group.key);
+            pendingLoadsRef.current.add(group.key);
+            setFailedGroups((current) => {
+                if (!current.has(group.key)) return current;
+                const next = new Set(current);
+                next.delete(group.key);
+                return next;
+            });
+            setLoadingGroups((current) => new Set(current).add(group.key));
+            void onLoadWorkspace(group.cwd)
+                .catch(() => setFailedGroups((current) => new Set(current).add(group.key)))
+                .finally(() => {
+                    pendingLoadsRef.current.delete(group.key);
+                    setLoadingGroups((current) => {
+                        const next = new Set(current);
+                        next.delete(group.key);
+                        return next;
+                    });
+                });
+        },
+        [onLoadWorkspace],
+    );
+
+    useEffect(() => {
+        if (props.mode !== "workspace") return;
+        for (const group of workspaceGroups) {
+            // Cold start already loads the active workspace. Restored groups have no click
+            // to trigger loading; an unsuccessful attempt waits for explicit retry.
+            if (
+                group.cwd !== props.activeCwd &&
+                expandedGroupKeys.has(group.key) &&
+                props.workspaces[group.cwd]?.listTotal === undefined &&
+                !attemptedLoadsRef.current.has(group.key)
+            )
+                loadWorkspaceGroup(group);
+        }
+    }, [
+        workspaceGroups,
+        expandedGroupKeys,
+        props.mode,
+        props.activeCwd,
+        props.workspaces,
+        loadWorkspaceGroup,
+    ]);
 
     const toggleGroup = (group: WorkspaceConversationGroup): void => {
         const open = expandedGroupKeys.has(group.key);

@@ -519,10 +519,7 @@ describe("memory write contract", () => {
     it("carries runtime session identity through async RPC context without a model parameter", async () => {
         const { currentMemoryWriteOrigin } = await import("../../src/memory/writeOrigin.ts");
         const tool = createMemoryTool();
-        assert.equal(
-            "sourceSessionId" in (tool.parameters as { properties: object }).properties,
-            false,
-        );
+        assert.doesNotMatch(JSON.stringify(tool.parameters), /sourceSessionId/);
         const calls: unknown[] = [];
         const origins: unknown[] = [];
         await invokeTool(

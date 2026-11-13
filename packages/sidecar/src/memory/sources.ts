@@ -25,6 +25,7 @@ export interface ResolvedMemorySources {
     readonly target: MemoryTargetKind;
     readonly memoryContent: string;
     readonly current: readonly MemoryEntry[];
+    readonly currentSourceId?: string;
     readonly associatedWorkspaces: readonly MemoryLayerEntries[];
     readonly managedGlobal: readonly MemoryLayerEntries[];
 }
@@ -111,6 +112,7 @@ export function resolveMemorySources(options: ResolveMemorySourcesOptions): Reso
         target: options.target,
         memoryContent: options.store.readMemory(),
         current: options.store.listTopics(),
+        ...(current instanceof LocalMemoryStore ? { currentSourceId: current.dirKey } : {}),
         associatedWorkspaces,
         managedGlobal,
     };
@@ -127,23 +129,39 @@ export function buildLayeredMemoryBlock(sources: ResolvedMemorySources): string 
                     : "Current workspace memory",
             entries: sources.current,
             inherited: false,
+            memoryLayer: "current",
+            sourceId: sources.currentSourceId,
         },
         ...sources.associatedWorkspaces.map((layer) => ({
             label: `Associated workspace memory (${layer.label})`,
             entries: layer.entries,
             inherited: true,
+            memoryLayer: "workspace",
+            sourceId: workspaceKey(layer.key),
         })),
         ...sources.managedGlobal.map((layer) => ({
             label: `Taco system memory (${layer.label})`,
             entries: layer.entries,
             inherited: true,
+            memoryLayer: "managed-global",
+            sourceId: workspaceKey(layer.key),
         })),
     ];
     return buildMemoryContextBlock(
         memoryBody && memoryBody !== "# Memory" ? memoryBody : "",
         layers.map((layer) => ({
-            heading: `${layer.label} (newest first${layer.inherited ? "; inherited entries are read-only" : ""}):`,
+            heading: `${layer.label} (newest first${layer.inherited ? "; inherited entries are read-only" : ""}; use memory action=read with the shown reference):`,
             entries: layer.entries,
+            ...(layer.sourceId
+                ? {
+                      readReference: (topic: MemoryEntry) =>
+                          JSON.stringify({
+                              memoryLayer: layer.memoryLayer,
+                              sourceId: layer.sourceId,
+                              id: topic.id,
+                          }),
+                  }
+                : {}),
         })),
         { nameMaxChars: 160 },
     );

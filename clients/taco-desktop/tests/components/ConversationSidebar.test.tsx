@@ -401,6 +401,61 @@ describe("Sidebar conversation groups", () => {
         expect(onExpandedWorkspacesChange).toHaveBeenCalledWith([]);
     });
 
+    it("loads an unloaded restored group when workspaces arrive after the preference", async () => {
+        const input = props({ expandedWorkspaces: ["/repo/one", "/repo/two"] });
+        input.workspaces["/repo/one"].listTotal = 1;
+        input.workspaces["/repo/two"] = createEmptyWorkspace("/repo/two");
+        let finish!: () => void;
+        input.onLoadWorkspace = vi.fn(
+            () =>
+                new Promise<void>((resolve) => {
+                    finish = resolve;
+                }),
+        );
+        const { rerender } = render(<Sidebar {...input} workspaces={{}} />);
+
+        rerender(<Sidebar {...input} />);
+
+        await waitFor(() => expect(input.onLoadWorkspace).toHaveBeenCalledWith("/repo/two"));
+        const group = screen.getByRole("region", { name: "two" });
+        expect(within(group).getByText("conversationNav.loading")).toBeTruthy();
+        expect(input.onOpenSession).not.toHaveBeenCalled();
+        rerender(<Sidebar {...input} workspaces={{ ...input.workspaces }} />);
+        expect(input.onLoadWorkspace).toHaveBeenCalledTimes(1);
+
+        finish();
+        input.workspaces["/repo/two"] = {
+            ...input.workspaces["/repo/two"],
+            sessions: [{ id: "restored", name: "Restored chat", createdAt: "2026-01-01" }],
+            listTotal: 1,
+        };
+        rerender(<Sidebar {...input} />);
+        expect(await within(group).findByRole("button", { name: "Restored chat" })).toBeTruthy();
+        expect(input.onLoadWorkspace).toHaveBeenCalledTimes(1);
+    });
+
+    it("retries a failed restored group only when the user requests it", async () => {
+        const input = props({ expandedWorkspaces: ["/repo/two"] });
+        input.workspaces["/repo/two"] = createEmptyWorkspace("/repo/two");
+        const load = vi
+            .fn()
+            .mockRejectedValueOnce(new Error("offline"))
+            .mockResolvedValue(undefined);
+        input.onLoadWorkspace = load;
+        const { rerender } = render(<Sidebar {...input} />);
+
+        expect(await screen.findByText("conversationNav.loadFailed")).toBeTruthy();
+        rerender(<Sidebar {...input} workspaces={{ ...input.workspaces }} />);
+        expect(load).toHaveBeenCalledTimes(1);
+        await userEvent
+            .setup({ delay: null })
+            .click(screen.getByRole("button", { name: "conversationNav.retry" }));
+        await waitFor(() => expect(load).toHaveBeenCalledTimes(2));
+        await waitFor(() => expect(screen.queryByText("conversationNav.loadFailed")).toBeNull());
+        rerender(<Sidebar {...input} workspaces={{ ...input.workspaces }} />);
+        expect(load).toHaveBeenCalledTimes(2);
+    });
+
     it("freezes workspace order after lazy loads and later session activity", () => {
         const input = props();
         const { rerender } = render(<Sidebar {...input} />);

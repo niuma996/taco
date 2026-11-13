@@ -38,6 +38,25 @@ export const memoryTopicIdSchema = Type.String({
     pattern: "^[a-z0-9-]+$",
 });
 
+/** Read selectors are opaque identities, never filesystem paths. Legacy topic ids remain readable. */
+export const memoryReadSelectorSchema = Type.Object(
+    {
+        memoryLayer: Type.Union([
+            Type.Literal("current"),
+            Type.Literal("workspace"),
+            Type.Literal("managed-global"),
+        ]),
+        sourceId: Type.String({ pattern: "^[0-9a-f]{16}$", minLength: 16, maxLength: 16 }),
+        id: Type.String({ pattern: "^[A-Za-z0-9_-]+$", minLength: 1, maxLength: 128 }),
+    },
+    { additionalProperties: false },
+);
+
+export const memoryReadSchema = Type.Object(
+    { workspace, ...memoryReadSelectorSchema.properties },
+    { additionalProperties: false },
+);
+
 /** Short human-readable title for a topic. */
 export const memoryTopicNameSchema = Type.String({
     minLength: 1,

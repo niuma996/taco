@@ -7,6 +7,7 @@ const SEPARATOR = "\n\n---\n\n";
 interface MemoryContextLayer {
     readonly heading: string;
     readonly entries: readonly MemoryEntry[];
+    readonly readReference?: (topic: MemoryEntry) => string;
 }
 
 interface MemoryContextOptions {
@@ -45,7 +46,8 @@ export function buildMemoryContextBlock(
                 .replace(/[\r\n]+/g, " ")
                 .trim()
                 .slice(0, 80);
-            const line = `- [${topic.type}] ${name} — ${description} — ${topic.id}`;
+            const reference = layer.readReference?.(topic);
+            const line = `- [${topic.type}] ${name} — ${description} — ${topic.id}${reference ? ` — memory.read ${reference}` : ""}`;
             const text = lines.length === 0 ? `${SEPARATOR}${layer.heading}\n${line}` : `\n${line}`;
             const addedBytes = Buffer.byteLength(text);
             if (count >= MAX_TOPIC_NOTES || bytes + addedBytes > MAX_TOPIC_BYTES) break;

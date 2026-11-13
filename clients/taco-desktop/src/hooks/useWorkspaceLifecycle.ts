@@ -63,7 +63,8 @@ export interface UseWorkspaceLifecycleApi {
     loadMoreSessions: (cwd: string) => Promise<boolean>;
     openWorkspace: (rawCwd: string) => Promise<boolean>;
     browseAndOpen: () => Promise<void>;
-    switchWorkspace: (cwd: string) => Promise<void>;
+    /** Whether the switch still owns navigation when loading finishes. */
+    switchWorkspace: (cwd: string) => Promise<boolean>;
     attachSession: (cwd: string, sid: string, isCurrent?: () => boolean) => Promise<void>;
     openImConversation: (cwd: string, sid: string, isCurrent?: () => boolean) => Promise<void>;
     restoreSessionSnapshot: (
@@ -118,6 +119,7 @@ export function useWorkspaceLifecycle({
     const connectionGeneration = useRef(0);
     const listEpochs = useRef(new Map<string, number>());
     const listedWorkspaces = useRef(new Set<string>());
+    const attachOwners = useRef(new Map<string, symbol>());
     const markNavigationIntent = useCallback(() => ++navigationVersion.current, []);
     const getNavigationVersion = useCallback(() => navigationVersion.current, []);
     const beginNavigation = useCallback(() => {
@@ -262,6 +264,14 @@ export function useWorkspaceLifecycle({
         ): Promise<void> => {
             const currentNavigation = beginNavigation();
             const navigationIsCurrent = () => currentNavigation() && isCurrent();
+            const owner = Symbol();
+            attachOwners.current.set(cwd, owner);
+            const releaseLoading = (
+                type: "ATTACH_FAILED" | "ATTACH_FINISHED" = "ATTACH_FAILED",
+            ) => {
+                if (attachOwners.current.get(cwd) === owner)
+                    dispatchWs({ type, cwd, sid: sessionId });
+            };
             const generation = connectionGeneration.current;
             const connectionIsCurrent = () => generation === connectionGeneration.current;
             const cached = getSessionState(workspacesRef.current[cwd], sessionId);
@@ -299,7 +309,7 @@ export function useWorkspaceLifecycle({
                 if ((err as { code?: string }).code === ErrorCodes.NotFound) {
                     dispatchWs({ type: "REMOVE_SESSION", cwd, sid: sessionId });
                 } else {
-                    dispatchWs({ type: "ATTACH_FAILED", cwd, sid: sessionId });
+                    releaseLoading();
                 }
                 return;
             }
@@ -312,11 +322,12 @@ export function useWorkspaceLifecycle({
                 );
                 if (!connectionIsCurrent()) return;
                 if (!restored) {
-                    dispatchWs({ type: "ATTACH_FAILED", cwd, sid: sessionId });
+                    releaseLoading();
                     return;
                 }
                 if (navigationIsCurrent())
                     dispatchWs({ type: "SELECT_SESSION", cwd, sid: sessionId });
+                else releaseLoading("ATTACH_FINISHED");
                 return;
             }
             const inFlightAgentToolCallIds = attachResult?.inFlightAgentToolCallIds;
@@ -334,7 +345,7 @@ export function useWorkspaceLifecycle({
                 if (navigationIsCurrent())
                     pushNotification(`Cannot load session history: ${(err as Error).message}`);
                 // Failed history is not an authoritative empty transcript.
-                dispatchWs({ type: "ATTACH_FAILED", cwd, sid: sessionId });
+                releaseLoading();
                 return;
             }
             if (!connectionIsCurrent()) return;
@@ -419,8 +430,8 @@ export function useWorkspaceLifecycle({
     const pendingSessionReloadRef = useRef(false);
 
     const switchWorkspace = useCallback(
-        async (cwd: string): Promise<void> => {
-            markNavigationIntent();
+        async (cwd: string): Promise<boolean> => {
+            const navigationIsCurrent = beginNavigation();
             setActiveCwd(cwd);
             persistActiveCwd(cwd);
             dispatchWs({ type: "SET_ACTIVE", cwd });
@@ -446,8 +457,9 @@ export function useWorkspaceLifecycle({
             // an existing session is the sidebar's job (Sidebar onAttach →
             // attachSession). Picking a session implicitly here would
             // resurrect stale history on every workspace switch.
+            return navigationIsCurrent();
         },
-        [dispatchWs, setActiveCwd, workspacesRef, loadWorkspaceSessions, markNavigationIntent],
+        [dispatchWs, setActiveCwd, workspacesRef, loadWorkspaceSessions, beginNavigation],
     );
 
     const initFromStorage = useCallback(async () => {

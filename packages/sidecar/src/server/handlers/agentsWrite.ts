@@ -19,7 +19,7 @@ import {
     type AgentScope,
     type AgentsWriteParams,
 } from "@taco-ai/protocol";
-import { parseAgentMarkdown } from "../../agents/loadAgents.ts";
+import { loadAgentDir, parseAgentMarkdown } from "../../agents/loadAgents.ts";
 import { type AgentDefinition, DEFAULT_SUBAGENT_RUNTIME } from "../../agents/types.ts";
 import { tacoHome } from "../../config/tacoHome.ts";
 import { writeTextAtomic } from "../../store/atomicFile.ts";
@@ -133,6 +133,8 @@ function renderAgentMarkdown(p: AgentsWriteParams): string {
     // SDK fields (sandbox / approvalPolicy), never Claude Code's permission
     // names. An all-default Codex definition writes no block at all.
     if (p.runtime === "codex") {
+        // An empty whitelist is distinct from inheriting all tools.
+        if (p.tools !== undefined) lines.push(`tools: ${JSON.stringify(p.tools)}`);
         const codexLines: string[] = [];
         if (p.codex?.cwd !== undefined) {
             codexLines.push(`  cwd: ${JSON.stringify(p.codex.cwd)}`);
@@ -251,9 +253,18 @@ export async function writeUserAgent(
     }
     const target = params.agentType;
     const previousType = params.previousAgentType;
+    const previousScope =
+        previousType === undefined
+            ? undefined
+            : (params.previousScope ??
+              requireEditable(
+                  currentAgents.find((a) => a.agentType === previousType),
+                  previousType,
+                  ctx,
+              ));
     const previousDef =
-        previousType !== undefined
-            ? currentAgents.find((a) => a.agentType === previousType)
+        previousType !== undefined && previousScope !== undefined
+            ? await readUserAgent(previousType, previousScope, ctx)
             : undefined;
     // An unchanged directory is not re-checked: a global agent fixed to
     // another workspace's directory must stay editable from here without
@@ -266,21 +277,13 @@ export async function writeUserAgent(
         const keptCwd = previousDef !== undefined && previousDef.codex?.cwd === params.codex.cwd;
         if (!keptCwd) await requireAllowedCwd(params.codex.cwd, ctx);
     }
-    const previousScope =
-        previousType === undefined
-            ? undefined
-            : (params.previousScope ??
-              requireEditable(
-                  currentAgents.find((a) => a.agentType === previousType),
-                  previousType,
-                  ctx,
-              ));
     const scope = params.scope ?? previousScope ?? "global";
-    const targetPath = pathFor(scope, target, ctx);
-    const previousPath =
-        previousType !== undefined && previousScope !== undefined
-            ? pathFor(previousScope, previousType, ctx)
-            : undefined;
+    const previousPath = previousDef?.filePath;
+    // In-place edits keep hand-written filenames; moves and renames use the new name.
+    const targetPath =
+        previousPath !== undefined && scope === previousScope && target === previousType
+            ? previousPath
+            : pathFor(scope, target, ctx);
 
     // `existing` is the entry in effect for the target name. When the target
     // name is the one being edited it is the definition being replaced.
@@ -293,7 +296,10 @@ export async function writeUserAgent(
             );
         }
     }
-    if (targetPath !== previousPath && existsSync(targetPath)) {
+    const targetDefinition = (await loadAgentDir(agentsDirFor(scope, ctx), "user")).find(
+        (agent) => agent.agentType === target && agent.filePath !== previousPath,
+    );
+    if (targetDefinition || (targetPath !== previousPath && existsSync(targetPath))) {
         throw new AgentWriteError(
             `agent type "${target}" already exists in the ${scope} directory — pick another name`,
         );
@@ -328,15 +334,11 @@ export async function readUserAgent(
     if (!AGENT_TYPE_PATTERN.test(agentType)) {
         throw new AgentWriteError(`invalid agentType: ${agentType}`);
     }
-    const filePath = pathFor(scope, agentType, ctx);
-    let text: string;
-    try {
-        text = await readFile(filePath, "utf-8");
-    } catch {
-        throw new AgentWriteError(`agent not found: ${agentType}`);
-    }
-    const definition = parseAgentMarkdown(text, filePath, "user");
-    if (!definition) throw new AgentWriteError(`agent "${agentType}" is not valid`);
+    // Match loadAgents' last-definition-wins rule without assuming a filename.
+    const definition = (await loadAgentDir(agentsDirFor(scope, ctx), "user"))
+        .filter((agent) => agent.agentType === agentType)
+        .at(-1);
+    if (!definition) throw new AgentWriteError(`agent not found: ${agentType}`);
     return definition;
 }
 
@@ -351,8 +353,8 @@ export async function deleteUserAgent(
         if (!AGENT_TYPE_PATTERN.test(agentType)) {
             throw new AgentWriteError(`invalid agentType: ${agentType}`);
         }
-        await readUserAgent(agentType, requestedScope, ctx);
-        await rm(pathFor(requestedScope, agentType, ctx), { force: true });
+        const definition = await readUserAgent(agentType, requestedScope, ctx);
+        await rm(definition.filePath, { force: true });
         return;
     }
     const scope = requireEditable(
@@ -360,5 +362,6 @@ export async function deleteUserAgent(
         agentType,
         ctx,
     );
-    await rm(pathFor(scope, agentType, ctx), { force: true });
+    const definition = await readUserAgent(agentType, scope, ctx);
+    await rm(definition.filePath, { force: true });
 }

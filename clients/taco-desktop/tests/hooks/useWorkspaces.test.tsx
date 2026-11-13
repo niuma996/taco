@@ -7,15 +7,17 @@
  */
 
 import { strict as assert } from "node:assert";
-import { ErrorCodes } from "@taco-ai/protocol";
-import { act, renderHook, waitFor } from "@testing-library/react";
+import { asSessionId, ErrorCodes, type SessionSnapshot } from "@taco-ai/protocol";
+import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { type ReactNode, useEffect } from "react";
-import { beforeEach, describe, it, type Mock, vi } from "vitest";
+import { afterEach, beforeEach, describe, it, type Mock, vi } from "vitest";
 import { ToastProvider } from "../../src/components/ToastProvider";
 import { useConversationDrafts } from "../../src/hooks/useConversationDrafts";
 import { useWorkspaces } from "../../src/hooks/useWorkspaces";
-import type { WorkspaceState } from "../../src/lib/chat/workspaceReducer";
+import { createEmptyWorkspace, type WorkspaceState } from "../../src/lib/chat/workspaceReducer";
 import type { TacoClient } from "../../src/lib/clients/tacoClient.ts";
+import { SessionPushProcessor } from "../../src/lib/sessionPushProcessor";
+import { bindSessionSynchronization } from "../../src/lib/sessionSynchronization";
 
 vi.mock("../../src/lib/workspaceStorage.ts", () => ({
     initDefaultCwd: vi.fn(async () => ""),
@@ -32,6 +34,139 @@ vi.mock("../../src/lib/workspaceStorage.ts", () => ({
 vi.mock("../../src/hooks/useSidecarStream.ts", () => ({
     sidecarLogListenerReady: Promise.resolve(),
 }));
+
+describe("new-chat navigation", () => {
+    afterEach(cleanup);
+
+    function deferred<T>() {
+        let resolve!: (value: T) => void;
+        const promise = new Promise<T>((finish) => {
+            resolve = finish;
+        });
+        return { promise, resolve };
+    }
+
+    it.each(["start", "sessionList"] as const)(
+        "keeps a local new draft usable when %s rejects",
+        async (method) => {
+            const client = {
+                start: vi.fn(async () => {}),
+                sessionList: vi.fn(async () => ({ sessions: [], total: 0 })),
+                onConnectionReady: vi.fn(() => () => {}),
+                onWorkspaceEpochChanged: vi.fn(() => () => {}),
+            };
+            client[method].mockRejectedValueOnce(new Error("offline"));
+            const report = vi.spyOn(console, "error").mockImplementation(() => {});
+            const { result } = renderHook(() => useWorkspaces(client as unknown as TacoClient));
+            try {
+                act(() => result.current.dispatchWs({ type: "UPSERT_WORKSPACE", cwd: "/repo/b" }));
+                await act(async () => {
+                    assert.equal(await result.current.openNewSession("/repo/b"), true);
+                });
+                assert.ok(result.current.workspaces["/repo/b"].draftId);
+                assert.equal(report.mock.calls.length, 1);
+            } finally {
+                report.mockRestore();
+            }
+        },
+    );
+
+    it("keeps a newer snapshot attach selected when an older cross-workspace new chat finishes", async () => {
+        const list = deferred<{ sessions: []; total: number }>();
+        const snapshot = deferred<SessionSnapshot>();
+        const client = {
+            start: vi.fn(async () => {}),
+            sessionList: vi.fn(() => list.promise),
+            sessionAttach: vi.fn(async () => ({ execution: "idle" })),
+            sessionSnapshotGet: vi.fn(() => snapshot.promise),
+            onConnectionReady: vi.fn(() => () => {}),
+            onWorkspaceEpochChanged: vi.fn(() => () => {}),
+        } as unknown as TacoClient;
+        const { result } = renderHook(() => useWorkspaces(client));
+        act(() => {
+            const a = createEmptyWorkspace("/repo/a", true);
+            a.listTotal = 0;
+            result.current.dispatchWs({
+                type: "INIT",
+                workspaces: {
+                    [a.cwd]: a,
+                    "/repo/b": createEmptyWorkspace("/repo/b"),
+                },
+            });
+        });
+        const processor = new SessionPushProcessor({
+            getEvents: async () => ({ events: [], firstSeq: 1, lastSeq: 1, resetRequired: false }),
+            recoverSnapshot: (cwd, sid, kind, _after, _target, isCurrent) =>
+                result.current.restoreSessionSnapshot(cwd, sid, kind, isCurrent),
+            deliver: vi.fn(),
+            reportError: vi.fn(),
+            snapshotRetryDelaysMs: [],
+        });
+        const unbind = bindSessionSynchronization(client, processor);
+        try {
+            let creating!: Promise<boolean>;
+            act(() => {
+                creating = result.current.openNewSession("/repo/b");
+            });
+            await act(async () => {});
+            await act(async () => {
+                await result.current.switchWorkspace("/repo/a");
+            });
+            let opening!: Promise<void>;
+            act(() => {
+                opening = result.current.attachSession("/repo/a", "chosen");
+            });
+            await act(async () => {});
+            let created: boolean | undefined;
+            await act(async () => {
+                list.resolve({ sessions: [], total: 0 });
+                created = await creating;
+            });
+            await act(async () => {
+                snapshot.resolve({
+                    sessionId: asSessionId("chosen"),
+                    sessionKind: "main",
+                    snapshotSeq: 1,
+                    history: { sessionId: asSessionId("chosen"), leafEntryId: null, entries: [] },
+                    runtime: {
+                        operation: null,
+                        tools: [],
+                        queues: [],
+                        pendingCommandPermissions: [],
+                        pendingAskUserToolCallIds: [],
+                        inFlightAgentToolCallIds: [],
+                        settledBackgroundSubSessionIds: [],
+                    },
+                });
+                await opening;
+            });
+            assert.equal(result.current.activeCwd, "/repo/a");
+            assert.equal(result.current.activeWs?.activeSession, "chosen");
+            assert.equal(result.current.activeWs?.loadingSessionId, undefined);
+            assert.equal(result.current.workspaces["/repo/b"].draftId, undefined);
+            assert.equal(created, false);
+        } finally {
+            unbind();
+        }
+    });
+
+    it("creates a draft when its workspace switch is still current", async () => {
+        const client = {
+            start: vi.fn(async () => {}),
+            sessionList: vi.fn(async () => ({ sessions: [], total: 0 })),
+            onConnectionReady: vi.fn(() => () => {}),
+            onWorkspaceEpochChanged: vi.fn(() => () => {}),
+        } as unknown as TacoClient;
+        const { result } = renderHook(() => useWorkspaces(client));
+        act(() => result.current.dispatchWs({ type: "UPSERT_WORKSPACE", cwd: "/repo/b" }));
+        await act(async () => {
+            assert.equal(await result.current.openNewSession("/repo/b"), true);
+        });
+        assert.equal(result.current.activeCwd, "/repo/b");
+        assert.equal(result.current.composerTarget.kind, "draft");
+        assert.ok(result.current.workspaces["/repo/b"].draftId);
+    });
+});
 
 describe("useWorkspacesFirstTurn.test.tsx", () => {
     // The first message of a new session goes through sessionCreate and then the

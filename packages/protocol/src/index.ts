@@ -197,6 +197,8 @@ export type {
     MemoryDreamUndoResult,
     MemoryListParams,
     MemoryListResult,
+    MemoryReadParams,
+    MemoryReadResult,
     MemoryRestoreTopicParams,
     MemoryRestoreTopicResult,
     MemorySource,

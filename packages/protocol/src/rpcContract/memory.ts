@@ -15,6 +15,7 @@ import type {
     MemoryDreamRunResult,
     MemoryDreamUndoResult,
     MemoryListResult,
+    MemoryReadResult,
     MemoryRestoreTopicResult,
     MemoryUpsertResult,
     MemoryWriteResult,
@@ -28,6 +29,7 @@ import {
     memoryDreamRunSchema,
     memoryDreamUndoSchema,
     memoryListSchema,
+    memoryReadSchema,
     memoryRestoreTopicSchema,
     memoryUpsertSchema,
     memoryWriteSchema,
@@ -46,6 +48,7 @@ const memoryRows = {
         checkpointsRestoreSchema,
     ),
     memoryList: row<MemoryListResult>()("memory.list", "workspace", memoryListSchema),
+    memoryRead: row<MemoryReadResult>()("memory.read", "workspace", memoryReadSchema),
     memoryWrite: row<MemoryWriteResult>()("memory.write", "workspace", memoryWriteSchema),
     memoryDeleteTopic: row<MemoryDeleteTopicResult>()(
         "memory.deleteTopic",

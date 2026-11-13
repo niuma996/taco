@@ -117,6 +117,37 @@ describe("AgentForm", () => {
         assert.equal("permissionMode" in saved, false);
     });
 
+    for (const tools of [undefined, [], ["chatToAgent"]]) {
+        it(`Codex dialog: preserves tools ${JSON.stringify(tools)} when editing the description`, () => {
+            const onSave = vi.fn<(v: AgentFormValue) => void>();
+            render(
+                <AgentForm
+                    {...base}
+                    runtime="codex"
+                    existing={{
+                        scope: "global",
+                        agentType: "restricted-codex",
+                        description: "original",
+                        runtime: "codex",
+                        maxTurns: 30,
+                        systemPrompt: "Review only.",
+                        tools,
+                    }}
+                    onSave={onSave}
+                    onCancel={() => {}}
+                />,
+            );
+            fireEvent.change(screen.getByRole("textbox", { name: "agents.form.description" }), {
+                target: { value: "updated" },
+            });
+            fireEvent.click(screen.getByText("agents.form.save"));
+            const saved = onSave.mock.calls[0]?.[0];
+            assert.ok(saved);
+            assert.equal(saved.description, "updated");
+            assert.deepEqual(saved.tools, tools);
+        });
+    }
+
     it("Codex dialog: installs the runtime and explains a signed-out install", async () => {
         const onInstallCodex = vi.fn();
         const onRefreshCodexRuntime = vi.fn();

@@ -984,9 +984,16 @@ export function useWorkspaces(client: TacoClient): UseWorkspacesApi {
             });
             return lifecycle.openImConversation(cwd, sid, isCurrent);
         },
-        switchWorkspace: (cwd) => {
+        switchWorkspace: async (cwd) => {
             navigationVersion.current++;
-            return lifecycle.switchWorkspace(cwd);
+            await lifecycle.switchWorkspace(cwd);
+        },
+        openNewSession: async (cwd) => {
+            const version = ++navigationVersion.current;
+            const current = await lifecycle.switchWorkspace(cwd);
+            if (!current || version !== navigationVersion.current) return false;
+            beginPendingNewSession(cwd);
+            return true;
         },
         attachSession: async (cwd, sid) => {
             const version = ++navigationVersion.current;

@@ -262,6 +262,12 @@ test("every facade method serializes a payload accepted by its registered schema
     await client.checkpointsList({ workspace });
     await client.checkpointsRestore({ workspace, checkpointId: "cp", sessionId: id });
     await client.memoryList({ workspace });
+    await client.memoryRead({
+        workspace,
+        memoryLayer: "workspace",
+        sourceId: "0123456789abcdef",
+        id: "topic",
+    });
     await client.memoryWrite({ workspace, content: "", baseHash: "hash" });
     await client.memoryDeleteTopic({ workspace, id: "topic", expectedContent: "" });
     await client.memoryRestoreTopic({ workspace, id: "topic" });

@@ -114,6 +114,7 @@ because a registered system-service daemon can outlive a desktop upgrade.
 | 2.15 | `peer` scope for IM directory associations (most specific conversation → peer → channel); optional `name` / `updatedAt` on `channels.listConversations` entries; optional `execution` on `session.attach` results; `channels.conversations_changed` also fires on IM session rename and on route removal. |
 | 2.16 | Optional `scope: global / workspace / builtin` on `skills.list` and `skills.content`; `builtin` source selection on `agents.list` and `agents.content`. Explicit sources expose original definitions before cross-layer overrides; omitted scope preserves the effective catalog. Agent write/delete scopes remain `global / workspace`. |
 | 2.17 | Layered `memory.list`: optional `memoryLayer` / `memoryLayerKey` / `readOnly` on topics and `memorySources` on the result. `memory.deleteTopic` accepts an optional current-layer selector. IM policy accepts optional `memory.inheritManagedGlobal`; absent means off. New clients read associated workspace memory automatically and expose Taco system memory only when the resolved channel policy opts in. |
+| 2.18 | `memory.read` retrieves a topic by `memoryLayer`, opaque `sourceId`, and `id`. Context summaries and `memory.list` expose usable source references; every read rechecks live source authorization. |
 
 Adding a value to an existing response enum is potentially breaking: older clients
 may index exhaustive maps with it. Such values require connection-scoped capability
@@ -149,6 +150,17 @@ available through `memory.list`. Inherited stores reuse file-signature caches an
 revoked sources disappear on the next read. Human-maintained
 `MEMORY.md` remains unconditional. Automatic extraction and the memory tool write
 only to the current workspace or channel partition.
+
+To fetch a summary's full body, call the model `memory` tool with `action: "read"`
+and the shown `memoryLayer`, `sourceId`, and `id`. The equivalent workspace-scoped
+RPC is `memory.read`; it returns `{ sourceId, topic }`. `memory.list` also includes
+an opaque `sourceId` on each topic. This identity is a stable hash, not a filesystem
+path or a grant: the handler resolves the source against the current association
+and managed-global opt-in on every call. The same topic id in different layers
+is unambiguous because the layer and source are required. Disabled memory,
+unrelated or revoked sources, invalid selectors, and unknown topics are refused.
+Inherited reads do not widen IM filesystem read roots. Write actions accept no
+source selectors and continue to affect only the current target.
 
 The IM memory field is optional in stored policy documents. Missing
 `memory.inheritManagedGlobal` resolves to `false`, so existing policy files need
@@ -302,6 +314,7 @@ fields of `settings.get` or `settings.write`.
 | `memory.dreamRun` | memory.* |
 | `memory.dreamUndo` | memory.* |
 | `memory.list` | memory.* |
+| `memory.read` | memory.* |
 | `memory.restoreTopic` | memory.* |
 | `memory.upsert` | memory.* |
 | `memory.write` | memory.* |
