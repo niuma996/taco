@@ -115,6 +115,7 @@
       "!**/coverage",
       "!**/.claude",
       "!**/.impeccable",
+      "!**/.taco",
       "!**/src-tauri/gen",
       "!**/src-tauri/binaries",
       "!**/src-tauri/generated",

@@ -6,6 +6,7 @@ node_modules/
 **/dist/
 packages/sidecar/lib/
 packages/sidecar/dist/
+site/
 
 # Desktop / Tauri build artifacts
 clients/*/dist/
