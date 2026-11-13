@@ -116,7 +116,23 @@ export default function App() {
     const [sidebarCollapsed, setSidebarCollapsed] = useState(
         () => readPersistedSidebarCollapsed() ?? false,
     );
-    const rightPanel = useRightPanel(sidebarCollapsed);
+    // Which view fills the main column. Declared above useRightPanel: the
+    // right panel belongs to the chat view, so it needs to know where it is.
+    const [mainView, setMainView] = useState<
+        | "chat"
+        | "tools"
+        | "skills"
+        | "agents"
+        | "plugins"
+        | "channels"
+        | "work"
+        | "memory"
+        | "checkpoints"
+        | "schedules"
+        | "mcp"
+        | "settings"
+    >("chat");
+    const rightPanel = useRightPanel(sidebarCollapsed, mainView);
     // Selected child session for SubagentPanel; pushed in via the SubagentProvider's
     // openInPanel callback when an agent card is opened. SubagentPanel below reads it.
     const [selectedSubSessionId, setSelectedSubSessionId] = useState<string | null>(null);
@@ -409,21 +425,6 @@ export default function App() {
         setExpandedWorkspaces(next);
         void persistExpandedWorkspaces(next);
     }, []);
-
-    const [mainView, setMainView] = useState<
-        | "chat"
-        | "tools"
-        | "skills"
-        | "agents"
-        | "plugins"
-        | "channels"
-        | "work"
-        | "memory"
-        | "checkpoints"
-        | "schedules"
-        | "mcp"
-        | "settings"
-    >("chat");
 
     const conversationActivity = useConversationActivity({
         workspaces,

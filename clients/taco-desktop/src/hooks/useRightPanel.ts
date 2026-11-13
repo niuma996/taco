@@ -28,6 +28,9 @@ import { type DragHandleProps, useDragResize } from "./primitives/useDragResize"
 
 export type RightPanelKind = "none" | "tasks" | "files" | "subagents";
 
+/** The view that owns the right panel. The other views bring their own panes. */
+const PANEL_OWNING_VIEW = "chat";
+
 /** Keyboard step in share units; Shift jumps five times as far. */
 const KEY_STEP = 0.02;
 const KEY_STEP_FAST = 0.05;
@@ -43,8 +46,18 @@ export interface UseRightPanelApi {
     resizeHandleProps: DragHandleProps;
 }
 
-export function useRightPanel(sidebarCollapsed = false): UseRightPanelApi {
+export function useRightPanel(
+    sidebarCollapsed = false,
+    activeView: string = PANEL_OWNING_VIEW,
+): UseRightPanelApi {
     const [panel, setPanel] = useState<RightPanelKind>("none");
+
+    // The panel belongs to the view that opened it. The other views bring
+    // their own panes, so a panel left open beside them shows as a leftover —
+    // and the layout keeps reserving its slot even where nothing is drawn.
+    useEffect(() => {
+        if (activeView !== PANEL_OWNING_VIEW) setPanel("none");
+    }, [activeView]);
 
     const toggle = useCallback((kind: Exclude<RightPanelKind, "none">) => {
         setPanel((current) => (current === kind ? "none" : kind));

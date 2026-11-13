@@ -72,6 +72,30 @@ describe("useRightPanel — exclusivity", () => {
     });
 });
 
+describe("useRightPanel — view ownership", () => {
+    it("closes the panel when the chat view is left", () => {
+        const { result, rerender } = renderHook(({ view }) => useRightPanel(false, view), {
+            initialProps: { view: "chat" },
+        });
+        act(() => result.current.show("files"));
+        assert.equal(result.current.panel, "files");
+
+        // The file tree is the chat's workspace context; the other views
+        // bring their own panes, so the drawer must not sit beside them.
+        rerender({ view: "agents" });
+        assert.equal(result.current.panel, "none");
+    });
+
+    it("keeps the panel open while the chat view is up", () => {
+        const { result, rerender } = renderHook(({ view }) => useRightPanel(false, view), {
+            initialProps: { view: "chat" },
+        });
+        act(() => result.current.show("subagents"));
+        rerender({ view: "chat" });
+        assert.equal(result.current.panel, "subagents");
+    });
+});
+
 describe("useRightPanel — width", () => {
     it("falls back to the default share with nothing persisted", () => {
         const { result } = renderHook(() => useRightPanel());
