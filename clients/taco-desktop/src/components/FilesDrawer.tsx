@@ -11,7 +11,7 @@
  *  - activeCwd change → refresh tree + clear preview
  *  - open change → loadRoot once
  */
-import { openPath } from "@tauri-apps/plugin-opener";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { FolderOpen } from "lucide-react";
 import { useEffect, useMemo } from "react";
 
@@ -20,6 +20,7 @@ import { useFilePreview } from "../hooks/useFilePreview";
 import { useFileTree } from "../hooks/useFileTree";
 import { useT } from "../i18n/useI18n";
 import { createFsClient, type FsClient } from "../lib/clients/fsClient";
+import { fileUrl } from "../lib/fileUrl";
 import { FilePreviewPopup } from "./FilePreviewPopup";
 import { FilesTreeView } from "./FilesTreeView";
 import { RightPanel } from "./panels/RightPanel";
@@ -94,10 +95,10 @@ export function FilesDrawer(props: FilesDrawerProps) {
                     activeCwd && (
                         <IconButton
                             onClick={() => {
-                                // openPath on a directory opens it in the OS file
-                                // manager (Finder/Explorer), so the user lands
-                                // on the workspace's contents directly.
-                                void openPath(activeCwd).catch((err: unknown) => {
+                                // A file:// URL for a directory lands in the OS
+                                // file manager (Finder/Explorer), so the user
+                                // sees the workspace's contents directly.
+                                void openUrl(fileUrl(activeCwd)).catch((err: unknown) => {
                                     console.error("[taco] open workspace failed", err);
                                 });
                             }}

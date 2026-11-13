@@ -138,7 +138,7 @@ function isForbiddenPath(e: unknown): boolean {
  * `.message` off it yields undefined, which the pane renders as a blank body
  * instead of an error. Never return "" for a non-empty rejection.
  */
-function errorText(e: unknown): string {
+export function errorText(e: unknown): string {
     if (e instanceof Error && e.message) return e.message;
     const s = String(e);
     return s === "" || s === "[object Object]" ? "unknown error" : s;

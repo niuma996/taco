@@ -18,11 +18,12 @@
  * toggle resets on file switch.
  */
 import { convertFileSrc } from "@tauri-apps/api/core";
-import { openPath, revealItemInDir } from "@tauri-apps/plugin-opener";
+import { openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
 import { useState } from "react";
-import type { PreviewBlock } from "../hooks/useFilePreview";
+import { errorText, type PreviewBlock } from "../hooks/useFilePreview";
 import { useT } from "../i18n/useI18n";
 import { getExtension, imageMimeFor, shikiLangFor } from "../lib/fileTypes";
+import { fileUrl } from "../lib/fileUrl";
 import { AssistantMarkdown } from "./AssistantMarkdown";
 import { HighlightedCode } from "./HighlightedCode";
 import { Button } from "./ui/Button";
@@ -49,6 +50,7 @@ export function FilesPreviewPane(props: FilesPreviewPaneProps) {
     const isHtml = shikiLangFor(selectedRelPath) === "html";
     const isImage = imageMimeFor(selectedRelPath) !== null;
     const [mdView, setMdView] = useState<"rendered" | "source">(isHtml ? "source" : "rendered");
+    const [openError, setOpenError] = useState<string | null>(null);
 
     return (
         <div className="files-preview-pane">
@@ -77,8 +79,10 @@ export function FilesPreviewPane(props: FilesPreviewPaneProps) {
                                 type="button"
                                 className="files-preview-action"
                                 onClick={() => {
-                                    void openPath(absPath).catch((err: unknown) => {
+                                    setOpenError(null);
+                                    void openUrl(fileUrl(absPath)).catch((err: unknown) => {
                                         console.error("[taco] open in browser failed", err);
+                                        setOpenError(errorText(err));
                                     });
                                 }}
                             >
@@ -89,6 +93,11 @@ export function FilesPreviewPane(props: FilesPreviewPaneProps) {
                 )}
             </div>
             <div className="files-preview-scroll">
+                {openError !== null && (
+                    <div className="files-preview-error" role="alert">
+                        {t("files.openFailed", { error: openError })}
+                    </div>
+                )}
                 {loading && <div className="files-preview-empty">…</div>}
                 {!loading && block !== null && (
                     <BlockedPreview block={block} fileName={selectedRelPath} absPath={absPath} />

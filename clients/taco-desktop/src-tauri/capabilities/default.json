@@ -17,6 +17,10 @@
       "identifier": "opener:allow-open-path",
       "allow": [{ "path": "**" }]
     },
+    {
+      "identifier": "opener:allow-open-url",
+      "allow": [{ "url": "file://**" }]
+    },
     "opener:allow-reveal-item-in-dir",
     "core:event:default",
     "core:window:allow-start-dragging",

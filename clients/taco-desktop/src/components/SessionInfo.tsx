@@ -17,7 +17,7 @@
  */
 
 import * as Popover from "@radix-ui/react-popover";
-import { openPath, revealItemInDir } from "@tauri-apps/plugin-opener";
+import { openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
 import {
     Check,
     Copy,
@@ -34,6 +34,7 @@ import type { ReactNode } from "react";
 import { useNow } from "../hooks/useNow";
 import type { WorkspaceState } from "../hooks/useWorkspaces";
 import { useT, useUiLanguage } from "../i18n/useI18n";
+import { fileUrl } from "../lib/fileUrl";
 import { formatRelativeTime } from "../lib/relativeTime";
 import { Divider } from "./ui/Divider";
 import { IconButton } from "./ui/IconButton";
@@ -153,11 +154,12 @@ export function SessionInfo({
     const filePath = activeMeta?.filePath;
     const openLog = async () => {
         // Try system default app first; fall back to revealing in file manager.
+        if (!filePath) return;
         try {
-            await openPath(filePath ?? "");
+            await openUrl(fileUrl(filePath));
         } catch {
             try {
-                await revealItemInDir(filePath ?? "");
+                await revealItemInDir(filePath);
             } catch (err) {
                 console.error("[taco] open log file failed", err);
             }
