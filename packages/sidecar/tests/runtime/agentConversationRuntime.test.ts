@@ -360,6 +360,12 @@ describe("AgentConversationRuntime", { timeout: 5_000 }, () => {
             assert.equal((await f.records())[0]?.receipt?.status, "queued");
             // The engine consumes the accepted input and finishes normally
             // after the sender is already cancelled.
+            for (const entry of f.native.entries) {
+                f.registry.emit("session.event", {
+                    sessionId: child,
+                    event: { type: "message_end", message: { role: "user", content: entry.text } },
+                });
+            }
             f.native.entries.length = 0;
             f.native.running = false;
             await f.runtime.end(child, "initial-run", f.completed);
@@ -371,6 +377,18 @@ describe("AgentConversationRuntime", { timeout: 5_000 }, () => {
             assert.equal(f.starts.length, 0);
         });
     }
+
+    it("releases shutdown waiters if the final native snapshot fails", async (t) => {
+        const f = await fixture(t);
+        f.runtime.stopAccepting();
+        f.native.onSnapshot = () => {
+            throw new Error("Snapshot unavailable");
+        };
+        const draining = f.runtime.whenExecutionsSettle();
+        await f.runtime.end(child, "initial-run", { ...f.completed, aborted: true });
+        await draining;
+        assert.equal(f.runtime.state(child), undefined);
+    });
 
     it("marks a queued run uncertain after restart when its native entry was already consumed", async (t) => {
         const f = await fixture(t);

@@ -180,6 +180,89 @@ describe("agent chat with the real standard harness and faux provider", { timeou
         assert.equal(occurrences(userText(observed[2]), "FOLLOWUP_ADD_TRIANGLE"), 1);
     });
 
+    it("does not confirm a followUp discarded by the turn limit", async (t) => {
+        const f = await fixture(t, 1);
+        let modelCalls = 0;
+        f.faux.setResponses([
+            () => {
+                modelCalls++;
+                return fauxAssistantMessage(fauxToolCall("chatProbe", {}, { id: "cap-probe" }), {
+                    stopReason: "toolUse",
+                });
+            },
+        ]);
+        const run = f.spawn();
+        await f.entered.promise;
+        const [child] = await f.spawner.listAgentSessions(f.parent);
+        assert.ok(child);
+        const receipt = await f.spawner.chatToAgent(f.parent, {
+            parentToolCallId: "cap-followup",
+            subSessionId: child.subSessionId,
+            prompt: "UNCONSUMED_AFTER_CAP",
+            delivery: "followUp",
+        });
+        assert.equal(receipt.status, "queued");
+        f.blocked.release();
+        const result = await run;
+        assert.equal(result.isError, false);
+        await nextImmediate();
+        const records = await f.ws.sessionRegistry.withSession(
+            child.subSessionId,
+            readAgentMessages,
+        );
+        assert.equal(modelCalls, 1);
+        assert.equal(records[0]?.receipt?.status, "aborted");
+        assert.equal(records[0]?.receipt?.isError, false);
+        assert.equal(f.spawner.conversation.state(child.subSessionId), undefined);
+    });
+
+    it("persists aborted peer receipts before disposing and rejects new messages", async (t) => {
+        const f = await fixture(t);
+        f.faux.setResponses([fauxAssistantMessage("Initial task complete")]);
+        const initial = await f.spawn();
+        assert.ok(initial.subSessionId);
+        const peer = asSessionId("peer");
+        await f.ws.sessionRegistry.createSession(peer, f.parent, async (session) => {
+            const { writeSessionFacts } = await import("../../src/runtime/session/sessionFacts.ts");
+            await writeSessionFacts(session, {
+                kind: "subagent",
+                parentSessionId: f.parent,
+                agentType: "chat-worker",
+                depth: 1,
+            });
+        });
+        f.faux.setResponses([
+            fauxAssistantMessage(fauxToolCall("chatProbe", {}, { id: "dispose-probe" }), {
+                stopReason: "toolUse",
+            }),
+        ]);
+        const receipt = await f.spawner.chatToAgent(peer, {
+            parentToolCallId: "peer-dispose",
+            subSessionId: initial.subSessionId,
+            prompt: "Continue",
+        });
+        assert.equal(receipt.status, "started");
+        await f.entered.promise;
+        const closing = f.spawner.dispose();
+        await assert.rejects(
+            f.spawner.chatToAgent(peer, {
+                parentToolCallId: "late-peer",
+                subSessionId: initial.subSessionId,
+                prompt: "Too late",
+            }),
+            /shutting down/,
+        );
+        f.blocked.release();
+        await closing;
+        const records = await f.ws.sessionRegistry.withSession(
+            initial.subSessionId,
+            readAgentMessages,
+        );
+        assert.equal(records[0]?.receipt?.messageId, receipt.messageId);
+        assert.equal(records[0]?.receipt?.status, "aborted");
+        assert.equal(records[0]?.receipt?.isError, false);
+    });
+
     it("retains prior transcript on idle chat while granting a fresh maxTurns budget", async (t) => {
         const f = await fixture(t, 3);
         f.blocked.release();
@@ -271,6 +354,44 @@ describe("agent chat with the real standard harness and faux provider", { timeou
         );
     });
 
+    it("stops a continuation disposed during attach before it calls the model", async (t) => {
+        const f = await fixture(t);
+        f.faux.setResponses([fauxAssistantMessage("Initial task complete")]);
+        const initial = await f.spawn();
+        assert.ok(initial.subSessionId);
+        const preparing = gate();
+        const release = gate();
+        const registry = f.ws.sessionRegistry;
+        const attach = registry.attachChild.bind(registry);
+        registry.attachChild = async (...args) => {
+            preparing.release();
+            await release.promise;
+            return attach(...args);
+        };
+        t.after(() => release.release());
+        let modelCalls = 0;
+        f.faux.setResponses([
+            () => {
+                modelCalls++;
+                return fauxAssistantMessage("Must not run after shutdown");
+            },
+        ]);
+        const receipt = await f.spawner.chatToAgent(f.parent, {
+            parentToolCallId: "preparing-dispose",
+            subSessionId: initial.subSessionId,
+            prompt: "Continue",
+        });
+        await preparing.promise;
+        assert.equal(f.spawner.conversation.state(initial.subSessionId)?.phase, "preparing");
+        const closing = f.spawner.dispose();
+        release.release();
+        await closing;
+        const records = await registry.withSession(initial.subSessionId, readAgentMessages);
+        assert.equal(records[0]?.receipt?.messageId, receipt.messageId);
+        assert.equal(records[0]?.receipt?.status, "aborted");
+        assert.equal(modelCalls, 0);
+    });
+
     it("wakes a real run for a retained native tail entry without duplicating its body in context", async (t) => {
         const f = await fixture(t);
         f.faux.setResponses([fauxAssistantMessage("Initial task complete")]);
@@ -355,5 +476,86 @@ describe("agent chat with the real standard harness and faux provider", { timeou
         } finally {
             watch.unsubscribe();
         }
+    });
+
+    it("settles every tail message consumed by one continuation without an extra run", async (t) => {
+        const f = await fixture(t);
+        f.faux.setResponses([fauxAssistantMessage("Initial task complete")]);
+        const initial = await f.spawn();
+        assert.ok(initial.subSessionId);
+        const child = initial.subSessionId;
+        const attached = f.ws.sessionRegistry.getAttached(child);
+        assert.ok(attached);
+        const lane = (attached as unknown as { lane: AgentLane }).lane;
+        const records: AgentMessageRecord[] = [];
+        for (const index of [1, 2]) {
+            const message: AgentMessageRecord = {
+                messageId: `tail-${index}`,
+                invocationId: JSON.stringify([f.parent, `tail-call-${index}`]),
+                senderSessionId: f.parent,
+                targetSessionId: child,
+                ownerParentSessionId: f.parent,
+                relation: "parent",
+                prompt: `TAIL_BODY_${index}`,
+                delivery: "followUp",
+                background: true,
+                createdAt: Date.now(),
+                receipt: {
+                    subSessionId: child,
+                    messageId: `tail-${index}`,
+                    runId: "tail-run",
+                    status: "queued",
+                    effectiveDelivery: "followUp",
+                    resultText: "Accepted",
+                    isError: false,
+                },
+            };
+            const queued = await lane.followUp(
+                agentMessageEnvelope(message),
+                undefined,
+                harnessContext,
+            );
+            assert.equal(queued.ok, true);
+            if (!queued.ok) throw new Error("Could not seed native tail queue");
+            message.queueEntryId = queued.value.entryId;
+            records.push(message);
+        }
+        await f.ws.sessionRegistry.withSession(child, (session) =>
+            writeAgentMessages(session, records),
+        );
+        const contexts: ModelContext[] = [];
+        const answered = gate();
+        const answer: FauxResponseFactory = (context) => {
+            contexts.push(structuredClone(context));
+            answered.release();
+            return fauxAssistantMessage("Both messages handled");
+        };
+        f.faux.setResponses([answer, answer]);
+        const started: string[] = [];
+        f.spawner.on("subagent.started", (event: { runId: string }) => started.push(event.runId));
+        f.spawner.conversation.begin(child, {
+            runId: "tail-run",
+            parentSessionId: f.parent,
+            phase: "settling",
+        });
+        await f.spawner.conversation.end(child, "tail-run", {
+            subSessionId: child,
+            resultText: "Initial task complete",
+            isError: false,
+        });
+        await answered.promise;
+        await f.spawner.whenBackgroundRunsSettle();
+        await nextImmediate();
+        const settled = await f.ws.sessionRegistry.withSession(child, readAgentMessages);
+        assert.equal(
+            contexts.length,
+            1,
+            "both queued messages were already in the first model context",
+        );
+        assert.match(userText(contexts[0]), /TAIL_BODY_1/);
+        assert.match(userText(contexts[0]), /TAIL_BODY_2/);
+        assert.equal(started.length, 1);
+        assert.ok(settled.every((message) => message.receipt?.status === "completed"));
+        assert.equal(settled[0]?.receipt?.runId, settled[1]?.receipt?.runId);
     });
 });

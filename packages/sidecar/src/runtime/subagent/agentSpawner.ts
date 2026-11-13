@@ -348,6 +348,7 @@ export class AgentSpawner extends EventEmitter {
     private findClaudeCode = findClaudeExecutable;
     private loadCodexSdkForRun = loadCodexSdk;
     readonly conversation: AgentConversationRuntime;
+    private stopping = false;
     private readonly chatRuns = new Map<
         string,
         {
@@ -876,6 +877,7 @@ export class AgentSpawner extends EventEmitter {
         // nothing to stop, after it the run has settled — `abortSubagentRun`
         // reporting "not running" outside the window is the truth.
         if (args.abortController) {
+            if (this.stopping) args.abortController.abort();
             this.subagentControllers.set(childSessionId, {
                 controller: args.abortController,
                 parentSessionId: args.parentSessionId,
@@ -1025,6 +1027,7 @@ export class AgentSpawner extends EventEmitter {
         // The SDK takes a controller, not a signal. Spawn paths always pass one;
         // a caller with only `signal` gets a controller that follows it.
         const controller = args.abortController ?? new AbortController();
+        if (this.stopping) controller.abort();
         const follow = (): void => controller.abort();
         if (args.signal?.aborted) controller.abort();
         args.signal?.addEventListener("abort", follow, { once: true });
@@ -1145,6 +1148,7 @@ export class AgentSpawner extends EventEmitter {
         args: SubagentSessionArgs,
     ): Promise<SubagentRunResult> {
         const controller = args.abortController ?? new AbortController();
+        if (this.stopping) controller.abort();
         const follow = (): void => controller.abort(args.signal?.reason);
         if (args.signal?.aborted) controller.abort(args.signal.reason);
         args.signal?.addEventListener("abort", follow, { once: true });
@@ -2293,9 +2297,12 @@ export class AgentSpawner extends EventEmitter {
     }
 
     async dispose(): Promise<void> {
+        this.stopping = true;
+        this.conversation.stopAccepting();
         for (const { controller } of this.subagentControllers.values()) controller.abort();
-        await this.conversation.dispose();
+        await this.conversation.whenExecutionsSettle();
         await this.whenBackgroundRunsSettle();
+        await this.conversation.dispose();
         this.removeAllListeners();
     }
 
@@ -2625,8 +2632,10 @@ export class AgentSpawner extends EventEmitter {
             readLastAssistantText: (id) => this.extractLastAssistantText(id),
             reportResumeStart: (id) => this.reportResumeStart(id),
             reportResumeSettle: (id, result, handle) => this.reportResumeSettle(id, result, handle),
-            registerController: (id, controller, parentSessionId) =>
-                this.subagentControllers.set(id, { controller, parentSessionId }),
+            registerController: (id, controller, parentSessionId) => {
+                if (this.stopping) controller.abort();
+                this.subagentControllers.set(id, { controller, parentSessionId });
+            },
             releaseController: (id, controller) => this.releaseController(id, controller),
             runClaudeCode: (request, def) =>
                 this.runClaudeCodeChild(request.subSessionId, {

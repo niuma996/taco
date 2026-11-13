@@ -2,6 +2,9 @@ import { type AgentSessionDescriptor, asSessionId, type SessionId } from "@taco-
 import type { AgentChatArgs, AgentChatResult } from "../../agents/agentConversationTypes.ts";
 import type { AgentDefinition, SubagentRuntime } from "../../agents/types.ts";
 import { createLogger } from "../../lib/logger.ts";
+import { textBlocks } from "../../lib/textBlocks.ts";
+import { findBalancedTagsSkippingFences } from "../../tags/fenceAware.ts";
+import type { AgentMessage } from "../pi/types.ts";
 import { readSessionFacts } from "../session/sessionFacts.ts";
 import type { SessionRegistry } from "../session/sessionRegistry.ts";
 import {
@@ -35,10 +38,31 @@ export interface AgentConversationRuntimeOptions {
     }>;
 }
 
+interface TrackedAgentExecution extends AgentExecutionState {
+    consumedMessages: Set<string>;
+    cancelledMessages: Set<string>;
+    settled: Promise<void>;
+    resolveSettled(): void;
+}
+
+function envelopeId(message: AgentMessage): string | undefined {
+    if (message.role !== "user") return undefined;
+    const text = (
+        typeof message.content === "string"
+            ? message.content
+            : textBlocks(message.content).join("\n")
+    ).trim();
+    const tags = findBalancedTagsSkippingFences(text, "agent_message");
+    const tag = tags[0];
+    return tags.length === 1 && tag?.range[0] === 0 && tag.range[1] === text.length
+        ? tag.attrs.id
+        : undefined;
+}
+
 /** Coordinates native lane queues with the lifetime of a delegated execution. */
 export class AgentConversationRuntime {
     readonly messages: AgentConversation;
-    private readonly executions = new Map<SessionId, AgentExecutionState>();
+    private readonly executions = new Map<SessionId, TrackedAgentExecution>();
     private readonly flushing = new Set<SessionId>();
     private readonly dirty = new Set<SessionId>();
     private readonly dispatches = new Set<Promise<void>>();
@@ -64,12 +88,26 @@ export class AgentConversationRuntime {
         event,
     }: {
         sessionId: SessionId;
-        event: { type: string };
+        event: {
+            type: string;
+            message?: AgentMessage;
+            steer?: AgentMessage[];
+            followUp?: AgentMessage[];
+        };
     }): void => {
-        if (event.type !== "run_start") return;
         const execution = this.executions.get(sessionId);
-        if (execution) execution.phase = "running";
-        this.wake(sessionId);
+        if (event.type === "run_start") {
+            if (execution) execution.phase = "running";
+            this.wake(sessionId);
+        } else if (execution && event.type === "message_end" && event.message) {
+            const id = envelopeId(event.message);
+            if (id) execution.consumedMessages.add(id);
+        } else if (execution && event.type === "operation_abort") {
+            for (const message of [...(event.steer ?? []), ...(event.followUp ?? [])]) {
+                const id = envelopeId(message);
+                if (id) execution.cancelledMessages.add(id);
+            }
+        }
     };
 
     private readonly onIdle = ({ sessionId }: { sessionId: SessionId }): void => {
@@ -88,9 +126,20 @@ export class AgentConversationRuntime {
     };
 
     begin(id: SessionId, state: AgentExecutionState): void {
+        if (this.disposed) throw new Error("Agent communication is shutting down.");
         if (this.executions.has(id))
             throw new Error("This agent already has an admitted execution.");
-        this.executions.set(id, state);
+        let resolveSettled = () => {};
+        const settled = new Promise<void>((resolve) => {
+            resolveSettled = resolve;
+        });
+        this.executions.set(id, {
+            ...state,
+            consumedMessages: new Set(),
+            cancelledMessages: new Set(),
+            settled,
+            resolveSettled,
+        });
     }
 
     state(id: SessionId): AgentExecutionState | undefined {
@@ -121,47 +170,83 @@ export class AgentConversationRuntime {
     }
 
     async end(id: SessionId, runId: string, result?: SubagentRunResult): Promise<void> {
-        if (this.executions.get(id)?.runId !== runId) return;
-        // Inspect before admission drains, then refresh inside it: an enqueue may be in flight.
-        await this.nativeQueuedIds(id);
-        await this.messages
-            .update(id, async (records) => {
-                const queued = await this.nativeQueuedIds(id);
-                for (const record of records) {
-                    const receipt = record.receipt;
-                    const belongsToRun =
-                        receipt?.runId === runId || record.queuedDuringRunId === runId;
-                    if (!belongsToRun || !receipt) continue;
-                    if (result?.aborted) {
-                        record.receipt = {
-                            ...receipt,
-                            status: "aborted",
-                            resultText:
-                                "The run was stopped; this message may not have been consumed.",
-                            isError: false,
-                        };
-                        record.queuedDuringRunId = undefined;
-                    } else if (record.queuedDuringRunId === runId) {
-                        record.queuedDuringRunId = undefined;
-                    } else if (record.queueEntryId && queued.has(record.queueEntryId)) {
-                        record.receipt = { ...receipt, runId: undefined, status: "queued" };
-                    } else if (!record.queueEntryId && receipt.status === "queued") {
-                        record.receipt = { ...receipt, runId: undefined };
-                    } else {
-                        record.receipt = {
-                            ...receipt,
-                            status: result?.isError ? "error" : "completed",
-                            resultText: result?.resultText ?? "The execution settled.",
-                            isError: result?.isError ?? false,
-                        };
+        const execution = this.executions.get(id);
+        if (execution?.runId !== runId) return;
+        try {
+            // Inspect before admission drains, then refresh inside it: an enqueue may be in flight.
+            await this.nativeQueuedIds(id).catch((error: unknown) => {
+                log.warn("failed to inspect native queue before settling", {
+                    id,
+                    error: String(error),
+                });
+            });
+            await this.messages
+                .update(id, async (records) => {
+                    let queued = new Set<string>();
+                    try {
+                        queued = await this.nativeQueuedIds(id);
+                    } catch (error) {
+                        log.warn("failed to inspect native queue while settling", {
+                            id,
+                            error: String(error),
+                        });
                     }
-                }
-            })
-            .catch((error: unknown) =>
-                log.error("failed to settle message receipts", { id, error: String(error) }),
-            );
-        if (this.executions.get(id)?.runId === runId) this.executions.delete(id);
-        this.wake(id);
+                    for (const record of records) {
+                        const receipt = record.receipt;
+                        const consumed = execution.consumedMessages.has(record.messageId);
+                        const cancelled = execution.cancelledMessages.has(record.messageId);
+                        const belongsToRun =
+                            consumed ||
+                            cancelled ||
+                            receipt?.runId === runId ||
+                            record.queuedDuringRunId === runId;
+                        if (!belongsToRun || !receipt) continue;
+                        if (result?.aborted || cancelled) {
+                            record.receipt = {
+                                ...receipt,
+                                status: "aborted",
+                                resultText:
+                                    "The run was stopped; this message may not have been consumed.",
+                                isError: false,
+                            };
+                            record.queuedDuringRunId = undefined;
+                        } else if (record.queuedDuringRunId === runId) {
+                            record.queuedDuringRunId = undefined;
+                        } else if (record.queueEntryId && queued.has(record.queueEntryId)) {
+                            record.receipt = { ...receipt, runId: undefined, status: "queued" };
+                        } else if (!record.queueEntryId && receipt.status === "queued") {
+                            record.receipt = { ...receipt, runId: undefined };
+                        } else if (
+                            record.queueEntryId &&
+                            !record.queueEntryId.startsWith("claude:") &&
+                            !consumed
+                        ) {
+                            record.receipt = {
+                                ...receipt,
+                                status: "error",
+                                isError: true,
+                                resultText:
+                                    "Delivery could not be confirmed; the queue entry disappeared without a consumed-message event. It was not automatically resent.",
+                            };
+                        } else {
+                            record.receipt = {
+                                ...receipt,
+                                runId,
+                                status: result?.isError ? "error" : "completed",
+                                resultText: result?.resultText ?? "The execution settled.",
+                                isError: result?.isError ?? false,
+                            };
+                        }
+                    }
+                })
+                .catch((error: unknown) =>
+                    log.error("failed to settle message receipts", { id, error: String(error) }),
+                );
+        } finally {
+            if (this.executions.get(id)?.runId === runId) this.executions.delete(id);
+            execution.resolveSettled();
+            this.wake(id);
+        }
     }
 
     chat(caller: SessionId, args: AgentChatArgs): Promise<AgentChatResult> {
@@ -206,6 +291,7 @@ export class AgentConversationRuntime {
     }
 
     private async deliver(message: AgentMessageRecord, args: AgentChatArgs) {
+        if (this.disposed) throw new Error("Agent communication is shutting down.");
         const state = this.executions.get(message.targetSessionId);
         if (!state) return this.options.start(message, args);
         if (state.runtime === "codex") {
@@ -297,6 +383,7 @@ export class AgentConversationRuntime {
         if (facts.kind !== "subagent") return;
         await this.messages.update(id, async (records) => {
             for (const pending of records) {
+                if (this.disposed) return;
                 if (pending.receipt?.status !== "queued") continue;
                 const state = this.executions.get(id);
                 if (state?.phase === "preparing" || state?.phase === "settling") return;
@@ -336,8 +423,17 @@ export class AgentConversationRuntime {
         });
     }
 
-    async dispose(): Promise<void> {
+    stopAccepting(): void {
         this.disposed = true;
+        this.dirty.clear();
+    }
+
+    async whenExecutionsSettle(): Promise<void> {
+        await Promise.all([...this.executions.values()].map((execution) => execution.settled));
+    }
+
+    async dispose(): Promise<void> {
+        this.stopAccepting();
         this.options.registry.off("session.event", this.onEvent);
         this.options.registry.off("session.idle", this.onIdle);
         this.options.registry.off("session.attached", this.onAttached);
