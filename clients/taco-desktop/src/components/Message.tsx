@@ -91,42 +91,44 @@ export const Message = memo(function Message({
     const showMeta = isLastInTurn && !isTurnInProgress;
     if (m.kind === "user") {
         return (
-            <div
-                className={`message user${highlighted ? " message--navigation-target" : ""}`}
-                data-message-id={m.id}
-            >
-                {m.images && m.images.length > 0 && (
-                    <div className="message-images">
-                        {m.images.map((img, i) => (
-                            <img
-                                key={`${img.mimeType}-${img.data.slice(0, 8)}-${img.data.slice(-8)}-${i}`}
-                                className="message-image"
-                                src={`data:${img.mimeType};base64,${img.data}`}
-                                alt=""
-                            />
-                        ))}
-                    </div>
-                )}
-                {m.attachments && m.attachments.length > 0 && (
-                    <div className="message-attachments">
-                        {m.attachments.map((a, i) => (
-                            <AttachmentChip
-                                key={`${a.path || a.name}-${i}`}
-                                name={a.name}
-                                size={a.size}
-                                kind={a.kind}
-                                path={a.path}
-                            />
-                        ))}
-                    </div>
-                )}
-                {clampLines === undefined ? (
-                    <div className="message-text">{m.text}</div>
-                ) : (
-                    <Clamp lines={clampLines} className="message-text">
-                        {m.text}
-                    </Clamp>
-                )}
+            <div className="message-row message-row--user">
+                <div
+                    className={`message user${highlighted ? " message--navigation-target" : ""}`}
+                    data-message-id={m.id}
+                >
+                    {m.images && m.images.length > 0 && (
+                        <div className="message-images">
+                            {m.images.map((img, i) => (
+                                <img
+                                    key={`${img.mimeType}-${img.data.slice(0, 8)}-${img.data.slice(-8)}-${i}`}
+                                    className="message-image"
+                                    src={`data:${img.mimeType};base64,${img.data}`}
+                                    alt=""
+                                />
+                            ))}
+                        </div>
+                    )}
+                    {m.attachments && m.attachments.length > 0 && (
+                        <div className="message-attachments">
+                            {m.attachments.map((a, i) => (
+                                <AttachmentChip
+                                    key={`${a.path || a.name}-${i}`}
+                                    name={a.name}
+                                    size={a.size}
+                                    kind={a.kind}
+                                    path={a.path}
+                                />
+                            ))}
+                        </div>
+                    )}
+                    {clampLines === undefined ? (
+                        <div className="message-text">{m.text}</div>
+                    ) : (
+                        <Clamp lines={clampLines} className="message-text">
+                            {m.text}
+                        </Clamp>
+                    )}
+                </div>
                 {showMeta && <MessageMeta ts={m.ts} text={m.text} />}
             </div>
         );
@@ -149,20 +151,26 @@ export const Message = memo(function Message({
     // in flight the empty bubble is the streaming placeholder.
     if (isEmptyAssistant(m) && !isTurnInProgress) return null;
     return (
-        <div className="message assistant">
-            {m.thinking.map((b, i) => (
-                <ThinkingBlock key={`${m.id}-think-${i}`} block={b} />
-            ))}
-            {m.text && <AssistantMarkdown text={m.text} />}
-            {m.tools.map((tool) => (
-                <ToolCardShell key={`${m.id}-${tool.id}`} tool={tool}>
-                    <CommandPermissionActions
-                        tool={tool}
-                        onResolve={onCommandPermission}
-                        pendingPermissionRequests={pendingPermissionRequests}
-                    />
-                </ToolCardShell>
-            ))}
+        <div
+            className={`message-row message-row--assistant${
+                isLastInTurn ? " message-row--final" : ""
+            }`}
+        >
+            <div className="message assistant">
+                {m.thinking.map((b, i) => (
+                    <ThinkingBlock key={`${m.id}-think-${i}`} block={b} />
+                ))}
+                {m.text && <AssistantMarkdown text={m.text} />}
+                {m.tools.map((tool) => (
+                    <ToolCardShell key={`${m.id}-${tool.id}`} tool={tool}>
+                        <CommandPermissionActions
+                            tool={tool}
+                            onResolve={onCommandPermission}
+                            pendingPermissionRequests={pendingPermissionRequests}
+                        />
+                    </ToolCardShell>
+                ))}
+            </div>
             {showMeta && (
                 <MessageMeta
                     ts={m.ts}

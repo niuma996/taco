@@ -71,9 +71,53 @@
 }
 
 .md-assistant table {
-    border-collapse: collapse;
+    /* Separate borders with zero spacing so the table can carry its own frame
+       and radius. Collapse mode paints the outer border straight across the
+       corners, and a radius there cannot clip the header fill. */
+    border-collapse: separate;
+    border-spacing: 0;
     margin: 0.6em 0;
     width: auto;
+    /* The table's own border is the outer frame; the cells draw inner rules
+       only, so every line stays a single pixel wide. */
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+}
+
+.md-assistant th,
+.md-assistant td {
+    border-right: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+    padding: 0.35em 0.7em;
+    text-align: left;
+}
+
+/* The last column and the last row end at the table's own border. */
+.md-assistant tr > *:last-child {
+    border-right: none;
+}
+
+.md-assistant tbody tr:last-child > * {
+    border-bottom: none;
+}
+
+/* The corner cells carry the fill and the frame, so the radius lands on them
+   — a radius on the table itself only rounds its own border, leaving the
+   header fill square against it. */
+.md-assistant thead th:first-child {
+    border-top-left-radius: var(--radius-sm);
+}
+
+.md-assistant thead th:last-child {
+    border-top-right-radius: var(--radius-sm);
+}
+
+.md-assistant tbody tr:last-child td:first-child {
+    border-bottom-left-radius: var(--radius-sm);
+}
+
+.md-assistant tbody tr:last-child td:last-child {
+    border-bottom-right-radius: var(--radius-sm);
 }
 
 /* Wide tables scroll inside this wrapper instead of widening the message
@@ -102,13 +146,6 @@
    scrollable area. */
 .md-table-scroll table {
     margin: 0.6em 0;
-}
-
-.md-assistant th,
-.md-assistant td {
-    border: 1px solid var(--border);
-    padding: 0.35em 0.7em;
-    text-align: left;
 }
 
 .md-assistant th {

@@ -1,5 +1,14 @@
 /* chatMessages.css — message bubbles (user/assistant/tool) + thinking block; split from chat.css */
 
+/* One turn row: the bubble plus its meta strip. The meta lives outside the
+   bubble, so the bubble carries only its own content, and the row is what the
+   pointer has to cross for the strip to appear. */
+.message-row {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+
 .message {
     padding: 0.6rem;
     border-radius: var(--radius-md);
@@ -42,11 +51,11 @@
 
 .message.assistant {
     background: var(--assistant-msg-bg);
-    /* No border: the tinted fill alone separates the turn from the page, and the
-       tool cards inside carry the only outline — a bubble border framed the
-       cards in a second frame. */
+    /* No border: the fill is the panel's own surface, so it separates nothing —
+       the tool cards inside carry the only outline, and a bubble border framed
+       the cards in a second frame. */
     border: none;
-    /* No horizontal padding: the fill is invisible in both themes (light matches
+    /* No horizontal padding: the fill is invisible in both themes (both match
        --chat-panel-bg exactly), so the padding bought no grouping — it only
        inset every tool card and text line by 0.6rem, breaking their edge
        alignment with the input card and the user bubble. Vertical padding stays:
@@ -77,22 +86,78 @@
     font-size: var(--text-sm);
 }
 
-/* End-of-turn meta row: timestamp + copy button. Floats to the right so it
-   reads as an afterthought rather than a sibling of the message content.
-   Anchored to the bubble's bottom edge — the bubble's own border-radius
-   contains it visually without a wrapping container. margin-top matches the
-   0.4rem intra-turn block spacing shared with .tool-card. */
+/* End-of-turn meta row: timestamp + copy button. It sits below the bubble
+   rather than inside it, so the bubble keeps only its own content. Floats to
+   the right so it reads as an afterthought rather than a sibling of the
+   message content. Hidden until its bubble is hovered — or a control inside
+   it takes focus — but kept in flow rather than display:none, so revealing it
+   never reflows the messages below it. */
 .message-meta {
     display: flex;
     align-items: center;
     justify-content: flex-end;
     gap: 6px;
-    margin-top: 0.4rem;
-    color: var(--fg-dim);
+    /* No margin between the bubble and the strip: they are siblings, and a
+       gap here would break the pointer's path from the bubble to the copy
+       button — the strip would vanish mid-move. The visible spacing comes
+       from the padding instead, which is part of the strip's own box. */
+    margin-top: 0;
+    padding-top: var(--space-1);
+    /* A small inset keeps the strip off the column's right edge. */
+    padding-right: var(--space-1);
+    color: var(--fg-faint);
     font-size: var(--text-xs);
-    /* The row appears when the turn settles; fading it in keeps the bubble
-       from growing in one frame. */
-    animation: ui-enter var(--motion-duration-fast) var(--motion-ease-out);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity var(--motion-duration-fast) var(--motion-ease-out);
+}
+
+/* A framed bubble already separates the strip from its content; an unframed
+   one has only the padding, so the strip sits closer. */
+.message-row--user .message-meta {
+    padding-top: var(--space-1-5);
+}
+
+/* The assistant bubble carries no frame of its own, so its content ends
+   straight on the panel surface. The strip therefore lines up with that
+   content's left edge: right-aligned, it would sit directly above the next
+   message's right-aligned bubble and read as that bubble's label. */
+.message-row--assistant .message-meta {
+    justify-content: flex-start;
+}
+
+/* The closing message of a turn carries the strip, so the bubble does not
+   need to keep room for it: a shorter bottom padding pulls the strip up
+   against the content it belongs to, instead of letting it drift down toward
+   the next message. Keyed off the turn's last message rather than the
+   strip's own presence, so the height does not shift when the turn settles
+   and the strip appears. */
+.message-row--assistant.message-row--final .message.assistant {
+    padding-bottom: var(--space-1);
+}
+
+/* The strip answers to its own bubble, not to the whole row. The space
+   between two rows belongs to neither, and a strip that lit up there would
+   read as belonging to the message on the wrong side of the gap. */
+.message:hover + .message-meta,
+.message-meta:hover,
+.message-meta:focus-within {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+/* Touch devices never hover, so the strip stays visible there. */
+@media (hover: none) {
+    .message-meta {
+        opacity: 1;
+        pointer-events: auto;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .message-meta {
+        transition: none;
+    }
 }
 .message-meta__time {
     font-variant-numeric: tabular-nums;

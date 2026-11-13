@@ -10,6 +10,9 @@
        lands on (--composer-chip-bg #252a32), not just --bg — the previous
        #7a8390 fell to 3.76:1 there. */
     --fg-dim: #9aa4b0;
+    /* Tertiary text — the quietest ink in the UI (message meta rows). A step
+       below --fg-dim so a timestamp reads as chrome rather than content. */
+    --fg-faint: #79828f;
     --accent: #88c0d0;
     --user: #a3be8c;
     --assistant: #88c0d0;
@@ -109,8 +112,10 @@
 
     /* User message background — solid deep-blue, same family as --accent. */
     --user-msg-bg: #1a2a3a;
-    /* Assistant message background — distinct from --chat-panel-bg, decoupled from sidebar list bg. */
-    --assistant-msg-bg: #1a1d23;
+    /* Assistant message background — the chat panel's own surface. The turn is
+       full-bleed (no horizontal padding, no side margin), so a fill of its own
+       reads as a rounded frame one shade off the panel, not as a turn. */
+    --assistant-msg-bg: var(--chat-panel-bg);
 
     /* Diff colors (Nord palette) — track with the theme. fg for left mark/gutter, bg for row fill. */
     --diff-old-fg: #bf616a; /* Nord 11, red */
@@ -288,6 +293,10 @@
        light surfaces it lands on (--warm-gray-4 #e8e5e0) need more ink to
        clear AA; the old #8a8177 fell to 3.05:1 there. */
     --fg-dim: #6b6359;
+    /* Tertiary text — one step below --fg-dim, but still AA (4.7:1) against
+       --chat-panel-bg: the meta row is 11px type, so it has little room to
+       fade without dropping below the contrast floor. */
+    --fg-faint: #756e64;
     --accent: #5e81ac; /* Nord 10, deep blue — matches dark #88c0d0 family */
     --user: #5b8a3c;
     --assistant: #4078c0; /* darker than --accent for role differentiation */
@@ -363,8 +372,8 @@
 
     /* User message background — solid light blue, same family as --accent. Mirror of dark theme #1a2a3a. */
     --user-msg-bg: #dbe5ee;
-    /* Assistant message background — distinct from --chat-panel-bg, decoupled from sidebar list bg. */
-    --assistant-msg-bg: var(--warm-gray-1);
+    /* Assistant message background — the chat panel's own surface. Mirror of dark theme. */
+    --assistant-msg-bg: var(--chat-panel-bg);
 
     /* Diff colors — more saturated red/green for light theme readability. */
     --diff-old-fg: #c0392b;

@@ -631,8 +631,10 @@ export function ChatPane(props: ChatPaneProps) {
                 </footer>
             </main>
             {/* The rail is an overlay of .main-col: it indexes the session's
-                user messages without taking part in the chat's scroll. */}
-            {guideEnabled && guideEntries.length > 0 && (
+                user messages without taking part in the chat's scroll. One
+                user message leaves nothing to jump between, so the rail
+                only appears once there is a choice to make. */}
+            {guideEnabled && guideEntries.length > 1 && (
                 <UserMessageGuide
                     entries={guideEntries}
                     activeId={activeId}
