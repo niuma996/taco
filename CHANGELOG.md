@@ -6,6 +6,141 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 starting with `v0.1.0` (the first open-source release).
 
+## [0.4.0] — 2026-11-14
+
+A release about seeing everything at once and letting work survive: workspace
+and IM conversations share one sidebar, agents and skills show where they came
+from, and scheduled or inbound work waits in a queue that survives a restart.
+Child agents can keep talking, and Codex joins Claude Code as a supported
+runtime.
+
+### Added
+
+**One sidebar for every conversation.** Workspace chats and IM conversations now
+appear together. You can browse and search across workspaces, keep a group open,
+and see which conversations are busy, which have unread messages and which are
+waiting for you — without switching workspaces one by one.
+
+**Agents and skills show where they come from.** The Agents and Skills panes
+distinguish the effective definition from the global, workspace and builtin
+ones. A definition another layer hides can still be read, and you can edit
+Taco's global and workspace agents without leaving the chat you are in.
+
+**Every conversation keeps its own memory.** An IM conversation has its own
+topic memory, reads the memory of the workspace it belongs to, and can opt into
+the memory of other local workspaces the sidecar is running. Inherited topics
+are read-only, and a memory reference fetches the full text without opening any
+extra files.
+
+**Scheduled and inbound work waits in a durable queue.** Incoming IM messages
+and scheduled jobs are written down before they run. Order is kept per
+conversation, a restart picks up the operation that was already accepted, and
+the Work pane shows how each one ran and whether it reached its destination.
+
+**Child agents keep talking.** `chatToAgent` gives a child more context or a
+follow-up task, and `listAgentSessions` lists the children and siblings it may
+address. The receipt says whether the message was accepted or finished, and the
+answer still goes back to the parent that started the work.
+
+**Claude Code and Codex children can be resumed.** Claude Code children keep
+their native session and accept later messages; a message that arrives while
+the child is busy is delivered on the next turn instead of interrupting the
+tool it is running. Codex agents use the official SDK, install from the Agents
+page, and resume their own thread.
+
+**External agents can talk back.** Claude Code and Codex receive the permitted
+`chatToAgent` and `listAgentSessions` tools for each run. Taco decides who the
+sender is and which conversations it may address.
+
+**Plan mode lets you approve a single write.** A file write outside the plan
+document — but still inside the workspace or an associated directory — can be
+approved on its own without leaving plan mode. The approval covers that path
+for the current plan; shell writes stay blocked.
+
+### Changed
+
+**Reconnecting keeps the conversation intact.** A reconnect restores the partial
+reply, the running tools, queued input, pending approvals and child
+conversations. Progress stays on the original agent card, and the panel
+reconciles live updates with the full history.
+
+**More fits on screen at a glance.** Agent and plugin panes use a wider layout,
+catalogs share the same controls and headings, markdown tables are rounded, and
+message details — timestamps among them — appear on hover instead of crowding
+the message.
+
+**The assistant is told what it can actually do.** Prompts explain how to find a
+child, what a receipt means, which siblings are reachable, and that later
+context has to be sent explicitly. Saved memory and project context can no
+longer grant a new approval through an embedded control tag.
+
+**Files and queues are written once.** Task lists and results are published
+atomically, so a crash cannot leave half a file behind, and the scheduler only
+reads the entries that are still open.
+
+### Fixed
+
+**Switching conversations no longer gets stuck.** An outdated new-chat request
+no longer cancels the conversation you picked afterwards. Restored groups load
+their conversations, and panels that belong to the chat close when you leave
+it.
+
+**Editing an agent keeps its definition.** Custom file names and hidden global
+definitions stay readable and editable, and unchanged working directories and
+Codex tool restrictions survive a save.
+
+**Stopping and replaying work respects the right run.** A cancellation that was
+deferred still takes effect after a restart, a replayed batch keeps its own
+waiting question, and a session that triggers its own scheduled job returns
+right away instead of waiting for itself.
+
+**Receipts say what really happened.** Follow-up messages that a turn limit
+dropped are no longer reported as finished, messages handled together do not
+start a second continuation, and shutting down settles the open receipts before
+clearing the execution state.
+
+**A failed answer keeps plan mode on.** Work that was cancelled or expired, a
+busy conversation, or a receipt that could not be saved will not approve the
+plan by accident, and a retry stays tied to the plan you reviewed.
+
+**Opening a local file or folder works again.** The action that opens the
+workspace folder or a session log in the browser now opens the path instead of
+doing nothing.
+
+### Breaking changes
+
+- The protocol moved from 2.13 to 2.18. The new desktop needs matching support
+  for scoped catalogs, layered memory and `memory.read`; older clients keep
+  receiving capability-based projections for inbound Work and the memory layers.
+  Keep the desktop and the sidecar on the same release line.
+- `agentContinue` is gone. Use `chatToAgent` both for a message to a running
+  child and for a follow-up after it finished. Existing history stays readable,
+  but old calls appear as plain tool records and take no part in the agent
+  topology or in recovering a run. An interrupted legacy call is not resumed
+  automatically.
+
+### Upgrade notes
+
+- Upgrade the desktop and the sidecar together; a running daemon may need a
+  restart to pick up the new protocol and runtime code.
+- Codex agents use the provider, model and credentials from your own Codex
+  configuration under `$CODEX_HOME` (default `~/.codex`). Leave the model empty
+  to inherit it, and a custom provider with its own credentials needs no OpenAI
+  login. Claude Code still needs its own CLI and Agent SDK; the in-app
+  installation card applies to Codex only.
+- Native Claude Code and Codex sessions are stored apart from the conversation
+  history Taco shows. Native storage supports resuming, but it does not mean
+  the session appears in the original application's conversation list. Older
+  Claude Code history without a native session cannot be resumed.
+- IM topic memory is now per conversation. Topics stored under the earlier
+  shared identity are not copied over automatically — review them before moving
+  any notes. The hand-written `MEMORY.md` stays shared, and associated and
+  system topics are inherited read-only.
+- Delivery to an IM platform is still at-least-once. A child message that was
+  interrupted and cannot be confirmed is not resent, and old inbox batches
+  that were still dispatching without a Work handoff are not replayed, because
+  their earlier outcome is unknown.
+
 ## [0.3.9] — 2026-11-09
 
 A release about background work that can wait for you: a scheduled job or a
