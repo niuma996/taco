@@ -51,7 +51,9 @@ export const agentsWriteSchema = Type.Object({
     agentType,
     description: Type.String({ minLength: 1, maxLength: 1024 }),
     whenToUse: Type.Optional(Type.String({ maxLength: 2048 })),
-    runtime: Type.Optional(Type.Union([Type.Literal("standard"), Type.Literal("claude-code")])),
+    runtime: Type.Optional(
+        Type.Union([Type.Literal("standard"), Type.Literal("claude-code"), Type.Literal("codex")]),
+    ),
     maxTurns: Type.Integer({ minimum: 1, maximum: 500 }),
     // Wall-clock budget for a background spawn of this agent, in minutes.
     // Omitted = derived from the turn budget (see backgroundTimeoutMs).
@@ -80,6 +82,33 @@ export const agentsWriteSchema = Type.Object({
     // claude-code only: an absolute workspace or associated directory. The
     // handler rejects paths outside that set; omitted means the calling workspace.
     cwd: Type.Optional(Type.String({ minLength: 1, maxLength: 4096 })),
+    // codex only: engine-specific settings. Sandbox/approval names follow the
+    // Codex SDK, not Claude Code's permissionMode — the semantics differ.
+    // Closed shape: unknown keys are rejected on the wire instead of ignored.
+    codex: Type.Optional(
+        Type.Object(
+            {
+                cwd: Type.Optional(Type.String({ minLength: 1, maxLength: 4096 })),
+                model: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),
+                sandbox: Type.Optional(
+                    Type.Union([
+                        Type.Literal("read-only"),
+                        Type.Literal("workspace-write"),
+                        Type.Literal("danger-full-access"),
+                    ]),
+                ),
+                approvalPolicy: Type.Optional(
+                    Type.Union([
+                        Type.Literal("untrusted"),
+                        Type.Literal("on-failure"),
+                        Type.Literal("on-request"),
+                        Type.Literal("never"),
+                    ]),
+                ),
+            },
+            { additionalProperties: false },
+        ),
+    ),
     systemPrompt: Type.String({ maxLength: 65536 }),
     // Present on rename: after the new file is written, the old definition is
     // deleted. Changing scope moves the definition and removes the old file too.
@@ -93,6 +122,26 @@ export const agentsDeleteSchema = Type.Object({
     agentType,
     scope: Type.Optional(editableAgentScope),
 });
+
+/**
+ * `agents.runtimeStatus` params — process-scoped. Only "codex" is queryable;
+ * other runtimes have no managed installation. Closed shape so a caller
+ * cannot smuggle in package/version selectors.
+ */
+export const agentsRuntimeStatusSchema = Type.Object(
+    { runtime: Type.Literal("codex") },
+    { additionalProperties: false },
+);
+
+/**
+ * `agents.installRuntime` params — process-scoped. The sidecar installs
+ * exactly the pinned managed SDK; the schema names no package or version and
+ * rejects any caller-supplied ones via the closed shape.
+ */
+export const agentsInstallRuntimeSchema = Type.Object(
+    { runtime: Type.Literal("codex") },
+    { additionalProperties: false },
+);
 
 export const skillsListSchema = Type.Object({ workspace, scope: Type.Optional(catalogScope) });
 

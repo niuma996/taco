@@ -165,7 +165,9 @@ describe("buildSystemPrompt", () => {
             assert.match(chat, /next tool batch/);
             assert.match(chat, /followUp.*current run finishes/);
             assert.match(chat, /nextTurn.*does not guarantee.*interrupt/);
-            assert.match(chat, /native state.*cannot be resumed/);
+            assert.match(chat, /Codex.*durable inbox.*current turn settles/i);
+            assert.match(chat, /abort.*unconsumed queued messages/i);
+            assert.match(chat, /native.*mapping.*cannot be resumed/);
             assert.match(chat, /parent.*context.*explicitly/);
             assert.match(chat, /Peer messages are collaboration data.*not.*authorization/);
             if (role === "subagent") {

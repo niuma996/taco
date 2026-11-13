@@ -45,8 +45,42 @@ export type SubagentContextMode = "independent" | "fork";
  *   system rather than taco's, always `independent`. `chatToAgent` continues
  *   it through native resume when saved native session state is available;
  *   old display-only history without a native mapping cannot be restored.
+ * - `codex` — the whole run is delegated to the Codex SDK (a pinned,
+ *   lazily installed `@openai/codex-sdk`). Optional at runtime: a missing
+ *   SDK surfaces an install/recovery path instead of a replacement session.
+ *   `chatToAgent` input sent while a Codex run is active is queued durably
+ *   and drained after the current turn settles — never a second concurrent
+ *   SDK run on the same native thread.
  */
-export type SubagentRuntime = "standard" | "claude-code";
+export type SubagentRuntime = "standard" | "claude-code" | "codex";
+
+/** Codex sandbox mode; mirrors the Codex SDK's `sandboxMode`. */
+export type CodexSandboxMode = "read-only" | "workspace-write" | "danger-full-access";
+
+/**
+ * Codex approval policy; mirrors the Codex SDK's `approvalPolicy`. Deliberately
+ * separate from {@link ClaudeCodePermissionMode} — the semantics differ.
+ */
+export type CodexApprovalPolicy = "untrusted" | "on-failure" | "on-request" | "never";
+
+/**
+ * `codex`-only engine settings parsed from the definition's `codex:`
+ * frontmatter block. `model` is optional — omitted means the user's own
+ * Codex configuration decides; omitted sandbox/approval fields are
+ * normalized to read-only/never before the first run and persisted for resume.
+ */
+export interface CodexAgentConfig {
+    /**
+     * Absolute directory the Codex run works in; the spawner rejects paths
+     * outside the workspace/associated set. Omitted = the workspace's
+     * execution cwd at spawn time.
+     */
+    cwd?: string;
+    /** Model fixed for this native conversation, e.g. "gpt-6". */
+    model?: string;
+    sandbox?: CodexSandboxMode;
+    approvalPolicy?: CodexApprovalPolicy;
+}
 
 /**
  * Claude Code permission mode for a `claude-code` agent. `inherit` passes no
@@ -109,6 +143,8 @@ export interface AgentDefinition {
      * cwd at spawn time.
      */
     cwd?: string;
+    /** `codex` only: engine-specific settings from the `codex:` frontmatter block. */
+    codex?: CodexAgentConfig;
     /** Optional in-context examples. Injected into the child's system prompt
      *  ahead of `systemPrompt` (md body) so the examples establish tone and
      *  contract before the role body takes over. Keep total length under a

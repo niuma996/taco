@@ -779,6 +779,7 @@ export class WorkspaceRuntime extends EventEmitter {
             cwd: this.sessionCwd,
             workspaceKey: this.workspaceKey,
             sessionsRoot: this.sessionsRoot,
+            getAllowedCwds: () => [this.executionCwd, ...this.associatedRoots()],
             env: this.env,
             models: this.models,
             getTools: () => this.tools,

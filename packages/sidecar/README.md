@@ -144,6 +144,43 @@ session records. Those records follow Claude Code's storage configuration and
 retention behavior; Claude Code or the user manages cleanup. Taco display
 history and native Claude history have separate lifecycles.
 
+### Codex
+
+Agents with `runtime: codex` use a pinned official `@openai/codex-sdk`
+installation under `$TACO_HOME/vendor`. The desktop exposes an Install action;
+the sidecar exposes the same operation as `agents.installRuntime`. Installation
+downloads the SDK and the platform-specific Codex binary and can be large.
+It uses the npm bundled with a normal Node.js installation, so a machine that
+only has Taco's embedded Node binary must install Node/npm first.
+
+The runtime is the SDK; the configuration is the user's own. A Codex child runs
+on `$CODEX_HOME` (default `~/.codex`): the provider, model, and credentials in
+`config.toml` and `auth.json`. That is the same rule a Claude Code agent
+follows with the user's Claude settings, so a third-party provider with its own
+credentials needs no OpenAI login. `agents.runtimeStatus` reports the effective
+model and provider, and offers a login command only when the configuration
+points at OpenAI without a login — `codex login status` alone would call a
+custom-provider setup "signed out" and refuse a run that works.
+
+Installation is separate from all of that. The desktop exposes an Install
+action; the sidecar exposes the same operation as `agents.installRuntime`.
+Installation downloads the SDK and the platform-specific Codex binary and can
+be large. It uses the npm bundled with a normal Node.js installation, so a
+machine that only has Taco's embedded Node binary must install Node/npm first.
+If npm is not visible to the sidecar, Agents shows the terminal command
+instead of an Install button that cannot succeed.
+
+Codex runs with an explicit workspace/worktree cwd, the profile's sandbox and
+approval policy, and a scrubbed environment. The model is optional: an agent
+that names none inherits the model from the user's current Codex configuration,
+including on resume; changing that configuration can change the model used by
+later turns. While a Codex turn is active,
+`chatToAgent` messages stay in Taco's durable queue with
+`effectiveDelivery: "queued"` and start after the current turn settles. Aborting
+the run settles unconsumed queued messages instead of starting them later.
+The SDK does not expose a live queue API; Taco intentionally accepts this
+after-current-turn delivery model.
+
 ## Build
 
 ```bash

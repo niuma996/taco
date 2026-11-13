@@ -19,6 +19,8 @@ export interface AgentMessageRecord {
     createdAt: number;
     receipt?: AgentChatResult;
     queueEntryId?: string;
+    /** Internal association only; public receipts still omit runId while queued. */
+    queuedDuringRunId?: string;
 }
 
 export interface AgentConversationDeps {

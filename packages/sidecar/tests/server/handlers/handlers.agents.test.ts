@@ -224,6 +224,71 @@ describe("agents.write", () => {
             assert.doesNotMatch(text, /tools:|permissionMode:/);
         });
 
+        it("round-trips a codex agent's engine fields; defaults stay implicit", async () => {
+            await writeUserAgent(
+                params({
+                    agentType: "cx-a",
+                    runtime: "codex",
+                    codex: {
+                        model: "gpt-6",
+                        sandbox: "read-only",
+                        approvalPolicy: "never",
+                    },
+                }),
+                [],
+            );
+            const text = readFileSync(join(userAgentsDir(), "cx-a.md"), "utf-8");
+            assert.match(text, /runtime: codex/);
+            assert.match(text, /codex:/);
+            const a = parseAgentMarkdown(text, "x", "user");
+            assert.equal(a?.runtime, "codex");
+            assert.deepEqual(a?.codex, {
+                model: "gpt-6",
+                sandbox: "read-only",
+                approvalPolicy: "never",
+            });
+
+            await writeUserAgent(
+                params({ agentType: "cx-b", runtime: "codex", codex: { model: "gpt-6" } }),
+                [],
+            );
+            const textB = readFileSync(join(userAgentsDir(), "cx-b.md"), "utf-8");
+            assert.match(textB, /runtime: codex/);
+            assert.match(textB, /codex:/);
+            assert.deepEqual(parseAgentMarkdown(textB, "x", "user")?.codex, { model: "gpt-6" });
+        });
+
+        it("rejects Claude Code settings on a codex agent with a readable error", async () => {
+            await assert.rejects(
+                writeUserAgent(
+                    params({ agentType: "cx-c", runtime: "codex", permissionMode: "acceptEdits" }),
+                    [],
+                ),
+                /Claude Code settings/,
+            );
+            await assert.rejects(
+                writeUserAgent(
+                    params({ agentType: "cx-d", runtime: "codex", cwd: process.cwd() }),
+                    [],
+                ),
+                /Claude Code settings/,
+            );
+        });
+
+        it("rejects codex settings on a non-codex runtime", async () => {
+            await assert.rejects(
+                writeUserAgent(
+                    params({
+                        agentType: "cx-e",
+                        runtime: "standard",
+                        codex: { model: "gpt-6" },
+                    }),
+                    [],
+                ),
+                /codex settings require runtime/,
+            );
+        });
+
         it("rejects AskUserQuestion, which the runner always blocks", async () => {
             await assert.rejects(
                 writeUserAgent(params({ tools: ["Read", "AskUserQuestion"] }), []),
@@ -572,6 +637,108 @@ describe("agents.write", () => {
         });
     });
 
+    describe("agentsWrite codex cwd", () => {
+        let home: string;
+        let workspaceDir: string;
+        let associated: string;
+        let outside: string;
+        let prevHome: string | undefined;
+
+        beforeEach(() => {
+            home = mkdtempSync(join(tmpdir(), "taco-agents-cxhome-"));
+            workspaceDir = mkdtempSync(join(tmpdir(), "taco-agents-cxws-"));
+            associated = mkdtempSync(join(tmpdir(), "taco-agents-cxassoc-"));
+            outside = mkdtempSync(join(tmpdir(), "taco-agents-cxout-"));
+            prevHome = process.env.TACO_HOME;
+            process.env.TACO_HOME = home;
+        });
+        afterEach(() => {
+            if (prevHome === undefined) delete process.env.TACO_HOME;
+            else process.env.TACO_HOME = prevHome;
+            for (const d of [home, workspaceDir, associated, outside]) {
+                rmSync(d, { recursive: true, force: true });
+            }
+        });
+
+        const ctx = () => ({ workspaceDir, allowedCwds: [workspaceDir, associated] });
+        const read = (name: string) => readFileSync(join(userAgentsDir(), `${name}.md`), "utf-8");
+
+        it("writes codex.cwd inside a codex block and the loader reads it back", async () => {
+            await writeUserAgent(
+                params({
+                    agentType: "cx-fixed",
+                    runtime: "codex",
+                    codex: { cwd: associated, model: "gpt-6" },
+                }),
+                [],
+                ctx(),
+            );
+            const text = read("cx-fixed");
+            assert.match(text, /codex:/);
+            assert.doesNotMatch(text, /^cwd:/m, "codex cwd must not leak into the Claude field");
+            const parsed = parseAgentMarkdown(text, "x", "user");
+            assert.equal(parsed?.codex?.cwd, associated);
+            assert.equal(parsed?.codex?.model, "gpt-6");
+            assert.equal(parsed?.cwd, undefined);
+        });
+
+        it("accepts the workspace directory and rejects anything outside the choices", async () => {
+            await writeUserAgent(
+                params({
+                    agentType: "cx-home",
+                    runtime: "codex",
+                    codex: { cwd: workspaceDir, model: "gpt-6" },
+                }),
+                [],
+                ctx(),
+            );
+            await assert.rejects(
+                writeUserAgent(
+                    params({
+                        agentType: "cx-out",
+                        runtime: "codex",
+                        codex: { cwd: outside, model: "gpt-6" },
+                    }),
+                    [],
+                    ctx(),
+                ),
+                /workspace directory or one of its associated directories/,
+            );
+            await assert.rejects(
+                writeUserAgent(
+                    params({
+                        agentType: "cx-rel",
+                        runtime: "codex",
+                        codex: { cwd: "relative/dir", model: "gpt-6" },
+                    }),
+                    [],
+                    ctx(),
+                ),
+                /absolute path/,
+            );
+        });
+
+        it("keeps an unchanged codex cwd that is no longer a choice here", async () => {
+            const existing = def({
+                agentType: "cx-keep",
+                runtime: "codex",
+                codex: { cwd: outside, model: "gpt-6" },
+            });
+            await writeUserAgent(
+                params({
+                    agentType: "cx-keep",
+                    runtime: "codex",
+                    codex: { cwd: outside, model: "gpt-6" },
+                    previousAgentType: "cx-keep",
+                    description: "v2",
+                }),
+                [existing],
+                ctx(),
+            );
+            assert.match(read("cx-keep"), /v2/);
+        });
+    });
+
     describe("agents.write/delete runtime reload", () => {
         const home = useTempTacoHome("agents-runtime");
         let server: SidecarServer;
@@ -627,6 +794,58 @@ describe("agents.write", () => {
                     ),
                 ),
             );
+        });
+
+        it("round-trips a codex definition through agents.write and agents.content", async () => {
+            const ws = await workspace();
+            await callMethod("agents.write", {
+                server,
+                workspace: ws,
+                params: params({
+                    agentType: "codex-rpc",
+                    runtime: "codex",
+                    codex: {
+                        model: "gpt-6",
+                        sandbox: "workspace-write",
+                        approvalPolicy: "on-request",
+                    },
+                }),
+            });
+            const content = await callMethod<{
+                runtime?: string;
+                permissionMode?: string;
+                cwd?: string;
+                codex?: unknown;
+            }>("agents.content", {
+                server,
+                workspace: ws,
+                params: { workspace: ws.executionCwd, agentType: "codex-rpc" },
+            });
+            assert.equal(content.runtime, "codex");
+            assert.deepEqual(content.codex, {
+                model: "gpt-6",
+                sandbox: "workspace-write",
+                approvalPolicy: "on-request",
+            });
+            assert.equal(content.permissionMode, undefined);
+            assert.equal(content.cwd, undefined);
+        });
+
+        it("agents.write rejects a codex definition carrying Claude-only fields over RPC", async () => {
+            const ws = await workspace();
+            await assert.rejects(
+                callMethod("agents.write", {
+                    server,
+                    workspace: ws,
+                    params: params({
+                        agentType: "codex-bad",
+                        runtime: "codex",
+                        permissionMode: "acceptEdits",
+                    }),
+                }),
+                /Claude Code settings/,
+            );
+            assert.equal(existsSync(join(userAgentsDir(), "codex-bad.md")), false);
         });
 
         it("keeps a successful deletion when catalog reload fails", async (t) => {

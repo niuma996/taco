@@ -16,7 +16,7 @@ export function createListAgentSessionsTool(ctx: AgentConversationContext): Taco
             "A parent sees its children; a child sees only other child agents with the same parent, never yourself. " +
             "This lists instances, not agent types; use `agent` to create a new agent. " +
             "Returns at most 100 descriptors with descriptions limited to 500 characters. " +
-            "Claude Code uses nextTurn delivery and does not interrupt an active tool.",
+            "Claude Code uses nextTurn delivery and does not interrupt an active tool. Codex uses queued delivery after the current turn.",
         parameters: Type.Object({}, { additionalProperties: false }),
         executionMode: "parallel",
         taco: {

@@ -213,6 +213,8 @@ describe("chatToAgent tool", () => {
         assert.match(description, /idle child/i);
         assert.match(description, /nextTurn/);
         assert.match(description, /does not interrupt.*tool/i);
+        assert.match(description, /Codex queues/i);
+        assert.match(description, /current turn/i);
     });
 });
 
@@ -241,10 +243,10 @@ describe("listAgentSessions tool", () => {
         ctx.list = async () => sessions;
         const tool = createListAgentSessionsTool(ctx);
         await invokeTool(tool, {}, {});
-        sessions = (["running", "idle", "preparing", "settling"] as const).map((status) => ({
+        sessions = (["running", "idle", "preparing", "settling"] as const).map((status, index) => ({
             ...session,
             status,
-            delivery: "nextTurn",
+            delivery: index === 0 ? "nextTurn" : index === 1 ? "steer" : "queued",
             canResume: false,
         }));
         const result = await invokeTool(tool, {}, {});

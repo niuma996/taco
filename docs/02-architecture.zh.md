@@ -392,6 +392,29 @@ RPC 响应仅返回
 不同工作区、不同 session 可并发运行。`CommandIdempotencyGate` 按
 `(workspace, sessionId)` 限制同一会话的 turn 命令，并跨连接去重重试。
 
+### 2.9 Codex 子代理运行时
+
+Codex 子代理通过按需安装的固定版本 `@openai/codex-sdk` 运行。安装与登录是
+两个独立状态，分别由 `agents.runtimeStatus` 与 `agents.installRuntime` 暴露。
+Agents 页面在聊天创建子会话之前展示这两个状态。sidecar 找不到 npm 时，状态携带
+终端安装命令，而不是假装应用内安装可以成功。
+
+运行本身使用用户自己的 Codex 配置（`$CODEX_HOME`，默认 `~/.codex`）：provider、
+模型和凭据都来自那里。因此登录状态由该配置推导，而不是只看 `codex login status`
+——后者会把第三方 provider 的配置判成未登录，从而拒绝一个本可正常运行的会话。
+状态里会报告实际生效的模型和 provider；只有当配置指向 OpenAI 且缺少登录时才给
+出登录命令。Taco 持久化原生 thread id、规范化 cwd、SDK 版本和不可变 profile 选项；续聊时
+任何一项不匹配都必须失败，不能静默创建新线程。
+
+代理的模型覆盖项是可选的。未指定时，新建和续聊都由当前 Codex 配置选择模型；
+Taco 不会把继承的模型固定为首轮使用的值。
+
+SDK 没有公开的运行中队列 API，因此 Codex 运行期间收到的消息保存在 Taco 持久
+inbox 中，回执为 `effectiveDelivery: "queued"` 且不公开当前 `runId`。当前 turn
+正常结束后按 FIFO 启动下一条；用户中止时，未消费消息直接结算为 aborted，不能
+在之后自动运行。子代理主动通信使用每次运行独立的 stdio MCP bridge，只暴露
+`chatToAgent` 与 `listAgentSessions`，发送者身份由父进程绑定。
+
 ## 3. 客户端
 
 ### 3.1 客户端分层

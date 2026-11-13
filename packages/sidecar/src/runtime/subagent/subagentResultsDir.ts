@@ -48,8 +48,29 @@ export async function settledSubagentResultIds(
     sessionsRoot: string,
 ): Promise<string[]> {
     try {
-        const names = await readdir(subagentResultsDir(parentSessionId, sessionsRoot));
-        return names.filter((n) => n.endsWith(".md")).map((n) => n.slice(0, -".md".length));
+        const root = subagentResultsDir(parentSessionId, sessionsRoot);
+        const entries = await readdir(root, { withFileTypes: true });
+        const ids = entries
+            .filter((entry) => entry.isFile() && entry.name.endsWith(".md"))
+            .map((entry) => entry.name.slice(0, -".md".length));
+        const runScoped = await Promise.all(
+            entries
+                .filter((entry) => entry.isDirectory())
+                .map(async (entry) => {
+                    const files = await readdir(join(root, entry.name)).catch((error: unknown) => {
+                        if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+                            log.error("run-scoped result directory read failed", {
+                                parentSessionId,
+                                childSessionId: entry.name,
+                                error: error instanceof Error ? error.message : String(error),
+                            });
+                        }
+                        return [];
+                    });
+                    return files.some((name) => name.endsWith(".md")) ? entry.name : undefined;
+                }),
+        );
+        return [...new Set([...ids, ...runScoped.filter((id): id is string => id !== undefined)])];
     } catch (err) {
         // ENOENT is the normal case — see the doc comment. Anything else
         // (EACCES, EMFILE, transient I/O) must be loud: downstream reads

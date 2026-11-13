@@ -21,6 +21,8 @@ export interface PendingSubagentResult {
     /** Explicit provenance for newly tracked notices; older records derive it from the tool call. */
     readonly workId?: string;
     readonly subSessionId: SessionId;
+    /** Immutable execution identity when the notice came from a run-scoped execution. */
+    readonly runId?: string;
     readonly parentToolCallId: string;
     readonly agentType: string;
     readonly outcome: "completed" | "error" | "aborted";

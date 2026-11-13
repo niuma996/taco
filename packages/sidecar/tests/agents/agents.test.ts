@@ -398,15 +398,21 @@ describe("loadAgents", () => {
             assert.equal(invalid?.context, undefined);
         });
 
-        it("parses runtime, falling back to undefined (standard) for an unknown value", () => {
+        it("parses runtime, including codex, falling back to undefined (standard) for an unknown value", () => {
             const cc = parseAgentMarkdown(
                 "---\nname: x\ndescription: y\nruntime: claude-code\n---\nbody",
                 "/x/x.md",
                 "user",
             );
             assert.equal(cc?.runtime, "claude-code");
-            const bogus = parseAgentMarkdown(
+            const codex = parseAgentMarkdown(
                 "---\nname: x\ndescription: y\nruntime: codex\n---\nbody",
+                "/x/x.md",
+                "user",
+            );
+            assert.equal(codex?.runtime, "codex");
+            const bogus = parseAgentMarkdown(
+                "---\nname: x\ndescription: y\nruntime: bogus\n---\nbody",
                 "/x/x.md",
                 "user",
             );
@@ -418,6 +424,72 @@ describe("loadAgents", () => {
                 "user",
             );
             assert.equal(explicit?.runtime, "standard");
+        });
+
+        it("parses the codex block with explicit engine fields", () => {
+            const def = parseAgentMarkdown(
+                [
+                    "---",
+                    "name: x",
+                    "description: y",
+                    "runtime: codex",
+                    "codex:",
+                    '  model: "gpt-6"',
+                    '  sandbox: "workspace-write"',
+                    '  approvalPolicy: "on-request"',
+                    '  cwd: "/abs/path"',
+                    "---",
+                    "body",
+                ].join("\n"),
+                "/x/x.md",
+                "user",
+            );
+            assert.equal(def?.runtime, "codex");
+            assert.deepEqual(def?.codex, {
+                model: "gpt-6",
+                sandbox: "workspace-write",
+                approvalPolicy: "on-request",
+                cwd: "/abs/path",
+            });
+        });
+
+        it("drops invalid codex values instead of failing the whole load", () => {
+            const def = parseAgentMarkdown(
+                [
+                    "---",
+                    "name: x",
+                    "description: y",
+                    "runtime: codex",
+                    "codex:",
+                    '  model: ""',
+                    '  sandbox: "break-out"',
+                    '  approvalPolicy: "yolo"',
+                    "  cwd: relative/path",
+                    "---",
+                    "body",
+                ].join("\n"),
+                "/x/x.md",
+                "user",
+            );
+            // Every subfield was invalid → the block vanishes rather than
+            // surfacing a half-empty config.
+            assert.equal(def?.runtime, "codex");
+            assert.equal(def?.codex, undefined);
+        });
+
+        it("omits codex config when the frontmatter key is absent or not a mapping", () => {
+            const absent = parseAgentMarkdown(
+                "---\nname: x\ndescription: y\nruntime: codex\n---\nbody",
+                "/x/x.md",
+                "user",
+            );
+            assert.equal(absent?.codex, undefined);
+            const notAMapping = parseAgentMarkdown(
+                '---\nname: x\ndescription: y\nruntime: codex\ncodex: "nope"\n---\nbody',
+                "/x/x.md",
+                "user",
+            );
+            assert.equal(notAMapping?.codex, undefined);
         });
     });
 

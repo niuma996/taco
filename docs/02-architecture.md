@@ -248,6 +248,34 @@ deleted. Native records follow Claude Code's storage configuration and retention
 behavior, and are managed or cleaned up by Claude Code or the user. The two
 histories therefore have separate lifecycles.
 
+### 2.2.3 Codex conversations
+
+Codex children use a pinned, lazily installed `@openai/codex-sdk` runtime.
+Installation and sign-in are separate process-level states exposed through
+`agents.runtimeStatus` and `agents.installRuntime`. The Agents page shows both
+before a chat spawn. If npm is not available to the sidecar, status carries the
+terminal install command instead of implying the in-app installer can run.
+
+The run itself uses the user's own Codex configuration under `$CODEX_HOME`:
+provider, model, and credentials. Sign-in is therefore derived from that
+configuration rather than from `codex login status`, which calls a
+custom-provider setup "signed out" even though it can run. The status reports
+the effective model and provider, and offers a login command only when the
+configuration points at OpenAI without a login. Taco persists the native
+thread id, canonical cwd, SDK version, and immutable profile options; a resume
+must match all of them and can never silently start a fresh thread.
+
+The agent's model override is optional. When absent, both creation and resume
+leave model selection to the current Codex configuration; Taco does not pin
+the inherited model to its value on the first turn.
+
+The SDK has no live queue API. Messages sent to a running Codex child therefore
+remain in Taco's durable inbox with `effectiveDelivery: "queued"` and no public
+`runId`. Normal settlement drains the inbox FIFO after the current turn; abort
+settles unconsumed messages without starting another run. Child-initiated
+communication uses a per-run stdio MCP bridge with only `chatToAgent` and
+`listAgentSessions`; the parent process binds the sender identity.
+
 ### 2.3 AgentHarness event flow (push channel)
 
 `AgentHarness` has its own event bus. The `AgentHarnessEvent` union

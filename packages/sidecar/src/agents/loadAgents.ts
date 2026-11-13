@@ -12,6 +12,9 @@ import type {
     AgentDefinition,
     AgentFewShot,
     ClaudeCodePermissionMode,
+    CodexAgentConfig,
+    CodexApprovalPolicy,
+    CodexSandboxMode,
     SubagentContextMode,
     SubagentRuntime,
 } from "./types.ts";
@@ -28,6 +31,7 @@ interface AgentFrontmatter {
     runtime?: unknown;
     permissionMode?: unknown;
     cwd?: unknown;
+    codex?: unknown;
     [key: string]: unknown;
 }
 
@@ -91,6 +95,7 @@ export function parseAgentMarkdown(
         runtime: parseRuntime(frontmatter.runtime),
         permissionMode: parsePermissionMode(frontmatter.permissionMode),
         cwd: parseCwd(frontmatter.cwd),
+        codex: parseCodexConfig(frontmatter.codex),
         source,
         filePath,
     };
@@ -134,8 +139,55 @@ function parseContext(raw: unknown): SubagentContextMode | undefined {
 
 /** Validate the optional `runtime:` entry; absent or unknown = the default (`standard`). */
 function parseRuntime(raw: unknown): SubagentRuntime | undefined {
-    if (raw === "standard" || raw === "claude-code") return raw;
+    if (raw === "standard" || raw === "claude-code" || raw === "codex") return raw;
     return undefined;
+}
+
+const CODEX_SANDBOX_MODES: ReadonlySet<string> = new Set<CodexSandboxMode>([
+    "read-only",
+    "workspace-write",
+    "danger-full-access",
+]);
+
+const CODEX_APPROVAL_POLICIES: ReadonlySet<string> = new Set<CodexApprovalPolicy>([
+    "untrusted",
+    "on-failure",
+    "on-request",
+    "never",
+]);
+
+function nonEmptyString(raw: unknown, maxLength: number): string | undefined {
+    if (typeof raw !== "string") return undefined;
+    const trimmed = raw.trim();
+    return trimmed.length > 0 && trimmed.length <= maxLength ? trimmed : undefined;
+}
+
+/**
+ * Validate the optional `codex:` frontmatter block. Mirrors the other
+ * frontmatter parsers' lenient style: individual bad values are dropped, a
+ * block whose every value is invalid (or which is not a mapping at all)
+ * yields undefined, so a hand-written file can never fail the whole load.
+ */
+function parseCodexConfig(raw: unknown): CodexAgentConfig | undefined {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+    const record = raw as Record<string, unknown>;
+    // The model is an override, not a requirement: an agent without one
+    // inherits the user's own Codex configuration.
+    const model = nonEmptyString(record.model, 256);
+    const config: CodexAgentConfig = {};
+    if (model !== undefined) config.model = model;
+    const cwd = parseCwd(record.cwd);
+    if (cwd !== undefined) config.cwd = cwd;
+    if (typeof record.sandbox === "string" && CODEX_SANDBOX_MODES.has(record.sandbox)) {
+        config.sandbox = record.sandbox as CodexSandboxMode;
+    }
+    if (
+        typeof record.approvalPolicy === "string" &&
+        CODEX_APPROVAL_POLICIES.has(record.approvalPolicy)
+    ) {
+        config.approvalPolicy = record.approvalPolicy as CodexApprovalPolicy;
+    }
+    return Object.keys(config).length > 0 ? config : undefined;
 }
 
 const PERMISSION_MODES: ReadonlySet<string> = new Set<ClaudeCodePermissionMode>([

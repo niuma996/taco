@@ -19,6 +19,7 @@ import {
 import { registerBuiltinMethods } from "../../src/server/methods.ts";
 import type { CommandOutcome } from "../../src/server/rpcResponse.ts";
 import { SidecarServer } from "../../src/server/server.ts";
+import { callMethod } from "../_helpers/handlerCall.ts";
 
 describe("methods.sessionCreate", () => {
     /**
@@ -603,7 +604,9 @@ describe("methods.snapshot", () => {
     const EXPECTED_METHODS: Record<string, MethodMeta> = {
         "agents.content": { ensureWorkspace: true },
         "agents.delete": { ensureWorkspace: true },
+        "agents.installRuntime": { ensureWorkspace: false, command: true },
         "agents.list": { ensureWorkspace: true },
+        "agents.runtimeStatus": { ensureWorkspace: false },
         "agents.write": { ensureWorkspace: true },
         "channels.bind": { ensureWorkspace: false, command: true },
         "channels.create": { ensureWorkspace: false, command: true },
@@ -676,6 +679,81 @@ describe("methods.snapshot", () => {
                 assert.deepEqual(subset, expectedMeta, `${name} metadata mismatch`);
             });
         }
+    });
+});
+
+describe("methods.agentsRuntime", () => {
+    /** Process-scoped Codex runtime RPCs; status never executes a paid turn. */
+
+    before(() => {
+        registerBuiltinMethods();
+    });
+
+    it("agents.runtimeStatus is process-scoped and reports an uninstalled runtime", async () => {
+        const originalCodexHome = process.env.CODEX_HOME;
+        const isolatedHome = await mkdtemp(join(tmpdir(), "taco-codex-status-"));
+        await writeFile(
+            join(isolatedHome, "config.toml"),
+            'model = "relay-model"\nmodel_provider = "relay"\n[model_providers.relay]\nname = "Relay"\n',
+        );
+        process.env.CODEX_HOME = isolatedHome;
+        try {
+            const result = await callMethod<{
+                runtime: string;
+                installed: boolean;
+                version?: string;
+                auth: string;
+                installer?: string;
+                installCommand?: string;
+                model?: string;
+                provider?: string;
+            }>("agents.runtimeStatus", {
+                params: { runtime: "codex" },
+            });
+            assert.equal(result.runtime, "codex");
+            assert.equal(result.installed, false);
+            assert.equal(result.version, undefined);
+            assert.equal(result.auth, "signed-in");
+            assert.equal(result.model, "relay-model");
+            assert.equal(result.provider, "relay");
+            assert.match(String(result.installCommand), /@openai\/codex-sdk@/);
+            assert.ok(result.installer === "available" || result.installer === "missing");
+        } finally {
+            if (originalCodexHome === undefined) delete process.env.CODEX_HOME;
+            else process.env.CODEX_HOME = originalCodexHome;
+            await rm(isolatedHome, { recursive: true, force: true });
+        }
+    });
+
+    it("agents.runtimeStatus rejects a non-codex runtime on the wire", async () => {
+        await assert.rejects(
+            () => callMethod("agents.runtimeStatus", { params: { runtime: "standard" } }),
+            /parameter validation failed/,
+        );
+    });
+
+    it("agents.installRuntime rejects caller-supplied package or version fields", async () => {
+        await assert.rejects(
+            () =>
+                callMethod("agents.installRuntime", {
+                    params: { runtime: "codex", packageName: "evil-package", version: "9.9.9" },
+                }),
+            /parameter validation failed/,
+        );
+        await assert.rejects(
+            () =>
+                callMethod("agents.installRuntime", {
+                    params: { runtime: "codex", version: "9.9.9" },
+                }),
+            /parameter validation failed/,
+        );
+    });
+
+    it("agents.installRuntime rejects a non-codex runtime on the wire", async () => {
+        await assert.rejects(
+            () => callMethod("agents.installRuntime", { params: { runtime: "claude-code" } }),
+            /parameter validation failed/,
+        );
     });
 });
 

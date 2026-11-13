@@ -30,7 +30,7 @@ export interface SessionFacts {
     /** Registered agent definition name, for subagent sessions. */
     agentType?: string;
     /** Engine that ran this subagent; absent = "standard". */
-    runtime?: "standard" | "claude-code";
+    runtime?: "standard" | "claude-code" | "codex";
     /** Spawn-chain depth. 0 for a user session, parent+1 for a subagent. */
     depth?: number;
     /**

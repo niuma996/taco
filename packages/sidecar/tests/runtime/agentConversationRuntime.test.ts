@@ -214,6 +214,44 @@ describe("AgentConversationRuntime", { timeout: 5_000 }, () => {
         assert.equal(f.starts.length, 0, "running messages must not launch another execution");
     });
 
+    it("queues Codex messages in Taco without a run id or native delivery claim", async (t) => {
+        const f = await fixture(t);
+        const state = f.runtime.state(child);
+        assert.ok(state);
+        state.runtime = "codex";
+        const receipt = await f.send("codex-call", "Apply this after the current turn", {
+            delivery: "steer",
+        });
+        assert.equal(receipt.status, "queued");
+        assert.equal(receipt.effectiveDelivery, "queued");
+        assert.equal(receipt.runId, undefined);
+        assert.equal(f.native.enqueues.length, 0);
+        const persisted = (await f.records())[0];
+        assert.deepEqual(persisted?.receipt, receipt);
+        f.native.running = false;
+        await f.runtime.end(child, "initial-run", f.completed);
+        await f.registry.drain();
+        assert.equal(f.starts.length, 1, "the queued Codex message must wake one later run");
+        assert.equal(f.starts[0]?.message.messageId, receipt.messageId);
+    });
+
+    it("settles Codex inbox messages on abort instead of starting them later", async (t) => {
+        const f = await fixture(t);
+        const state = f.runtime.state(child);
+        assert.ok(state);
+        state.runtime = "codex";
+        const receipt = await f.send("codex-abort-call", "Do not run after stop");
+        f.native.running = false;
+        await f.runtime.end(child, "initial-run", { ...f.completed, aborted: true });
+        f.registry.emit("session.idle", { sessionId: child });
+        await f.registry.drain();
+        const persisted = (await f.records())[0];
+        assert.equal(persisted?.receipt?.messageId, receipt.messageId);
+        assert.equal(persisted?.receipt?.status, "aborted");
+        assert.equal(persisted?.queuedDuringRunId, undefined);
+        assert.equal(f.starts.length, 0);
+    });
+
     it("accepts during preparing and delivers exactly once when run_start arrives", async (t) => {
         const f = await fixture(t, "preparing");
         const receipt = await f.send("preparing-call", "Deliver after attachment");

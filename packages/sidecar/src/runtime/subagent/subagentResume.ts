@@ -21,6 +21,8 @@ export interface ResumeSubagentArgs {
     newTask?: boolean;
     managedExternally?: boolean;
     budget?: SubagentBudgetState;
+    abortController?: AbortController;
+    executionId?: string;
 }
 
 export interface SubagentResumeDeps {
@@ -41,6 +43,11 @@ export interface SubagentResumeDeps {
     registerController(id: SessionId, controller: AbortController, parent: SessionId): void;
     releaseController(id: SessionId, controller: AbortController): void;
     runClaudeCode(args: ResumeSubagentArgs, def: AgentDefinition): Promise<SubagentRunResult>;
+    runCodex(
+        args: ResumeSubagentArgs,
+        def: AgentDefinition,
+        controller: AbortController,
+    ): Promise<SubagentRunResult>;
 }
 
 /** An idle continuation rebuilds the original profile without changing session ownership. */
@@ -106,6 +113,39 @@ export async function runSubagentResume(
                 "The agent definition changed runtime; the existing session cannot switch engines.",
         };
     if (md.runtime === "claude-code") return deps.runClaudeCode(args, def);
+    if (md.runtime === "codex") {
+        const controller = args.abortController ?? new AbortController();
+        const follow = (): void => controller.abort(args.signal?.reason);
+        if (args.signal?.aborted) controller.abort(args.signal.reason);
+        args.signal?.addEventListener("abort", follow, { once: true });
+        deps.registerController(args.subSessionId, controller, args.parentSessionId);
+        try {
+            const handle = args.managedExternally
+                ? undefined
+                : await deps.reportResumeStart(args.subSessionId);
+            const execute = () => deps.runCodex(args, def, controller);
+            let result: SubagentRunResult;
+            try {
+                result =
+                    handle && deps.workHooks?.run
+                        ? await deps.workHooks.run(handle.workId, args.subSessionId, execute)
+                        : await execute();
+            } catch (error) {
+                result = {
+                    subSessionId: args.subSessionId,
+                    resultText: error instanceof Error ? error.message : String(error),
+                    isError: true,
+                };
+            }
+            if (!args.managedExternally) {
+                await deps.reportResumeSettle(args.subSessionId, result, handle);
+            }
+            return result;
+        } finally {
+            args.signal?.removeEventListener("abort", follow);
+            deps.releaseController(args.subSessionId, controller);
+        }
+    }
     // 2. Compute remaining turn budget. We don't have a turn_end counter
     //    on disk — assistant messages count one-per-turn and survive across
     //    resumes. Subtract from `def.maxTurns`; fail fast when depleted

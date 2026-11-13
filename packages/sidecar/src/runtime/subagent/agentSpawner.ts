@@ -7,8 +7,8 @@
  */
 
 import { EventEmitter } from "node:events";
-import { mkdir, stat } from "node:fs/promises";
-import { dirname } from "node:path";
+import { mkdir, realpath, stat } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import { asSessionId, type SessionId, type WorkspaceId } from "@taco-ai/protocol";
 import type { AgentChatArgs, AgentChatResult } from "../../agents/agentConversationTypes.ts";
 import {
@@ -22,6 +22,7 @@ import type {
     AgentDefinition,
     AgentFewShot,
     ClaudeCodePermissionMode,
+    CodexAgentConfig,
     SubagentContextMode,
     SubagentProgressSink,
     SubagentRuntime,
@@ -41,6 +42,7 @@ import type { BackgroundWorkHooks } from "../../work/workHooks.ts";
 import type { WorkAttemptHandle } from "../../work/workOperationTypes.ts";
 import type { AttachedSession } from "../harness/attachedSession.ts";
 import { findModelById } from "../models/modelLookup.ts";
+import { scrubbedProcessEnv } from "../models/providerKeyStore.ts";
 import type { NodeExecutionEnv } from "../pi/node.ts";
 import type { AgentMessage, Api, Model, MutableModels } from "../pi/types.ts";
 import { uuidv7 } from "../pi/values.ts";
@@ -57,6 +59,24 @@ import { type ChildAttachDeps, prepareChildAttach } from "./childAttach.ts";
 import { runClaudeCodeSubagent } from "./claudeCode/claudeCodeRunner.ts";
 import { findClaudeExecutable, loadClaudeAgentSdk } from "./claudeCode/claudeCodeSdk.ts";
 import { readClaudeCodeState, writeClaudeCodeState } from "./claudeCode/claudeCodeState.ts";
+import {
+    type CodexCommunicationBridge,
+    createCodexCommunicationBridge,
+} from "./codex/codexCommunication.ts";
+import { runCodexSubagent } from "./codex/codexRunner.ts";
+import { codexRuntimeUnavailableMessage } from "./codex/codexRuntimeInstall.ts";
+import {
+    CODEX_SDK_VERSION,
+    createCodexClient,
+    type LoadedCodexSdk,
+    loadCodexSdk,
+} from "./codex/codexSdk.ts";
+import {
+    type CodexState,
+    codexProfileIdentity,
+    readCodexState,
+    writeCodexState,
+} from "./codex/codexState.ts";
 import { deliverSubagentResult, deliverSubagentResultDetailed } from "./subagentDelivery.ts";
 import {
     addPendingSubagentResult,
@@ -132,6 +152,8 @@ export interface AgentSpawnerOptions {
      * them under the process cwd instead of beside the sessions.
      */
     readonly sessionsRoot: string;
+    /** Workspace/associated roots a Codex cwd may resolve into. */
+    readonly getAllowedCwds?: () => readonly string[];
     readonly env: NodeExecutionEnv;
     readonly models: MutableModels;
     /**
@@ -239,6 +261,10 @@ export interface SubagentSessionArgs {
     permissionMode?: ClaudeCodePermissionMode;
     /** `claude-code` only: the definition's fixed directory. Absent = the execution cwd. */
     claudeCodeCwd?: string;
+    /** `codex` only: SDK thread options from the definition's `codex:` block. */
+    codexConfig?: CodexAgentConfig;
+    /** `codex` only: profile tool names used to grant the communication bridge. */
+    codexTools?: readonly string[];
     /**
      * Optional in-context examples to inject ahead of `rolePrompt`. The
      * examples establish the contract the profile expects (e.g. citation
@@ -308,6 +334,7 @@ export class AgentSpawner extends EventEmitter {
 
     /** Root for sidecar-owned session-adjacent state; see `AgentSpawnerOptions`. */
     private readonly sessionsRoot: string;
+    private readonly getAllowedCwds: () => readonly string[];
     readonly env: NodeExecutionEnv;
     readonly models: MutableModels;
     /** Public so tests can assert on the live parent toolset a spawn would see. */
@@ -319,6 +346,7 @@ export class AgentSpawner extends EventEmitter {
     /** Claude Code SDK/CLI lookup. Fields rather than imports so tests can swap them. */
     private loadClaudeCodeSdk = loadClaudeAgentSdk;
     private findClaudeCode = findClaudeExecutable;
+    private loadCodexSdkForRun = loadCodexSdk;
     readonly conversation: AgentConversationRuntime;
     private readonly chatRuns = new Map<
         string,
@@ -337,6 +365,7 @@ export class AgentSpawner extends EventEmitter {
         this.workspaceKey = options.workspaceKey ?? options.cwd;
         this.sessionsRoot = options.sessionsRoot;
         this.env = options.env;
+        this.getAllowedCwds = options.getAllowedCwds ?? (() => [this.env.cwd]);
         this.models = options.models;
         this.getTools = options.getTools;
         this.agents = options.agents;
@@ -570,6 +599,59 @@ export class AgentSpawner extends EventEmitter {
         return this.agents.find((a) => a.agentType === type);
     }
 
+    /** Canonical Codex cwd, constrained to the workspace/associated roots. */
+    private async resolveCodexCwd(requested?: string): Promise<string> {
+        const candidate = await realpath(requested ?? this.env.cwd).catch(() => undefined);
+        if (!candidate)
+            throw new Error(`Codex cwd is not an existing directory: ${requested ?? this.env.cwd}`);
+        const isDir = await stat(candidate)
+            .then((entry) => entry.isDirectory())
+            .catch(() => false);
+        if (!isDir) throw new Error(`Codex cwd is not an existing directory: ${candidate}`);
+        const allowed = await Promise.all(
+            this.getAllowedCwds().map((root) => realpath(root).catch(() => undefined)),
+        );
+        if (!allowed.includes(candidate)) {
+            throw new Error(
+                `Codex cwd must be the workspace directory or one of its associated directories: ${candidate}`,
+            );
+        }
+        return candidate;
+    }
+
+    /** Detect a Git worktree even when cwd is a nested directory. */
+    private async isInsideGitWorktree(cwd: string): Promise<boolean> {
+        let current = cwd;
+        while (true) {
+            const found = await stat(join(current, ".git"))
+                .then(() => true)
+                .catch(() => false);
+            if (found) return true;
+            const parent = dirname(current);
+            if (parent === current) return false;
+            current = parent;
+        }
+    }
+
+    /**
+     * Fail before creating a child when the SDK or its platform binary is
+     * missing.
+     *
+     * Credentials are not checked here: the run uses the user's own Codex
+     * configuration, and a custom provider carries its own credentials, so
+     * only Codex itself can say whether a turn can authenticate. Blocking on
+     * our own guess would refuse runs that work.
+     */
+    private async preflightCodexRuntime(): Promise<void> {
+        let loaded: LoadedCodexSdk;
+        try {
+            loaded = await this.loadCodexSdkForRun();
+            createCodexClient(loaded.module, { env: scrubbedProcessEnv() });
+        } catch (error) {
+            throw new Error(codexRuntimeUnavailableMessage(error));
+        }
+    }
+
     /** Swap the agent catalog after an `agents.write` / `agents.delete` rescan. */
     replaceAgents(next: AgentDefinition[]): void {
         this.agents = next;
@@ -657,6 +739,7 @@ export class AgentSpawner extends EventEmitter {
             this.conversation.begin(childSessionId, {
                 runId,
                 parentSessionId: args.parentSessionId,
+                runtime: args.runtime,
                 phase: "preparing",
             });
         let result: SubagentRunResult | undefined;
@@ -733,10 +816,14 @@ export class AgentSpawner extends EventEmitter {
             parentToolCallId: args.parentToolCallId,
             subSessionId: childSessionId,
             agentType: args.agentType,
+            ...(args.executionId !== undefined ? { runId: args.executionId } : {}),
         });
 
         if (args.runtime === "claude-code") {
             return this.runClaudeCodeChild(asSessionId(childSessionId), args);
+        }
+        if (args.runtime === "codex") {
+            return this.runCodexChild(asSessionId(childSessionId), args);
         }
 
         // 3. Build the child's toolset + system prompt.
@@ -861,6 +948,18 @@ export class AgentSpawner extends EventEmitter {
                     resultText:
                         `agent type "${def.agentType}" is set to run in ${def.cwd}, which is not an ` +
                         "existing directory. Ask the user to fix the subagent's directory in its settings.",
+                    isError: true,
+                    ...(args.background ? { background: true as const } : {}),
+                };
+            }
+        }
+        if (def.runtime === "codex") {
+            try {
+                await this.resolveCodexCwd(def.codex?.cwd);
+                await this.preflightCodexRuntime();
+            } catch (error) {
+                return {
+                    resultText: error instanceof Error ? error.message : String(error),
                     isError: true,
                     ...(args.background ? { background: true as const } : {}),
                 };
@@ -1035,6 +1134,167 @@ export class AgentSpawner extends EventEmitter {
     }
 
     /**
+     * `runtime: codex` body of `runSubagentSession`. The SDK thread is the
+     * native conversation; Taco persists only the mapping and display
+     * transcript. A resume must use exactly the saved thread and the same
+     * immutable cwd/profile options.
+     */
+    private async runCodexChild(
+        childSessionId: SessionId,
+        args: SubagentSessionArgs,
+    ): Promise<SubagentRunResult> {
+        const controller = args.abortController ?? new AbortController();
+        const follow = (): void => controller.abort(args.signal?.reason);
+        if (args.signal?.aborted) controller.abort(args.signal.reason);
+        args.signal?.addEventListener("abort", follow, { once: true });
+        this.subagentControllers.set(childSessionId, {
+            controller,
+            parentSessionId: args.parentSessionId,
+        });
+        let communicationBridge: CodexCommunicationBridge | undefined;
+        try {
+            if (args.resume) await this.preflightCodexRuntime();
+            let cwd: string;
+            try {
+                cwd = await this.resolveCodexCwd(args.codexConfig?.cwd);
+            } catch (error) {
+                return {
+                    subSessionId: childSessionId,
+                    isError: true,
+                    resultText: error instanceof Error ? error.message : String(error),
+                };
+            }
+            // No model override means the user's own Codex configuration
+            // decides — the same rule a Claude Code agent follows.
+            const model = args.codexConfig?.model?.trim();
+            const configWithoutModel = { ...(args.codexConfig ?? {}) };
+            delete configWithoutModel.model;
+            const effectiveConfig = {
+                ...configWithoutModel,
+                ...(model !== undefined && model !== "" ? { model } : {}),
+                sandbox: args.codexConfig?.sandbox ?? ("read-only" as const),
+                approvalPolicy: args.codexConfig?.approvalPolicy ?? ("never" as const),
+            };
+            const skipGitRepoCheck = !(await this.isInsideGitWorktree(cwd));
+            const communicationNames = (["chatToAgent", "listAgentSessions"] as const).filter(
+                (name) =>
+                    args.codexTools === undefined ||
+                    args.codexTools.includes(name) ||
+                    args.codexTools.includes(`mcp__taco__${name}`),
+            );
+            const profileIdentity = codexProfileIdentity(
+                args.agentType,
+                effectiveConfig,
+                communicationNames,
+                args.rolePrompt,
+            );
+            const native = args.resume
+                ? await this.sessionRegistry.withSession(childSessionId, readCodexState)
+                : undefined;
+            if (args.resume && !native) {
+                return {
+                    subSessionId: childSessionId,
+                    isError: true,
+                    resultText:
+                        "This Codex session cannot be resumed because its native thread mapping was not saved. " +
+                        "Create a fresh agent explicitly.",
+                };
+            }
+            if (
+                native &&
+                (native.cwd !== cwd ||
+                    native.profileIdentity !== profileIdentity ||
+                    native.sdkVersion !== CODEX_SDK_VERSION ||
+                    native.threadOptions.skipGitRepoCheck !== skipGitRepoCheck)
+            ) {
+                return {
+                    subSessionId: childSessionId,
+                    isError: true,
+                    resultText:
+                        "Codex continuation requires the original cwd, SDK version, and profile options. " +
+                        "The profile changed; create a new agent explicitly.",
+                };
+            }
+            const state: CodexState = native ?? {
+                nativeThreadId: "",
+                cwd,
+                profileIdentity,
+                sdkVersion: CODEX_SDK_VERSION,
+                threadOptions: {
+                    ...(effectiveConfig.model !== undefined
+                        ? { model: effectiveConfig.model }
+                        : {}),
+                    sandbox: effectiveConfig.sandbox,
+                    approvalPolicy: effectiveConfig.approvalPolicy,
+                    skipGitRepoCheck,
+                    ...(communicationNames.length > 0
+                        ? { communicationTools: communicationNames }
+                        : {}),
+                },
+            };
+            if (communicationNames.length > 0) {
+                communicationBridge = await createCodexCommunicationBridge({
+                    allowedNames: communicationNames,
+                    chat: (input) =>
+                        this.chatToAgent(childSessionId, {
+                            ...input,
+                            subSessionId: asSessionId(input.subSessionId),
+                            parentToolCallId: `codex-message:${uuidv7()}`,
+                        }),
+                    list: () => this.listAgentSessions(childSessionId),
+                });
+            }
+            this.conversation.markRunning(childSessionId, args.executionId);
+            return await runCodexSubagent({
+                subSessionId: childSessionId,
+                agentType: args.agentType,
+                prompt: args.prompt,
+                ...(native ? { resumeThreadId: native.nativeThreadId } : {}),
+                ...(native
+                    ? {}
+                    : {
+                          onThreadId: async (nativeThreadId: string) => {
+                              await this.sessionRegistry.withSession(childSessionId, (session) =>
+                                  writeCodexState(session, { ...state, nativeThreadId }),
+                              );
+                          },
+                      }),
+                rolePrompt: args.rolePrompt,
+                config: effectiveConfig,
+                ...(communicationBridge
+                    ? { mcpServers: { taco: communicationBridge.mcpServer } }
+                    : {}),
+                cwd,
+                skipGitRepoCheck,
+                abortController: controller,
+                onUpdate: args.onUpdate,
+                loadSdk: async () => (await this.loadCodexSdkForRun()).module,
+                appendMessages: (messages) =>
+                    this.sessionRegistry.withSession(childSessionId, async (session) => {
+                        const branch =
+                            (await session.branch(MAIN_BRANCH, harnessContext)) ??
+                            (await session.createBranch(MAIN_BRANCH, null, harnessContext));
+                        for (const message of messages) {
+                            await branch.appendMessage(message, harnessContext);
+                            this.pushChildMessages(childSessionId, message);
+                        }
+                    }),
+            });
+        } finally {
+            try {
+                await communicationBridge?.close();
+            } catch (error) {
+                log.warn("Codex communication bridge cleanup failed", {
+                    subSessionId: childSessionId,
+                    error: error instanceof Error ? error.message : String(error),
+                });
+            }
+            args.signal?.removeEventListener("abort", follow);
+            this.releaseController(childSessionId, controller);
+        }
+    }
+
+    /**
      * Push one persisted child message as pi-style events so the desktop panel
      * streams it live. The registry routes by the facts cache (`noteSessionKind`),
      * so the frame lands in `childMessagesBySubSessionId` as a subagent.
@@ -1131,7 +1391,8 @@ export class AgentSpawner extends EventEmitter {
         // runtime, so it may well ask for `fork` here; correct the request
         // instead of failing it. `<available_agents>` states the constraint, so
         // a model that reads it never gets here.
-        const effectiveContextMode = def.runtime === "claude-code" ? "independent" : contextMode;
+        const effectiveContextMode =
+            def.runtime === "claude-code" || def.runtime === "codex" ? "independent" : contextMode;
         // Compute parent depth to feed filterToolsForAgent before delegating.
         // Depth lives in the session's value store, not `JsonlSessionMetadata`
         // (pi 0.85 removed the free-form metadata bag), so it needs a read.
@@ -1187,6 +1448,12 @@ export class AgentSpawner extends EventEmitter {
                       claudeCodeTools: def.tools,
                       permissionMode: def.permissionMode,
                       ...(def.cwd !== undefined ? { claudeCodeCwd: def.cwd } : {}),
+                  }
+                : {}),
+            ...(def.runtime === "codex"
+                ? {
+                      ...(def.codex !== undefined ? { codexConfig: def.codex } : {}),
+                      ...(def.tools !== undefined ? { codexTools: def.tools } : {}),
                   }
                 : {}),
         };
@@ -1263,7 +1530,12 @@ export class AgentSpawner extends EventEmitter {
         // `spawnSubagent` before any await; this method must not add it again.
         const childSessionId = sessionArgs.childSessionId ?? asSessionId(uuidv7());
         const runId = sessionArgs.executionId ?? uuidv7();
-        this.conversation.begin(childSessionId, { runId, parentSessionId, phase: "preparing" });
+        this.conversation.begin(childSessionId, {
+            runId,
+            parentSessionId,
+            runtime: sessionArgs.runtime,
+            phase: "preparing",
+        });
         // Computed at launch, not at settle: the receipt below carries it, so
         // the model holds the exact path from the moment it delegates. That is
         // what makes the result recoverable when the completion notice never
@@ -1313,6 +1585,8 @@ export class AgentSpawner extends EventEmitter {
                         newTask: true,
                         managedExternally: true,
                         budget: sessionArgs.budget,
+                        abortController: controller,
+                        executionId: runId,
                     }),
                 );
             return this.executeSubagentSession({
@@ -1368,6 +1642,7 @@ export class AgentSpawner extends EventEmitter {
                     parentSessionId,
                     parentToolCallId,
                     subSessionId: childSessionId,
+                    runId,
                     outcome,
                 });
                 const notification = this.formatBackgroundNotification(sessionArgs.agentType, {
@@ -1384,6 +1659,7 @@ export class AgentSpawner extends EventEmitter {
                     parentSessionId,
                     parentToolCallId,
                     subSessionId: childSessionId,
+                    runId,
                     agentType: sessionArgs.agentType,
                     outcome,
                     resultPath: path,
@@ -1449,6 +1725,7 @@ export class AgentSpawner extends EventEmitter {
                     parentSessionId,
                     parentToolCallId,
                     subSessionId: childSessionId,
+                    runId,
                     outcome: "error",
                 });
                 const fallback = this.formatBackgroundNotification(sessionArgs.agentType, {
@@ -1466,6 +1743,7 @@ export class AgentSpawner extends EventEmitter {
                     parentSessionId,
                     parentToolCallId,
                     subSessionId: childSessionId,
+                    runId,
                     agentType: sessionArgs.agentType,
                     outcome: "error",
                     description,
@@ -1494,7 +1772,7 @@ export class AgentSpawner extends EventEmitter {
                 // race a fresh entry into existence. Without this the set
                 // holds one string per background spawn for the process's
                 // entire lifetime.
-                this.settledEmitted.delete(parentToolCallId);
+                this.settledEmitted.delete(`${parentToolCallId}:${runId}`);
             });
         // Deliberately not awaited or returned — see method doc. A rejection
         // from `run` is already handled by the `.catch` above, so there is no
@@ -1675,6 +1953,7 @@ export class AgentSpawner extends EventEmitter {
         parentSessionId: SessionId;
         parentToolCallId: string;
         subSessionId: SessionId;
+        runId?: string;
         agentType: string;
         outcome: "completed" | "error" | "aborted";
         resultPath?: string;
@@ -1712,6 +1991,7 @@ export class AgentSpawner extends EventEmitter {
         parentSessionId: SessionId;
         parentToolCallId: string;
         subSessionId: SessionId;
+        runId?: string;
         agentType: string;
         outcome: "completed" | "error" | "aborted";
         resultPath?: string;
@@ -1767,11 +2047,13 @@ export class AgentSpawner extends EventEmitter {
             parentSessionId: SessionId;
             parentToolCallId: string;
             subSessionId: SessionId;
+            runId?: string;
             outcome: "completed" | "error" | "aborted";
         },
     ): void {
-        if (this.settledEmitted.has(args.parentToolCallId)) return;
-        this.settledEmitted.add(args.parentToolCallId);
+        const key = `${args.parentToolCallId}:${args.runId ?? "legacy"}`;
+        if (this.settledEmitted.has(key)) return;
+        this.settledEmitted.add(key);
         const chatRunId = args.parentToolCallId.startsWith("chat:")
             ? args.parentToolCallId.slice(5)
             : undefined;
@@ -1784,6 +2066,7 @@ export class AgentSpawner extends EventEmitter {
             parentToolCallId: args.parentToolCallId,
             subSessionId: args.subSessionId,
             agentType,
+            ...(args.runId !== undefined ? { runId: args.runId } : {}),
             outcome: args.outcome,
         });
     }
@@ -2046,6 +2329,16 @@ export class AgentSpawner extends EventEmitter {
                 "This Claude Code session cannot be resumed because it has no saved native session. Create a fresh agent explicitly.",
             );
         }
+        if (facts.runtime === "codex") {
+            if (
+                !(await this.sessionRegistry.withSession(message.targetSessionId, readCodexState))
+            ) {
+                throw new Error(
+                    "This Codex session cannot be resumed because its native thread mapping was not saved. Create a fresh agent explicitly.",
+                );
+            }
+            await this.preflightCodexRuntime();
+        }
         const runId = uuidv7();
         const started = {
             parentSessionId: message.ownerParentSessionId,
@@ -2066,7 +2359,12 @@ export class AgentSpawner extends EventEmitter {
             messageId: message.messageId,
             runId,
             status: "started",
-            effectiveDelivery: facts.runtime === "claude-code" ? "nextTurn" : message.delivery,
+            effectiveDelivery:
+                facts.runtime === "claude-code"
+                    ? "nextTurn"
+                    : facts.runtime === "codex"
+                      ? "followUp"
+                      : message.delivery,
             resultText:
                 "The existing agent conversation is continuing. Completion will be reported to its original parent.",
             isError: false,
@@ -2099,10 +2397,21 @@ export class AgentSpawner extends EventEmitter {
             );
             return { result: { ...receipt, resultPath: launched.resultPath } };
         }
+        const executionController = facts.runtime === "codex" ? new AbortController() : undefined;
+        const followChatAbort = (): void => executionController?.abort(args.signal?.reason);
+        if (executionController) {
+            if (args.signal?.aborted) executionController.abort(args.signal.reason);
+            args.signal?.addEventListener("abort", followChatAbort, { once: true });
+            this.subagentControllers.set(message.targetSessionId, {
+                controller: executionController,
+                parentSessionId: message.ownerParentSessionId,
+            });
+        }
         announce();
         this.conversation.begin(message.targetSessionId, {
             runId,
             parentSessionId: message.ownerParentSessionId,
+            runtime: facts.runtime,
             phase: "preparing",
         });
         const completion = this.trackInFlight(
@@ -2118,41 +2427,50 @@ export class AgentSpawner extends EventEmitter {
                     onUpdate: args.onUpdate,
                     newTask: true,
                     managedExternally: true,
+                    executionId: runId,
+                    ...(executionController ? { abortController: executionController } : {}),
                 }),
-        ).then(
-            async (result) => {
-                this.settleChatRun(
-                    runId,
-                    result.aborted ? "aborted" : result.isError ? "error" : "completed",
-                );
-                await this.conversation.end(message.targetSessionId, runId, result);
-                return {
-                    ...receipt,
-                    status: result.aborted
-                        ? ("aborted" as const)
-                        : result.isError
-                          ? ("error" as const)
-                          : ("completed" as const),
-                    resultText: result.resultText,
-                    isError: result.isError && !result.aborted,
-                };
-            },
-            async (error: unknown) => {
-                const result = {
-                    subSessionId: message.targetSessionId,
-                    resultText: String(error),
-                    isError: true,
-                };
-                this.settleChatRun(runId, "error");
-                await this.conversation.end(message.targetSessionId, runId, result);
-                return {
-                    ...receipt,
-                    status: "error" as const,
-                    resultText: String(error),
-                    isError: true,
-                };
-            },
-        );
+        )
+            .then(
+                async (result) => {
+                    this.settleChatRun(
+                        runId,
+                        result.aborted ? "aborted" : result.isError ? "error" : "completed",
+                    );
+                    await this.conversation.end(message.targetSessionId, runId, result);
+                    return {
+                        ...receipt,
+                        status: result.aborted
+                            ? ("aborted" as const)
+                            : result.isError
+                              ? ("error" as const)
+                              : ("completed" as const),
+                        resultText: result.resultText,
+                        isError: result.isError && !result.aborted,
+                    };
+                },
+                async (error: unknown) => {
+                    const result = {
+                        subSessionId: message.targetSessionId,
+                        resultText: String(error),
+                        isError: true,
+                    };
+                    this.settleChatRun(runId, "error");
+                    await this.conversation.end(message.targetSessionId, runId, result);
+                    return {
+                        ...receipt,
+                        status: "error" as const,
+                        resultText: String(error),
+                        isError: true,
+                    };
+                },
+            )
+            .finally(() => {
+                args.signal?.removeEventListener("abort", followChatAbort);
+                if (executionController) {
+                    this.releaseController(message.targetSessionId, executionController);
+                }
+            });
         return { result: receipt, completion };
     }
 
@@ -2179,11 +2497,13 @@ export class AgentSpawner extends EventEmitter {
         isError: boolean;
         aborted?: boolean;
     }> {
+        let runtime: SubagentRuntime | undefined;
         try {
             const facts = await this.sessionRegistry.withSession(
                 args.subSessionId,
                 readSessionFacts,
             );
+            runtime = facts.runtime;
             if (facts.kind !== "subagent")
                 return {
                     subSessionId: args.subSessionId,
@@ -2225,6 +2545,7 @@ export class AgentSpawner extends EventEmitter {
         this.conversation.begin(args.subSessionId, {
             runId,
             parentSessionId: args.parentSessionId,
+            runtime,
             phase: "preparing",
         });
         let result: SubagentRunResult | undefined;
@@ -2233,7 +2554,7 @@ export class AgentSpawner extends EventEmitter {
             args.parentToolCallId,
             async () => {
                 try {
-                    result = await this.runResume(args);
+                    result = await this.runResume({ ...args, executionId: runId });
                     return result;
                 } finally {
                     await this.conversation.end(args.subSessionId, runId, result);
@@ -2319,6 +2640,22 @@ export class AgentSpawner extends EventEmitter {
                     claudeCodeTools: def.tools,
                     permissionMode: def.permissionMode,
                     claudeCodeCwd: def.cwd,
+                    signal: request.signal,
+                    onUpdate: request.onUpdate,
+                }),
+            runCodex: (request, def, controller) =>
+                this.runCodexChild(request.subSessionId, {
+                    parentSessionId: request.parentSessionId,
+                    parentToolCallId: request.parentToolCallId,
+                    agentType: def.agentType,
+                    prompt: request.prompt,
+                    tools: [],
+                    runtime: "codex",
+                    resume: true,
+                    rolePrompt: def.systemPrompt,
+                    ...(def.codex !== undefined ? { codexConfig: def.codex } : {}),
+                    ...(def.tools !== undefined ? { codexTools: def.tools } : {}),
+                    abortController: controller,
                     signal: request.signal,
                     onUpdate: request.onUpdate,
                 }),

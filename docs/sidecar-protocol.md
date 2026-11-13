@@ -261,7 +261,9 @@ fields of `settings.get` or `settings.write`.
 |--------|----------|
 | `agents.content` | agents.* |
 | `agents.delete` | agents.* |
+| `agents.installRuntime` | agents.* |
 | `agents.list` | agents.* |
+| `agents.runtimeStatus` | agents.* |
 | `agents.write` | agents.* |
 | `attachment.stage` | attachment.* |
 | `channels.bind` | channels.* |
@@ -340,6 +342,7 @@ fields of `settings.get` or `settings.write`.
 | `work.delete` | work.* |
 | `work.get` | work.* |
 | `work.list` | work.* |
+| `work.queueCancel` | work.* |
 | `work.retryDelivery` | work.* |
 | `workspace.associations.get` | workspace.* |
 | `workspace.associations.resolve` | workspace.* |

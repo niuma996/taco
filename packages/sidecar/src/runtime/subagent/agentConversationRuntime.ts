@@ -1,6 +1,6 @@
 import { type AgentSessionDescriptor, asSessionId, type SessionId } from "@taco-ai/protocol";
 import type { AgentChatArgs, AgentChatResult } from "../../agents/agentConversationTypes.ts";
-import type { AgentDefinition } from "../../agents/types.ts";
+import type { AgentDefinition, SubagentRuntime } from "../../agents/types.ts";
 import { createLogger } from "../../lib/logger.ts";
 import { readSessionFacts } from "../session/sessionFacts.ts";
 import type { SessionRegistry } from "../session/sessionRegistry.ts";
@@ -10,6 +10,7 @@ import {
     agentMessageEnvelope,
 } from "./agentConversation.ts";
 import { readAgentMessages, writeAgentMessages } from "./agentMessages.ts";
+import { readCodexState } from "./codex/codexState.ts";
 import type { SubagentRunResult } from "./subagentRunner.ts";
 
 const log = createLogger("sidecar.agentConversation");
@@ -17,6 +18,7 @@ const log = createLogger("sidecar.agentConversation");
 export interface AgentExecutionState {
     runId: string;
     parentSessionId: SessionId;
+    runtime?: SubagentRuntime;
     phase: "preparing" | "running" | "settling";
     input?: { send(prompt: string, messageId: string): boolean; close(): void };
 }
@@ -100,6 +102,13 @@ export class AgentConversationRuntime {
         if (execution) execution.phase = "settling";
     }
 
+    markRunning(id: SessionId, runId?: string): void {
+        const execution = this.executions.get(id);
+        if (!execution) return;
+        if (runId !== undefined && execution.runId !== runId) return;
+        execution.phase = "running";
+    }
+
     setInput(id: SessionId, input: NonNullable<AgentExecutionState["input"]>): void {
         const execution = this.executions.get(id);
         if (!execution) {
@@ -119,22 +128,28 @@ export class AgentConversationRuntime {
             .update(id, async (records) => {
                 const queued = await this.nativeQueuedIds(id);
                 for (const record of records) {
-                    if (record.receipt?.runId !== runId) continue;
+                    const receipt = record.receipt;
+                    const belongsToRun =
+                        receipt?.runId === runId || record.queuedDuringRunId === runId;
+                    if (!belongsToRun || !receipt) continue;
                     if (result?.aborted) {
                         record.receipt = {
-                            ...record.receipt,
+                            ...receipt,
                             status: "aborted",
                             resultText:
                                 "The run was stopped; this message may not have been consumed.",
                             isError: false,
                         };
+                        record.queuedDuringRunId = undefined;
+                    } else if (record.queuedDuringRunId === runId) {
+                        record.queuedDuringRunId = undefined;
                     } else if (record.queueEntryId && queued.has(record.queueEntryId)) {
-                        record.receipt = { ...record.receipt, runId: undefined, status: "queued" };
-                    } else if (!record.queueEntryId && record.receipt.status === "queued") {
-                        record.receipt.runId = undefined;
+                        record.receipt = { ...receipt, runId: undefined, status: "queued" };
+                    } else if (!record.queueEntryId && receipt.status === "queued") {
+                        record.receipt = { ...receipt, runId: undefined };
                     } else {
                         record.receipt = {
-                            ...record.receipt,
+                            ...receipt,
                             status: result?.isError ? "error" : "completed",
                             resultText: result?.resultText ?? "The execution settled.",
                             isError: result?.isError ?? false,
@@ -167,15 +182,23 @@ export class AgentConversationRuntime {
             const facts = await registry.getSessionFacts(id);
             if (facts.kind !== "subagent" || facts.parentSessionId !== parent) continue;
             const def = facts.agentType ? this.options.findAgent(facts.agentType) : undefined;
+            const canResume =
+                def !== undefined &&
+                (def.runtime ?? "standard") === (facts.runtime ?? "standard") &&
+                (facts.runtime !== "codex" ||
+                    (await registry.withSession(id, readCodexState)) !== undefined);
             out.push({
                 subSessionId: id,
                 agentType: facts.agentType ?? "unknown",
                 description: def?.description,
                 status: this.executions.get(id)?.phase ?? "idle",
-                canResume:
-                    def !== undefined &&
-                    (def.runtime ?? "standard") === (facts.runtime ?? "standard"),
-                delivery: facts.runtime === "claude-code" ? "nextTurn" : "steer",
+                canResume,
+                delivery:
+                    facts.runtime === "claude-code"
+                        ? "nextTurn"
+                        : facts.runtime === "codex"
+                          ? "queued"
+                          : ("steer" as const),
             });
             if (out.length === 64) break;
         }
@@ -185,6 +208,10 @@ export class AgentConversationRuntime {
     private async deliver(message: AgentMessageRecord, args: AgentChatArgs) {
         const state = this.executions.get(message.targetSessionId);
         if (!state) return this.options.start(message, args);
+        if (state.runtime === "codex") {
+            message.queuedDuringRunId = state.runId;
+            return { result: this.receipt(message, "queued", undefined, "queued") };
+        }
         const received = state.phase === "running" ? await this.enqueue(message, state) : undefined;
         if (received) return { result: received };
         return {
@@ -200,13 +227,14 @@ export class AgentConversationRuntime {
         message: AgentMessageRecord,
         status: "queued" | "started",
         runId?: string,
+        effectiveDelivery?: AgentChatResult["effectiveDelivery"],
     ): AgentChatResult {
         return {
             subSessionId: message.targetSessionId,
             messageId: message.messageId,
             status,
-            effectiveDelivery: message.delivery,
-            runId,
+            effectiveDelivery: effectiveDelivery ?? message.delivery,
+            ...(runId !== undefined ? { runId } : {}),
             resultText: "Message accepted. This is a delivery receipt, not a task result.",
             isError: false,
         };

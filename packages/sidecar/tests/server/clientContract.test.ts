@@ -255,6 +255,8 @@ test("every facade method serializes a payload accepted by its registered schema
         systemPrompt: "",
     });
     await client.agentsDelete({ workspace, agentType: "reviewer" });
+    await client.agentsRuntimeStatus({ runtime: "codex" });
+    await client.agentsInstallRuntime({ runtime: "codex" });
     await client.skillsList({ workspace });
     await client.skillContent({ workspace, filePath: "/w/SKILL.md" });
     await client.checkpointsList({ workspace });

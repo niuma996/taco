@@ -11,7 +11,9 @@ import type { sessionSubmitAnswersSchema } from "./schemas/session.js";
 import type {
     agentsContentSchema,
     agentsDeleteSchema,
+    agentsInstallRuntimeSchema,
     agentsListSchema,
+    agentsRuntimeStatusSchema,
     agentsWriteSchema,
     skillContentSchema,
     skillsListSchema,
@@ -172,7 +174,40 @@ export type AgentsListParams = ParamsOf<typeof agentsListSchema>;
  * Engine that runs an agent. UI/config only — the model always delegates by
  * agent name and never sees this. Absent = "standard" (taco's own harness).
  */
-export type AgentRuntime = "standard" | "claude-code";
+export type AgentRuntime = "standard" | "claude-code" | "codex";
+
+/**
+ * Codex sandbox mode for a `codex` agent — how much of the filesystem and
+ * network the Codex run may touch. Mirrors the Codex SDK's `sandboxMode`.
+ */
+export type CodexSandboxMode = "read-only" | "workspace-write" | "danger-full-access";
+
+/**
+ * Codex approval policy for a `codex` agent — when the run must stop and ask
+ * before acting. Mirrors the Codex SDK's `approvalPolicy`; deliberately NOT
+ * named after Claude Code's `permissionMode`, whose semantics differ.
+ */
+export type CodexApprovalPolicy = "untrusted" | "on-failure" | "on-request" | "never";
+
+/**
+ * `codex`-only engine settings of an agent definition. `model` is required so
+ * native resume stays reproducible; omitted sandbox/approval fields normalize
+ * to Taco's read-only/never defaults. `cwd` shares the claude-code allow-list
+ * (the workspace directory or one of its associated directories); omitted =
+ * the calling workspace.
+ */
+export interface CodexAgentConfig {
+    /** Absolute directory the Codex run works in. */
+    cwd?: string;
+    /**
+     * Model override for this conversation, e.g. "gpt-6". Omitted means the
+     * user's own Codex configuration decides, the same way a Claude Code
+     * agent inherits the user's Claude settings.
+     */
+    model?: string;
+    sandbox?: CodexSandboxMode;
+    approvalPolicy?: CodexApprovalPolicy;
+}
 
 /**
  * Where an editable agent definition lives: `global` is `$TACO_HOME/agents`
@@ -249,6 +284,8 @@ export interface AgentsContentResult {
     permissionMode?: ClaudeCodePermissionMode;
     /** `claude-code` only: the directory it runs in. Absent = the calling workspace's directory. */
     cwd?: string;
+    /** `codex` only: engine-specific settings from the definition's `codex:` frontmatter block. */
+    codex?: CodexAgentConfig;
     source: "builtin" | "user";
     scope?: AgentScope;
     editable: boolean;
@@ -269,6 +306,54 @@ export type AgentsDeleteParams = ParamsOf<typeof agentsDeleteSchema>;
 
 export interface AgentsDeleteResult {
     ok: true;
+}
+
+/** `agents.runtimeStatus` RPC params — process-scoped; only the Codex runtime is queryable. */
+export type AgentsRuntimeStatusParams = ParamsOf<typeof agentsRuntimeStatusSchema>;
+
+/**
+ * `agents.runtimeStatus` RPC result — installation/authentication facts about
+ * the managed Codex runtime. Reported without executing a paid model turn:
+ * version comes from the resolved SDK package, auth from `codex login status`
+ * when the managed binary resolves, else "unknown".
+ */
+export interface AgentsRuntimeStatusResult {
+    runtime: "codex";
+    /** Whether the pinned managed SDK resolves in this installation. */
+    installed: boolean;
+    /** Installed managed SDK version (e.g. "0.167.2"). Absent when not installed. */
+    version?: string;
+    /** Managed CLI sign-in state; "unknown" when it cannot be determined safely. */
+    auth: "signed-in" | "signed-out" | "unknown";
+    /** Exact managed CLI command to run when sign-in is required. Not a global `codex` binary. */
+    loginCommand?: string;
+    /**
+     * Whether this process can run the in-app installer. Absent on older
+     * sidecars; "missing" means the desktop must show the terminal command
+     * instead of a button that cannot succeed.
+     */
+    installer?: "available" | "missing";
+    /** Exact npm command for a terminal that has npm. Present even when the in-app installer cannot run. */
+    installCommand?: string;
+    /** Model the user's Codex config selects; absent when Codex picks it at run time. */
+    model?: string;
+    /** Provider the user's Codex config selects (e.g. "openai", or a custom one). */
+    provider?: string;
+}
+
+/**
+ * `agents.installRuntime` RPC params — process-scoped. Deliberately names no
+ * package or version: the sidecar installs exactly the pinned managed SDK and
+ * never accepts an arbitrary specifier from a caller.
+ */
+export type AgentsInstallRuntimeParams = ParamsOf<typeof agentsInstallRuntimeSchema>;
+
+/** `agents.installRuntime` RPC result — the runtime is installed at this version. */
+export interface AgentsInstallRuntimeResult {
+    runtime: "codex";
+    ok: true;
+    /** Version of the SDK just installed (e.g. "0.167.2"). */
+    version: string;
 }
 
 /** `subagent.spawned` push params. */
@@ -346,12 +431,24 @@ export interface SubagentProgressDetails {
     turns?: number;
 }
 
-/** A message receipt; only terminal statuses describe the run's outcome. */
+/**
+ * A message receipt; only terminal statuses describe the run's outcome.
+ *
+ * `effectiveDelivery` reports what the runtime actually did with the message:
+ *  - `steer` / `followUp` — the engine accepted the input mid-conversation /
+ *    for the next run of the same conversation.
+ *  - `nextTurn` — the engine cannot take input mid-run; the message applies
+ *    after the current run (Claude Code).
+ *  - `queued` — the message was admitted to the child's durable inbox and
+ *    starts its own run only after the current one settles (Codex). A queued
+ *    receipt omits `runId` until that run starts; `messageId` remains the
+ *    durable admission identity either way.
+ */
 export interface ChatToAgentToolDetails {
     subSessionId: SessionId;
     messageId: string;
     status: "queued" | "started" | "completed" | "error" | "aborted";
-    effectiveDelivery: "steer" | "followUp" | "nextTurn";
+    effectiveDelivery: "steer" | "followUp" | "nextTurn" | "queued";
     runId?: string;
     resultPath?: string;
 }
@@ -363,7 +460,7 @@ export interface AgentSessionDescriptor {
     description?: string;
     status: "running" | "idle" | "preparing" | "settling";
     canResume: boolean;
-    delivery: "steer" | "nextTurn";
+    delivery: "steer" | "nextTurn" | "queued";
 }
 
 // askUser tool

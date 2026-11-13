@@ -11,7 +11,9 @@ import { join } from "node:path";
 import type {
     AgentsContentResult,
     AgentsDeleteResult,
+    AgentsInstallRuntimeResult,
     AgentsListResult,
+    AgentsRuntimeStatusResult,
     AgentsWriteResult,
 } from "@taco-ai/protocol";
 import { loadAgentDir } from "../../agents/loadAgents.ts";
@@ -19,6 +21,10 @@ import type { AgentDefinition } from "../../agents/types.ts";
 import { createLogger } from "../../lib/logger.ts";
 import { resourceRoot } from "../../runtime/runtimeResources.ts";
 import type { ServerRpcSurface } from "../../runtime/serverRpcSurface.ts";
+import {
+    getCodexRuntimeStatus,
+    installCodexRuntime,
+} from "../../runtime/subagent/codex/codexRuntimeInstall.ts";
 import type { WorkspaceRuntime } from "../../runtime/workspace.ts";
 import { registerMethod } from "../methodRegistry.ts";
 import {
@@ -110,6 +116,7 @@ export function registerAgentsHandlers(): void {
                 ...(def.tools !== undefined ? { tools: def.tools } : {}),
                 ...(def.permissionMode !== undefined ? { permissionMode: def.permissionMode } : {}),
                 ...(def.runtime === "claude-code" && def.cwd !== undefined ? { cwd: def.cwd } : {}),
+                ...(def.runtime === "codex" && def.codex !== undefined ? { codex: def.codex } : {}),
                 source: def.source,
                 ...(scope !== undefined ? { scope } : {}),
                 editable: scope !== undefined,
@@ -140,5 +147,26 @@ export function registerAgentsHandlers(): void {
             await reloadAgents(server);
             return { ok: true };
         },
+    );
+
+    /** Process-scoped Codex runtime status; never executes a paid model turn. */
+    registerMethod(
+        "agentsRuntimeStatus",
+        false,
+        async ({ params }): Promise<AgentsRuntimeStatusResult> => {
+            void params.runtime;
+            return getCodexRuntimeStatus();
+        },
+    );
+
+    /** Process-scoped install of exactly the pinned managed Codex SDK. */
+    registerMethod(
+        "agentsInstallRuntime",
+        false,
+        async ({ params }): Promise<AgentsInstallRuntimeResult> => {
+            void params.runtime;
+            return installCodexRuntime();
+        },
+        { command: true },
     );
 }

@@ -9,7 +9,9 @@
 import {
     agentsContentSchema,
     agentsDeleteSchema,
+    agentsInstallRuntimeSchema,
     agentsListSchema,
+    agentsRuntimeStatusSchema,
     agentsWriteSchema,
     skillContentSchema,
     skillsListSchema,
@@ -18,7 +20,9 @@ import {
 import type {
     AgentsContentResult,
     AgentsDeleteResult,
+    AgentsInstallRuntimeResult,
     AgentsListResult,
+    AgentsRuntimeStatusResult,
     AgentsWriteResult,
     SkillContentResult,
     SkillsListResult,
@@ -32,6 +36,16 @@ const toolsRows = {
     agentsContent: row<AgentsContentResult>()("agents.content", "workspace", agentsContentSchema),
     agentsWrite: row<AgentsWriteResult>()("agents.write", "workspace", agentsWriteSchema),
     agentsDelete: row<AgentsDeleteResult>()("agents.delete", "workspace", agentsDeleteSchema),
+    agentsRuntimeStatus: row<AgentsRuntimeStatusResult>()(
+        "agents.runtimeStatus",
+        "process",
+        agentsRuntimeStatusSchema,
+    ),
+    agentsInstallRuntime: row<AgentsInstallRuntimeResult>()(
+        "agents.installRuntime",
+        "process",
+        agentsInstallRuntimeSchema,
+    ),
     skillsList: row<SkillsListResult>()("skills.list", "workspace", skillsListSchema),
     skillContent: row<SkillContentResult>()("skills.content", "workspace", skillContentSchema),
 };

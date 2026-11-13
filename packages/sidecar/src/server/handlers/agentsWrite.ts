@@ -115,8 +115,9 @@ function renderAgentMarkdown(p: AgentsWriteParams): string {
     if (p.runtime !== undefined && p.runtime !== DEFAULT_SUBAGENT_RUNTIME) {
         lines.push(`runtime: ${p.runtime}`);
     }
-    // Claude Code settings mean nothing to the standard runtime, so they are
-    // never written for it. Defaults (full preset, `auto`) stay implicit too.
+    // Claude Code settings mean nothing to the standard or codex runtimes, so
+    // they are never written for them. Defaults (full preset, `auto`) stay
+    // implicit too.
     if (p.runtime === "claude-code") {
         if (p.tools !== undefined && p.tools.length > 0) {
             lines.push(`tools: ${JSON.stringify(p.tools)}`);
@@ -126,6 +127,27 @@ function renderAgentMarkdown(p: AgentsWriteParams): string {
         }
         if (p.cwd !== undefined) {
             lines.push(`cwd: ${JSON.stringify(p.cwd)}`);
+        }
+    }
+    // Codex engine settings live in their own `codex:` block, named after the
+    // SDK fields (sandbox / approvalPolicy), never Claude Code's permission
+    // names. An all-default Codex definition writes no block at all.
+    if (p.runtime === "codex") {
+        const codexLines: string[] = [];
+        if (p.codex?.cwd !== undefined) {
+            codexLines.push(`  cwd: ${JSON.stringify(p.codex.cwd)}`);
+        }
+        if (p.codex?.model !== undefined && p.codex.model.trim() !== "") {
+            codexLines.push(`  model: ${JSON.stringify(p.codex.model.trim())}`);
+        }
+        if (p.codex?.sandbox !== undefined) {
+            codexLines.push(`  sandbox: ${JSON.stringify(p.codex.sandbox)}`);
+        }
+        if (p.codex?.approvalPolicy !== undefined) {
+            codexLines.push(`  approvalPolicy: ${JSON.stringify(p.codex.approvalPolicy)}`);
+        }
+        if (codexLines.length > 0) {
+            lines.push("codex:", ...codexLines);
         }
     }
     lines.push(`maxTurns: ${p.maxTurns}`);
@@ -210,16 +232,39 @@ export async function writeUserAgent(
             "AskUserQuestion is not available to subagents — a subagent cannot ask the user questions",
         );
     }
+    // Runtime-specific fields: Claude Code settings on a codex definition
+    // (and vice versa) are an author error, not something to silently drop —
+    // silently dropping would let the editor show a setting that never took
+    // effect. The standard runtime keeps its long-standing lenient policy
+    // (Claude Code fields are ignored, never written).
+    if (params.runtime === "codex") {
+        if (params.permissionMode !== undefined || params.cwd !== undefined) {
+            throw new AgentWriteError(
+                "permissionMode and cwd are Claude Code settings and do not apply to the codex runtime — use codex.approvalPolicy and codex.cwd instead",
+            );
+        }
+        // No model requirement: an agent that pins none inherits the user's
+        // own Codex configuration, the same way a Claude Code agent inherits
+        // the user's Claude settings.
+    } else if (params.codex !== undefined) {
+        throw new AgentWriteError('codex settings require runtime: "codex"');
+    }
     const target = params.agentType;
     const previousType = params.previousAgentType;
+    const previousDef =
+        previousType !== undefined
+            ? currentAgents.find((a) => a.agentType === previousType)
+            : undefined;
     // An unchanged directory is not re-checked: a global agent fixed to
     // another workspace's directory must stay editable from here without
     // being forced onto this workspace's choices.
-    const keptCwd =
-        previousType !== undefined &&
-        currentAgents.find((a) => a.agentType === previousType)?.cwd === params.cwd;
-    if (params.runtime === "claude-code" && params.cwd !== undefined && !keptCwd) {
-        await requireAllowedCwd(params.cwd, ctx);
+    if (params.runtime === "claude-code" && params.cwd !== undefined) {
+        const keptCwd = previousDef !== undefined && previousDef.cwd === params.cwd;
+        if (!keptCwd) await requireAllowedCwd(params.cwd, ctx);
+    }
+    if (params.runtime === "codex" && params.codex?.cwd !== undefined) {
+        const keptCwd = previousDef !== undefined && previousDef.codex?.cwd === params.codex.cwd;
+        if (!keptCwd) await requireAllowedCwd(params.codex.cwd, ctx);
     }
     const previousScope =
         previousType === undefined
