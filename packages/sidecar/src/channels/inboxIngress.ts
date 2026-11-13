@@ -44,6 +44,7 @@ export class InboxIngress implements ChannelIngress {
             target: { workspace: string; sessionId: string },
             batch: InboxBatch,
         ) => Promise<{ sessionId: string; failed?: boolean }>,
+        private readonly replayable = false,
     ) {}
 
     submit(message: ChannelInboundMessage) {
@@ -71,7 +72,14 @@ export class InboxIngress implements ChannelIngress {
             batchId = batch.batchId;
             target = batch.target ?? target ?? (await this.route(combined));
             this.requireBinding({ ...combined, bindingId });
-            if (!(await this.store.claimBatch(batch.batchId, target))) continue;
+            if (
+                !(await this.store.claimBatch(
+                    batch.batchId,
+                    target,
+                    this.replayable ? "work" : "legacy",
+                ))
+            )
+                continue;
             try {
                 const members = await Promise.all(
                     batch.memberReceiptIds.map((id) => this.store.get(id)),
@@ -93,7 +101,7 @@ export class InboxIngress implements ChannelIngress {
                 );
                 await this.store.finishBatch(batch.batchId, result.failed);
             } catch (error) {
-                await this.store.finishBatch(batch.batchId, true);
+                if (!this.replayable) await this.store.finishBatch(batch.batchId, true);
                 throw error;
             }
         }
@@ -162,7 +170,12 @@ export class InboxIngress implements ChannelIngress {
             if (value) ready(value);
         }
         for (const batch of await this.store.listBatches()) {
-            if (batch.state && batch.state !== "frozen") continue;
+            if (
+                batch.state &&
+                batch.state !== "frozen" &&
+                !(this.replayable && batch.state === "dispatching" && batch.dispatchMode === "work")
+            )
+                continue;
             const members = await Promise.all(
                 batch.memberReceiptIds.map((id) => this.store.get(id)),
             );

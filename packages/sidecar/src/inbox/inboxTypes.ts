@@ -60,6 +60,8 @@ export interface InboxBatch {
     readonly createdAt: number;
     readonly frozenAt: number;
     readonly state?: "frozen" | "dispatching" | "submitted" | "failed";
+    /** Only the idempotent Work enqueue may retry an ambiguous handoff. */
+    readonly dispatchMode?: "work" | "legacy";
     readonly target?: SessionTarget;
     readonly updatedAt?: number;
 }

@@ -145,6 +145,46 @@ it("runs scheduled fires through the durable queue without legacy followUp", asy
     assert.equal((await service.store.get(result.workId))?.attempt.queueId !== undefined, true);
 });
 
+it("accepts self-fired work behind its caller without waiting for that lane", async (t) => {
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+        release = resolve;
+    });
+    const { root, service } = await rig(t, async () => {
+        await held;
+        return reply("caller finished");
+    });
+    t.after(release);
+    await service.enqueueInbound(inbound("caller"));
+    await eventually(
+        () => service.store.list(),
+        (works) => works.length === 1 && works[0]?.status === "running",
+    );
+    const request = {
+        jobId: "self",
+        fireId: "fire",
+        title: "self",
+        workspace: inbound("caller").workspace,
+        sessionId: "session",
+        prompt: "run later",
+        createSession: false,
+        waitForCompletion: false,
+    };
+    const pending = service.queueScheduled(request);
+    const result = await Promise.race([
+        pending,
+        new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), 300)),
+    ]);
+    assert.ok(result?.workId, "durable acceptance must return before the caller releases its lane");
+    assert.equal((await service.store.get(result.workId))?.status, "running");
+    release();
+    const queue = new WorkQueueStore(join(root, "queue"));
+    await eventually(
+        () => queue.list(),
+        (entries) => entries.length === 2 && entries.every((entry) => entry.status === "completed"),
+    );
+});
+
 it("does not re-execute an existing legacy scheduled Work through the new queue", async (t) => {
     const { root, service, calls } = await rig(t, undefined, false);
     const legacy = await service.controller.startScheduled({
@@ -236,6 +276,79 @@ it("supersedes a waiting inbound Work when ordinary new input arrives", async (t
     assert.equal(all.find((work) => work.workId !== first.workId)?.status, "completed");
 });
 
+it("preserves its own question when the same inbound batch is replayed", async (t) => {
+    const { service, calls } = await rig(t, async () => waiting);
+    const first = await service.enqueueInbound(inbound("batch-a"));
+    const work = await eventually(
+        async () => (await service.store.list())[0],
+        (value) => value?.status === "waiting",
+    );
+    const replayed = await service.enqueueInbound(inbound("batch-a"));
+    assert.equal(replayed.queueId, first.queueId);
+    const after = await service.store.get(work.workId);
+    assert.equal(after?.status, "waiting");
+    assert.equal(after?.attempt.attemptId, work.attempt.attemptId);
+    assert.equal(after?.waiting?.toolCallId, "question-1");
+    assert.equal(after?.attempt.cancelRequestedAt, undefined);
+    assert.deepEqual(calls, ["inbound:batch-a"]);
+});
+
+it("retries superseding an older question after enqueue succeeded but cancellation failed", async (t) => {
+    const { root, service } = await rig(t, async (entry) =>
+        entry.sourceEventId === "inbound:batch-a" ? waiting : reply("new"),
+    );
+    await service.enqueueInbound(inbound("batch-a"));
+    const old = await eventually(
+        async () => (await service.store.list())[0],
+        (value) => value?.status === "waiting",
+    );
+    const mutate = service.store.mutate.bind(service.store);
+    let failCancellation = true;
+    service.store.mutate = (id, update) =>
+        mutate(id, (current) => {
+            const next = update(current);
+            if (id === old.workId && next?.status === "cancelled" && failCancellation) {
+                failCancellation = false;
+                throw new Error("cancellation snapshot failed");
+            }
+            return next;
+        });
+    await assert.rejects(service.enqueueInbound(inbound("batch-b")), /snapshot failed/);
+    const queue = new WorkQueueStore(join(root, "queue"));
+    const persisted = (await queue.list()).find(
+        (entry) => entry.sourceEventId === "inbound:batch-b",
+    );
+    assert.ok(persisted, "new input must be durable before it supersedes the old question");
+    const retried = await service.enqueueInbound(inbound("batch-b"));
+    assert.equal(retried.queueId, persisted.queueId);
+    await eventually(
+        () => service.store.list(),
+        (works) => works.length === 2 && works.every((work) => work.status !== "running"),
+    );
+    assert.equal((await service.store.get(old.workId))?.status, "cancelled");
+});
+
+it("does not let an older batch replay supersede a newer waiting question", async (t) => {
+    const { service } = await rig(t, async () => waiting);
+    await service.enqueueInbound(inbound("batch-a"));
+    await eventually(
+        () => service.store.list(),
+        (works) => works[0]?.status === "waiting",
+    );
+    await service.enqueueInbound(inbound("batch-b"));
+    const newer = await eventually(
+        () => service.store.list(),
+        (works) =>
+            works.some(
+                (work) => work.sourceEventId === "inbound:batch-b" && work.status === "waiting",
+            ),
+    );
+    const question = newer.find((work) => work.sourceEventId === "inbound:batch-b");
+    assert.ok(question);
+    await service.enqueueInbound(inbound("batch-a"));
+    assert.equal((await service.store.get(question.workId))?.status, "waiting");
+});
+
 it("cancels a persisted intent by queue revision before creating a Work", async (t) => {
     const { root, service, calls } = await rig(t, undefined, false);
     const queued = await service.enqueueInbound(inbound("batch-a"));
@@ -314,4 +427,126 @@ it("settles a persisted operation result after restart without executing it agai
         (status) => status === "confirmed",
     );
     await service.deliverer.forget(work.workId);
+});
+
+it("retains the attach-time cancellation guard until the recovered operation settles", async (t) => {
+    const root = await mkdtemp(join(tmpdir(), "work-cancel-restart-"));
+    const queue = new WorkQueueStore(join(root, "queue"));
+    let aborted = false;
+    let recoveries = 0;
+    let service!: WorkService;
+    service = new WorkService({
+        root: join(root, "work"),
+        instanceId: "new",
+        channels: { sendText: async () => ({ kind: "confirmed" }), maxMessageLength: () => 1000 },
+        resolveRoute: () => undefined,
+        operations: {
+            inspect: async () =>
+                aborted ? { kind: "settled", outcome: "aborted" } : { kind: "open" },
+            abort: async () => ({ outcome: "deferred", newlyRequested: false }),
+        },
+        queue: {
+            root: join(root, "queue"),
+            execute: async () => assert.fail("cancelled operation must never be replaced"),
+            recover: async (entry) => {
+                assert.ok(entry.operation);
+                assert.equal(
+                    await service.cancellationRequested(
+                        entry.workspace,
+                        entry.sessionId,
+                        entry.operation.operationId,
+                    ),
+                    true,
+                );
+                recoveries++;
+            },
+        },
+    });
+    t.after(async () => {
+        service.stop();
+        await rm(root, { recursive: true, force: true });
+    });
+    const entry = (
+        await queue.enqueue({
+            kind: "scheduled",
+            sourceEventId: "job:cancel:fire",
+            title: "cancel",
+            jobId: "cancel",
+            workspace: "/workspace",
+            sessionId: "session",
+            lane: "main",
+            payload: { text: "run" },
+        })
+    ).entry;
+    const claimed = await queue.claim(entry.queueId, "old");
+    assert.ok(claimed?.operation);
+    const work = await service.controller.startScheduled({
+        sourceEventId: entry.sourceEventId,
+        title: entry.title,
+        jobId: "cancel",
+        workspace: entry.workspace,
+        sessionId: entry.sessionId,
+        queueId: entry.queueId,
+        operation: claimed.operation,
+    });
+    await service.store.mutate(work.workId, (current) => ({
+        ...current,
+        ownerInstanceId: "old",
+        attempt: { ...current.attempt, operationAccepted: true },
+    }));
+    const running = await queue.updateOwned(entry.queueId, "old", (current) => ({
+        ...current,
+        status: "running",
+        operationAccepted: true,
+        work: { workId: work.workId, attemptId: work.attempt.attemptId },
+    }));
+    assert.ok(running);
+    await service.cancelQueue(entry.queueId, running.revision);
+    await service.start();
+    await eventually(
+        async () => recoveries,
+        (value) => value === 1,
+    );
+    assert.equal((await service.store.get(work.workId))?.status, "running");
+    assert.equal((await queue.get(entry.queueId))?.status, "running");
+    aborted = true;
+    await eventually(
+        () => queue.get(entry.queueId),
+        (value) => value?.status === "cancelled",
+    );
+    assert.equal((await service.store.get(work.workId))?.status, "cancelled");
+});
+
+it("keeps an accepted self-fire's eventual execution failure visible in Work", async (t) => {
+    const { root, service } = await rig(t, async () => {
+        throw new Error("provider failed after acceptance");
+    });
+    const result = await service.queueScheduled({
+        jobId: "self",
+        fireId: "failure",
+        title: "self",
+        workspace: "/workspace",
+        sessionId: "session",
+        prompt: "run",
+        createSession: false,
+        waitForCompletion: false,
+    });
+    assert.ok(result.workId);
+    const queue = new WorkQueueStore(join(root, "queue"));
+    await eventually(
+        () => queue.list(),
+        (entries) => entries[0]?.status === "failed",
+    );
+    assert.equal((await service.get(result.workId)).work?.status, "failed");
+    const repeated = await service.queueScheduled({
+        jobId: "self",
+        fireId: "failure",
+        title: "self",
+        workspace: "/workspace",
+        sessionId: "session",
+        prompt: "run",
+        createSession: false,
+        waitForCompletion: false,
+    });
+    assert.equal(repeated.status, "failed");
 });

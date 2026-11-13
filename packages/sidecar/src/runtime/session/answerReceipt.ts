@@ -4,11 +4,16 @@ import { isBusyError } from "../harness/harnessErrors.ts";
 import type { Session } from "../pi/types.ts";
 import { value } from "../pi/values.ts";
 
-interface AnswerReceipt {
+interface PreparedAnswer {
+    text: string;
+    /** The plan reviewed by this answer; a replay must not approve a different plan. */
+    approvedPlanSlug?: string;
+}
+
+interface AnswerReceipt extends PreparedAnswer {
     version: 1;
     payloadHash: string;
     operationId: string;
-    text: string;
     status: "prepared" | "completed";
     work?: { workId: string; attemptId: string };
 }
@@ -43,7 +48,7 @@ export class AnswerReceiptConflict extends Error {
 export function withAnswerReceipt(
     session: Session,
     submission: AnswerSubmission,
-    prepare: (answers: AnswerSubmission["answers"]) => Promise<string>,
+    prepare: (answers: AnswerSubmission["answers"]) => Promise<PreparedAnswer>,
     run: (
         receipt: Readonly<AnswerReceipt>,
         bind: (handle: { workId: string; attemptId: string }) => Promise<void>,
@@ -81,7 +86,7 @@ export function withAnswerReceipt(
                 version: 1,
                 payloadHash,
                 operationId: session.idGenerator.next(Date.now()),
-                text: await prepare(answers),
+                ...(await prepare(answers)),
                 status: "prepared",
             };
             await session.setValue(address, receipt, harnessContext);

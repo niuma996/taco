@@ -32,6 +32,7 @@ import {
 import type { Static } from "typebox";
 import { Type } from "typebox";
 import type { AgentHarnessTool } from "../runtime/pi/types.ts";
+import { withJobCaller } from "../scheduler/invocationContext.ts";
 import type { TacoToolContext } from "./context.ts";
 
 // ─── schema ──────────────────────────────────────────────────────────────────
@@ -148,7 +149,11 @@ function buildJobsTool<M extends Extract<RpcMethodName, `jobs.${string}`>, TInpu
                 throw new Error(`${opts.rpcMethod}: no self-RPC dispatcher in this workspace`);
             }
             const params = opts.buildParams(input, ctx);
-            const result = await call<M>(opts.rpcMethod, workspace, { ...params, actor });
+            const invoke = () => call<M>(opts.rpcMethod, workspace, { ...params, actor });
+            const result =
+                opts.rpcMethod === RPC.jobsRunNow
+                    ? await withJobCaller({ workspace, sessionId: ctx.sessionId }, invoke)
+                    : await invoke();
             return {
                 content: [{ type: "text", text: opts.render(input, result, ctx) }],
                 details: result,
@@ -272,7 +277,7 @@ export function createJobsRunNowTool(): AgentHarnessTool<TacoToolContext> {
         name: "jobsRunNow",
         label: "jobsRunNow",
         summary:
-            'Force-fire a job immediately, outside its schedule. Returns status="ok" once the fire was ACCEPTED (this is not the same as "completed": when the target session already has a turn in flight, the dispatcher degrades to a follow-up enqueue and reports "ok" the moment the enqueue lands, BEFORE the model turn actually runs — so a self-fired max_runs:1 job may retire itself before its own work finishes; the agent loop completes asynchronously at the next may_finish boundary). status="skipped" means an overlapping fire held the lock (this fire was dropped, not queued). status="failed" carries the invocation error.',
+            'Force-fire a job immediately, outside its schedule. When the job targets this session, status="ok" means durably ACCEPTED: the returned workId tracks the independent execution after this turn releases the session. A self-fired max_runs:1 job may retire before that execution finishes; inspect its Work for the eventual outcome. Other targets wait for completion or a question requiring input. status="skipped" means an overlapping fire held the lock. status="failed" carries the invocation error.',
         mutates: true,
         schema: jobsRunNowSchema,
         rpcMethod: RPC.jobsRunNow,

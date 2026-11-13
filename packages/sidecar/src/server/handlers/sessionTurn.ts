@@ -242,22 +242,32 @@ export function registerSessionTurnHandlers(): void {
                             `no waiting ${toolName} tool result for toolCallId=${params.toolCallId}`,
                         );
                     }
-                    // Plan approval changes plan-mode state, so it is decided
-                    // here — the one place that knows the answers came from a
-                    // person and that the toolResult is still waiting. The
-                    // model's own `answers` argument is not trusted for this.
-                    if (toolName === "planExit" && isPlanApproved(answers)) {
-                        exitPlanMode(attached.planState);
-                        workspace.publishCurrentPlanSnapshot(params.sessionId);
-                    }
-                    return wrapAskUserContext(
-                        formatAskUserContextBody(toolName, questions, answers),
-                    );
+                    return {
+                        text: wrapAskUserContext(
+                            formatAskUserContextBody(toolName, questions, answers),
+                        ),
+                        ...(toolName === "planExit" &&
+                        isPlanApproved(answers) &&
+                        attached.planState.currentSlug !== null
+                            ? { approvedPlanSlug: attached.planState.currentSlug }
+                            : {}),
+                    };
                 },
                 async (receipt, bind) => {
                     const run = () =>
                         attached.prompt(receipt.text, undefined, undefined, undefined, {
                             operationId: receipt.operationId,
+                            // Receipt persistence, Work validation and lane admission must
+                            // succeed before an approval can lift plan-mode restrictions.
+                            onAccepted: () => {
+                                if (
+                                    receipt.approvedPlanSlug !== undefined &&
+                                    receipt.approvedPlanSlug === attached.planState.currentSlug
+                                ) {
+                                    exitPlanMode(attached.planState);
+                                    workspace.publishCurrentPlanSnapshot(params.sessionId);
+                                }
+                            },
                         });
                     await (server.work
                         ? server.work.answerWaiting(

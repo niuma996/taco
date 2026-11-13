@@ -32,6 +32,7 @@ import type { QueuedOutcome, QueuedWatch } from "../runtime/harness/queuedWatch.
 import type { AgentMessage } from "../runtime/pi/types.ts";
 import type { ScheduledFireSettle, ScheduledWorkHooks } from "../work/workHooks.ts";
 import { isBuiltinJob } from "./builtinJobs.ts";
+import { isJobCaller } from "./invocationContext.ts";
 import type { FireContext, InvokeResult } from "./runner.ts";
 import type { Job, SessionStrategy } from "./types.ts";
 
@@ -53,6 +54,7 @@ interface DispatchSurface {
             sessionId: string;
             prompt: string;
             createSession: boolean;
+            waitForCompletion?: boolean;
         },
         onWork?: (workId: string) => void,
     ): Promise<{ workId?: string; status: string; reason?: string }>;
@@ -257,6 +259,7 @@ async function queueTurn(
             sessionId,
             prompt,
             createSession,
+            ...(isJobCaller(workspace, sessionId) ? { waitForCompletion: false } : {}),
         },
         (workId) => {
             if (reported === workId) return;

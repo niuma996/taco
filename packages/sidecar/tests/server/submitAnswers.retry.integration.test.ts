@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { it } from "node:test";
@@ -7,7 +7,7 @@ import { createModels } from "@earendil-works/pi-ai/compat";
 import { fauxAssistantMessage, fauxProvider } from "@earendil-works/pi-ai/providers/faux";
 import { asSessionId, asWorkspaceId } from "@taco-ai/protocol";
 import { harnessContext } from "../../src/lib/harnessContext.ts";
-import { createPlanModeState } from "../../src/plan/planModeState.ts";
+import { createPlanModeState, enterPlanMode } from "../../src/plan/planModeState.ts";
 import { AttachedSession } from "../../src/runtime/harness/attachedSession.ts";
 import { ProviderKeyStore } from "../../src/runtime/models/providerKeyStore.ts";
 import { NodeExecutionEnv } from "../../src/runtime/pi/node.ts";
@@ -15,10 +15,15 @@ import { JsonlSessionRepo, LaneBusy, value } from "../../src/runtime/pi/values.t
 import { findBranchEntries } from "../../src/runtime/session/sessionBranch.ts";
 import { SidecarServer } from "../../src/server/server.ts";
 import { createAskUserTool } from "../../src/tools/askUser.ts";
+import { createPlanExitTool } from "../../src/tools/planExit.ts";
 import type { WorkRecord } from "../../src/work/workTypes.ts";
 
-async function fixture() {
+async function fixture(toolName: "askUser" | "planExit" = "askUser") {
     const root = await mkdtemp(join(tmpdir(), "taco-answer-retry-"));
+    if (toolName === "planExit") {
+        await mkdir(join(root, ".taco", "plans"), { recursive: true });
+        await writeFile(join(root, ".taco", "plans", "approval-plan.md"), "# Approved work\n");
+    }
     const env = new NodeExecutionEnv({ cwd: root });
     const repo = new JsonlSessionRepo({ fileSystem: env, sessionsRoot: join(root, "sessions") });
     const provider = fauxProvider({ provider: "answer-retry", tokensPerSecond: 0 });
@@ -27,20 +32,23 @@ async function fixture() {
             {
                 type: "toolCall",
                 id: "question",
-                name: "askUser",
-                arguments: {
-                    questions: [
-                        {
-                            question: "Choose?",
-                            header: "Choice",
-                            multiSelect: false,
-                            options: [
-                                { label: "A", description: "First" },
-                                { label: "B", description: "Second" },
-                            ],
-                        },
-                    ],
-                },
+                name: toolName,
+                arguments:
+                    toolName === "planExit"
+                        ? { planSlug: "approval-plan" }
+                        : {
+                              questions: [
+                                  {
+                                      question: "Choose?",
+                                      header: "Choice",
+                                      multiSelect: false,
+                                      options: [
+                                          { label: "A", description: "First" },
+                                          { label: "B", description: "Second" },
+                                      ],
+                                  },
+                              ],
+                          },
             },
         ]),
         fauxAssistantMessage("Done"),
@@ -49,15 +57,19 @@ async function fixture() {
     models.setProvider(provider.provider);
     let session = await repo.create({ cwd: root }, harnessContext);
     const metadata = session.metadata;
-    const attach = () =>
-        AttachedSession.create({
+    const attach = () => {
+        const planState = createPlanModeState();
+        if (toolName === "planExit") enterPlanMode(planState, "approval-plan");
+        return AttachedSession.create({
             session,
             sessionKind: "main",
             models,
             model: provider.getModel(),
             env,
             systemPrompt: "test",
-            tools: [createAskUserTool()],
+            tools: [
+                toolName === "planExit" ? createPlanExitTool(planState, root) : createAskUserTool(),
+            ],
             resources: {},
             streamOptions: {},
             taskStore: {
@@ -65,13 +77,14 @@ async function fixture() {
                 getTaskState: () => ({ planMode: false }),
                 setTaskState: () => {},
             } as never,
-            planState: createPlanModeState(),
+            planState,
             tasksDir: root,
             attachmentsDir: root,
             sessionCwd: asWorkspaceId(root),
             getToolContext: () => ({ env, workspace: asWorkspaceId(root) }) as never,
             compaction: { enabled: false } as never,
         });
+    };
     let attached = await attach();
     assert.equal((await attached.prompt("Ask a question")).role, "toolResult");
     const host = () => {
@@ -81,6 +94,7 @@ async function fixture() {
                 workspaceKey: asWorkspaceId(root),
                 getAttached: () => attached,
                 invalidateListCache: () => {},
+                publishCurrentPlanSnapshot: () => {},
             }) as never;
         return server;
     };
@@ -103,6 +117,7 @@ async function fixture() {
                     workspace: asWorkspaceId(root),
                     sessionId: asSessionId(metadata.id),
                     toolCallId: "question",
+                    toolName,
                     answers,
                 },
             });
@@ -643,5 +658,146 @@ it("recovers the atomically bound operation after a crash before writing the rec
         });
     } finally {
         await f.close();
+    }
+});
+
+it("keeps plan mode when its Work interaction was cancelled", async () => {
+    const f = await fixture("planExit");
+    try {
+        const work = await waitingWork(f);
+        assert.equal(
+            (await f.work.cancel(work.workId, work.attempt.attemptId)).outcome,
+            "accepted",
+        );
+        const result = await f.submit({ "Approve this plan?": "Approve" });
+        assert.equal(result.ok, false);
+        if (!result.ok) assert.equal(result.error.code, "invalid_state");
+        assert.deepEqual(f.attached.planState, { active: true, currentSlug: "approval-plan" });
+        assert.equal(f.provider.state.callCount, 1);
+    } finally {
+        await f.close();
+    }
+});
+
+it("keeps plan mode when the approval receipt cannot be persisted", async () => {
+    const f = await fixture("planExit");
+    const setValue = f.attached.session.setValue.bind(f.attached.session);
+    f.attached.session.setValue = async (address, next, context) => {
+        if (address.namespace === "taco.session.answerReceipt") throw new Error("disk full");
+        return setValue(address, next, context);
+    };
+    try {
+        assert.equal((await f.submit({ "Approve this plan?": "Approve" })).ok, false);
+        assert.deepEqual(f.attached.planState, { active: true, currentSlug: "approval-plan" });
+        assert.equal(f.provider.state.callCount, 1);
+    } finally {
+        f.attached.session.setValue = setValue;
+        await f.close();
+    }
+});
+
+it("keeps plan mode on busy admission and applies a prepared approval before the accepted turn", async () => {
+    const f = await fixture("planExit");
+    const prompt = f.attached.prompt.bind(f.attached);
+    f.attached.prompt = async () => {
+        throw new LaneBusy({
+            lane: "main",
+            operationId: "other",
+            operationKind: "run",
+            message: "busy",
+        });
+    };
+    try {
+        const result = await f.submit({ "Approve this plan?": "Approve" });
+        assert.equal(result.ok, false);
+        if (!result.ok) assert.equal(result.error.code, "session_busy");
+        assert.deepEqual(f.attached.planState, { active: true, currentSlug: "approval-plan" });
+        f.attached.prompt = prompt;
+        f.provider.setResponses([
+            () => {
+                assert.deepEqual(f.attached.planState, { active: false, currentSlug: null });
+                return fauxAssistantMessage("Implementation admitted");
+            },
+        ]);
+        assert.equal((await f.submit({ "Approve this plan?": "Approve" })).ok, true);
+        assert.equal(f.provider.state.callCount, 2);
+    } finally {
+        f.attached.prompt = prompt;
+        await f.close();
+    }
+});
+
+it("restores a prepared approval after a preadmission restart", async () => {
+    const f = await fixture("planExit");
+    f.attached.prompt = async () => {
+        throw new Error("crash before admission");
+    };
+    try {
+        assert.equal((await f.submit({ "Approve this plan?": "Approve" })).ok, false);
+        await f.restart();
+        f.provider.setResponses([
+            () => {
+                assert.deepEqual(f.attached.planState, { active: false, currentSlug: null });
+                return fauxAssistantMessage("Recovered approved implementation");
+            },
+        ]);
+        assert.equal((await f.submit({ "Approve this plan?": "Approve" })).ok, true);
+        assert.equal(f.provider.state.callCount, 2);
+    } finally {
+        await f.close();
+    }
+});
+
+it("does not approve a replacement plan when retrying a prepared answer", async () => {
+    const f = await fixture("planExit");
+    const prompt = f.attached.prompt.bind(f.attached);
+    f.attached.prompt = async () => {
+        throw new Error("stopped before admission");
+    };
+    try {
+        assert.equal((await f.submit({ "Approve this plan?": "Approve" })).ok, false);
+        enterPlanMode(f.attached.planState, "replacement-plan");
+        f.attached.prompt = prompt;
+        f.provider.setResponses([
+            () => {
+                assert.deepEqual(f.attached.planState, {
+                    active: true,
+                    currentSlug: "replacement-plan",
+                });
+                return fauxAssistantMessage("The earlier approval does not authorize this plan");
+            },
+        ]);
+        assert.equal((await f.submit({ "Approve this plan?": "Approve" })).ok, true);
+        assert.deepEqual(f.attached.planState, { active: true, currentSlug: "replacement-plan" });
+    } finally {
+        f.attached.prompt = prompt;
+        await f.close();
+    }
+});
+
+it("keeps plan mode for an expired Work answer and for a rejected plan", async () => {
+    const f = await fixture("planExit");
+    try {
+        const work = await waitingWork(f);
+        await f.work.store.mutate(work.workId, (record) => ({
+            ...record,
+            expiresAt: Date.now() - 1,
+        }));
+        const result = await f.submit({ "Approve this plan?": "Approve" });
+        assert.equal(result.ok, false);
+        if (!result.ok) assert.equal(result.error.code, "invalid_state");
+        assert.deepEqual(f.attached.planState, { active: true, currentSlug: "approval-plan" });
+    } finally {
+        await f.close();
+    }
+    const rejected = await fixture("planExit");
+    try {
+        assert.equal((await rejected.submit({ "Approve this plan?": "Reject" })).ok, true);
+        assert.deepEqual(rejected.attached.planState, {
+            active: true,
+            currentSlug: "approval-plan",
+        });
+    } finally {
+        await rejected.close();
     }
 });

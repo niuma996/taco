@@ -49,6 +49,7 @@ export class WorkQueue {
         { entry: WorkQueueEntry; observing: boolean; promise: Promise<void> }
     >();
     private readonly recoveryStarted = new Set<string>();
+    private readonly preparations = new Map<string, Promise<WorkQueueEntry | undefined>>();
     private readonly listeners = new Map<string, Set<() => void>>();
     private stopped = true;
     private timer?: ReturnType<typeof setTimeout>;
@@ -87,6 +88,27 @@ export class WorkQueue {
     async whenIdle(): Promise<void> {
         while (this.active.size)
             await Promise.allSettled([...this.active.values()].map((value) => value.promise));
+    }
+
+    /** Persist a Work before acknowledging a self-fire, without driving or waiting for its lane. */
+    prepare(queueId: string): Promise<WorkQueueEntry | undefined> {
+        const pending = this.preparations.get(queueId);
+        if (pending) return pending;
+        const preparation = (async () => {
+            const entry = await this.store.claim(queueId, this.epoch);
+            if (!entry) return this.store.get(queueId);
+            if (entry.work) return entry;
+            const work = await this.backend.prepare(entry);
+            return this.store.updateOwned(queueId, this.epoch, (value) => ({ ...value, work }));
+        })();
+        this.preparations.set(queueId, preparation);
+        void preparation
+            .finally(() => {
+                if (this.preparations.get(queueId) === preparation)
+                    this.preparations.delete(queueId);
+            })
+            .catch(() => undefined);
+        return preparation;
     }
 
     /** Retention pass for finished entries; failures must not stop scheduling. */
@@ -231,15 +253,11 @@ export class WorkQueue {
             return true;
         };
         if (!entry.operation) throw new Error("claimed queue entry has no operation");
-        if (entry.cancelRequestedAt !== undefined) {
-            if (entry.work) {
-                await this.backend.cancel(entry);
-                await this.backend.settle(entry, "aborted", undefined, "cancelled by the user");
-            }
-            await save((value) => ({ ...value, status: "cancelled" }));
-            return true;
-        }
-        if (entry.deadlineAt <= Date.now() && !entry.operationAccepted)
+        if (
+            entry.cancelRequestedAt === undefined &&
+            entry.deadlineAt <= Date.now() &&
+            !entry.operationAccepted
+        )
             return fail("queue waiting deadline exceeded");
         if (entry.work) {
             const attemptId = await this.backend.readAttempt?.(entry);
@@ -274,28 +292,38 @@ export class WorkQueue {
                 }));
                 return true;
             }
-            if (state === "waiting") {
+            if (state === "waiting" && entry.cancelRequestedAt === undefined) {
                 if (entry.status !== "waiting")
                     await save((value) => ({ ...value, status: "waiting" }));
                 return false;
             }
             if (state === "missing") return fail("queued Work record is missing");
         }
+        // Persist cancellation before any read/attach that can start recovery.
+        let cancellationRecorded = false;
+        if (entry.cancelRequestedAt !== undefined && entry.work) {
+            await this.backend.cancel(entry);
+            cancellationRecorded = true;
+        }
         // Inspect before admission, including a crash before the Work link was saved.
         const observed = await this.backend.inspect(entry.operation);
         if (observed.kind === "unknown") return false;
         if (!entry.work) {
-            let handle: WorkAttemptHandle;
             try {
-                handle = await this.backend.prepare(entry);
+                // Join a concurrent self-fire preparation before cancellation
+                // terminalizes this entry, so every created Work stays linked.
+                entry = await this.prepare(entry.queueId);
             } catch (error) {
                 if ((error as { code?: unknown }).code === "legacy_work")
                     return fail("existing Work retains its legacy queue semantics");
                 throw error;
             }
-            entry = await save((value) => ({ ...value, work: handle }));
             if (!entry) return false;
         }
+        // A deferred abort is only intent. Keep the Work running so attach-time
+        // recovery can apply it before resuming the original operation.
+        if (entry.cancelRequestedAt !== undefined && !cancellationRecorded)
+            await this.backend.cancel(entry);
         if (observed.kind === "settled") {
             await this.finish(entry, observed.outcome, observed.message, observed.reason);
             return true;
@@ -307,6 +335,10 @@ export class WorkQueue {
                 this.recoveryStarted.add(entry.queueId);
             }
             return false;
+        }
+        if (entry.cancelRequestedAt !== undefined) {
+            await this.finish(entry, "aborted", undefined, "cancelled by the user");
+            return true;
         }
         if (entry.operationAccepted)
             return fail("accepted operation cannot be confirmed; execution was not repeated");

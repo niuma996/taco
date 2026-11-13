@@ -15,6 +15,9 @@ import type { Job } from "../../src/scheduler/types.ts";
 import type { MethodCtx } from "../../src/server/methodRegistry.ts";
 import { getRegisteredMethod } from "../../src/server/methodRegistry.ts";
 import { registerBuiltinMethods } from "../../src/server/methods.ts";
+import type { TacoToolContext } from "../../src/tools/context.ts";
+import { createJobsRunNowTool } from "../../src/tools/jobs.ts";
+import { invokeTool } from "../_helpers/invokeTool.ts";
 
 export type _ServerRpcSurfaceRef = ServerRpcSurface;
 
@@ -203,6 +206,66 @@ describe("dispatcher", () => {
     });
 
     describe("createJobDispatcher — reuse strategy", () => {
+        it("returns durable acceptance only for the session invoking its own job", async () => {
+            const workspace = makeImCwd("ch", "peer", "chat");
+            const requests: { waitForCompletion?: boolean }[] = [];
+            const fake = {
+                dispatchRpc: async (): Promise<RpcResponse> => {
+                    throw new Error("legacy dispatch must not run");
+                },
+                lookupRoute: () => ({ sessionId: "caller" }),
+                queueScheduled: async (request: { waitForCompletion?: boolean }) => {
+                    requests.push(request);
+                    return { workId: "w-self", status: "running" };
+                },
+            };
+            const dispatcher = createJobDispatcher(() => fake);
+            const job = invokeJob(workspace, "later", { sessionStrategy: "reuse" });
+            const call = async () => {
+                const result = await dispatcher(job, { fireId: "f", onWork: () => {} });
+                return { status: "ok", workId: result?.workId };
+            };
+            const context = {
+                workspace,
+                sessionId: "caller",
+                sessionKind: "main",
+                isIm: true,
+                call,
+            } as unknown as TacoToolContext;
+            await invokeTool(createJobsRunNowTool(), { id: job.id }, context);
+            assert.equal(requests[0]?.waitForCompletion, false);
+            await invokeTool(
+                createJobsRunNowTool(),
+                { id: job.id },
+                {
+                    ...context,
+                    sessionId: "other" as SessionId,
+                },
+            );
+            assert.notEqual(requests[1]?.waitForCompletion, false);
+            await dispatcher(job, { fireId: "regular", onWork: () => {} });
+            assert.notEqual(requests[2]?.waitForCompletion, false);
+        });
+
+        it("still reports actual queued failures for regular scheduled fires", async () => {
+            const workspace = makeImCwd("ch", "peer", "chat");
+            const dispatcher = createJobDispatcher(() => ({
+                dispatchRpc: async (): Promise<RpcResponse> => {
+                    throw new Error("legacy dispatch must not run");
+                },
+                lookupRoute: () => ({ sessionId: "target" }),
+                queueScheduled: async () => ({
+                    workId: "w-failed",
+                    status: "failed",
+                    reason: "provider rejected the request",
+                }),
+            }));
+            await assert.rejects(
+                dispatcher(invokeJob(workspace, "run"), { fireId: "f", onWork: () => {} }),
+                /provider rejected the request/,
+            );
+        });
+
         it("attaches and prompts the existing session bound to the imCwd", async () => {
             const im = makeImCwd("ch1", "peer-1", "chat-1");
             const existingId = "existing-sess-1";

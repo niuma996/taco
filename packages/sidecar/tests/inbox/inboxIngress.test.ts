@@ -76,6 +76,8 @@ async function rig(t: TestContext, rejectPrompt = false, submitInbound?: SubmitI
                 config,
                 createLogger("inbox-test"),
                 new InboxStore(join(root, "inbox")),
+                undefined,
+                submitInbound,
             ),
     };
 }
@@ -183,4 +185,105 @@ it("does not redispatch a legacy batch with an ambiguous pre-restart outcome", a
     assert.equal((await restart().ingress.submit(message)).sessionId, "original");
     assert.equal(requests.filter((req) => req.method === RPC.sessionPrompt).length, 0);
     assert.ok(ctx.ingress);
+});
+
+it("replays a Work handoff interrupted before durable enqueue", async (t) => {
+    const submitted: string[] = [];
+    const { inbox, msg, restart } = await rig(t, false, async (_message, target, batch) => {
+        submitted.push(batch.batchId);
+        return target;
+    });
+    const receipt = (
+        await inbox.accept({
+            ...msg("crash"),
+            bindingId: "account-a",
+            workspace: "im://wechat/p/c",
+            receivedAt: Date.now(),
+        })
+    ).receipt;
+    const batch = (await inbox.freezeBatch(receipt.workspace, [receipt.receiptId])).batch;
+    await inbox.claimBatch(
+        batch.batchId,
+        { workspace: receipt.workspace, sessionId: "original" },
+        "work",
+    );
+    const restored = restart();
+    await restored.ingress.recoverPrepared?.(
+        "wechat",
+        async () => undefined,
+        () => {},
+    );
+    assert.deepEqual(submitted, [batch.batchId]);
+    await restored.ingress.submit(msg("crash"));
+    assert.deepEqual(submitted, [batch.batchId]);
+    assert.equal((await inbox.getBatch(batch.batchId))?.state, "submitted");
+});
+
+it("does not replay legacy handoffs after upgrading to Work enqueue", async (t) => {
+    let submitted = 0;
+    const { inbox, msg, restart } = await rig(t, false, async (_message, target) => {
+        submitted++;
+        return target;
+    });
+    const receipt = (
+        await inbox.accept({
+            ...msg("legacy"),
+            bindingId: "account-a",
+            workspace: "im://wechat/p/c",
+            receivedAt: Date.now(),
+        })
+    ).receipt;
+    const batch = (await inbox.freezeBatch(receipt.workspace, [receipt.receiptId])).batch;
+    await inbox.claimBatch(batch.batchId, { workspace: receipt.workspace, sessionId: "original" });
+    await restart().ingress.recoverPrepared?.(
+        "wechat",
+        async () => undefined,
+        () => {},
+    );
+    await restart().ingress.submit(msg("legacy"));
+    assert.equal(submitted, 0);
+});
+
+it("retries a lost Work handoff response with the same durable queue identity", async (t) => {
+    const { WorkQueueStore } = await import("../../src/work/workQueueStore.ts");
+    const root = await mkdtemp(join(tmpdir(), "inbox-work-handoff-"));
+    t.after(() => rm(root, { recursive: true, force: true }));
+    const queue = new WorkQueueStore(join(root, "queue"));
+    let loseResponse = true;
+    const { ctx, inbox, msg, restart } = await rig(t, false, async (message, target, batch) => {
+        await queue.enqueue({
+            sourceEventId: `inbound:${batch.batchId}`,
+            kind: "inbound",
+            title: "handoff",
+            workspace: target.workspace,
+            sessionId: target.sessionId,
+            lane: "main",
+            payload: { text: message.text },
+            sourceMemberIds: batch.memberReceiptIds,
+            deliveryTarget: {
+                channelId: "wechat",
+                peerId: "p",
+                chatId: "c",
+                bindingId: "account-a",
+            },
+        });
+        if (loseResponse) {
+            loseResponse = false;
+            throw new Error("response lost after enqueue");
+        }
+        return target;
+    });
+    await assert.rejects(ctx.ingress.submit(msg("lost-response")), /response lost/);
+    const first = (await queue.list())[0];
+    assert.ok(first);
+    await restart().ingress.recoverPrepared?.(
+        "wechat",
+        async () => undefined,
+        () => {},
+    );
+    assert.equal((await inbox.listBatches())[0]?.state, "submitted");
+    assert.deepEqual(
+        (await queue.list()).map((entry) => entry.queueId),
+        [first.queueId],
+    );
 });

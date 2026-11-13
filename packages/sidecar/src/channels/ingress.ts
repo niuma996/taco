@@ -52,6 +52,7 @@ export class DefaultChannelContext implements ChannelContext {
                 () => binding?.() ?? store.getDeliveryBinding?.(),
                 (message) => router.route(hook, channelId, message.peerId, message.chatId),
                 submitInbound ?? ((message) => this.submitLegacy(message)),
+                submitInbound !== undefined,
             );
     }
 

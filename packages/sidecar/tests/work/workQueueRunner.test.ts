@@ -186,3 +186,108 @@ it("recovers the original operation when queue state fails after accept", async 
     assert.equal(recovered, 1);
     assert.equal((await store.list())[0]?.operationAccepted, true);
 });
+
+it("keeps cancellation pending until the recovered operation is terminal", async (t) => {
+    let open = true;
+    let recoveries = 0;
+    const settled: string[] = [];
+    const { store, queue } = await rig(t, {
+        inspect: async () => (open ? { kind: "open" } : { kind: "settled", outcome: "aborted" }),
+        cancel: async () => {}, // The unattached runtime defers its abort.
+        recover: async () => {
+            recoveries++;
+        },
+        settle: async (_entry, outcome) => {
+            settled.push(outcome);
+        },
+    });
+    const entry = (await store.enqueue(intent("cancel-open"))).entry;
+    await store.claim(entry.queueId, "dead");
+    const running = await store.updateOwned(entry.queueId, "dead", (value) => ({
+        ...value,
+        status: "running",
+        operationAccepted: true,
+        work: { workId: "w-original", attemptId: "a" },
+    }));
+    assert.ok(running);
+    await store.cancel(running.queueId, running.revision);
+    await queue.start();
+    await queue.whenIdle();
+    assert.deepEqual(settled, []);
+    assert.equal((await store.get(entry.queueId))?.status, "running");
+    assert.equal(recoveries, 1);
+    open = false;
+    await queue.pump();
+    await queue.whenIdle();
+    assert.deepEqual(settled, ["aborted"]);
+    assert.equal((await store.get(entry.queueId))?.status, "cancelled");
+});
+
+it("does not cancel the fresh answer attempt through its old queue entry", async (t) => {
+    let cancellations = 0;
+    let settlements = 0;
+    const { store, queue } = await rig(t, {
+        readAttempt: async () => "fresh-answer",
+        cancel: async () => {
+            cancellations++;
+        },
+        settle: async () => {
+            settlements++;
+        },
+    });
+    const entry = (await store.enqueue(intent("answered"))).entry;
+    await store.claim(entry.queueId, "dead");
+    const waiting = await store.updateOwned(entry.queueId, "dead", (value) => ({
+        ...value,
+        status: "waiting",
+        work: { workId: "w-original", attemptId: "old-question" },
+    }));
+    assert.ok(waiting);
+    await store.cancel(waiting.queueId, waiting.revision);
+    await queue.start();
+    await queue.whenIdle();
+    assert.equal(cancellations, 0);
+    assert.equal(settlements, 0);
+    assert.equal((await store.get(entry.queueId))?.status, "completed");
+});
+
+it("links and settles the Work when cancellation races its preparation", async (t) => {
+    let begin!: () => void;
+    const begun = new Promise<void>((resolve) => {
+        begin = resolve;
+    });
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+        release = resolve;
+    });
+    let settled = false;
+    const { store, queue } = await rig(t, {
+        prepare: async () => {
+            begin();
+            await held;
+            return { workId: "w-preparing", attemptId: "original" };
+        },
+        settle: async (entry, outcome) => {
+            assert.equal(entry.work?.workId, "w-preparing");
+            assert.equal(outcome, "aborted");
+            settled = true;
+        },
+    });
+    t.after(release);
+    const entry = (await store.enqueue(intent("cancel-preparing"))).entry;
+    const preparation = queue.prepare(entry.queueId);
+    await begun;
+    const current = await store.get(entry.queueId);
+    assert.ok(current);
+    await queue.cancel(entry.queueId, current.revision);
+    await queue.start();
+    // Let the cancellation pass inspect the operation before creation returns.
+    await new Promise((resolve) => setImmediate(resolve));
+    release();
+    await preparation;
+    await queue.whenIdle();
+    assert.equal(settled, true, "a created Work must not be orphaned by the cancellation pass");
+    const cancelled = await store.get(entry.queueId);
+    assert.equal(cancelled?.status, "cancelled");
+    assert.equal(cancelled?.work?.workId, "w-preparing");
+});

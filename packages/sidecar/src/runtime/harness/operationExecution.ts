@@ -5,6 +5,8 @@ import { isBusyError, toHarnessError } from "./harnessErrors.ts";
 
 export interface PromptOperation {
     readonly operationId: string;
+    /** Apply admission-dependent session state before driving an accepted operation. */
+    readonly onAccepted?: () => void;
 }
 
 interface ManagedOperation extends PromptOperation {
@@ -55,6 +57,7 @@ export async function executePromptOperation(
         }
     }
     await managed?.afterAccept(operation.operationId);
+    operation.onAccepted?.();
     const driven = await lane.drive(
         { operationId: operation.operationId, waitForRetry: true },
         context,

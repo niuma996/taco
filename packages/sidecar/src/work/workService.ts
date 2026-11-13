@@ -51,7 +51,7 @@ import { WorkParentNotice } from "./workParentNotice.ts";
 import { WorkPermissionProjection } from "./workPermissionProjection.ts";
 import { WorkQueue } from "./workQueue.ts";
 import { WorkQueueStore } from "./workQueueStore.ts";
-import type { WorkQueueEntry } from "./workQueueTypes.ts";
+import { isQueueTerminal, type WorkQueueEntry } from "./workQueueTypes.ts";
 import { WorkReconciler } from "./workReconciler.ts";
 import { isSafeWorkId, legacyWorkIdForSource, WorkStore, workIdForSource } from "./workStore.ts";
 import { isTerminal } from "./workTypes.ts";
@@ -95,6 +95,8 @@ export interface QueueScheduledWork {
     readonly sessionId: string;
     readonly prompt: string;
     readonly createSession: boolean;
+    /** A tool targeting its own session must release that session before this Work can run. */
+    readonly waitForCompletion?: boolean;
 }
 
 export interface QueueInboundWork {
@@ -386,6 +388,17 @@ export class WorkService implements BackgroundWorkHooks, ScheduledWorkHooks, Wor
             payload: { text: request.prompt },
             createSession: request.createSession,
         });
+        if (request.waitForCompletion === false) {
+            const prepared = await this.queue.prepare(queued.entry.queueId);
+            if (!prepared) throw new Error("scheduled queue entry disappeared");
+            if (prepared.work) report(prepared.work.workId);
+            this.queue.wake();
+            return {
+                ...(prepared.work ? { workId: prepared.work.workId } : {}),
+                status: prepared.status,
+                ...(prepared.reason ? { reason: prepared.reason } : {}),
+            };
+        }
         if (onWork) {
             if (queued.entry.work) report(queued.entry.work.workId);
             else {
@@ -409,17 +422,6 @@ export class WorkService implements BackgroundWorkHooks, ScheduledWorkHooks, Wor
 
     async enqueueInbound(request: QueueInboundWork): Promise<{ queueId: string }> {
         if (!this.queue) throw new Error("independent Work queue is unavailable");
-        // Ordinary new input supersedes an old question; explicit answers use
-        // session.submitAnswers and continue that Work with a fresh attempt.
-        for (const work of await this.store.list()) {
-            if (
-                work.kind === "inbound" &&
-                work.status === "waiting" &&
-                work.workspace === request.workspace &&
-                work.parentSessionId === request.sessionId
-            )
-                await this.execution.cancel(work.workId, work.attempt.attemptId);
-        }
         const queued = await this.queue.store.enqueue({
             sourceEventId: `inbound:${request.batchId}`,
             kind: "inbound",
@@ -431,6 +433,31 @@ export class WorkService implements BackgroundWorkHooks, ScheduledWorkHooks, Wor
             sourceMemberIds: request.memberReceiptIds,
             deliveryTarget: request.deliveryTarget,
         });
+        // Commit and deduplicate before superseding. A failed cancellation can
+        // then retry the same intent after restart without cancelling its own
+        // question, or a question produced by a later batch.
+        const entry = queued.entry;
+        if (!isQueueTerminal(entry.status)) {
+            const sources = new Map(
+                (await this.queue.store.list())
+                    .filter((candidate) => candidate.workspace === entry.workspace)
+                    .map((candidate) => [candidate.sourceEventId, candidate.sequence]),
+            );
+            for (const work of await this.store.list()) {
+                const sequence = sources.get(work.sourceEventId);
+                if (
+                    work.kind === "inbound" &&
+                    work.status === "waiting" &&
+                    work.workspace === entry.workspace &&
+                    work.parentSessionId === entry.sessionId &&
+                    work.sourceEventId !== entry.sourceEventId &&
+                    (sequence !== undefined
+                        ? sequence < entry.sequence
+                        : work.createdAt <= entry.enqueuedAt)
+                )
+                    await this.execution.cancel(work.workId, work.attempt.attemptId);
+            }
+        }
         this.queue.wake();
         return { queueId: queued.entry.queueId };
     }

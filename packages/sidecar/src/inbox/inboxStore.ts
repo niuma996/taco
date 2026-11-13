@@ -138,15 +138,25 @@ export class InboxStore {
         });
     }
 
-    claimBatch(id: string, target: SessionTarget): Promise<boolean> {
+    claimBatch(
+        id: string,
+        target: SessionTarget,
+        mode: "work" | "legacy" = "legacy",
+    ): Promise<boolean> {
         return this.serial(async () => {
             const batch = await this.readBatch(id);
             if (!batch || batch.workspace !== target.workspace)
                 throw new Error("inbox batch target mismatch");
-            if (batch.state && batch.state !== "frozen") return false;
+            if (batch.state && batch.state !== "frozen")
+                return (
+                    batch.state === "dispatching" &&
+                    batch.dispatchMode === "work" &&
+                    mode === "work"
+                );
             await this.writeJson(this.batchPath(id), {
                 ...batch,
                 state: "dispatching",
+                dispatchMode: mode,
                 target,
                 updatedAt: Date.now(),
             });
