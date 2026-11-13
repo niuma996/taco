@@ -6,13 +6,13 @@
 
 Taco 在 Pi 的 harness 之上补了什么，从代码里能看到的：
 
-- **`agent` 工具 —— 可 fan-out 的 subagent。** 按类型配工具白名单、`agent/<type>` 命名空间、深度受限的递归、`executionMode: "parallel"` 支持并发调用。
+- **子代理会话。** `agent` 创建子 session，按类型配工具白名单、深度受限的递归；`chatToAgent` 发消息或续聊；`listAgentSessions` 发现可通信实例及其状态、可续聊性与投递能力。父会话看得见自己的子会话，子会话只看得见同父兄弟（不含自己）。
 - **`skill` 工具 —— inline 或 subagent 两种形态。** 按名字加载；inline 形态入队一条由 `skillReinjector` 保护的 `<skill_body name="NAME">` 消息，subagent 形态则经 `spawnSkillSubagent` 开一个新 session。
-- **带硬闸门的 Plan 模式。** `planEnter` 打开 `.taco/plans/<slug>.md`；期间只允许 read / askUser / 写 plan 文档；`planExit` 把 plan 交回审批。
+- **带硬闸门的 Plan 模式。** `planEnter` 打开 `.taco/plans/<slug>.md`；期间可读取和写计划；工作区或关联目录内的其他文件写入需单独审批，shell 写入仍被阻止。`planExit` 把计划交回审批。
 - **Prompt tag 体系。** 每个 `<tag>` 块带 `compression` 策略（`pin` / `pinOnce` / `summarize` / `drop`）与 `tuiVisibility`（`visible` / `hidden` / `ephemeral`）；感知 pin 的 compact hook 直接读这张注册表。
 - **扩展系统。** 新能力以扩展的形式接入，而不是写死进运行时；workspace 激活时把进程级与 workspace 级贡献合并为一个冻结的 `WorkspaceExtensionSet`，扩展可自带 tag。
 - **JSONL 存储。** session / history / event log 全部走 `JsonlSessionStorage` + `JsonlSessionRepo` —— 只追加、可回放、无 schema 迁移。
-- **Pi 作为依赖。** `@taco-ai/pi-harness` `0.1.0` 与 `pi-ai` `1.3.0`；直接消费上游 API。`pi-harness` 承载了 Pi 1.0 从 `pi-agent-core` 移除的 `AgentHarness` API，接口面冻结在 `0.99.2`，运行在当前 `pi-ai` 版本线上。
+- **Pi 作为依赖。** `@taco-ai/pi-harness` `0.2.0` 与 `pi-ai` `1.5.2`；直接消费上游 API。`pi-harness` 承载了 Pi 1.0 从 `pi-agent-core` 移除的 `AgentHarness` API，接口面冻结在 `0.99.2`，运行在当前 `pi-ai` 版本线上。
 - **独立部署。** `@taco-ai/sidecar` 是带自己 bin 的独立 npm 包，支持两种运行模式 —— 直接的 `NDJSON over stdio`（任何语言都能这么驱动它）与 `taco start` 及 Tauri 桌面端所用的常驻 daemon 模式。见 §2.8。
 - **单 daemon 多 workspace。** 一个 daemon 服务 UI 打开的每一个 workspace，按 `cwd` 路由；同一条 NDJSON socket 还能并发承载多个客户端的流量。
 
@@ -395,7 +395,7 @@ RPC 响应仅返回
 ### 2.9 Codex 子代理运行时
 
 Codex 子代理通过按需安装的固定版本 `@openai/codex-sdk` 运行。安装与登录是
-两个独立状态，分别由 `agents.runtimeStatus` 与 `agents.installRuntime` 暴露。
+两个独立状态：`agents.runtimeStatus` 查询状态，`agents.installRuntime` 执行安装。
 Agents 页面在聊天创建子会话之前展示这两个状态。sidecar 找不到 npm 时，状态携带
 终端安装命令，而不是假装应用内安装可以成功。
 
@@ -414,6 +414,11 @@ inbox 中，回执为 `effectiveDelivery: "queued"` 且不公开当前 `runId`�
 正常结束后按 FIFO 启动下一条；用户中止时，未消费消息直接结算为 aborted，不能
 在之后自动运行。子代理主动通信使用每次运行独立的 stdio MCP bridge，只暴露
 `chatToAgent` 与 `listAgentSessions`，发送者身份由父进程绑定。
+
+Claude Code 同样可获得获准的通信工具，使用 Agent SDK 的进程内 MCP 服务；Codex
+使用 stdio bridge。两者都由 Taco 绑定发送者身份并校验目标。工具挂载仅作用于当次
+运行，不修改用户的原生配置文件；原生会话记录与 Taco 显示历史分别保留，不保证在
+原应用聊天列表中可见。
 
 桌面端的 `chatToAgent` 卡片可跳转到已有子会话，不新增子代理条目。消息通过
 `messageId`、`subSessionId` 和 `runId` 关联投递与执行状态；排队回执不表示执行完成。
@@ -526,30 +531,23 @@ prompt() 是同步的（等完整回复才 resolve），但 LLM 流式输出需�
 
 ### 4.3 IM 通道的一次往返
 
-```
-IM 对端          Channel SDK          sidecar                       桌面端
-  │                  │                │                            │
-  │── 文本消息 ─────>│                │                            │
-  │                  │──onMessage──>  │                            │
-  │                  │                │──ConversationRouter.route()│
-  │                  │                │  (peer/chat → sessionId)   │
-  │                  │                │                            │
-  │                  │                │──ingress.submit() (RPC)────>│
-  │                  │                │  session.prompt (im cwd)   │
-  │                  │                │                            │
-  │                  │                │<─push: session.event ──────│
-  │                  │                │  message_start / update…   │
-  │                  │                │                            │
-  │                  │                │──channel.push(text)────────>│
-  │                  │                │  extractReplyText + 分片   │
-  │                  │                │                            │
-  │<─ 回复文本 ──────│<─sdk.send()────│                            │
-  │                  │                │                            │
-  │                  │                │<─push: im.tools_enabled ───│  （仅首次）
+```text
+IM 平台 → Channel SDK → InboxIngress.prepare → 持久入站回执
+    → 下载媒体／合并消息 → 冻结批次 → ConversationRouter 固定目标
+    → WorkService.enqueueInbound → 持久 WorkQueue
+    → 原操作接受／执行／恢复 → Work 结果 → WorkDeliverer 分片投递 → IM 平台
+                                   └→ 会话 push → 桌面端
 ```
 
-sidecar 的 channel handle 在 `push` 时用 `extractReplyText` 抽取 assistant
-文本（跳过 thinking 块、tool call、tool result），按渠道的单条消息长度预算
-分片，再调 SDK 的 `send`。反向的请求流（扫码、配对码）走
-`ChannelBindBroker.requestScan` / `requestVerifyCode`，它们会发布
-`channel.status_changed` push 帧，让桌面端能实时渲染绑定 UI。
+回执与批次先落盘，Work 队列按 `(workspace, sessionId, lane)` 保持 FIFO，并限制
+同时运行的任务数。重启先检查原 operation 的持久状态，不能用新操作替代已经接受的
+执行。Work 交接带幂等 batch/source 身份；dispatching 批次只在明确标记为 Work
+交接时重放，旧 legacy 交接结果不明时不自动重放。
+
+执行状态、结果完整性和投递状态分别记录。由入站 Work 拥有的回复不再通过旧实时
+文本路径重复发送；最终文本由 WorkDeliverer 按平台长度限制分片，并维护投递重试。
+平台投递仍为至少一次，不能承诺绝无重复。取消请求在底层操作确认终止前保持有效，
+重放同一批次不会取消其自身待回答的问题。
+
+扫码、配对码等绑定请求仍由 `ChannelBindBroker.requestScan` / `requestVerifyCode`
+发布 `channel.status_changed`，桌面端据此显示实时绑定状态。

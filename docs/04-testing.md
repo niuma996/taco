@@ -2,6 +2,33 @@
 
 > How to run end-to-end verification and capture runtime evidence.
 
+## Release regression checks
+
+From the repository root, run `pnpm protocol:build`, `pnpm shared:build`,
+`pnpm lint`, `pnpm lint:comments`, `pnpm typecheck`, `pnpm deps:circular`,
+`pnpm test`, the desktop build, and `pnpm pack:smoke`. These checks require no
+paid model call; SDK tests use isolated fake providers and transports.
+
+When the default parallel package run saturates filesystem event delivery, use
+the same complete package suite with bounded concurrency, then run the client
+and component suites normally:
+
+```bash
+node --experimental-transform-types \
+  --import ./packages/sidecar/tests/_helpers/tsResolveHooks.ts \
+  --import ./packages/sidecar/tests/_helpers/testSetup.ts \
+  --test-concurrency=4 --test-force-exit --test 'packages/**/tests/**/*.test.ts'
+pnpm test:client
+pnpm test:components
+```
+
+Check multi-workspace navigation and restored groups, scoped Agent CRUD and
+Codex tool restrictions, authorized memory reads after association revocation,
+IM handoff replay, recovered cancellation, self-fired jobs, and child message
+settlement. Regressions live beside their module tests; no manual API login is
+needed. A real runtime smoke test is separate: native credentials and an
+installed Claude/Codex SDK are required, and model turns may incur charges.
+
 ## 1. End-to-end testing
 
 ### Tier 1 — protocol smoke (no API key needed)

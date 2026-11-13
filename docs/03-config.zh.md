@@ -55,6 +55,11 @@ Taco 会读 / 写下列文件路径。基准目录是 `$TACO_HOME`，默认 `~/.
 | `$TACO_HOME/channels/<channelId>.json` | channel SDK | 渠道凭证。权限 `0600`。不放进 `taco.json`。 |
 | `$TACO_HOME/checkpoints/<workspaceHash>/` | sidecar | turn 级的写前文件快照。`index.json` + 内容寻址的 `blobs/<sha256>`。 |
 | `$TACO_HOME/im-workspace-policies/<channelId>.json` | sidecar | 按渠道的 IM workspace 策略（`imPolicy.*`）。 |
+| `$TACO_HOME/work/` | sidecar | Work 记录、尝试、结果和投递状态。 |
+| `$TACO_HOME/work-queue/` | sidecar | 定时与 IM 入站工作的持久执行意图。 |
+| `$TACO_HOME/inbox/` | sidecar | IM 入站回执与冻结消息批次。 |
+| `$TACO_HOME/vendor/` | sidecar + 用户 | 可选外部 SDK 安装。 |
+| `$TACO_HOME/memory/projects/<source-key>/` | sidecar | 按工作区或完整 IM 对话身份存放主题记忆。 |
 | `$TACO_HOME/logs/taco-desktop.log` | desktop | 轮转主日志（上限 10 MiB，保留 3 份，`0600`）。 |
 | `$TACO_HOME/logs/llm-dump.log` | desktop | 可选的 LLM payload dump（仅当 `TACO_DEBUG_LLM_PAYLOAD=1` 且用户开启）。 |
 
@@ -79,7 +84,7 @@ Taco 会读 / 写下列文件路径。基准目录是 `$TACO_HOME`，默认 `~/.
 ### 3.2 global config：写 `~/.taco/taco.json`
 
 默认路径 `~/.taco/taco.json`（`TacoGlobalConfigShape` schema）。
-**不创建任何** **`.taco`** **目录。**
+工作区级 agents、skills 和计划仍可使用项目内 `.taco/`；该目录不存放全局 `taco.json`。
 
 最小示例（只是声明默认 model，key 走 env var）：
 
@@ -228,12 +233,26 @@ workspace 的 catalog。
 `customProviders[].models` 上有同一个可选字段。它需要协议 2.6；2.5 的 daemon
 在 `settings.write` 时会丢掉该字段却仍然返回成功，保存的图片开关因此不会生效。
 
-### 3.4 没有 per-workspace config
+### 3.4 全局设置与配置来源
 
-跟 pi 保持一致——每个 cwd 的差异**不通过配置**表达，而是：
+`taco.json` 仍为全局文件，没有工作区级 `taco.json`；工作区仍可在 `.taco` 目录下
+保存 agents、skills 和指令文件。Agents 与 Skills 面板区分以下来源：
 
-- session 数据按 cwd 隔离存放在 `~/.taco/sessions/<encoded-cwd>/`
-- workspace 内模型/工具行为相同；如果有差异应该改 **session 内部的状态**（model\_change entry 等），不是配置文件
+| 视图 | 来源 |
+|---|---|
+| 生效 | 选定目标的合并运行时目录，包含兼容的 Claude/Pi 来源。 |
+| 全局 | Taco 管理的 `$TACO_HOME/agents` 或 `$TACO_HOME/skills`。 |
+| 工作区 | 执行目录下的 `.taco/agents` 或 `.taco/skills`。 |
+| 内置 | 安装包中的原始定义，包含已启用扩展提供的 skills。 |
+
+选择配置目标不会切换当前聊天；显式来源视图可查看被其他层遮蔽的定义。Agent 编辑器
+支持创建、编辑、移动、重命名和删除 Taco 管理的全局／工作区定义；内置与外部兼容
+来源保持只读。工作区代理覆盖同名全局代理。兼容目录中的 skill 可出现在生效视图，
+但不会因此进入 Taco 管理的来源视图。
+
+关联目录按策略授予执行和文件访问范围，不会把其中的 agents、skills 或 MCP 配置
+合并进当前目标。IM 对话没有可编辑的工作区 Agent 层。RPC 作用域及记忆继承规则见
+[配置来源协议](sidecar-protocol.md)。
 
 ### 3.5 验证 config 链路
 
@@ -281,3 +300,32 @@ taco-sidecar [--default-model <model>] [--sessions-root <path>]
 
 自动提取采取保守策略：对话没有包含有依据、值得长期保留的信息时，记忆可以不发生变化。
 记忆更新与聊天历史独立，因此未提取新记忆不代表聊天记录丢失。
+
+### IM 记忆来源
+
+每个完整 `im://<channelId>/<peerId>/<chatId>` 身份都有独立主题分区，改变执行目录
+不会把它与其他对话的记忆合并。IM 自动以只读方式继承关联工作区主题；渠道／对话
+策略的 `memory.inheritManagedGlobal` 开关还可继承当前 sidecar 进程已注册的本地
+工作区主题，排除已关联来源和其他 IM 分区。人工维护的 `MEMORY.md` 仍共享。
+
+记忆面板会标记只读主题。模型上下文摘要包含 `memoryLayer`、不透明 `sourceId`
+和 `id`，可通过 `memory` 工具的 `read` 动作或 `memory.read` RPC 获取完整正文。
+来源引用不是文件路径，也不是授权；每次读取都会重新检查关联与继承开关。写入和
+整理始终面向当前分区。旧共享 IM scratch 身份下的主题不会自动复制，请审阅后再
+选择需要的笔记迁入对话分区。
+
+## 6. 外部子代理配置
+
+| 运行时 | 前置条件 | 运行配置 |
+|---|---|---|
+| Claude Code | 单独安装本地 `claude` CLI 和可选 Agent SDK，并配置可用凭据。 | 沿用用户 Claude 设置；Taco 暂无对应的应用内安装卡片。 |
+| Codex | 在 Agents 页面安装固定版本 SDK；应用内安装需要 npm，找不到时按页面说明手动安装。 | 沿用 `$CODEX_HOME`（默认 `~/.codex`）下的配置；模型覆盖留空即继承。 |
+
+Codex 状态区分安装与认证，自带凭据的第三方 provider 不需要 OpenAI 登录。沙箱、
+审批策略和 cwd 属于代理定义；Taco 根据工作区和关联目录检查 cwd。编辑器会保留
+Codex 定义中的通信 `tools`：`[]` 关闭 bridge 工具，省略则允许 `chatToAgent`
+和 `listAgentSessions`。
+
+两种运行时均保留原生会话身份用于续聊，和 Taco 显示历史分别管理。SDK 原生会话不
+保证出现在原应用的聊天列表中，可见性可能受来源与工作目录影响。安装命令与保留
+规则见 [Sidecar 运行时指南](../packages/sidecar/README.md#optional-dependencies)。

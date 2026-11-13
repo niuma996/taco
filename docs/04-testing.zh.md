@@ -2,6 +2,30 @@
 
 > 本文回答"如何跑通端到端验证 + 调试运行时问题"。
 
+## 发布回归检查
+
+在仓库根目录运行 `pnpm protocol:build`、`pnpm shared:build`、`pnpm lint`、
+`pnpm lint:comments`、`pnpm typecheck`、`pnpm deps:circular`、`pnpm test`、
+桌面构建和 `pnpm pack:smoke`。这些检查不需要付费模型调用；SDK 测试使用隔离的
+假 provider 与 transport。
+
+默认并行包测试导致文件系统事件投递饱和时，可用受控并发运行同一套完整包测试，
+再照常运行客户端和组件套件：
+
+```bash
+node --experimental-transform-types \
+  --import ./packages/sidecar/tests/_helpers/tsResolveHooks.ts \
+  --import ./packages/sidecar/tests/_helpers/testSetup.ts \
+  --test-concurrency=4 --test-force-exit --test 'packages/**/tests/**/*.test.ts'
+pnpm test:client
+pnpm test:components
+```
+
+重点覆盖多工作区导航与分组恢复、分层 Agent CRUD 与 Codex 工具限制、撤销关联后
+的记忆读取授权、IM 交接重放、恢复时的取消、自触发定时任务，以及子代理消息结算。
+永久回归用例位于各模块测试旁，不需要手动登录 API。真实运行时冒烟另行执行，需
+安装 Claude/Codex SDK 并配置原生凭据，模型回合可能产生费用。
+
 ## 1. 端到端测试
 
 ### 1.1 Tier 1：协议层冒烟测试（无需 API key）

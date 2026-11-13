@@ -86,7 +86,7 @@ The server validates the client's protocol version with `isCompatibleClientProto
 (major must match exactly; client minor must be `<=` server minor). The response is:
 
 ```json
-{ "id": "<uuid>", "ok": true, "result": { "serverVersion": "0.1.0", "serverCapabilities": { "methods": [...], "pushes": [...], "channels": [...] }, "protocolVersion": { "major": 2, "minor": 2 }, "instanceId": "<uuid>", "pid": <pid> } }
+{ "id": "<uuid>", "ok": true, "result": { "serverVersion": "<server-version>", "serverCapabilities": { "methods": [...], "pushes": [...], "channels": [...] }, "protocolVersion": { "major": 2, "minor": 18 }, "instanceId": "<uuid>", "pid": <pid> } }
 ```
 
 Clients run the mirror check, `isCompatibleSidecarProtocol`: major must match

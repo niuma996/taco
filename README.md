@@ -12,13 +12,13 @@ Taco ships four packages: the sidecar server (`@taco-ai/sidecar`), the typed Nod
 
 ## Project Highlights
 
-- **`agent` tool.** Per-type tool whitelist, `agent/<type>` namespace, depth-bounded recursion, `executionMode: "parallel"` for concurrent calls.
+- **Agent conversations.** `agent` creates a child, `chatToAgent` sends context or continues it, and `listAgentSessions` discovers communicable instances across standard, Claude Code, and Codex runtimes. Tool whitelists and depth limits constrain each child.
 - **`skill` tool.** Loads by name; inline enqueues `<skill_body name="NAME">` protected by `skillReinjector`, subagent mode spawns a fresh session via `spawnSkillSubagent`.
-- **Plan mode.** `planEnter` opens `.taco/plans/<slug>.md`; only read / askUser / write-the-plan are allowed; `planExit` returns the plan for approval.
+- **Plan mode.** `planEnter` opens `.taco/plans/<slug>.md`; inspection and plan writes are allowed; other file writes within workspace or associated directories need individual approval, while shell writes stay blocked. `planExit` presents the plan for approval.
 - **Prompt tag system.** Each `<tag>` carries a `compression` policy (`pin` / `pinOnce` / `summarize` / `drop`) and `tuiVisibility` (`visible` / `hidden` / `ephemeral`).
 - **Extension system.** New capabilities ship as extensions rather than being built into the runtime — process-level and workspace-level contributions merge into one frozen set, and an extension brings its own tags.
 - **JSONL storage.** Sessions / history / event logs go through `JsonlSessionStorage` + `JsonlSessionRepo` — append-only, replayable, no schema migrations.
-- **Pi as a dependency.** `@taco-ai/pi-harness` `0.1.0` and `pi-ai` `1.3.0`; consumes upstream APIs directly. `pi-harness` is our compatibility package for the `AgentHarness` that Pi 1.0 deleted from `pi-agent-core`.
+- **Pi as a dependency.** `@taco-ai/pi-harness` `0.2.0` and `pi-ai` `1.5.2`; consumes upstream APIs directly. `pi-harness` is our compatibility package for the `AgentHarness` that Pi 1.0 deleted from `pi-agent-core`.
 - **Standalone deploy.** `@taco-ai/sidecar` is a standalone npm package with its own bin. It supports two running modes — direct `NDJSON over stdio` (any language can drive it that way) and the long-lived daemon mode used by `taco start` and the Tauri desktop. Tenant isolation in daemon mode is "another control endpoint", not "another process".
 - **One daemon, many workspaces.** The desktop daemon serves every workspace the UI has open, routed by `cwd`. The same NDJSON socket can carry traffic from multiple clients concurrently.
 

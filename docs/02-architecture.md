@@ -9,11 +9,11 @@ What Taco adds on top of Pi's harness, from the code:
 
 - **Agent conversations.** `agent` creates child sessions with per-type tool whitelists and depth-bounded recursion. `chatToAgent` messages or resumes an existing session; `listAgentSessions` discovers communicable instances and their status, resumability, and delivery capability. A parent sees its children; a child sees only siblings with the same parent, excluding itself.
 - **`skill` tool — inline or subagent.** Loads by name; inline enqueues a `<skill_body name="NAME">` message protected by `skillReinjector`, subagent mode spawns a fresh session via `spawnSkillSubagent`.
-- **Plan mode with a hard gate.** `planEnter` opens `.taco/plans/<slug>.md`; only read / askUser / write-the-plan are allowed; `planExit` returns the plan for approval.
+- **Plan mode with a hard gate.** `planEnter` opens `.taco/plans/<slug>.md`; inspection and plan writes are allowed; other file writes within the workspace or associated directories need individual approval, while shell writes remain blocked. `planExit` presents the plan for approval.
 - **Prompt tag system.** Each `<tag>` block carries a `compression` policy (`pin` / `pinOnce` / `summarize` / `drop`) and `tuiVisibility` (`visible` / `hidden` / `ephemeral`); the pin-aware compact hook reads that registry.
 - **Extension system.** Capabilities plug in as extensions rather than being built into the runtime; workspace activation merges process and workspace contributions into one frozen `WorkspaceExtensionSet`, and an extension can contribute its own tags.
 - **JSONL storage.** Sessions / history / event logs go through `JsonlSessionStorage` + `JsonlSessionRepo` — append-only, replayable, no schema migrations.
-- **Pi as a dependency.** `@taco-ai/pi-harness` `0.1.0` and `pi-ai` `1.3.0`; consumes upstream APIs directly. `pi-harness` carries the `AgentHarness` API that Pi 1.0 removed from `pi-agent-core`, frozen at the `0.99.2` surface and running on the current `pi-ai` line.
+- **Pi as a dependency.** `@taco-ai/pi-harness` `0.2.0` and `pi-ai` `1.5.2`; consumes upstream APIs directly. `pi-harness` carries the `AgentHarness` API that Pi 1.0 removed from `pi-agent-core`, frozen at the `0.99.2` surface and running on the current `pi-ai` line.
 - **Standalone deploy.** `@taco-ai/sidecar` is a standalone npm package with its own bin. It supports two running modes — direct `NDJSON over stdio` (any language can drive it that way) and the long-lived daemon mode used by `taco start` and the Tauri desktop. See §2.8.
 - **One daemon, many workspaces.** One daemon serves every workspace the UI has open, routed by `cwd`, and the same NDJSON socket carries traffic from multiple clients concurrently.
 
@@ -258,8 +258,8 @@ histories therefore have separate lifecycles.
 ### 2.2.3 Codex conversations
 
 Codex children use a pinned, lazily installed `@openai/codex-sdk` runtime.
-Installation and sign-in are separate process-level states exposed through
-`agents.runtimeStatus` and `agents.installRuntime`. The Agents page shows both
+Installation and sign-in are separate process-level states queried through
+`agents.runtimeStatus`; `agents.installRuntime` performs installation. The Agents page shows both
 before a chat spawn. If npm is not available to the sidecar, status carries the
 terminal install command instead of implying the in-app installer can run.
 
@@ -282,6 +282,12 @@ remain in Taco's durable inbox with `effectiveDelivery: "queued"` and no public
 settles unconsumed messages without starting another run. Child-initiated
 communication uses a per-run stdio MCP bridge with only `chatToAgent` and
 `listAgentSessions`; the parent process binds the sender identity.
+
+Claude Code receives the same permitted communication tools through the Agent
+SDK's in-process MCP server. Both bridges bind sender identity in Taco and check
+target scope. Tool injection is per run and does not rewrite the user's runtime
+configuration. Native session persistence is separate from Taco's display
+history and does not guarantee visibility in the original application's picker.
 
 ### 2.3 AgentHarness event flow (push channel)
 
@@ -652,32 +658,28 @@ context, then subscribes to push for ongoing deltas**.
 
 ### 4.3 IM channel round-trip
 
-```
-IM peer        Channel SDK          sidecar                       desktop
-  │                  │                │                            │
-  │── text msg ────>│                │                            │
-  │                  │──onMessage──>  │                            │
-  │                  │                │──ConversationRouter.route()│
-  │                  │                │  (peer/chat → sessionId)   │
-  │                  │                │                            │
-  │                  │                │──ingress.submit() (RPC)────>│
-  │                  │                │  session.prompt (im cwd)   │
-  │                  │                │                            │
-  │                  │                │<─push: session.event ──────│
-  │                  │                │  message_start / update…   │
-  │                  │                │                            │
-  │                  │                │──channel.push(text)────────>│
-  │                  │                │  extractReplyText + chunk  │
-  │                  │                │                            │
-  │<─ reply text ───│<─sdk.send()────│                            │
-  │                  │                │                            │
-  │                  │                │<─push: im.tools_enabled ───│  (first time only)
+```text
+IM platform → Channel SDK → InboxIngress.prepare → durable receipt
+    → prepare media / merge messages → freeze batch → ConversationRouter target
+    → WorkService.enqueueInbound → durable WorkQueue
+    → accept / drive / recover original operation → Work result
+    → WorkDeliverer chunks and retries → IM platform
+                     └→ session pushes → desktop
 ```
 
-The sidecar's channel handle `push` extracts assistant text via
-`extractReplyText` (skips thinking blocks, tool calls, tool results),
-chunks it to fit the channel's per-message length budget, and calls
-the SDK's `send` method. Reverse request flow (QR scan, pairing code)
-goes through `ChannelBindBroker.requestScan` / `requestVerifyCode`
-which publishes `channel.status_changed` push frames so the desktop
-can render the binding UI live.
+Receipts and batches are persisted before execution. The Work queue preserves
+FIFO per `(workspace, sessionId, lane)` with bounded concurrency. Restart checks
+the original operation's durable state rather than creating a replacement for
+an already accepted operation. Work handoffs deduplicate by batch/source
+identity; dispatching batches replay only when marked as idempotent Work
+handoffs. Ambiguous legacy handoffs do not automatically replay.
+
+Execution status, result completeness and delivery status are independent.
+Inbound Work owns its reply, suppressing the legacy live-text send path so the
+same answer is not sent twice through two paths. WorkDeliverer chunks the final
+text to the platform limit and records delivery retries. Platform delivery
+remains at-least-once. Cancellation intent remains effective until the operation
+settles; replaying a batch does not cancel its own waiting question.
+
+QR and pairing-code requests still use `ChannelBindBroker.requestScan` /
+`requestVerifyCode` and publish `channel.status_changed` for the binding UI.

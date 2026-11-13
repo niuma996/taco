@@ -146,29 +146,21 @@ history and native Claude history have separate lifecycles.
 
 ### Codex
 
-Agents with `runtime: codex` use a pinned official `@openai/codex-sdk`
-installation under `$TACO_HOME/vendor`. The desktop exposes an Install action;
-the sidecar exposes the same operation as `agents.installRuntime`. Installation
-downloads the SDK and the platform-specific Codex binary and can be large.
-It uses the npm bundled with a normal Node.js installation, so a machine that
-only has Taco's embedded Node binary must install Node/npm first.
+Agents with `runtime: codex` use the pinned official `@openai/codex-sdk`
+runtime under `$TACO_HOME/vendor`. Install it from Agents settings or through
+`agents.installRuntime`. The Agents page and Codex form distinguish installation
+from sign-in; `agents.runtimeStatus` reports both. Installation downloads the
+SDK and a platform-specific Codex binary. It requires npm from a normal Node.js
+installation; Taco's embedded Node alone does not provide npm. When npm is not
+visible to the sidecar, the UI shows manual installation instructions and the
+terminal command.
 
-The runtime is the SDK; the configuration is the user's own. A Codex child runs
-on `$CODEX_HOME` (default `~/.codex`): the provider, model, and credentials in
-`config.toml` and `auth.json`. That is the same rule a Claude Code agent
-follows with the user's Claude settings, so a third-party provider with its own
-credentials needs no OpenAI login. `agents.runtimeStatus` reports the effective
-model and provider, and offers a login command only when the configuration
-points at OpenAI without a login — `codex login status` alone would call a
-custom-provider setup "signed out" and refuse a run that works.
-
-Installation is separate from all of that. The desktop exposes an Install
-action; the sidecar exposes the same operation as `agents.installRuntime`.
-Installation downloads the SDK and the platform-specific Codex binary and can
-be large. It uses the npm bundled with a normal Node.js installation, so a
-machine that only has Taco's embedded Node binary must install Node/npm first.
-If npm is not visible to the sidecar, Agents shows the terminal command
-instead of an Install button that cannot succeed.
+The run uses the user's own Codex configuration under `$CODEX_HOME` (default
+`~/.codex`), including provider, model and credentials. A custom provider with
+its own credentials needs no OpenAI login. Runtime status reports the model and
+provider read from the configuration and offers a managed CLI login command
+when the auth check reports signed out. This managed setup UI currently applies
+to Codex; Claude Code requires the separate CLI and SDK setup above.
 
 Codex runs with an explicit workspace/worktree cwd, the profile's sandbox and
 approval policy, and a scrubbed environment. The model is optional: an agent
@@ -181,10 +173,22 @@ the run settles unconsumed queued messages instead of starting them later.
 The SDK does not expose a live queue API; Taco intentionally accepts this
 after-current-turn delivery model.
 
+Both external runtimes receive only the communication MCP tools allowed by the
+agent definition. The Claude Agent SDK hosts an in-process MCP server; Codex
+uses a per-run stdio bridge. Taco binds the sender's identity in either case,
+checks the target scope, and closes the communication service after the run.
+These overrides do not rewrite the user's runtime configuration files.
+
+Codex retains its native thread in addition to Taco's display transcript, as
+Claude Code does. Native persistence and resume do not imply inclusion in the
+original app's session picker: the native source, cwd, and UI filters can
+influence visibility. Deleting Taco's display transcript does not delete native
+Claude Code or Codex history.
+
 ## Build
 
 ```bash
-pnpm -F @taco-ai/sidecar build      # bundle via esbuild → dist/
+pnpm -F @taco-ai/sidecar build      # bundle via esbuild → lib/
 pnpm -F @taco-ai/sidecar package:runtime --target <triple>
                                     # produce release-stage binary per triple
 ```

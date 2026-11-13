@@ -62,6 +62,11 @@ Taco reads / writes the following filesystem paths. The base is
 | `$TACO_HOME/channels/<channelId>.json` | channel SDK | Channel credentials. Permission `0600`. Not in `taco.json`. |
 | `$TACO_HOME/checkpoints/<workspaceHash>/` | sidecar | Turn-scoped pre-write file snapshots. `index.json` + content-addressed `blobs/<sha256>`. |
 | `$TACO_HOME/im-workspace-policies/<channelId>.json` | sidecar | Per-channel IM workspace policy (`imPolicy.*`). |
+| `$TACO_HOME/work/` | sidecar | Work records, attempts, results and delivery state. |
+| `$TACO_HOME/work-queue/` | sidecar | Durable scheduled and inbound execution intents. |
+| `$TACO_HOME/inbox/` | sidecar | Inbound IM receipts and frozen message batches. |
+| `$TACO_HOME/vendor/` | sidecar + user | Optional external SDK installations. |
+| `$TACO_HOME/memory/projects/<source-key>/` | sidecar | Topic memory keyed by workspace or full IM conversation identity. |
 | `$TACO_HOME/logs/taco-desktop.log` | desktop | Rotating main log (10 MiB cap, 3 retained, `0600`). |
 | `$TACO_HOME/logs/llm-dump.log` | desktop | Optional LLM payload dump (only when `TACO_DEBUG_LLM_PAYLOAD=1` and the user enables it). |
 
@@ -245,14 +250,51 @@ taco-sidecar [--default-model <model>] [--sessions-root <path>]
 | `--anthropic-api-key` | `ANTHROPIC_API_KEY` | `process.env` |
 | `--openai-api-key` | `OPENAI_API_KEY` | `process.env` |
 
-## 5. No per-workspace config
+## 5. Global settings and source layers
 
-`Pi`-style: each workspace's differences are expressed through session
-state, not through a per-cwd config file. The `taco.json` is global.
-Workspaces are identified by absolute `cwd` paths; sessions are
-identified by `uuidv7` ids. Tooling differences (e.g. available MCP
-servers, IM policy) are per-session or per-workspace-runtime, not per-cwd
-config.
+`taco.json` remains global; there is no workspace-local `taco.json`. A workspace
+can still own agents, skills and instruction files under its `.taco` directory.
+The Agents and Skills panes distinguish these source layers:
+
+| View | Source |
+|---|---|
+| Effective | The selected target's merged runtime catalog, including compatible Claude/Pi sources. |
+| Global | Taco-owned `$TACO_HOME/agents` or `$TACO_HOME/skills`. |
+| Workspace | The execution directory's `.taco/agents` or `.taco/skills`. |
+| Builtin | Original packaged definitions, including enabled extension skills. |
+
+Select a configuration target without changing the open chat. Explicit source
+views expose definitions hidden by another layer. The Agent editor can create,
+edit, move, rename and delete Taco-owned global/workspace definitions; builtin
+and compatible external definitions remain read-only. A workspace agent overrides
+an identically named global agent. Skills from compatible directories can appear
+in Effective without appearing in the Taco-owned source views.
+
+Associated directories grant execution/read/write access according to policy;
+they do not merge their agents, skills, MCP servers or other configuration into
+the target. IM conversations have no editable workspace Agent layer. See the
+[protocol's source-layer contract](sidecar-protocol.md)
+for RPC scopes and memory inheritance.
+
+### External subagent setup
+
+| Runtime | Prerequisites | Runtime configuration |
+|---|---|---|
+| Claude Code | Local `claude` CLI and optional Agent SDK installed separately; usable Claude credentials. | User Claude settings; no managed installation card in Taco. |
+| Codex | Install the pinned SDK runtime from Agents; npm is required for in-app installation. If unavailable, follow the displayed manual instructions. | User configuration under `$CODEX_HOME` (default `~/.codex`); an empty model override inherits it. |
+
+Codex status separates installation from authentication. A third-party provider
+with its own credentials does not require OpenAI login. Runtime sandbox,
+approval policy and cwd belong to the agent definition; Taco checks the cwd
+against the workspace and associated choices. Codex communication `tools`, when
+set in the definition, are preserved by the editor; `[]` disables these bridge
+tools and omission permits both `chatToAgent` and `listAgentSessions`.
+
+Both runtimes retain native session identities for resume, separately from
+Taco's display transcript. A native SDK session need not appear in the original
+application's session list; visibility can depend on source and working directory.
+For installation commands and retention details see the
+[Sidecar runtime guide](../packages/sidecar/README.md#optional-dependencies).
 
 ## 6. Long-term memory
 
@@ -269,3 +311,20 @@ purging an archive permanently removes those archived copies.
 Automatic extraction is conservative: it may leave memory unchanged when a
 conversation contains no supported, durable information. Memory updates are
 separate from chat history, so an empty extraction does not mean a chat was lost.
+
+### IM memory sources
+
+Each full `im://<channelId>/<peerId>/<chatId>` identity owns a topic partition;
+changing its execution directory does not merge topic memory with another chat.
+IM inherits associated workspace topics read-only. The channel/chat policy's
+`memory.inheritManagedGlobal` opt-in additionally reads topics from local
+workspaces currently registered in that sidecar process, excluding associated
+sources and other IM partitions. Human-maintained `MEMORY.md` stays shared.
+
+The Memory pane marks inherited topics read-only. Model context summaries carry
+`memoryLayer`, opaque `sourceId`, and `id`; the `memory` tool's `read` action
+(or `memory.read` RPC) fetches the authorized full body. A source reference is
+not a filesystem path or a grant: revoked associations and disabled inheritance
+are checked on every read. Writes and consolidation target the current partition.
+Old topics under the shared IM scratch identity are not copied automatically;
+review them before selectively moving notes to conversation partitions.

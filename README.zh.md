@@ -12,13 +12,13 @@ Taco 是一个极简 sidecar 协议层 + 多客户端调试终端，基于 Pi �
 
 ## 项目特色
 
-- **`agent` 工具。** 按类型白名单隔离工具，`agent/<type>` 命名空间，深度限制递归，`executionMode: "parallel"` 并发调用。
+- **子代理会话。** `agent` 创建子会话，`chatToAgent` 补充上下文或续聊，`listAgentSessions` 发现可通信实例；支持标准、Claude Code 和 Codex 运行时。工具白名单和深度限制约束各子代理。
 - **`skill` 工具。** 按名称加载；inline 模式入队 `<skill_body name="NAME">` 受 `skillReinjector` 保护的消息，subagent 模式通过 `spawnSkillSubagent` 启动独立 session。
-- **Plan 模式。** `planEnter` 创建 `.taco/plans/<slug>.md`，期间只允许读 / askUser / 写方案；`planExit` 返回计划待审批。
+- **Plan 模式。** `planEnter` 创建 `.taco/plans/<slug>.md`，期间可读取和写方案；工作区或关联目录内的其他文件写入需单独审批，shell 写入仍被阻止。`planExit` 返回计划待审批。
 - **Prompt tag 系统。** 每个 `<tag>` 声明 `compression`（`pin` / `pinOnce` / `summarize` / `drop`）和 `tuiVisibility`（`visible` / `hidden` / `ephemeral`）。
 - **扩展系统。** 新能力以扩展的形式接入，而不是写死进运行时 —— 进程级与 workspace 级贡献合并为一个冻结集合，扩展可自带 tag。
 - **JSONL 存储。** Session / 历史 / event log 走 `JsonlSessionStorage` + `JsonlSessionRepo`，append-only、可重放、无 schema 迁移。
-- **Pi 为依赖。** `@taco-ai/pi-harness` `0.1.0` 与 `pi-ai` `1.3.0`，直接消费上游 API。`pi-harness` 是我们为 Pi 1.0 从 `pi-agent-core` 移除的 `AgentHarness` 提供的兼容包。
+- **Pi 为依赖。** `@taco-ai/pi-harness` `0.2.0` 与 `pi-ai` `1.5.2`，直接消费上游 API。`pi-harness` 是我们为 Pi 1.0 从 `pi-agent-core` 移除的 `AgentHarness` 提供的兼容包。
 - **独立部署。** `@taco-ai/sidecar` 是独立 npm 包，有自己的 bin；支持两种运行模式 —— 直接 `NDJSON over stdio`（任何语言都能这样驱动）和 `taco start` / 桌面端使用的常驻 daemon 模式。daemon 模式下的租户隔离是「换一个 control endpoint」，不是「再起一个进程」。
 - **一 daemon 多 workspace。** 桌面端 daemon 服务 UI 中打开的所有 workspace，按 `cwd` 路由；同一 NDJSON socket 可承载多客户端并发。
 
