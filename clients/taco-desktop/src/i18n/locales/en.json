@@ -71,6 +71,14 @@
     ]
   },
   "subagents": {
+    "message": "Agent message",
+    "delivery": {
+      "queued": "Queued",
+      "started": "Running",
+      "completed": "Completed",
+      "error": "Failed",
+      "aborted": "Stopped"
+    },
     "title": "Subagents",
     "empty": "No subagents in this chat yet.",
     "noMatch": "No subagents match your search.",
@@ -897,6 +905,8 @@
     }
   },
   "message": {
+    "parentAgent": "Parent agent",
+    "peerAgent": "Peer agent",
     "copy": "Copy message",
     "copied": "Copied",
     "copyFailed": "Copy failed",

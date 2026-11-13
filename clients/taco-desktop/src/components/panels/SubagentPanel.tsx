@@ -5,8 +5,7 @@
  * The list is derived from `messages` on every render rather than stored, so
  * switching sessions or workspaces needs no cleanup. The detail area reuses
  * SubagentContext's live / history readers: live wins, and history is pulled
- * lazily the first time a subagent with an empty live stream is opened (that is
- * the historical-replay case — no more push events will arrive for it).
+ * on open and whenever the selected conversation starts or settles another run.
  */
 
 import { type ReactElement, useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -136,15 +135,8 @@ export function SubagentPanel({
 }
 
 /**
- * Detail body for one subagent. Render priority is live > history; when both
- * are empty and no pull has been attempted yet, pull history once. A failed
- * pull is recoverable via retry — the former inline card rendered a dead error
- * line, leaving the user no way forward but reopening the card.
- *
- * The pull is keyed on the run's phase, not just "attempted": a pull taken
- * mid-run is a partial snapshot, and a claude-code child has no live event
- * stream to top it up, so without a second pull once the run settles the panel
- * would stick at whatever existed at first pull (often just the prompt).
+ * A live tail may begin at a continuation, so always reconcile history on open
+ * and on run transitions. The workspace merges it into the canonical child stream.
  */
 function SubagentDetail({
     entry,
@@ -162,30 +154,34 @@ function SubagentDetail({
     const hasContent = shown.length > 0;
 
     const settled = entry.status === "ok" || entry.status === "error" || entry.status === "aborted";
-    const pullKey = settled ? "settled" : "open";
+    const pullKey = `${settled ? "settled" : "open"}:${entry.conversationRunId ?? ""}:${entry.conversationStatus ?? ""}:${entry.conversationToolCallId ?? ""}`;
     const [loading, setLoading] = useState(false);
     const [pulledKey, setPulledKey] = useState<string | null>(null);
     const [error, setError] = useState<string | null>(null);
+    const pullGeneration = useRef(0);
 
     const pull = useCallback(
         (key: string) => {
+            const generation = ++pullGeneration.current;
             setPulledKey(key);
             setLoading(true);
             setError(null);
             loadSubagentHistory(subSessionId)
                 .catch((e: unknown) => {
-                    setError(e instanceof Error ? e.message : String(e));
+                    if (generation === pullGeneration.current)
+                        setError(e instanceof Error ? e.message : String(e));
                 })
-                .finally(() => setLoading(false));
+                .finally(() => {
+                    if (generation === pullGeneration.current) setLoading(false);
+                });
         },
         [loadSubagentHistory, subSessionId],
     );
 
     useEffect(() => {
-        if (live.length > 0) return;
         if (pulledKey === pullKey) return;
         pull(pullKey);
-    }, [live.length, pullKey, pulledKey, pull]);
+    }, [pullKey, pulledKey, pull]);
 
     return (
         <>

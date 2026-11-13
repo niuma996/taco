@@ -32,6 +32,7 @@ import type {
 import {
     appendAssistantError,
     assistantFailureText,
+    extractAgentProvenance,
     extractAssistantTextAndThinking,
     extractAttachments,
     extractImageParts,
@@ -165,7 +166,19 @@ function handleMessageEnd(
     const m = ev.message;
     if (!m) return { messages };
     if (m.role === "user") {
-        const id = `live-user-${m.timestamp ?? opts.now}`;
+        const agentProvenance = extractAgentProvenance(m);
+        if (
+            agentProvenance?.messageId &&
+            messages.some(
+                (existing) =>
+                    existing.kind === "user" &&
+                    existing.agentProvenance?.messageId === agentProvenance.messageId,
+            )
+        )
+            return { messages };
+        const id = agentProvenance
+            ? `agent-message-${agentProvenance.messageId ?? `${agentProvenance.senderSessionId ?? ""}:${agentProvenance.relation}:${m.timestamp ?? opts.now}`}`
+            : `live-user-${m.timestamp ?? opts.now}`;
         if (messages.some((existing) => existing.id === id)) return { messages };
         // Server-pushed user message snapshots can also carry image parts —
         // extract them onto UiMessage.images so history shows them in the UI.
@@ -187,6 +200,7 @@ function handleMessageEnd(
         // same text but different attachments must not swap chips.
         const serverFilesSig = attachments.map((a) => a.name).join("\u0000");
         const optimisticIdx = messages.findIndex((x) => {
+            if (agentProvenance || (x.kind === "user" && x.agentProvenance)) return false;
             if (x.kind !== "user" || !x.id.startsWith("optimistic-user-") || x.text !== text) {
                 return false;
             }
@@ -220,6 +234,7 @@ function handleMessageEnd(
                     ts: parseEntryTimestamp(m.timestamp, opts.now),
                     ...(images.length > 0 ? { images } : {}),
                     ...(attachments.length > 0 ? { attachments } : {}),
+                    ...(agentProvenance ? { agentProvenance } : {}),
                 },
             ],
         };

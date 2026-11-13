@@ -71,6 +71,14 @@
     ]
   },
   "subagents": {
+    "message": "代理消息",
+    "delivery": {
+      "queued": "已排队",
+      "started": "运行中",
+      "completed": "已完成",
+      "error": "失败",
+      "aborted": "已停止"
+    },
     "title": "子代理",
     "empty": "本次聊天还没有子代理。",
     "noMatch": "没有匹配的子代理。",
@@ -897,6 +905,8 @@
     }
   },
   "message": {
+    "parentAgent": "父级代理",
+    "peerAgent": "同级代理",
     "copy": "复制消息",
     "copied": "已复制",
     "copyFailed": "复制失败",

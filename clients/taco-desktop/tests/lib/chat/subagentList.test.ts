@@ -352,3 +352,85 @@ describe("shouldAutoOpen", () => {
         assert.equal(shouldAutoOpen(new Set(["s1"]), next, false), "s2");
     });
 });
+
+describe("conversation rounds", () => {
+    it("keeps one child row and uses the latest continuation identity", () => {
+        const entries = deriveSubagents([
+            asst("spawn", [agentTool({ status: "error" })]),
+            asst("chat", [
+                {
+                    id: "chat-1",
+                    name: "chatToAgent",
+                    args: { subSessionId: "sub-1", prompt: "continue" },
+                    status: "ok",
+                    details: {
+                        subSessionId: "sub-1",
+                        messageId: "msg-1",
+                        runId: "run-1",
+                        status: "completed",
+                    },
+                },
+            ]),
+        ]);
+        assert.equal(entries.length, 1);
+        assert.equal(entries[0].agentType, "Explore");
+        assert.equal(entries[0].status, "ok");
+        assert.equal(entries[0].conversationStatus, "completed");
+        assert.equal(entries[0].conversationRunId, "run-1");
+        assert.equal(entries[0].conversationToolCallId, "chat-1");
+        assert.equal(entries[0].prompt, "去找 xx");
+    });
+
+    it("keeps the active run visible while another message is queued", () => {
+        const entries = deriveSubagents(
+            [
+                asst("spawn", [
+                    agentTool({
+                        status: "running",
+                        details: { subSessionId: "sub-1", runId: "run-1" },
+                    }),
+                ]),
+                asst("chat", [
+                    {
+                        id: "chat-1",
+                        name: "chatToAgent",
+                        args: { subSessionId: "sub-1" },
+                        status: "ok",
+                        details: { subSessionId: "sub-1", status: "queued", messageId: "msg-2" },
+                    },
+                ]),
+            ],
+            { "call-1": "running" },
+            { "call-1": "run-1" },
+        );
+        assert.equal(entries[0].status, "background");
+    });
+});
+
+describe("newer peer continuation", () => {
+    it("does not overwrite the current run outcome with an older parent receipt", () => {
+        const entries = deriveSubagents(
+            [
+                asst("spawn", [
+                    agentTool({
+                        status: "error",
+                        details: { subSessionId: "sub-1", runId: "run-new", status: "error" },
+                    }),
+                ]),
+                asst("old-chat", [
+                    {
+                        id: "old-chat",
+                        name: "chatToAgent",
+                        status: "ok",
+                        args: { subSessionId: "sub-1" },
+                        details: { subSessionId: "sub-1", runId: "run-old", status: "completed" },
+                    },
+                ]),
+            ],
+            { "call-1": "error" },
+            { "call-1": "run-new" },
+        );
+        assert.equal(entries[0].status, "error");
+        assert.equal(entries[0].conversationRunId, "run-new");
+    });
+});

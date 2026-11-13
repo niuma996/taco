@@ -11,6 +11,7 @@
 
 import { createContext, type ReactNode, useContext, useMemo } from "react";
 import type { UiMessage } from "../lib/chat/chatUtils";
+import type { SubagentEntry } from "../lib/chat/subagentList";
 
 export interface SubagentContextValue {
     cwd: string;
@@ -33,6 +34,7 @@ export interface SubagentContextValue {
      * only an entry point now — the child stream renders in exactly one place.
      */
     openInPanel: (subSessionId: string) => void;
+    agentTypeFor: (subSessionId: string) => string | undefined;
 }
 
 const SubagentContext = createContext<SubagentContextValue | null>(null);
@@ -48,6 +50,7 @@ export interface SubagentProviderProps {
     historyMessagesFor: (subSessionId: string) => UiMessage[];
     openInPanel: (subSessionId: string) => void;
     children: ReactNode;
+    entries?: readonly SubagentEntry[];
 }
 
 export function SubagentProvider({
@@ -57,11 +60,20 @@ export function SubagentProvider({
     historyMessagesFor,
     openInPanel,
     children,
+    entries,
 }: SubagentProviderProps) {
     // cwd is generally stable; other deps change ref every time workspaces state changes.
     const value = useMemo<SubagentContextValue>(
-        () => ({ cwd, loadSubagentHistory, liveMessagesFor, historyMessagesFor, openInPanel }),
-        [cwd, loadSubagentHistory, liveMessagesFor, historyMessagesFor, openInPanel],
+        () => ({
+            cwd,
+            loadSubagentHistory,
+            liveMessagesFor,
+            historyMessagesFor,
+            openInPanel,
+            agentTypeFor: (id: string) =>
+                entries?.find((entry) => entry.subSessionId === id)?.agentType,
+        }),
+        [cwd, loadSubagentHistory, liveMessagesFor, historyMessagesFor, openInPanel, entries],
     );
     return <SubagentContext.Provider value={value}>{children}</SubagentContext.Provider>;
 }

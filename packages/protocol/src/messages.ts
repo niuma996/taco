@@ -46,7 +46,14 @@ export interface Usage {
 export interface UserMessage {
     role: "user";
     content: string | ProtocolContentBlock[];
+    /** Structured source metadata for collaboration messages shown in a child session. */
+    agentProvenance?: AgentMessageProvenance;
     timestamp: number;
+}
+export interface AgentMessageProvenance {
+    messageId?: string;
+    senderSessionId?: string;
+    relation: "parent" | "peer";
 }
 export interface AssistantMessage {
     role: "assistant";

@@ -14,6 +14,7 @@ import { afterEach, describe, it, vi } from "vitest";
 
 import { ToolCardShell } from "../../../src/components/ToolCardShell";
 import "../../../src/components/toolViews/index.ts";
+import { SubagentProvider } from "../../../src/hooks/useSubagent";
 import type { UiToolCall } from "../../../src/lib/chat/chatUtils";
 
 // Echoes the source inside a .shiki pre, matching shiki's real wrapper shape
@@ -86,6 +87,39 @@ describe("ToolCardShell regions", () => {
         assert.ok(container.querySelector(".tool-card.error"));
         assert.ok(container.querySelector(".tool-card-icon--error"));
         assert.ok(screen.getByText("shell"));
+    });
+
+    it("renders chatToAgent as a jumpable child-session card", async () => {
+        const openInPanel = vi.fn();
+        render(
+            <SubagentProvider
+                cwd="/proj"
+                loadSubagentHistory={async () => {}}
+                liveMessagesFor={() => []}
+                historyMessagesFor={() => []}
+                openInPanel={openInPanel}
+            >
+                <ToolCardShell
+                    tool={call({
+                        name: "chatToAgent",
+                        args: { subSessionId: "sub-1", prompt: "继续检查" },
+                        details: {
+                            subSessionId: "sub-1",
+                            messageId: "msg-1",
+                            runId: "run-1",
+                            status: "queued",
+                            effectiveDelivery: "queued",
+                        },
+                    })}
+                />
+            </SubagentProvider>,
+        );
+
+        assert.ok(screen.getByText("继续检查"));
+        await userEvent
+            .setup({ delay: null })
+            .click(document.querySelector(".agent-card-header") as HTMLButtonElement);
+        assert.deepEqual(openInPanel.mock.calls, [["sub-1"]]);
     });
 
     it("appends caller children below the body", () => {

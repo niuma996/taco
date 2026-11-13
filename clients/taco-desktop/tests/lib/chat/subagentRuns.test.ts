@@ -238,3 +238,180 @@ test("authoritative runtime snapshot restores active continuation identity", () 
     assert.equal(row(next)?.status, "background");
     assert.equal(workspacesReducer(next, { ...settled, runId: "old" }), next);
 });
+
+test("late queued receipt inherits its already settled continuation without resurrecting it", () => {
+    const state = initial();
+    const parent = state["/w"].messages[0];
+    assert.equal(parent.kind, "assistant");
+    if (parent.kind !== "assistant") return;
+    parent.tools.push({
+        id: "send-1",
+        name: "chatToAgent",
+        status: "running",
+        args: { subSessionId: "child", prompt: "continue" },
+    });
+    let next = workspacesReducer(state, { ...started, messageId: "message-1" });
+    next = workspacesReducer(next, { ...settled, runId: "run-new" });
+    next = workspacesReducer(next, {
+        type: "APPLY_EVENT",
+        cwd: "/w",
+        sid: "parent",
+        now: 2,
+        suppressedThinking: false,
+        ev: {
+            type: "tool_end",
+            toolCallId: "send-1",
+            toolName: "chatToAgent",
+            result: {
+                details: {
+                    subSessionId: "child",
+                    messageId: "message-1",
+                    status: "queued",
+                    effectiveDelivery: "queued",
+                },
+            },
+        },
+    });
+    const message = getSessionState(next["/w"], "parent")?.messages[0];
+    assert.equal(message?.kind, "assistant");
+    if (message?.kind !== "assistant") return;
+    assert.equal((message.tools[1].details as { status: string }).status, "completed");
+    assert.equal((message.tools[1].details as { runId: string }).runId, "run-new");
+    assert.deepEqual(getSessionState(next["/w"], "parent")?.agentToolPending, {});
+});
+
+test("queued message starts by message identity without adopting another message's run", () => {
+    const state = initial();
+    const parent = state["/w"].messages[0];
+    if (parent.kind !== "assistant") return;
+    parent.tools.push(
+        ...["message-1", "message-2"].map((messageId) => ({
+            id: messageId,
+            name: "chatToAgent",
+            args: { subSessionId: "child" },
+            status: "ok" as const,
+            details: { subSessionId: "child", messageId, status: "queued" },
+        })),
+    );
+    const next = workspacesReducer(state, { ...started, messageId: "message-1" });
+    const message = getSessionState(next["/w"], "parent")?.messages[0];
+    if (message?.kind !== "assistant") return assert.fail("missing assistant");
+    assert.equal((message.tools[1].details as { status: string }).status, "started");
+    assert.equal((message.tools[1].details as { runId: string }).runId, "run-new");
+    assert.equal((message.tools[2].details as { status: string }).status, "queued");
+});
+
+test("peer sender receives continuation state without gaining child ownership", () => {
+    let state = initial();
+    state = workspacesReducer(state, {
+        type: "CHILD_MESSAGE_EVENT",
+        cwd: "/w",
+        subSessionId: "peer",
+        now: 2,
+        suppressedThinking: false,
+        ev: {
+            type: "message_end",
+            message: {
+                role: "assistant",
+                timestamp: 2,
+                content: [{ type: "text", text: "" }],
+            },
+        },
+    });
+    state = workspacesReducer(state, {
+        type: "CHILD_MESSAGE_EVENT",
+        cwd: "/w",
+        subSessionId: "peer",
+        now: 3,
+        suppressedThinking: false,
+        ev: {
+            type: "tool_start",
+            toolCallId: "send-peer",
+            toolName: "chatToAgent",
+            args: { subSessionId: "child", prompt: "check" },
+        },
+    });
+    state = workspacesReducer(state, {
+        type: "CHILD_MESSAGE_EVENT",
+        cwd: "/w",
+        subSessionId: "peer",
+        now: 4,
+        suppressedThinking: false,
+        ev: {
+            type: "tool_end",
+            toolCallId: "send-peer",
+            toolName: "chatToAgent",
+            result: {
+                details: {
+                    subSessionId: "child",
+                    messageId: "msg-peer",
+                    status: "queued",
+                    effectiveDelivery: "queued",
+                },
+            },
+        },
+    });
+    state = workspacesReducer(state, { ...started, messageId: "msg-peer" });
+    state = workspacesReducer(state, { ...settled, runId: "run-new" });
+    const peer = getSessionState(state["/w"], "peer");
+    const call = peer?.messages
+        .flatMap((m) => (m.kind === "assistant" ? m.tools : []))
+        .find((t) => t.id === "send-peer");
+    assert.equal((call?.details as { status: string }).status, "completed");
+    assert.equal((call?.details as { runId: string }).runId, "run-new");
+    assert.deepEqual(peer?.agentToolPending, {});
+    assert.deepEqual(peer?.backgroundSubagents, {});
+});
+
+test("peer propagation leaves an unrelated agent with the same tool call id untouched", () => {
+    let state = workspacesReducer(initial(), { type: "SELECT_SESSION", cwd: "/w", sid: "parent" });
+    const parent = getSessionState(state["/w"], "parent");
+    assert.ok(parent);
+    const peer = {
+        ...parent,
+        kind: "subagent" as const,
+        backgroundSubagents: {},
+        backgroundRunIds: {},
+        messages: [
+            {
+                id: "peer",
+                kind: "assistant" as const,
+                text: "",
+                ts: 2,
+                thinking: [],
+                tools: [
+                    {
+                        id: "spawn-1",
+                        name: "agent",
+                        args: {},
+                        status: "running" as const,
+                        details: {
+                            subSessionId: "unrelated-child",
+                            runId: "unrelated-run",
+                            status: "started",
+                        },
+                    },
+                    {
+                        id: "send-peer",
+                        name: "chatToAgent",
+                        args: { subSessionId: "child" },
+                        status: "ok" as const,
+                        details: {
+                            subSessionId: "child",
+                            messageId: "peer-message",
+                            runId: "run-new",
+                            status: "queued",
+                        },
+                    },
+                ],
+            },
+        ],
+    };
+    state["/w"].sessionStatesById = { ...state["/w"].sessionStatesById, peer };
+    state = workspacesReducer(state, { ...started, messageId: "peer-message" });
+    state = workspacesReducer(state, { ...settled, runId: "run-new" });
+    const updated = getSessionState(state["/w"], "peer")?.messages[0];
+    if (updated?.kind !== "assistant") return assert.fail("missing peer");
+    assert.equal(updated.tools[0], peer.messages[0].tools[0]);
+    assert.equal((updated.tools[1].details as { status: string }).status, "completed");
+});

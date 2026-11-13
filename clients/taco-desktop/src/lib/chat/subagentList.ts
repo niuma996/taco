@@ -40,6 +40,9 @@ export interface SubagentEntry {
     status: SubagentStatus;
     /** Tool call that first introduced this subagent; used as a stable React key. */
     firstToolCallId: string;
+    conversationStatus?: string;
+    conversationRunId?: string;
+    conversationToolCallId?: string;
 }
 
 const TOOL_CALL_STATUSES = new Set<ToolCallStatus>(["running", "ok", "error"]);
@@ -86,6 +89,9 @@ function entryFromTool(
                   ? "aborted"
                   : backgroundStatus(tool.id, backgroundSubagents, tool.status),
         firstToolCallId: tool.id,
+        ...(readString(tool.details, "runId")
+            ? { conversationRunId: readString(tool.details, "runId") }
+            : {}),
     };
 }
 
@@ -135,7 +141,8 @@ export function deriveSubagents(
 ): SubagentEntry[] {
     const out: SubagentEntry[] = [];
     const indexBySubSessionId = new Map<string, number>();
-    const currentRuns = new Map<string, SubagentStatus>();
+    const currentRuns = new Map<string, { status: SubagentStatus; runId: string }>();
+    const conversations = new Map<string, { status: string; runId?: string; toolCallId: string }>();
 
     for (const message of messages) {
         if (message.kind !== "assistant") continue;
@@ -143,6 +150,19 @@ export function deriveSubagents(
         if (!Array.isArray(tools)) continue;
 
         for (const tool of tools) {
+            if (tool.name === "chatToAgent") {
+                const subSessionId =
+                    readString(tool.details, "subSessionId") ||
+                    readString(tool.args, "subSessionId");
+                const status = readString(tool.details, "status");
+                if (subSessionId !== "" && status !== "") {
+                    conversations.set(subSessionId, {
+                        status,
+                        runId: readString(tool.details, "runId") || undefined,
+                        toolCallId: tool.id,
+                    });
+                }
+            }
             let entry: SubagentEntry | null = null;
             try {
                 entry = entryFromTool(tool, backgroundSubagents);
@@ -156,10 +176,10 @@ export function deriveSubagents(
                 backgroundSubagents[tool.id] !== undefined &&
                 backgroundRunIds[tool.id] !== undefined
             )
-                currentRuns.set(
-                    entry.subSessionId,
-                    backgroundStatus(tool.id, backgroundSubagents, tool.status),
-                );
+                currentRuns.set(entry.subSessionId, {
+                    status: backgroundStatus(tool.id, backgroundSubagents, tool.status),
+                    runId: backgroundRunIds[tool.id],
+                });
 
             // Detached entries have no key to merge on, so each stands alone.
             if (entry.subSessionId === null) {
@@ -180,8 +200,37 @@ export function deriveSubagents(
     }
 
     return out.map((entry) => {
-        const status = entry.subSessionId ? currentRuns.get(entry.subSessionId) : undefined;
-        return status === undefined ? entry : { ...entry, status };
+        const currentRun = entry.subSessionId ? currentRuns.get(entry.subSessionId) : undefined;
+        const status = currentRun?.status;
+        const conversation = entry.subSessionId ? conversations.get(entry.subSessionId) : undefined;
+        const matchesCurrent =
+            !currentRun || !conversation?.runId || conversation.runId === currentRun.runId;
+        const active =
+            status === "background" || entry.status === "running" || entry.status === "background";
+        const latestStatus = matchesCurrent ? conversation?.status : undefined;
+        const conversationStatus: SubagentStatus | undefined =
+            latestStatus === "completed"
+                ? "ok"
+                : latestStatus === "error"
+                  ? "error"
+                  : latestStatus === "aborted"
+                    ? "aborted"
+                    : undefined;
+        return {
+            ...entry,
+            status: active
+                ? (status ?? entry.status)
+                : (conversationStatus ?? status ?? entry.status),
+            ...(conversation
+                ? {
+                      conversationStatus: conversation.status,
+                      ...(currentRun?.runId || conversation.runId
+                          ? { conversationRunId: currentRun?.runId ?? conversation.runId }
+                          : {}),
+                      conversationToolCallId: conversation.toolCallId,
+                  }
+                : {}),
+        };
     });
 }
 

@@ -356,6 +356,7 @@ export class AgentSpawner extends EventEmitter {
             subSessionId: SessionId;
             agentType: string;
             runId: string;
+            messageId: string;
         }
     >();
 
@@ -2346,6 +2347,7 @@ export class AgentSpawner extends EventEmitter {
             subSessionId: message.targetSessionId,
             agentType: def.agentType,
             runId,
+            messageId: message.messageId,
         };
         const announce = () => {
             this.chatRuns.set(runId, started);

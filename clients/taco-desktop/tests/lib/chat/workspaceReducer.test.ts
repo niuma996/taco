@@ -211,6 +211,67 @@ describe("workspacesReducer — INIT / SET_ACTIVE", () => {
 });
 
 describe("workspacesReducer — sessions", () => {
+    it("tracks chatToAgent lifecycle by subSessionId and runId", () => {
+        const state = {
+            "/ws": baseWs({
+                activeSession: "main-1",
+                messages: [
+                    {
+                        id: "assistant-1",
+                        kind: "assistant",
+                        text: "",
+                        ts: 1,
+                        thinking: [],
+                        tools: [
+                            {
+                                id: "chat-call-1",
+                                name: "chatToAgent",
+                                args: { subSessionId: "sub-1", prompt: "继续检查" },
+                                status: "ok",
+                                details: {
+                                    subSessionId: "sub-1",
+                                    messageId: "msg-1",
+                                    runId: "run-1",
+                                    status: "started",
+                                    effectiveDelivery: "queued",
+                                },
+                            },
+                        ],
+                    },
+                ],
+            }),
+        };
+
+        const started = workspacesReducer(state, {
+            type: "SUBAGENT_STARTED",
+            cwd: "/ws",
+            parentSessionId: "main-1",
+            parentToolCallId: "chat:run-1",
+            subSessionId: "sub-1",
+            agentType: "codextest",
+            runId: "run-1",
+        });
+        const startedTool = started["/ws"]?.messages[0];
+        assert.equal(startedTool?.kind, "assistant");
+        if (startedTool?.kind !== "assistant") return;
+        assert.equal(startedTool.tools[0]?.status, "running");
+        assert.equal((startedTool.tools[0]?.details as { status?: string }).status, "started");
+
+        const settled = workspacesReducer(started, {
+            type: "SUBAGENT_SETTLED",
+            cwd: "/ws",
+            parentSessionId: "main-1",
+            parentToolCallId: "chat:run-1",
+            outcome: "completed",
+            runId: "run-1",
+        });
+        const settledTool = settled["/ws"]?.messages[0];
+        assert.equal(settledTool?.kind, "assistant");
+        if (settledTool?.kind !== "assistant") return;
+        assert.equal(settledTool.tools[0]?.status, "ok");
+        assert.equal((settledTool.tools[0]?.details as { status?: string }).status, "completed");
+    });
+
     it("LOAD_SESSIONS creates workspace if missing and sorts desc", () => {
         const next = workspacesReducer(
             {},

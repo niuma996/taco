@@ -1,73 +1,86 @@
-/**
- * agent tool view — a one-line entry point. Clicking opens the child session
- * in the right-side subagent panel; the child message stream renders there and
- * nowhere else, so there is no second copy of the same state to keep in sync.
- *
- * A call whose toolResult never landed (sidecar killed mid-run) has no
- * subSessionId; that card renders unclickable rather than leading nowhere.
- */
-
+/** Agent creation and messaging share the same child-session navigation. */
 import { LoaderCircle } from "lucide-react";
 import type { ReactElement } from "react";
 import { useSubagent } from "../../hooks/useSubagent";
+import { useT } from "../../i18n/useI18n";
 import { type ToolViewProps, toolViews } from "./registry";
 
-interface AgentToolDetailsShape {
-    status?: unknown;
-    subSessionId?: unknown;
-    agentType?: unknown;
+function readString(source: unknown, key: string): string {
+    if (typeof source !== "object" || source === null) return "";
+    const value = (source as Record<string, unknown>)[key];
+    return typeof value === "string" ? value : "";
 }
 
-interface AgentToolArgsShape {
-    subagent_type?: unknown;
-    description?: unknown;
-}
-
-export function AgentToolView({ tool }: ToolViewProps): ReactElement {
-    const { openInPanel } = useSubagent();
-    const args = (tool.args ?? {}) as AgentToolArgsShape;
-    const description = typeof args.description === "string" ? args.description : "";
-    const agentTypeFromArgs = typeof args.subagent_type === "string" ? args.subagent_type : "";
-    const details = (tool.details ?? {}) as AgentToolDetailsShape;
-    const isRunning = tool.status === "running";
-    // A deliberate stop also lands as an error tool result; label it as
-    // stopped so the card agrees with the subagent panel.
-    const isAborted = details.status === "aborted";
-    const isError = tool.status === "error" && !isAborted;
-    const subSessionId = typeof details.subSessionId === "string" ? details.subSessionId : null;
-    const agentTypeFromDetails = typeof details.agentType === "string" ? details.agentType : "";
-    const agentType = agentTypeFromDetails || agentTypeFromArgs || "agent";
+function AgentSessionCard({ tool }: ToolViewProps): ReactElement {
+    const { openInPanel, agentTypeFor } = useSubagent();
+    const { t } = useT();
+    const messaging = tool.name === "chatToAgent";
+    const subSessionId =
+        readString(tool.details, "subSessionId") ||
+        (messaging ? readString(tool.args, "subSessionId") : "");
+    const agentType =
+        readString(tool.details, "agentType") ||
+        readString(tool.args, "subagent_type") ||
+        agentTypeFor(subSessionId);
+    const description = readString(tool.args, messaging ? "prompt" : "description");
+    const receiptStatus = readString(tool.details, "status");
+    const status =
+        receiptStatus === "aborted"
+            ? "aborted"
+            : tool.status === "error" || receiptStatus === "error"
+              ? "error"
+              : messaging && receiptStatus
+                ? receiptStatus
+                : tool.status === "running"
+                  ? "started"
+                  : "";
+    const running = status === "started";
+    const statusClass =
+        status === "error"
+            ? "agent-card-error"
+            : status === "aborted"
+              ? "agent-card-aborted"
+              : "agent-card-running";
 
     return (
-        <div className="agent-card" data-agent-running={isRunning ? "true" : "false"}>
+        <div className="agent-card" data-agent-running={running ? "true" : "false"}>
             <button
                 type="button"
                 className="agent-card-header"
-                disabled={subSessionId === null}
+                disabled={subSessionId === ""}
                 onClick={() => {
-                    if (subSessionId !== null) openInPanel(subSessionId);
+                    if (subSessionId) openInPanel(subSessionId);
                 }}
             >
-                <span className="agent-card-type">{agentType}</span>
-                {description.length > 0 && <span className="agent-card-desc">{description}</span>}
-                {isRunning && (
-                    <span className="agent-card-running ui-fade-in">
-                        <LoaderCircle size={11} className="spin" aria-hidden="true" />
-                        running
+                <span className="agent-card-type">
+                    {agentType || (messaging ? t("subagents.message") : "agent")}
+                </span>
+                {description && (
+                    <span className="agent-card-desc" title={description}>
+                        {description}
                     </span>
                 )}
-                {isError && <span className="agent-card-error ui-fade-in">error</span>}
-                {isAborted && <span className="agent-card-aborted ui-fade-in">stopped</span>}
+                {status && (
+                    <span className={`${statusClass} ui-fade-in`}>
+                        {running && <LoaderCircle size={11} className="spin" aria-hidden="true" />}
+                        {t(`subagents.delivery.${status}`)}
+                    </span>
+                )}
                 {subSessionId && (
                     <span className="agent-card-subid ui-fade-in" title={subSessionId}>
                         id {subSessionId.slice(0, 8)}
                     </span>
                 )}
             </button>
+            {messaging && status === "error" && tool.resultText && (
+                <pre className="tool-card-result">{tool.resultText.slice(0, 480)}</pre>
+            )}
         </div>
     );
 }
 
-// The body already shows agent type + description, so the default summary
-// would only repeat them as a JSON fragment.
+export const AgentToolView = AgentSessionCard;
+export const ChatToAgentToolView = AgentSessionCard;
+
 toolViews.agent = { summary: () => null, body: AgentToolView };
+toolViews.chatToAgent = { summary: () => null, body: ChatToAgentToolView };

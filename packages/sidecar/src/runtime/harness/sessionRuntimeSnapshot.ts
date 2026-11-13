@@ -63,7 +63,16 @@ export function toSessionRuntimeSnapshot(
                 return {
                     entryId: entry.entryId,
                     kind: entry.kind,
-                    message: { ...message, content: visible.content },
+                    message: {
+                        ...message,
+                        content: visible.content,
+                        ...(visible.attachments.length > 0
+                            ? { attachments: visible.attachments }
+                            : {}),
+                        ...(visible.agentProvenance
+                            ? { agentProvenance: visible.agentProvenance }
+                            : {}),
+                    },
                 };
             }
             return {

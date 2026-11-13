@@ -415,6 +415,12 @@ inbox 中，回执为 `effectiveDelivery: "queued"` 且不公开当前 `runId`�
 在之后自动运行。子代理主动通信使用每次运行独立的 stdio MCP bridge，只暴露
 `chatToAgent` 与 `listAgentSessions`，发送者身份由父进程绑定。
 
+桌面端的 `chatToAgent` 卡片可跳转到已有子会话，不新增子代理条目。消息通过
+`messageId`、`subSessionId` 和 `runId` 关联投递与执行状态；排队回执不表示执行完成。
+历史读取会从子会话的持久 inbox 恢复回执状态，子代理面板在打开及续聊状态变化时
+补齐完整历史。`agent_message` 的显示策略为 `ephemeral`：界面展示正文和父级／同级
+代理来源，隐藏路由标签；模型仍接收原始封装，消息不因此获得新的用户授权。
+
 ## 3. 客户端
 
 ### 3.1 客户端分层

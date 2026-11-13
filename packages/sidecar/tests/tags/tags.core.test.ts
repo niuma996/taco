@@ -289,16 +289,21 @@ describe("visibility policy", () => {
 });
 
 describe("agent message envelope", () => {
-    it("hides the envelope but retains collaboration data in model context", () => {
+    it("shows collaboration text without exposing the routing envelope", () => {
         const spec = tagRegistry.agent_message;
         assert.ok(spec, "agent_message must be registered");
         assert.equal(spec.scope, "user-context");
         assert.equal(spec.compression.kind, "summarize");
-        assert.equal(spec.tuiVisibility, "hidden");
         const envelope = tagWrap("agent_message", "Peer found the caller in api.ts", {
-            "sender-session": "peer-1",
+            id: "message-1",
+            from: "peer-1",
+            relation: "peer",
         });
-        assert.equal(stripHiddenTagsInMarkdown(envelope, [spec.name]), "");
+        assert.equal(stripHiddenTagsInMarkdown(envelope), envelope);
+        assert.equal(
+            stripEphemeralTagWrappers(envelope, [spec.name]).trim(),
+            "Peer found the caller in api.ts",
+        );
         const [message] = stripDropTagsFromMessages([
             { role: "user", content: [{ type: "text", text: envelope }] },
         ]);

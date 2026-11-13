@@ -83,6 +83,7 @@ export type SidecarAction =
           subSessionId: string;
           agentType: string;
           runId: string;
+          messageId?: string;
       }
     | { type: "ATTACHED"; cwd: string; sid: string }
     | {
@@ -356,6 +357,7 @@ export function normalizePushFrame(p: ServerPush, dispatch: (a: SidecarAction) =
                 subSessionId: params.subSessionId,
                 agentType: typeof params.agentType === "string" ? params.agentType : "agent",
                 runId: params.runId,
+                ...(typeof params.messageId === "string" ? { messageId: params.messageId } : {}),
             });
         }
         case PushMethods.TasksUpdated: {

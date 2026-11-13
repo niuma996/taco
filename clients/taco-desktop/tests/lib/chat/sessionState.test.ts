@@ -571,3 +571,87 @@ test("late child history cannot replace an overlapping live assistant bubble", (
     });
     assert.equal(getSessionState(state["/w"], "child")?.messages[0]?.text, "live result");
 });
+
+test("history joins agent deliveries by message identity, preserving same-time human input", () => {
+    const provenance = {
+        messageId: "delivery-1",
+        senderSessionId: "parent",
+        relation: "parent" as const,
+    };
+    const live: UiMessage = {
+        id: "agent-message-delivery-1",
+        kind: "user",
+        text: "continue",
+        ts: 2,
+        agentProvenance: provenance,
+    };
+    const history: UiMessage[] = [
+        { id: "human", kind: "user", text: "continue", ts: 1 },
+        {
+            id: "stored-delivery",
+            kind: "user",
+            text: "continue",
+            ts: 1,
+            agentProvenance: provenance,
+        },
+    ];
+    const result = mergeSessionHistory(
+        {
+            ...createSessionState(),
+            messages: [live],
+            messageVersions: { "user:2": 1, "agent-message:delivery-1": 1 },
+        },
+        history,
+    );
+    assert.equal(result.messages.length, 2);
+    assert.equal(result.messages.filter((m) => m.kind === "user" && m.agentProvenance).length, 1);
+});
+
+test("child history can replace cached receipt state from before the read", () => {
+    const cached: UiMessage = {
+        id: "live",
+        kind: "assistant",
+        text: "",
+        ts: 1,
+        thinking: [],
+        tools: [
+            {
+                id: "send",
+                name: "chatToAgent",
+                args: {},
+                status: "ok",
+                details: { status: "started" },
+            },
+        ],
+    };
+    const history: UiMessage = {
+        ...cached,
+        id: "stored",
+        tools: [{ ...cached.tools[0], details: { status: "completed" } }],
+    };
+    const ws = createEmptyWorkspace("/w");
+    ws.sessionStatesById = {
+        child: {
+            ...createSessionState(),
+            kind: "subagent",
+            messages: [cached],
+            revision: 3,
+            messageVersions: { "assistant:1": 3 },
+        },
+    };
+    const state = workspacesReducer(
+        { "/w": ws },
+        {
+            type: "LOAD_SUBAGENT_HISTORY",
+            cwd: "/w",
+            subSessionId: "child",
+            messages: [history],
+            requestRevision: 3,
+        },
+    );
+    const message = getSessionState(state["/w"], "child")?.messages[0];
+    assert.equal(
+        message?.kind === "assistant" && (message.tools[0].details as { status: string }).status,
+        "completed",
+    );
+});

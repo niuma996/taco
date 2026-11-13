@@ -21,6 +21,7 @@ import type { StagedAttachment, StageInput } from "../lib/attachments";
 import { toMessageAttachments } from "../lib/attachments";
 import { historyToUiMessages, type QueuedUiItem, type UiMessage } from "../lib/chat/chatUtils";
 import type { ConversationTarget } from "../lib/chat/conversationDrafts";
+import { getSessionState } from "../lib/chat/sessionState";
 import {
     type WorkspaceAction,
     type WorkspaceState,
@@ -137,6 +138,7 @@ export function useWorkspaces(client: TacoClient): UseWorkspacesApi {
     const navigationVersion = useRef(0);
     const runEpochs = useRef(new Map<string, number>());
     const promptTokens = useRef(new Map<string, symbol>());
+    const childHistoryTokens = useRef(new Map<string, symbol>());
     const activeCwdRef = useRef(activeCwd);
     activeCwdRef.current = activeCwd;
     const getNavigationVersion = useCallback(() => navigationVersion.current, []);
@@ -318,6 +320,7 @@ export function useWorkspaces(client: TacoClient): UseWorkspacesApi {
                     parentSessionId: action.parentSessionId,
                     parentToolCallId: action.parentToolCallId,
                     outcome: action.outcome,
+                    subSessionId: action.subSessionId,
                     ...(action.runId ? { runId: action.runId } : {}),
                 });
             } else if (action.type === "SUBAGENT_STARTED") {
@@ -888,7 +891,12 @@ export function useWorkspaces(client: TacoClient): UseWorkspacesApi {
     }
 
     async function loadSubagentHistory(subSessionId: string): Promise<void> {
-        const cwd = activeCwd;
+        const cwd = activeCwdRef.current;
+        const key = `${cwd}\u0000${subSessionId}`;
+        const token = Symbol();
+        childHistoryTokens.current.set(key, token);
+        const requestRevision =
+            getSessionState(workspacesRef.current[cwd], subSessionId)?.revision ?? 0;
         try {
             const hist = await client.sessionHistory({
                 workspace: asWorkspaceId(cwd),
@@ -897,10 +905,21 @@ export function useWorkspaces(client: TacoClient): UseWorkspacesApi {
             const msgs = historyToUiMessages(
                 hist.entries as Parameters<typeof historyToUiMessages>[0],
             );
-            dispatchWs({ type: "LOAD_SUBAGENT_HISTORY", cwd, subSessionId, messages: msgs });
+            if (childHistoryTokens.current.get(key) === token)
+                dispatchWs({
+                    type: "LOAD_SUBAGENT_HISTORY",
+                    cwd,
+                    subSessionId,
+                    messages: msgs,
+                    requestRevision,
+                });
         } catch (err) {
             console.error("[taco] subagent history pull failed", subSessionId, err);
             pushNotification(`Subagent history failed: ${(err as Error).message}`);
+            throw err;
+        } finally {
+            if (childHistoryTokens.current.get(key) === token)
+                childHistoryTokens.current.delete(key);
         }
     }
 

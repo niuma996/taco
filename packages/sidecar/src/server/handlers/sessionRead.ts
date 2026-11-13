@@ -18,8 +18,10 @@ import type { AttachedSession } from "../../runtime/harness/attachedSession.ts";
 import { toSessionRuntimeSnapshot } from "../../runtime/harness/sessionRuntimeSnapshot.ts";
 import type { ImageContent, TextContent } from "../../runtime/pi/types.ts";
 import { resolveSessionByPrefix } from "../../runtime/session/sessionLookup.ts";
+import { readAgentMessages } from "../../runtime/subagent/agentMessages.ts";
 import type { WorkspaceRuntime } from "../../runtime/workspace.ts";
 import { rehydrateAskUserDetails } from "../../tags/index.ts";
+import { rehydrateAgentChatReceipts } from "../agentChatHistory.ts";
 import { type MethodCtx, RpcHandlerError, registerMethod } from "../methodRegistry.ts";
 import { ensureAttached } from "./attachGuard.ts";
 import { buildHistoryListDetail, buildTasksGetResult } from "./sessionTasksGet.ts";
@@ -46,6 +48,7 @@ function toSessionHistory(
                     payload: {
                         ...msg,
                         content: view.content,
+                        ...(view.agentProvenance ? { agentProvenance: view.agentProvenance } : {}),
                         ...(view.attachments.length > 0 ? { attachments: view.attachments } : {}),
                     } as Payload,
                     // pi 0.85 stores epoch millis; the wire contract is an ISO string.
@@ -107,7 +110,15 @@ export function registerSessionReadHandlers(): void {
     });
 
     registerMethod("sessionHistory", true, async ({ workspace, params }) => {
-        return toSessionHistory(params.sessionId, await workspace.getHistory(params.sessionId));
+        const history = toSessionHistory(
+            params.sessionId,
+            await workspace.getHistory(params.sessionId),
+        );
+        return workspace.sessionRegistry
+            ? rehydrateAgentChatReceipts(history, (id) =>
+                  workspace.sessionRegistry.withSession(id, readAgentMessages),
+              )
+            : history;
     });
 
     registerMethod("sessionSnapshotGet", true, async ({ workspace, params, server }) => {
@@ -137,7 +148,12 @@ export function registerSessionReadHandlers(): void {
                         ? await workspace.getHistory(params.sessionId)
                         : { leafEntryId: source.tipId, entries: source.transcript };
                 if (source && historySource.leafEntryId !== source.tipId) changed = true;
-                const history = toSessionHistory(params.sessionId, historySource);
+                const projected = toSessionHistory(params.sessionId, historySource);
+                const history = workspace.sessionRegistry
+                    ? await rehydrateAgentChatReceipts(projected, (id) =>
+                          workspace.sessionRegistry.withSession(id, readAgentMessages),
+                      )
+                    : projected;
                 let runtime: SessionSnapshot["runtime"];
                 if (source) {
                     const settledBackgroundSubSessionIds =

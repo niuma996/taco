@@ -153,7 +153,6 @@ describe("default summary never dumps JSON", () => {
     /** Tools with no registry entry at all, so they exercise the default. */
     const UNREGISTERED = [
         "memory",
-        "chatToAgent",
         "addTools",
         "jobsCreate",
         "jobsUpdate",

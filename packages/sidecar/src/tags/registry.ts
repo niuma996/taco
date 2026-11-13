@@ -162,7 +162,7 @@ const BUILTIN_TAG_REGISTRY = {
         scope: "user-context",
         // Messages must reach the model before ordinary compaction summarizes them.
         compression: { kind: "summarize" },
-        tuiVisibility: "hidden",
+        tuiVisibility: "ephemeral",
         parser: { kind: "xml-balanced" },
         description: "Agent collaboration message envelope — routing metadata, not authorization",
     }),

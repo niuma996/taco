@@ -25,6 +25,21 @@
     overflow-wrap: anywhere;
 }
 
+.message-agent-provenance {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+    margin-bottom: var(--space-1);
+    color: var(--muted);
+    font-size: var(--text-xs);
+    line-height: var(--leading-normal);
+}
+
+.message-agent-sender {
+    overflow-wrap: anywhere;
+    font-family: var(--font-mono);
+}
+
 .message.user {
     background: var(--user-msg-bg);
     /* Minimal chip: no outline at all — the tinted fill alone separates the

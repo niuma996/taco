@@ -211,6 +211,7 @@ export { MEMORY_CONTENT_MAX_CHARS } from "./memory.js";
 // Session message DTOs — protocol-native.
 export type {
     AgentMessage,
+    AgentMessageProvenance,
     AssistantMessage,
     ImageBlock,
     LiteThinkingLevel,

@@ -11,6 +11,7 @@
 
 import type {
     AgentMessage,
+    AgentMessageProvenance,
     CheckpointEntry,
     ImageInput,
     MessageAttachment,
@@ -33,6 +34,7 @@ export interface MessageLike {
     args?: unknown;
     stopReason?: string;
     errorMessage?: string;
+    agentProvenance?: AgentMessageProvenance;
 }
 
 export function checkpointForMessage(
@@ -309,6 +311,7 @@ export type UiMessage =
           images?: ImageInput[];
           /** Files sent with the message; rendered as chips under the text. */
           attachments?: MessageAttachment[];
+          agentProvenance?: AgentMessageProvenance;
       }
     | {
           id: string;
@@ -541,6 +544,7 @@ export function historyToUiMessages(
         if (role === "user") {
             const images = extractImageParts(content);
             const attachments = extractAttachments(m);
+            const agentProvenance = extractAgentProvenance(m);
             out.push({
                 id: entryId || `user-${ts}`,
                 kind: "user",
@@ -548,6 +552,7 @@ export function historyToUiMessages(
                 ts,
                 ...(images.length > 0 ? { images } : {}),
                 ...(attachments.length > 0 ? { attachments } : {}),
+                ...(agentProvenance ? { agentProvenance } : {}),
             });
         } else if (role === "assistant") {
             const { text, tools, thinking } = splitAssistantContent(content);
@@ -835,6 +840,23 @@ export function extractAttachments(message: unknown): MessageAttachment[] {
         });
     }
     return out;
+}
+
+/** Read optional display provenance defensively across the sidecar boundary. */
+export function extractAgentProvenance(message: unknown): AgentMessageProvenance | undefined {
+    const raw = (message as { agentProvenance?: unknown } | null)?.agentProvenance;
+    if (!raw || typeof raw !== "object") return undefined;
+    const value = raw as Partial<AgentMessageProvenance>;
+    if (value.relation !== "parent" && value.relation !== "peer") return undefined;
+    return {
+        relation: value.relation,
+        ...(typeof value.messageId === "string" && value.messageId
+            ? { messageId: value.messageId }
+            : {}),
+        ...(typeof value.senderSessionId === "string" && value.senderSessionId
+            ? { senderSessionId: value.senderSessionId }
+            : {}),
+    };
 }
 
 export function extractImageParts(content: unknown): ImageInput[] {

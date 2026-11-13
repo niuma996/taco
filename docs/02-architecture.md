@@ -228,11 +228,18 @@ explicitly, including after a fork. Prompt communication guidance is included
 only for tools actually available in the session.
 
 Runtime-delivered messages use an `<agent_message>` envelope registered as
-`hidden` + `summarize`: the model receives it as ordinary conversation context,
-the UI hides the routing wrapper, and compaction can summarize it. Outbound
+`ephemeral` + `summarize`: the model receives the original envelope as ordinary
+conversation context. The UI shows the body with parent/peer provenance while
+hiding the routing wrapper; compaction can summarize it. Outbound
 agent text neutralizes this and other control-tag shapes to prevent forged
 runtime envelopes. `agentContinue` has been removed; its historical calls are
 ordinary tool records and do not drive topology or execution recovery.
+
+The desktop renders `chatToAgent` as a link to the existing child session. It
+keeps delivery receipts distinct from completed runs, correlating lifecycle
+events with `messageId`, `subSessionId`, and `runId`. History reads refresh
+persisted receipts from the child's durable inbox, and the child panel reconciles
+the full transcript when opened and after continuation transitions.
 
 ### 2.2.2 Claude Code conversations and retention
 

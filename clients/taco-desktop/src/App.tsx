@@ -942,6 +942,7 @@ export default function App() {
                             <FilePreviewOpenerProvider cwd={activeCwd}>
                                 <SubagentProvider
                                     cwd={activeCwd}
+                                    entries={subagentEntries}
                                     loadSubagentHistory={stableLoadSubagentHistory}
                                     liveMessagesFor={liveMessagesFor}
                                     historyMessagesFor={historyMessagesFor}

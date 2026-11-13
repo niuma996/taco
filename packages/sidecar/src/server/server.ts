@@ -1339,6 +1339,9 @@ export class SidecarServer implements ServerRpcSurface {
                         message: {
                             ...evt.message,
                             content: view.content,
+                            ...(view.agentProvenance
+                                ? { agentProvenance: view.agentProvenance }
+                                : {}),
                             ...(view.attachments.length > 0
                                 ? { attachments: view.attachments }
                                 : {}),

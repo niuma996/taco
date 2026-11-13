@@ -181,11 +181,10 @@ describe("SubagentPanel — 详情", () => {
         });
     });
 
-    it("live 非空时不拉历史", async () => {
+    it("live 非空时仍补齐历史，避免仅显示续聊的增量消息", async () => {
         const loadHistory = vi.fn(async () => {});
         renderPanel({ selected: "sub-1", live: { "sub-1": [userMsg] }, loadHistory });
-        await new Promise((r) => setTimeout(r, 20));
-        assert.equal(loadHistory.mock.calls.length, 0);
+        await waitFor(() => assert.equal(loadHistory.mock.calls.length, 1));
     });
 
     it("加载成功但子会话为空 → noMessages（区别于失败）", async () => {

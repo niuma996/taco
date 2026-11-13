@@ -235,6 +235,8 @@ export function updateSessionMessages(session: SessionState, messages: UiMessage
 
 // History and live streams use different entry ids for the same role/timestamp.
 function messageKey(message: UiMessage): string {
+    if (message.kind === "user" && message.agentProvenance?.messageId)
+        return `user-agent:${message.agentProvenance.messageId}`;
     return `${message.kind}:${message.kind === "assistant" || message.kind === "user" ? (message.ts ?? message.id) : message.id}`;
 }
 

@@ -88,6 +88,7 @@ export const Message = memo(function Message({
         checkpointId: string,
     ) => Promise<{ ok: true; protectionId?: string } | { ok: false; reason: string }>;
 }) {
+    const { t } = useT();
     const showMeta = isLastInTurn && !isTurnInProgress;
     if (m.kind === "user") {
         return (
@@ -96,6 +97,22 @@ export const Message = memo(function Message({
                     className={`message user${highlighted ? " message--navigation-target" : ""}`}
                     data-message-id={m.id}
                 >
+                    {m.agentProvenance && (
+                        <div className="message-agent-provenance">
+                            <span>
+                                {t(
+                                    m.agentProvenance.relation === "parent"
+                                        ? "message.parentAgent"
+                                        : "message.peerAgent",
+                                )}
+                            </span>
+                            {m.agentProvenance.senderSessionId && (
+                                <span className="message-agent-sender">
+                                    {m.agentProvenance.senderSessionId}
+                                </span>
+                            )}
+                        </div>
+                    )}
                     {m.images && m.images.length > 0 && (
                         <div className="message-images">
                             {m.images.map((img, i) => (

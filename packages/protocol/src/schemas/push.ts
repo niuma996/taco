@@ -12,6 +12,7 @@ const owner = {
 export const subagentStartedSchema = Type.Object({
     ...owner,
     runId: Type.String({ minLength: 1 }),
+    messageId: Type.Optional(Type.String({ minLength: 1 })),
 });
 
 export const pushSchemas = {
