@@ -5,6 +5,7 @@ import type { SubagentBudgetState } from "../../tags/subagentBudget.ts";
 import type { TacoTool } from "../../tools/index.ts";
 import { readSessionFacts, type SessionFacts } from "../session/sessionFacts.ts";
 import type { SessionRegistry } from "../session/sessionRegistry.ts";
+import { normalizeSubagentRuntime, sameSubagentRuntime } from "./engines/runtime.ts";
 import type { SubagentRunResult } from "./subagentRunner.ts";
 import type { SubagentSessionArgs } from "./subagentTypes.ts";
 
@@ -89,14 +90,14 @@ export async function runSubagentResume(
             isError: true,
         };
     }
-    if ((md.runtime ?? "standard") !== (def.runtime ?? "standard"))
+    if (!sameSubagentRuntime(md.runtime, def.runtime))
         return {
             subSessionId: args.subSessionId,
             isError: true,
             resultText:
                 "The agent definition changed runtime; the existing session cannot switch engines.",
         };
-    const standard = md.runtime !== "claude-code" && md.runtime !== "codex";
+    const standard = normalizeSubagentRuntime(md.runtime) === "standard";
     // Only the standard engine counts persisted assistant turns against its harness budget.
     let maxTurns = def.maxTurns;
     if (standard && !args.newTask && maxTurns !== undefined) {

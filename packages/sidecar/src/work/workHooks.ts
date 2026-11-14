@@ -32,6 +32,26 @@ export interface WorkSettle {
     readonly waiting?: import("../runtime/session/waitingInteraction.ts").WaitingInteraction;
 }
 
+export type BackgroundWorkSettlement =
+    | {
+          readonly kind: "committed";
+          readonly attemptId: string;
+          readonly outcome: "completed" | "error" | "aborted";
+          readonly path?: string;
+      }
+    | { readonly kind: "superseded" }
+    | { readonly kind: "retry"; readonly attemptId?: string };
+
+export interface PendingParentNotice {
+    readonly workId: string;
+    readonly attemptId: string;
+    readonly subSessionId: string;
+    readonly agentType: string;
+    readonly description?: string;
+    readonly outcome: "completed" | "error" | "aborted";
+    readonly path?: string;
+}
+
 export interface WorkWaiting {
     readonly toolCallId: string;
     readonly toolName: "askUser" | "planExit";
@@ -42,7 +62,19 @@ export interface WorkWaiting {
 export type ParentNoticeDecision =
     | { readonly mode: "legacy"; readonly claimId?: never }
     | { readonly mode: "skip"; readonly claimId?: never; readonly retry?: true }
-    | { readonly mode: "capture" | "silent"; readonly claimId: string; readonly workId?: string };
+    | {
+          readonly mode: "capture" | "silent";
+          readonly claimId: string;
+          readonly workId?: string;
+          readonly notice?: {
+              readonly attemptId: string;
+              readonly subSessionId?: string;
+              readonly agentType?: string;
+              readonly description?: string;
+              readonly outcome: "completed" | "error" | "aborted";
+              readonly path?: string;
+          };
+      };
 
 export interface ParentNoticeOutcome {
     readonly status: "not_run" | "completed";
@@ -56,6 +88,7 @@ export interface BackgroundWorkHooks {
         tracked?: boolean,
         target?: SessionTarget,
         legacyWorkId?: string,
+        expectedAttemptId?: string,
     ): Promise<ParentNoticeDecision>;
     /** Release only unadmitted prompts; admitted prompts remain closed even on failure. */
     endParentNotice(workId: string, claimId: string, outcome: ParentNoticeOutcome): Promise<void>;
@@ -84,7 +117,13 @@ export interface BackgroundWorkHooks {
      * emits `subagent.settled`, so a consumer that sees the settle can rely on
      * the record already being on disk.
      */
-    onSettle(workId: string, parentSessionId: SessionId, settle: WorkSettle): Promise<void>;
+    onSettle(
+        workId: string,
+        parentSessionId: SessionId,
+        settle: WorkSettle,
+        // biome-ignore lint/suspicious/noConfusingVoidType: Keep existing Promise<void> hooks compatible.
+    ): Promise<BackgroundWorkSettlement | void>;
+    pendingParentNotices?(target: SessionTarget): Promise<PendingParentNotice[]>;
     /** Park a background Work until its child session receives an answer. */
     onWaiting?(workId: string, waiting: WorkWaiting, attemptId?: string): Promise<void>;
     /**

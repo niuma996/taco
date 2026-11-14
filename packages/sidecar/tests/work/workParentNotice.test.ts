@@ -3,8 +3,9 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { it, type TestContext } from "node:test";
-import { asSessionId } from "@taco-ai/protocol";
-import { BackgroundSubagentCoordinator } from "../../src/runtime/subagent/backgroundSubagentCoordinator.ts";
+import { asSessionId, asWorkspaceId } from "@taco-ai/protocol";
+import type { SessionRegistry } from "../../src/runtime/session/sessionRegistry.ts";
+import { SubagentNoticeDelivery } from "../../src/runtime/subagent/subagentNoticeDelivery.ts";
 import type { BackgroundWorkHooks, ParentNoticeOutcome } from "../../src/work/workHooks.ts";
 import { WorkParentNotice } from "../../src/work/workParentNotice.ts";
 import { resumeAttempt } from "../../src/work/workState.ts";
@@ -67,28 +68,26 @@ function noticeSpawner(
 ) {
     let holds = 0;
     const outcomes: ParentNoticeOutcome[] = [];
-    const spawner = Object.assign(Object.create(BackgroundSubagentCoordinator.prototype), {
-        workHooks: {
-            runParentNotice: guard,
-            beginParentNotice: (id: string, tracked?: boolean) => notices.begin(id, tracked),
-            endParentNotice: async (id: string, claimId: string, outcome: ParentNoticeOutcome) => {
-                beforeEnd?.(holds);
-                outcomes.push(outcome);
-                await notices.end(id, claimId, outcome);
-            },
-            onNoticeRunStart: () => holds++,
-            onNoticeRunRelease: () => holds--,
+    const hooks = {
+        runParentNotice: guard,
+        beginParentNotice: (id: string, tracked?: boolean) => notices.begin(id, tracked),
+        endParentNotice: async (id: string, claimId: string, outcome: ParentNoticeOutcome) => {
+            beforeEnd?.(holds);
+            outcomes.push(outcome);
+            await notices.end(id, claimId, outcome);
         },
-        sessionRegistry: { getAttached: () => parent },
-    }) as {
-        deliverNotice(
-            parent: string,
-            text: string,
-            id: string,
-            trackedOnly: boolean,
-            tracked: boolean,
-        ): Promise<boolean>;
+        onNoticeRunStart: () => {
+            holds++;
+        },
+        onNoticeRunRelease: () => {
+            holds--;
+        },
     };
+    const spawner = new SubagentNoticeDelivery(
+        { getAttached: () => parent } as unknown as SessionRegistry,
+        asWorkspaceId("/workspace"),
+        hooks,
+    );
     return {
         deliver: (workId: string, tracked = true) =>
             spawner.deliverNotice(asSessionId("parent"), "notice", workId, false, tracked),

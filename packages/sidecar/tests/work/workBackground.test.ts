@@ -341,8 +341,9 @@ describe("work × background subagent", () => {
             const restoreRun = stubRun("answer");
             const restoreParent = stubParent({ absent: true });
             let workId = "";
+            let toolCallId = "";
             try {
-                ({ workId } = await launch("p-late", route));
+                ({ workId, toolCallId } = await launch("p-late", route));
                 await until(
                     async () => (await service.store.get(workId))?.delivery?.status === "confirmed",
                     "template delivery",
@@ -350,19 +351,28 @@ describe("work × background subagent", () => {
             } finally {
                 restoreParent();
             }
+            const work = await service.store.get(workId);
+            assert.ok(work?.childSessionId);
+            await ws.sessionRegistry.withSession(asSessionId("p-late"), (session) =>
+                addPendingSubagentResult(session, {
+                    workId,
+                    parentToolCallId: toolCallId,
+                    subSessionId: asSessionId(work.childSessionId ?? ""),
+                    agentType: "explorer",
+                    outcome: "completed",
+                    settledAt: Date.now(),
+                }),
+            );
             let heldDuringLateRun: boolean | undefined;
             const restoreLate = stubParent({
-                prompt: async () => {
+                prompt: async (notice) => {
+                    assert.match(notice, /Its task was: Find the leak/);
                     heldDuringLateRun = service.controller.isHoldingReplies("p-late");
                     return { role: "assistant", content: [{ type: "text", text: "late words" }] };
                 },
             });
             try {
-                const spawner = (ws.agentSpawner as unknown as { background: unknown })
-                    .background as unknown as {
-                    deliverNotice: (p: SessionId, n: string, w: string) => Promise<boolean>;
-                };
-                await spawner.deliverNotice(asSessionId("p-late"), "notice", workId);
+                await ws.agentSpawner.flushPendingSubagentResults(asSessionId("p-late"));
                 assert.equal(
                     heldDuringLateRun,
                     true,
@@ -370,6 +380,12 @@ describe("work × background subagent", () => {
                 );
                 assert.equal((await service.store.get(workId))?.delivery?.source, "template");
                 assert.equal(handle.sent.length, 1);
+                assert.equal((await service.store.get(workId))?.parentNotice?.state, "completed");
+                const pending = await ws.sessionRegistry.withSession(
+                    asSessionId("p-late"),
+                    readPendingSubagentResults,
+                );
+                assert.equal(toolCallId in pending, false);
             } finally {
                 restoreRun();
                 restoreLate();
@@ -393,6 +409,7 @@ describe("work × background subagent", () => {
             // A pending record that survived the crash, as the flush path sees it.
             await ws.sessionRegistry.withSession(asSessionId("p-flushed"), (session) =>
                 addPendingSubagentResult(session, {
+                    workId,
                     parentToolCallId: toolCallId,
                     subSessionId: asSessionId("child-flushed"),
                     agentType: "explorer",
@@ -409,13 +426,9 @@ describe("work × background subagent", () => {
                 },
             });
             try {
-                const spawner = (ws.agentSpawner as unknown as { background: unknown })
-                    .background as unknown as {
-                    flush(p: SessionId): Promise<void>;
-                };
-                await spawner.flush(asSessionId("p-flushed"));
+                await ws.agentSpawner.flushPendingSubagentResults(asSessionId("p-flushed"));
                 assert.equal(prompts, 1, "delivery to the user does not update the parent model");
-                await spawner.flush(asSessionId("p-flushed"));
+                await ws.agentSpawner.flushPendingSubagentResults(asSessionId("p-flushed"));
                 assert.equal(prompts, 1, "a repeated flush must not prompt twice");
                 assert.equal(handle.sent.length, 1);
                 const pending = await ws.sessionRegistry.withSession(
@@ -610,15 +623,16 @@ describe("work × background subagent", () => {
                     return { role: "assistant", content: [{ type: "text", text: "found it" }] };
                 },
             });
-            const spawner = (ws.agentSpawner as unknown as { background: unknown })
-                .background as unknown as {
-                flushingParents: Set<SessionId>;
-                flush(id: SessionId, trackedOnly: boolean): Promise<void>;
-            };
-            const flushing = spawner.flush(parent, true);
+            const flushing = ws.agentSpawner.flushPendingSubagentResults(parent, true);
             try {
                 await until(() => blocked, "busy release to reach its write");
-                assert.equal(spawner.flushingParents.has(parent), true);
+                const pending = await ws.sessionRegistry.withSession(
+                    parent,
+                    readPendingSubagentResults,
+                );
+                assert.equal(toolCallId in pending, true, "a busy notice must remain pending");
+                assert.equal((await service.store.get(workId))?.parentNotice?.state, "claimed");
+                assert.equal(prompts, 1);
                 busy = false;
                 ws.sessionRegistry.emit("session.idle", { sessionId: parent });
                 ws.sessionRegistry.emit("session.idle", { sessionId: parent });
@@ -629,7 +643,10 @@ describe("work × background subagent", () => {
                         parent,
                         readPendingSubagentResults,
                     );
-                    return !(toolCallId in pending) && !spawner.flushingParents.has(parent);
+                    return (
+                        !(toolCallId in pending) &&
+                        (await service.store.get(workId))?.parentNotice?.state === "completed"
+                    );
                 }, "deferred idle flush to clear the pending notice");
                 assert.equal(prompts, 2, "one busy attempt and one accepted prompt");
                 assert.equal((await service.store.get(workId))?.parentNotice?.state, "completed");
@@ -775,10 +792,13 @@ describe("work × background subagent", () => {
             },
         });
         try {
-            await launch(parent);
-            const spawner = (ws.agentSpawner as unknown as { background: unknown })
-                .background as unknown as { flushingParents: Set<SessionId> };
-            await until(() => !spawner.flushingParents.has(parent), "idle flush to finish");
+            const { toolCallId } = await launch(parent);
+            await ws.agentSpawner.flushPendingSubagentResults(parent, true);
+            const pending = await ws.sessionRegistry.withSession(
+                parent,
+                readPendingSubagentResults,
+            );
+            assert.equal(toolCallId in pending, false, "the live notice must have been delivered");
             assert.equal(prompts, 1);
         } finally {
             service.store.createIfAbsent = originalCreate;

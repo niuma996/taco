@@ -20,6 +20,12 @@ import { value } from "../pi/values.ts";
 export interface PendingSubagentResult {
     /** Explicit provenance for newly tracked notices; older records derive it from the tool call. */
     readonly workId?: string;
+    /** Frozen Work attempt; old records omit it and use compatibility resolution. */
+    readonly attemptId?: string;
+    /** The result file is durable but the Work settlement still needs committing. */
+    readonly settlementPending?: boolean;
+    readonly partial?: boolean;
+    readonly settlementText?: string;
     readonly subSessionId: SessionId;
     /** Immutable execution identity when the notice came from a run-scoped execution. */
     readonly runId?: string;

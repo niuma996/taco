@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Readable } from "node:stream";
 import { type TestContext, test } from "node:test";
 import { NodeExecutionEnv } from "../../src/runtime/pi/node.ts";
 import { invokeTool } from "../_helpers/invokeTool.ts";
@@ -21,10 +22,16 @@ function grepResult(value: unknown): GrepResult {
     return value as GrepResult;
 }
 
-function mockSpawn(t: TestContext, run: (args: string[]) => ReturnType<typeof childProcess.spawn>) {
+function mockSpawn(
+    t: TestContext,
+    run: (
+        args: string[],
+        options: childProcess.SpawnOptions,
+    ) => ReturnType<typeof childProcess.spawn>,
+) {
     const mocked = t.mock.method(childProcess, "spawn", ((...received: unknown[]) => {
         const args = Array.isArray(received[1]) ? received[1].map(String) : [];
-        return run(args);
+        return run(args, received[2] as childProcess.SpawnOptions);
     }) as typeof childProcess.spawn);
     syncBuiltinESMExports();
     t.after(() => {
@@ -118,6 +125,102 @@ test("ripgrep spawn failures surface as errors instead of no matches", async (t)
     await assert.rejects(invokeTool(tool, { pattern: "needle" }, { env }), /ENOENT/);
     assert.ok(ignorePath);
     assert.equal(existsSync(ignorePath), false);
+});
+
+test("ripgrep process failures report stderr and clean up the ignore file", async (t) => {
+    const { env, tool } = await fixture(t, true);
+    let ignorePath = "";
+    mockSpawn(t, (args) => {
+        ignorePath = args[args.indexOf("--ignore-file") + 1];
+        return realSpawn(process.execPath, [
+            "-e",
+            "process.stdout.write('file.ts:1:partial'); process.stderr.write('search failed'); process.exitCode = 2;",
+        ]);
+    });
+    await assert.rejects(invokeTool(tool, { pattern: "needle" }, { env }), /search failed/);
+    assert.ok(ignorePath);
+    assert.equal(existsSync(ignorePath), false);
+});
+
+test("ripgrep cancellation stops a partial record and cleans up the ignore file", async (t) => {
+    const { env, tool } = await fixture(t, true);
+    const controller = new AbortController();
+    let ignorePath = "";
+    let closed: Promise<void> | undefined;
+    mockSpawn(t, (args, options) => {
+        ignorePath = args[args.indexOf("--ignore-file") + 1];
+        assert.equal(options.signal, controller.signal);
+        const child = realSpawn(
+            process.execPath,
+            ["-e", "process.stdout.write('file.ts:1:partial'); setInterval(() => {}, 1000);"],
+            { signal: options.signal },
+        );
+        t.after(() => child.kill());
+        closed = new Promise((resolve) => child.once("close", () => resolve()));
+        child.stdout?.once("data", () => controller.abort());
+        return child;
+    });
+    await assert.rejects(
+        invokeTool(tool, { pattern: "needle" }, { env }, { signal: controller.signal }),
+        /abort/i,
+    );
+    await closed;
+    assert.ok(ignorePath);
+    assert.equal(existsSync(ignorePath), false);
+});
+
+test("ripgrep preserves standalone CR within LF-delimited matches", async (t) => {
+    const { env, tool } = await fixture(t, true);
+    const output = "file.ts:1:before\rneedle\r\n\nfile.ts:2:tail\r";
+    mockSpawn(t, () =>
+        realSpawn(process.execPath, ["-e", `process.stdout.write(${JSON.stringify(output)})`]),
+    );
+    const result = grepResult(await invokeTool(tool, { pattern: "needle" }, { env }));
+    assert.equal(result.content[0].text, "file.ts:1:before\rneedle\r\nfile.ts:2:tail\r");
+    assert.equal(result.details.count, 2);
+    assert.equal(result.details.truncated, false);
+});
+
+test("ripgrep preserves CR and UTF-8 across stream chunk boundaries", async (t) => {
+    const { env, tool } = await fixture(t, true);
+    const unicode = Buffer.from("🌮中");
+    const chunks = [
+        Buffer.from("file.ts:1:before\r"),
+        Buffer.concat([Buffer.from("needle "), unicode.subarray(0, 1)]),
+        unicode.subarray(1, 5),
+        Buffer.concat([unicode.subarray(5), Buffer.from("\r")]),
+        Buffer.from("\n\nfile.ts:2:tail"),
+    ];
+    mockSpawn(t, () => {
+        const child = realSpawn(process.execPath, ["-e", ""]);
+        Object.defineProperty(child, "stdout", { value: Readable.from(chunks) });
+        return child;
+    });
+    const result = grepResult(await invokeTool(tool, { pattern: "needle" }, { env }));
+    assert.equal(result.content[0].text, "file.ts:1:before\rneedle 🌮中\r\nfile.ts:2:tail");
+    assert.equal(result.details.count, 2);
+    assert.equal(result.details.truncated, false);
+});
+
+test("ripgrep clips a long record across chunks and counts its following record", async (t) => {
+    const { env, tool } = await fixture(t, true);
+    mockSpawn(t, () => {
+        const child = realSpawn(process.execPath, ["-e", ""]);
+        const chunks = async function* () {
+            yield Buffer.from("file.ts:1:needle\r");
+            for (let i = 0; i < 1024; i++) yield Buffer.alloc(16 * 1024, "x");
+            yield Buffer.from("\nfile.ts:2:needle");
+        };
+        Object.defineProperty(child, "stdout", { value: Readable.from(chunks()) });
+        return child;
+    });
+    const result = grepResult(await invokeTool(tool, { pattern: "needle" }, { env }));
+    assert.equal(
+        result.content[0].text,
+        `${`file.ts:1:needle\r${"x".repeat(500)}`.slice(0, 500)}… [line clipped]\nfile.ts:2:needle`,
+    );
+    assert.equal(result.details.count, 2);
+    assert.equal(result.details.truncated, true);
 });
 
 test("ripgrep streams more than 8 MiB of matches without losing its bounded result", async (t) => {

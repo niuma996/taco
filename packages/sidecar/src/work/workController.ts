@@ -118,6 +118,8 @@ export interface SettleWorkArgs {
     readonly deliver?: boolean;
     /** True when the parent model will be woken and expected to write the notice. */
     readonly parentWillReply: boolean;
+    /** A direct continuation returns through its caller instead of a background notice. */
+    readonly parentNoticeHandled?: boolean;
 }
 
 export interface WorkControllerOptions {
@@ -354,7 +356,20 @@ export class WorkController {
             if (work.attempt.attemptId !== current.attempt.attemptId) return undefined;
             const next = settle(work, { outcome: args.outcome, result, reason: args.reason, now });
             if (!next) return undefined;
-            return delivery ? { ...next, delivery } : next;
+            const reported = args.parentNoticeHandled
+                ? {
+                      ...next,
+                      parentNotice: {
+                          attemptId: work.attempt.attemptId,
+                          claimId: `resume:${work.attempt.attemptId}`,
+                          ownerInstanceId: this.instanceId,
+                          state: "completed" as const,
+                          claimedAt: now,
+                          completedAt: now,
+                      },
+                  }
+                : next;
+            return delivery ? { ...reported, delivery } : reported;
         });
         if (!res) return undefined;
         // A Work that already ended keeps its outcome, and this call must not

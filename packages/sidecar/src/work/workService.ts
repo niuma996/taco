@@ -33,8 +33,10 @@ import { type DeliveryClock, systemClock, WorkDeliverer } from "./workDelivery.t
 import { WorkExecution } from "./workExecution.ts";
 import type {
     BackgroundWorkHooks,
+    BackgroundWorkSettlement,
     ParentNoticeDecision,
     ParentNoticeOutcome,
+    PendingParentNotice,
     ScheduledFire,
     ScheduledFireSettle,
     ScheduledWorkHooks,
@@ -654,14 +656,17 @@ export class WorkService implements BackgroundWorkHooks, ScheduledWorkHooks, Wor
         }
     }
 
-    async onSettle(workId: string, parentSessionId: SessionId, settle: WorkSettle): Promise<void> {
+    async onSettle(
+        workId: string,
+        parentSessionId: SessionId,
+        settle: WorkSettle,
+    ): Promise<BackgroundWorkSettlement> {
+        const attemptId = settle.attemptId ?? this.launchAttempts.get(workId);
         try {
             const work = await this.store.get(workId);
             const route = this.options.resolveRoute(parentSessionId, work?.workspace);
-            const attemptId = settle.attemptId ?? this.launchAttempts.get(workId);
-            if (!attemptId) return;
-            if (this.launchAttempts.get(workId) === attemptId) this.launchAttempts.delete(workId);
-            await this.controller.settle({
+            if (!attemptId) return { kind: "superseded" };
+            const committed = await this.controller.settle({
                 workId,
                 attemptId,
                 outcome: settle.outcome,
@@ -670,9 +675,58 @@ export class WorkService implements BackgroundWorkHooks, ScheduledWorkHooks, Wor
                 path: settle.path,
                 parentWillReply: route !== undefined,
             });
+            if (
+                !committed ||
+                committed.attempt.attemptId !== attemptId ||
+                !isTerminal(committed.status)
+            )
+                return { kind: "superseded" };
+            if (this.launchAttempts.get(workId) === attemptId) this.launchAttempts.delete(workId);
+            return {
+                kind: "committed",
+                attemptId,
+                outcome:
+                    committed.status === "completed"
+                        ? "completed"
+                        : committed.status === "cancelled"
+                          ? "aborted"
+                          : "error",
+                ...(committed.result?.path !== undefined ? { path: committed.result.path } : {}),
+            };
         } catch (e) {
             log.error("work settle failed", { workId, error: String(e) });
+            return { kind: "retry", ...(attemptId ? { attemptId } : {}) };
         }
+    }
+
+    async pendingParentNotices(target: SessionTarget): Promise<PendingParentNotice[]> {
+        const works = await this.store.list();
+        return works
+            .filter(
+                (work) =>
+                    work.kind === "subagent" &&
+                    work.workspace === target.workspace &&
+                    work.parentSessionId === target.sessionId &&
+                    isTerminal(work.status) &&
+                    work.childSessionId !== undefined &&
+                    work.parentNotice === undefined &&
+                    work.delivery?.status !== "cancelled" &&
+                    work.delivery?.status !== "handedOff",
+            )
+            .map((work) => ({
+                workId: work.workId,
+                attemptId: work.attempt.attemptId,
+                subSessionId: work.childSessionId as string,
+                agentType: work.agentType ?? "",
+                ...(work.title ? { description: work.title } : {}),
+                outcome:
+                    work.status === "completed"
+                        ? "completed"
+                        : work.status === "cancelled"
+                          ? "aborted"
+                          : "error",
+                ...(work.result?.path !== undefined ? { path: work.result.path } : {}),
+            }));
     }
 
     async onWaiting(
@@ -728,6 +782,7 @@ export class WorkService implements BackgroundWorkHooks, ScheduledWorkHooks, Wor
                 // user just used; a second copy over the channel would repeat it.
                 deliver: false,
                 parentWillReply: false,
+                parentNoticeHandled: true,
             });
         } catch (e) {
             log.error("work resume settle failed", { childSessionId, error: String(e) });
@@ -798,6 +853,7 @@ export class WorkService implements BackgroundWorkHooks, ScheduledWorkHooks, Wor
         tracked = true,
         parentTarget?: SessionTarget,
         legacyWorkId?: string,
+        expectedAttemptId?: string,
     ): Promise<ParentNoticeDecision> {
         try {
             // A replay recomputes the composite id; a record from before ids
@@ -827,7 +883,7 @@ export class WorkService implements BackgroundWorkHooks, ScheduledWorkHooks, Wor
                 if (!current) return { mode: "skip", retry: true };
                 if (current !== target.bindingId) return { mode: "skip" };
             }
-            const decision = await this.parentNotices.begin(workId, tracked);
+            const decision = await this.parentNotices.begin(workId, tracked, expectedAttemptId);
             return decision.mode === "capture" || decision.mode === "silent"
                 ? { ...decision, workId }
                 : decision;

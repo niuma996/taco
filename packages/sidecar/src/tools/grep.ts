@@ -14,7 +14,6 @@ import { spawn, spawnSync } from "node:child_process";
 import { mkdtemp, open, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { isAbsolute, join, relative, resolve } from "node:path";
-import * as readline from "node:readline";
 import fg from "fast-glob";
 import ignore from "ignore";
 import type { Static } from "typebox";
@@ -194,16 +193,32 @@ async function runRipgrep(
                 }
             });
         });
-        const lines = readline.createInterface({ input: child.stdout });
+        child.stdout.setEncoding("utf8");
         try {
             const consume = async (): Promise<void> => {
-                for await (const line of lines) {
-                    if (line.length > 0) appendMatch(result, line);
+                let line = "";
+                for await (const chunk of child.stdout) {
+                    const text = String(chunk);
+                    let start = 0;
+                    while (start < text.length) {
+                        const newline = text.indexOf("\n", start);
+                        const end = newline === -1 ? text.length : newline;
+                        // Keep one extra character to detect clipping without buffering long records.
+                        line += text.slice(
+                            start,
+                            Math.min(end, start + MAX_LINE_CHARS + 1 - line.length),
+                        );
+                        if (newline === -1) break;
+                        if (line.length > 0) appendMatch(result, line);
+                        line = "";
+                        start = newline + 1;
+                    }
                 }
+                if (line.length > 0) appendMatch(result, line);
             };
             await Promise.all([completion, consume()]);
         } finally {
-            lines.close();
+            child.stdout.destroy();
             if (child.exitCode === null && child.signalCode === null) child.kill();
         }
         return result;

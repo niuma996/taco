@@ -199,6 +199,13 @@ same engine entry point. `SubagentRunLifecycle` owns cancellation scopes: nested
 background runs share one controller until settlement finishes, and parent stop
 requests wait for the final scope to release.
 
+Coordinators consume narrow execution and event ports. Runtime aliases resolve in
+`engines/runtime.ts`. `SubagentNoticeDelivery` claims parent awareness from the
+committed Work snapshot, and `SubagentPendingStore` serializes compatibility and
+retry records with run-aware removal. Parent attach recovers unclaimed Work results
+even when no pending record was written. Failed settlements retain their attempt
+and body for retry; direct resumes commit parent awareness with the terminal result.
+
 **Key surface**
 
 ```typescript

@@ -15,10 +15,24 @@ export class WorkParentNotice {
         private readonly now: () => number = Date.now,
     ) {}
 
-    async begin(workId: string, tracked = true): Promise<ParentNoticeDecision> {
+    async begin(
+        workId: string,
+        tracked = true,
+        expectedAttemptId?: string,
+    ): Promise<ParentNoticeDecision> {
         let decision: ParentNoticeDecision = { mode: "skip" };
         const result = await this.store.mutate(workId, (current) => {
             if (
+                expectedAttemptId !== undefined &&
+                current.attempt.attemptId === expectedAttemptId &&
+                current.status === "running"
+            ) {
+                decision = { mode: "skip", retry: true };
+                return undefined;
+            }
+            if (
+                (expectedAttemptId !== undefined &&
+                    current.attempt.attemptId !== expectedAttemptId) ||
                 !isTerminal(current.status) ||
                 current.delivery?.status === "cancelled" ||
                 current.delivery?.status === "handedOff"
@@ -49,9 +63,28 @@ export class WorkParentNotice {
             return next;
         });
         if (result) {
-            if (result.changed && result.record.parentNotice)
-                this.active.add(result.record.parentNotice.claimId);
-            return decision;
+            if (!result.changed || !result.record.parentNotice) return decision;
+            this.active.add(result.record.parentNotice.claimId);
+            const work = result.record;
+            return {
+                mode: work.delivery ? "capture" : "silent",
+                claimId: result.record.parentNotice.claimId,
+                notice: {
+                    attemptId: work.attempt.attemptId,
+                    ...(work.childSessionId !== undefined
+                        ? { subSessionId: work.childSessionId }
+                        : {}),
+                    ...(work.agentType !== undefined ? { agentType: work.agentType } : {}),
+                    description: work.title,
+                    outcome:
+                        work.status === "completed"
+                            ? "completed"
+                            : work.status === "cancelled"
+                              ? "aborted"
+                              : "error",
+                    ...(work.result?.path !== undefined ? { path: work.result.path } : {}),
+                },
+            };
         }
         if (await this.store.isDeleted(workId)) return { mode: "skip" };
         return tracked || (await this.store.hasSnapshot(workId))

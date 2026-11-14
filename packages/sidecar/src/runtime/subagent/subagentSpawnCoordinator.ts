@@ -19,7 +19,13 @@ import {
 } from "../session/sessionFacts.ts";
 import type { SessionRegistry } from "../session/sessionRegistry.ts";
 import type { AgentConversationRuntime } from "./agentConversationRuntime.ts";
+import { normalizeSubagentRuntime } from "./engines/runtime.ts";
 import type { AgentEngine, EngineRunRequest } from "./engines/types.ts";
+import type {
+    BackgroundSubagentLauncher,
+    SubagentEvents,
+    SubagentExecution,
+} from "./subagentCoordination.ts";
 import type { SubagentRunLifecycle } from "./subagentRunLifecycle.ts";
 import type { SubagentRunResult } from "./subagentRunner.ts";
 import type { SubagentSessionArgs } from "./subagentTypes.ts";
@@ -29,29 +35,10 @@ export interface SubagentSpawnCoordinatorOptions {
     readonly conversation: AgentConversationRuntime;
     readonly runLifecycle: SubagentRunLifecycle;
     readonly engines: Record<SubagentRuntime, AgentEngine>;
-    readonly trackInFlight: <T>(
-        parentSessionId: SessionId,
-        parentToolCallId: string,
-        run: () => Promise<T>,
-    ) => Promise<T>;
-    readonly emit: (event: string, payload: unknown) => void;
+    readonly execution: Pick<SubagentExecution, "execute" | "track">;
+    readonly events: Pick<SubagentEvents, "emit">;
     readonly getTools: () => TacoTool[];
-    readonly launchBackground: (
-        args: SubagentSessionArgs,
-        def: AgentDefinition,
-        description?: string,
-    ) => Promise<{
-        subSessionId: SessionId;
-        resultText: string;
-        isError: boolean;
-        background: true;
-        resultPath: string;
-    }>;
-    readonly executeSubagentSession: (args: SubagentSessionArgs) => Promise<SubagentRunResult>;
-}
-
-function normalizedRuntime(runtime?: SubagentRuntime): SubagentRuntime {
-    return runtime === "claude-code" || runtime === "codex" ? runtime : "standard";
+    readonly background: Pick<BackgroundSubagentLauncher, "launch">;
 }
 
 export class SubagentSpawnCoordinator {
@@ -59,24 +46,22 @@ export class SubagentSpawnCoordinator {
     private readonly conversation: AgentConversationRuntime;
     private readonly runLifecycle: SubagentRunLifecycle;
     private readonly engines: Record<SubagentRuntime, AgentEngine>;
-    private readonly trackInFlight: SubagentSpawnCoordinatorOptions["trackInFlight"];
+    private readonly execution: SubagentSpawnCoordinatorOptions["execution"];
     private readonly getTools: SubagentSpawnCoordinatorOptions["getTools"];
-    private readonly launchBackground: SubagentSpawnCoordinatorOptions["launchBackground"];
-    private readonly executeSession: SubagentSpawnCoordinatorOptions["executeSubagentSession"];
-    private readonly emitEvent: SubagentSpawnCoordinatorOptions["emit"];
+    private readonly background: SubagentSpawnCoordinatorOptions["background"];
+    private readonly events: SubagentSpawnCoordinatorOptions["events"];
     constructor(options: SubagentSpawnCoordinatorOptions) {
         this.sessionRegistry = options.sessionRegistry;
         this.conversation = options.conversation;
         this.runLifecycle = options.runLifecycle;
         this.engines = options.engines;
-        this.trackInFlight = options.trackInFlight;
-        this.executeSession = options.executeSubagentSession;
+        this.execution = options.execution;
         this.getTools = options.getTools;
-        this.launchBackground = options.launchBackground;
-        this.emitEvent = options.emit;
+        this.background = options.background;
+        this.events = options.events;
     }
     private emit(event: string, payload: unknown): void {
-        this.emitEvent(event, payload);
+        this.events.emit(event, payload);
     }
 
     async executeSubagentSession(args: SubagentSessionArgs): Promise<SubagentRunResult> {
@@ -91,7 +76,7 @@ export class SubagentSpawnCoordinator {
             });
         let result: SubagentRunResult | undefined;
         try {
-            result = await this.trackInFlight(
+            result = await this.execution.track(
                 args.parentSessionId,
                 args.parentToolCallId,
                 async () => {
@@ -177,7 +162,7 @@ export class SubagentSpawnCoordinator {
             ...(args.executionId !== undefined ? { runId: args.executionId } : {}),
         });
 
-        return this.engines[normalizedRuntime(args.runtime)].run({
+        return this.engines[normalizeSubagentRuntime(args.runtime)].run({
             ...args,
             childSessionId: asSessionId(childSessionId),
             abortController: args.abortController,
@@ -209,8 +194,8 @@ export class SubagentSpawnCoordinator {
         const contextMode = resolveContextMode(args.context, def.context);
         // Native engines own separate context stores; their adapters cannot import
         // a parent transcript. Correct a fork request to independent for them.
-        const effectiveContextMode = this.engines[normalizedRuntime(def.runtime)].capabilities
-            .forkContext
+        const effectiveContextMode = this.engines[normalizeSubagentRuntime(def.runtime)]
+            .capabilities.forkContext
             ? contextMode
             : "independent";
         // Compute parent depth to feed filterToolsForAgent before delegating.
@@ -246,7 +231,10 @@ export class SubagentSpawnCoordinator {
             // Spawned from a registry profile, so runResume can re-derive the
             // child's toolset from its agentType. Claude Code runs keep no
             // resumable harness state.
-            resumability: def.runtime === "claude-code" ? "not_resumable" : "resumable",
+            resumability:
+                normalizeSubagentRuntime(def.runtime) === "claude-code"
+                    ? "not_resumable"
+                    : "resumable",
             runtime: def.runtime,
             childDepth,
             // The profile's declared tools bound what the child may also load
@@ -263,14 +251,14 @@ export class SubagentSpawnCoordinator {
             fewShots: def.fewShots,
             maxTurns: def.maxTurns,
             forkedContext,
-            ...(def.runtime === "claude-code"
+            ...(normalizeSubagentRuntime(def.runtime) === "claude-code"
                 ? {
                       claudeCodeTools: def.tools,
                       permissionMode: def.permissionMode,
                       ...(def.cwd !== undefined ? { claudeCodeCwd: def.cwd } : {}),
                   }
                 : {}),
-            ...(def.runtime === "codex"
+            ...(normalizeSubagentRuntime(def.runtime) === "codex"
                 ? {
                       ...(def.codex !== undefined ? { codexConfig: def.codex } : {}),
                       ...(def.tools !== undefined ? { codexTools: def.tools } : {}),
@@ -278,9 +266,9 @@ export class SubagentSpawnCoordinator {
                 : {}),
         };
         if (!args.background) {
-            return this.executeSession({ ...sessionArgs, signal: args.signal });
+            return this.execution.execute({ ...sessionArgs, signal: args.signal });
         }
-        return this.launchBackground(sessionArgs, def, args.description);
+        return this.background.launch(sessionArgs, def, args.description);
     }
     async appendChildMessages(childId: SessionId, messages: AgentMessage[]): Promise<void> {
         await this.sessionRegistry.withSession(childId, async (session) => {

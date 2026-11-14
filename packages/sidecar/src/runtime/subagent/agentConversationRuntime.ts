@@ -14,6 +14,7 @@ import {
 } from "./agentConversation.ts";
 import { readAgentMessages, writeAgentMessages } from "./agentMessages.ts";
 import { readCodexState } from "./codex/codexState.ts";
+import { normalizeSubagentRuntime, sameSubagentRuntime } from "./engines/runtime.ts";
 import type { SubagentRunResult } from "./subagentRunner.ts";
 
 const log = createLogger("sidecar.agentConversation");
@@ -269,8 +270,8 @@ export class AgentConversationRuntime {
             const def = facts.agentType ? this.options.findAgent(facts.agentType) : undefined;
             const canResume =
                 def !== undefined &&
-                (def.runtime ?? "standard") === (facts.runtime ?? "standard") &&
-                (facts.runtime !== "codex" ||
+                sameSubagentRuntime(def.runtime, facts.runtime) &&
+                (normalizeSubagentRuntime(facts.runtime) !== "codex" ||
                     (await registry.withSession(id, readCodexState)) !== undefined);
             out.push({
                 subSessionId: id,
@@ -279,9 +280,9 @@ export class AgentConversationRuntime {
                 status: this.executions.get(id)?.phase ?? "idle",
                 canResume,
                 delivery:
-                    facts.runtime === "claude-code"
+                    normalizeSubagentRuntime(facts.runtime) === "claude-code"
                         ? "nextTurn"
-                        : facts.runtime === "codex"
+                        : normalizeSubagentRuntime(facts.runtime) === "codex"
                           ? "queued"
                           : ("steer" as const),
             });

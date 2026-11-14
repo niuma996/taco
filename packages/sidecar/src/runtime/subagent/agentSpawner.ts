@@ -44,9 +44,10 @@ import { findClaudeExecutable, loadClaudeAgentSdk } from "./claudeCode/claudeCod
 import { loadCodexSdk } from "./codex/codexSdk.ts";
 import { createClaudeCodeEngine } from "./engines/claudeCodeEngine.ts";
 import { createCodexEngine } from "./engines/codexEngine.ts";
+import { normalizeSubagentRuntime } from "./engines/runtime.ts";
 import { createStandardEngine } from "./engines/standardEngine.ts";
 import type { AgentEngine, NativeEngineDeps } from "./engines/types.ts";
-
+import type { SubagentExecution } from "./subagentCoordination.ts";
 import { type ResumeSubagentArgs, runSubagentResume } from "./subagentResume.ts";
 import { SubagentRunLifecycle } from "./subagentRunLifecycle.ts";
 import type { SubagentRunResult } from "./subagentRunner.ts";
@@ -56,11 +57,6 @@ import type { SubagentSessionArgs } from "./subagentTypes.ts";
 export { backgroundTimeoutMs } from "./backgroundSubagentCoordinator.ts";
 
 const log = createLogger("sidecar.agentSpawner");
-
-// Preserve the standard-engine fallback used by legacy in-process callers.
-function normalizedRuntime(runtime?: SubagentRuntime): SubagentRuntime {
-    return runtime === "claude-code" || runtime === "codex" ? runtime : "standard";
-}
 
 export interface AgentSpawnerOptions {
     readonly cwd: WorkspaceId;
@@ -253,17 +249,26 @@ export class AgentSpawner extends EventEmitter {
                 loadCodexSdkForRun: () => this.loadCodexSdkForRun(),
             }),
         };
+        const execution: SubagentExecution = {
+            execute: (args) => this.executeSubagentSession(args),
+            resume: (args) => this.runResume(args),
+            track: (parent, call, run) => this.trackInFlight(parent, call, run),
+        };
         this.spawnCoordinator = new SubagentSpawnCoordinator({
             sessionRegistry: this.sessionRegistry,
             conversation: this.conversation,
             runLifecycle: this.runLifecycle,
             engines: this.engines,
-            trackInFlight: (parent, call, run) => this.trackInFlight(parent, call, run),
-            emit: (event, payload) => this.emit(event, payload),
+            execution,
+            events: {
+                emit: (event, payload) => {
+                    this.emit(event, payload);
+                },
+            },
             getTools: () => this.getTools(),
-            executeSubagentSession: (args) => this.executeSubagentSession(args),
-            launchBackground: (args, def, description) =>
-                this.background.launch(args, def, description),
+            background: {
+                launch: (args, def, description) => this.background.launch(args, def, description),
+            },
         });
         this.background = new BackgroundSubagentCoordinator({
             sessionRegistry: this.sessionRegistry,
@@ -273,12 +278,17 @@ export class AgentSpawner extends EventEmitter {
             workHooks: this.workHooks,
             sessionsRoot: this.sessionsRoot,
             workspaceKey: this.workspaceKey,
-            executeSubagentSession: (args) => this.executeSubagentSession(args),
-            runResume: (args) => this.runResume(args),
-            trackInFlight: (parent, call, run) => this.trackInFlight(parent, call, run),
-            hasChatRun: (id) => this.chatRuns.has(id),
-            settleChatRun: (id, outcome) => this.settleChatRun(id, outcome),
-            emit: (event, payload) => this.emit(event, payload),
+            execution,
+            events: {
+                emit: (event, payload) => {
+                    this.emit(event, payload);
+                },
+                settleChat: (id, outcome) => {
+                    if (!this.chatRuns.has(id)) return false;
+                    this.settleChatRun(id, outcome);
+                    return true;
+                },
+            },
         });
         this.conversationRunner = new AgentConversationRunner({
             sessionRegistry: this.sessionRegistry,
@@ -286,14 +296,15 @@ export class AgentSpawner extends EventEmitter {
             engines: this.engines,
             background: this.background,
             runLifecycle: this.runLifecycle,
-            trackInFlight: (parent, call, run) => this.trackInFlight(parent, call, run),
+            execution,
             findAgent: (type) => this.findAgent(type),
-            runResume: (args) => this.runResume(args),
-            announce: (started) => {
-                this.chatRuns.set(started.runId, started);
-                this.emit("subagent.started", started);
+            events: {
+                announce: (started) => {
+                    this.chatRuns.set(started.runId, started);
+                    this.emit("subagent.started", started);
+                },
+                settle: (runId, outcome) => this.settleChatRun(runId, outcome),
             },
-            settle: (runId, outcome) => this.settleChatRun(runId, outcome),
         });
     }
 
@@ -478,7 +489,7 @@ export class AgentSpawner extends EventEmitter {
             };
         }
         try {
-            await this.engines[normalizedRuntime(def.runtime)].preflight(def);
+            await this.engines[normalizeSubagentRuntime(def.runtime)].preflight(def);
         } catch (error) {
             return {
                 resultText: error instanceof Error ? error.message : String(error),
@@ -525,6 +536,11 @@ export class AgentSpawner extends EventEmitter {
             };
         }
     }
+    /** Retry undelivered child results after a parent reconnect or idle transition. */
+    flushPendingSubagentResults(parentSessionId: SessionId, trackedOnly = false): Promise<void> {
+        return this.background.flush(parentSessionId, trackedOnly);
+    }
+
     async whenBackgroundRunsSettle(): Promise<void> {
         await this.background.whenBackgroundRunsSettle();
     }
@@ -764,7 +780,7 @@ export class AgentSpawner extends EventEmitter {
                 signal: args.signal,
             },
             async (controller) => {
-                const engine = this.engines[normalizedRuntime(args.runtime)];
+                const engine = this.engines[normalizeSubagentRuntime(args.runtime)];
                 const tracksWork = !managedExternally && engine.capabilities.workLane;
                 const handle = tracksWork
                     ? await this.reportResumeStart(args.childSessionId)

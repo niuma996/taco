@@ -50,12 +50,17 @@ async function fixture(t: TestContext) {
         },
         sessionsRoot,
         workspaceKey: ws.workspaceKey,
-        executeSubagentSession: async () => result,
-        runResume: async () => result,
-        trackInFlight: (_parent, _call, run) => run(),
-        hasChatRun: () => false,
-        settleChatRun: () => {},
-        emit: (event) => events.push(event),
+        execution: {
+            execute: async () => result,
+            resume: async () => result,
+            track: (_parent, _call, run) => run(),
+        },
+        events: {
+            settleChat: () => false,
+            emit: (event) => {
+                events.push(event);
+            },
+        },
     });
     t.after(async () => {
         coordinator.dispose();
@@ -73,6 +78,37 @@ test("background coordinator releases only its own retry listeners on dispose", 
     coordinator.dispose();
     assert.equal(ws.sessionRegistry.listenerCount("session.attached"), baseline.attached);
     assert.equal(ws.sessionRegistry.listenerCount("session.idle"), baseline.idle);
+});
+
+test("failed background admission releases its reserved slot without starting a timer", async (t) => {
+    const { ws, coordinator, lifecycle } = await fixture(t);
+    const timers: Array<number | undefined> = [];
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    const timeout = globalThis.setTimeout;
+    t.mock.method(globalThis, "setTimeout", ((...args: Parameters<typeof setTimeout>) => {
+        timers.push(args[1]);
+        return timeout(...args);
+    }) as typeof setTimeout);
+    ws.agentSpawner.conversation.stopAccepting();
+    assert.equal(coordinator.reserve("failed"), undefined);
+    await assert.rejects(
+        coordinator.launch(
+            {
+                parentSessionId: parent,
+                parentToolCallId: "failed",
+                childSessionId: child,
+                agentType: definition.agentType,
+                prompt: "Search",
+                tools: [],
+            },
+            definition,
+        ),
+        /shutting down/,
+    );
+    assert.deepEqual(timers, []);
+    assert.equal(lifecycle.abort(child), false);
+    assert.equal(coordinator.reserve("failed"), undefined);
+    coordinator.release("failed");
 });
 
 test("background coordinator persists the result and retries a failed parent notice", async (t) => {

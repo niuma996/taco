@@ -176,6 +176,12 @@ cwd 是文件系统层面的"项目目录"标识，pi 的现有 model（`pi-codi
 后台嵌套执行共享同一 controller，直到结算完成才释放；父会话停止操作会等待最后一个
 作用域释放。
 
+coordinator 通过窄 execution/event 接口协作，runtime 别名统一在 `engines/runtime.ts`
+解析。`SubagentNoticeDelivery` 从已提交的 Work 快照领取父会话通知；
+`SubagentPendingStore` 串行管理兼容及重试记录，并按 run 身份删除。父会话重新挂载时，
+即使 pending 尚未写入，也可从 Work 恢复未领取的结果；结算失败会保留 attempt 和正文
+供重试，直接续跑则把已通知状态与终态结果一起提交。
+
 **关键 API**
 
 ```typescript

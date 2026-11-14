@@ -1,26 +1,23 @@
 /** Coordinates background subagent settlement, durable notices, and retries. */
 
-import { mkdir } from "node:fs/promises";
+import { mkdir, readFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { asSessionId, type SessionId, type WorkspaceId } from "@taco-ai/protocol";
 import { MAX_AGENT_TURNS } from "../../agents/loadAgents.ts";
 import type { AgentDefinition, SubagentRuntime } from "../../agents/types.ts";
 import { createLogger } from "../../lib/logger.ts";
 import { writeTextAtomic } from "../../store/atomicFile.ts";
-import { tagWrap } from "../../tags/builder.ts";
-import type { BackgroundWorkHooks } from "../../work/workHooks.ts";
+import type { BackgroundWorkHooks, BackgroundWorkSettlement } from "../../work/workHooks.ts";
 import { uuidv7 } from "../pi/values.ts";
 import type { SessionRegistry } from "../session/sessionRegistry.ts";
 import type { AgentConversationRuntime } from "./agentConversationRuntime.ts";
+import { normalizeSubagentRuntime } from "./engines/runtime.ts";
 import type { AgentEngine } from "./engines/types.ts";
-import { deliverSubagentResult, deliverSubagentResultDetailed } from "./subagentDelivery.ts";
-import {
-    addPendingSubagentResult,
-    clearPendingSubagentResult,
-    readPendingSubagentResults,
-} from "./subagentPending.ts";
+import type { SubagentEvents, SubagentExecution } from "./subagentCoordination.ts";
+import { formatBackgroundNotification, SubagentNoticeDelivery } from "./subagentNoticeDelivery.ts";
+import type { PendingSubagentResult } from "./subagentPending.ts";
+import { SubagentPendingStore } from "./subagentPendingStore.ts";
 import { subagentResultPath } from "./subagentResultsDir.ts";
-import type { ResumeSubagentArgs } from "./subagentResume.ts";
 import type { SubagentRunLifecycle } from "./subagentRunLifecycle.ts";
 import type { SubagentRunResult } from "./subagentRunner.ts";
 import type { SubagentSessionArgs } from "./subagentTypes.ts";
@@ -87,22 +84,15 @@ export interface BackgroundSubagentCoordinatorOptions {
     readonly workHooks?: BackgroundWorkHooks;
     readonly sessionsRoot: string;
     readonly workspaceKey: WorkspaceId;
-    readonly executeSubagentSession: (args: SubagentSessionArgs) => Promise<SubagentRunResult>;
-    readonly runResume: (args: ResumeSubagentArgs) => Promise<SubagentRunResult>;
-    readonly trackInFlight: <T>(
-        parentSessionId: SessionId,
-        parentToolCallId: string,
-        run: () => Promise<T>,
-    ) => Promise<T>;
-    readonly hasChatRun: (runId: string) => boolean;
-    readonly settleChatRun: (runId: string, outcome: "completed" | "error" | "aborted") => void;
-    readonly emit: (event: string, payload: unknown) => void;
+    readonly execution: SubagentExecution;
+    readonly events: SubagentEvents;
 }
 
 export class BackgroundSubagentCoordinator {
     private readonly flushingParents = new Set<SessionId>();
     private readonly deferredIdleFlushes = new Set<SessionId>();
-    private readonly pendingWriteQueues = new Map<SessionId, Promise<void>>();
+    private readonly pending: SubagentPendingStore;
+    private readonly notices: SubagentNoticeDelivery;
     private readonly backgroundRuns = new Set<Promise<void>>();
     private readonly sessionRegistry: SessionRegistry;
     private readonly conversation: AgentConversationRuntime;
@@ -113,12 +103,8 @@ export class BackgroundSubagentCoordinator {
     private readonly workspaceKey: WorkspaceId;
     private readonly backgroundInFlight = new Set<string>();
     private readonly settledEmitted = new Set<string>();
-    private readonly executeSubagentSession: BackgroundSubagentCoordinatorOptions["executeSubagentSession"];
-    private readonly runResume: BackgroundSubagentCoordinatorOptions["runResume"];
-    private readonly trackInFlight: BackgroundSubagentCoordinatorOptions["trackInFlight"];
-    private readonly hasChatRun: BackgroundSubagentCoordinatorOptions["hasChatRun"];
-    private readonly settleChatRun: BackgroundSubagentCoordinatorOptions["settleChatRun"];
-    private readonly emitEvent: BackgroundSubagentCoordinatorOptions["emit"];
+    private readonly execution: SubagentExecution;
+    private readonly events: SubagentEvents;
 
     constructor(options: BackgroundSubagentCoordinatorOptions) {
         this.sessionRegistry = options.sessionRegistry;
@@ -128,12 +114,14 @@ export class BackgroundSubagentCoordinator {
         this.workHooks = options.workHooks;
         this.sessionsRoot = options.sessionsRoot;
         this.workspaceKey = options.workspaceKey;
-        this.executeSubagentSession = options.executeSubagentSession;
-        this.runResume = options.runResume;
-        this.trackInFlight = options.trackInFlight;
-        this.hasChatRun = options.hasChatRun;
-        this.settleChatRun = options.settleChatRun;
-        this.emitEvent = options.emit;
+        this.execution = options.execution;
+        this.events = options.events;
+        this.pending = new SubagentPendingStore(this.sessionRegistry);
+        this.notices = new SubagentNoticeDelivery(
+            this.sessionRegistry,
+            this.workspaceKey,
+            this.workHooks,
+        );
         this.sessionRegistry.on("session.attached", this.onAttached);
         this.sessionRegistry.on("session.idle", this.onIdle);
     }
@@ -164,11 +152,7 @@ export class BackgroundSubagentCoordinator {
     }
 
     private emit(event: string, payload: unknown): void {
-        this.emitEvent(event, payload);
-    }
-
-    private normalizedRuntime(runtime?: SubagentRuntime): SubagentRuntime {
-        return runtime === "claude-code" || runtime === "codex" ? runtime : "standard";
+        this.events.emit(event, payload);
     }
 
     async launch(
@@ -193,14 +177,6 @@ export class BackgroundSubagentCoordinator {
         const controller = new AbortController();
         // The reason tells the runner this was the run's own budget running out,
         // not a user stop: the two need different words and different advice.
-        const timer = setTimeout(
-            () =>
-                controller.abort({
-                    kind: "subagent-timeout",
-                    timeoutMinutes: Math.round(timeoutMs / 60_000),
-                }),
-            timeoutMs,
-        );
         const { parentSessionId, parentToolCallId } = sessionArgs;
         // Generated here, not inside runSubagentSession, so the receipt below
         // can report it without waiting for the child session to actually be
@@ -212,44 +188,57 @@ export class BackgroundSubagentCoordinator {
         // `spawnSubagent` before any await; this method must not add it again.
         const childSessionId = sessionArgs.childSessionId ?? asSessionId(uuidv7());
         const runId = sessionArgs.executionId ?? uuidv7();
-        this.conversation.begin(childSessionId, {
-            runId,
-            parentSessionId,
-            runtime: sessionArgs.runtime,
-            phase: "preparing",
-        });
-        // Computed at launch, not at settle: the receipt below carries it, so
-        // the model holds the exact path from the moment it delegates. That is
-        // what makes the result recoverable when the completion notice never
-        // lands (parent mid-compaction, process restarted) — the model can read
-        // the file on its own, and a missing file is itself the "still running"
-        // answer. Deriving it here also keeps the path a single source of truth
-        // shared by the receipt and the write.
         const resultPath = subagentResultPath(
             parentSessionId,
             childSessionId,
             this.sessionsRoot,
             sessionArgs.resume ? runId : undefined,
         );
-        // Registered at launch (not when the run starts) so a stop request
-        // that arrives during setup still reaches the run: the runner's
-        // pre-aborted check turns it into an immediate interruption.
-        const runScope = this.runLifecycle.acquire({
-            sessionId: childSessionId,
-            parentSessionId,
-            controller,
-        });
+        let runScope: ReturnType<SubagentRunLifecycle["acquire"]> | undefined;
+        try {
+            runScope = this.runLifecycle.acquire({
+                sessionId: childSessionId,
+                parentSessionId,
+                controller,
+            });
+            this.conversation.begin(childSessionId, {
+                runId,
+                parentSessionId,
+                runtime: sessionArgs.runtime,
+                phase: "preparing",
+            });
+        } catch (error) {
+            runScope?.release();
+            this.release(parentToolCallId);
+            throw error;
+        }
+        const scope = runScope;
+        const timer = setTimeout(
+            () =>
+                controller.abort({
+                    kind: "subagent-timeout",
+                    timeoutMinutes: Math.round(timeoutMs / 60_000),
+                }),
+            timeoutMs,
+        );
         // Recorded before the run starts: the Work must exist for the whole of
         // its run, or a crash mid-flight leaves nothing for the next start to
         // mark interrupted. Never throws; a failed record means no tracking.
-        const workId = await this.workHooks?.onLaunch({
-            workspace: this.workspaceKey,
-            parentSessionId,
-            parentToolCallId,
-            childSessionId,
-            agentType: sessionArgs.agentType,
-            ...(description !== undefined ? { description } : {}),
-        });
+        const workId = await Promise.resolve()
+            .then(() =>
+                this.workHooks?.onLaunch({
+                    workspace: this.workspaceKey,
+                    parentSessionId,
+                    parentToolCallId,
+                    childSessionId,
+                    agentType: sessionArgs.agentType,
+                    ...(description !== undefined ? { description } : {}),
+                }),
+            )
+            .catch((error: unknown) => {
+                log.error("work launch record failed", { error: String(error) });
+                return undefined;
+            });
 
         // executeSubagentSession never throws (errors are `{ isError: true }`),
         // so `.then` always fires with a result. `.catch` covers
@@ -260,8 +249,8 @@ export class BackgroundSubagentCoordinator {
         const execute = async (attemptId?: string) => {
             workAttemptId = attemptId;
             if (sessionArgs.resume)
-                return this.trackInFlight(parentSessionId, parentToolCallId, () =>
-                    this.runResume({
+                return this.execution.track(parentSessionId, parentToolCallId, () =>
+                    this.execution.resume({
                         parentSessionId,
                         parentToolCallId,
                         subSessionId: childSessionId,
@@ -275,7 +264,7 @@ export class BackgroundSubagentCoordinator {
                         executionId: runId,
                     }),
                 );
-            return this.executeSubagentSession({
+            return this.execution.execute({
                 ...sessionArgs,
                 childSessionId,
                 executionId: runId,
@@ -284,12 +273,13 @@ export class BackgroundSubagentCoordinator {
                 abortController: controller,
             });
         };
-        const execution =
+        const execution = Promise.resolve().then(() =>
             workId &&
             this.workHooks?.run &&
-            this.engines[this.normalizedRuntime(sessionArgs.runtime)].capabilities.workLane
+            this.engines[normalizeSubagentRuntime(sessionArgs.runtime)].capabilities.workLane
                 ? this.workHooks.run(workId, childSessionId, execute)
-                : execute();
+                : execute(),
+        );
         let settledResult: SubagentRunResult | undefined;
         const run = execution
             .then(async (result) => {
@@ -303,29 +293,31 @@ export class BackgroundSubagentCoordinator {
                 // The timeout and `abortSubagentRun` fire the same controller,
                 // so an aborted run reads as "aborted" here regardless of
                 // which one stopped it — a deliberate stop, not a failure.
-                const outcome =
+                let outcome =
                     controller.signal.aborted || result.aborted
                         ? ("aborted" as const)
                         : result.isError
                           ? ("error" as const)
                           : ("completed" as const);
-                const path = await this.writeBackgroundResult(resultPath, result.resultText);
-                // Result and delivery intent land in one Work snapshot before
-                // anything else observes the settle. A crash after this line
-                // still leaves a record that someone must be told.
+                let path = await this.writeBackgroundResult(resultPath, result.resultText);
+                let settlement: BackgroundWorkSettlement | undefined;
                 if (workId !== undefined) {
-                    await this.workHooks?.onSettle(workId, parentSessionId, {
-                        attemptId: workAttemptId,
-                        outcome,
-                        resultText: result.resultText,
-                        partial: result.partial === true,
-                        ...(path !== undefined ? { path } : {}),
-                    });
+                    settlement =
+                        (await this.workHooks?.onSettle(workId, parentSessionId, {
+                            attemptId: workAttemptId,
+                            outcome,
+                            resultText: result.resultText,
+                            partial: result.partial === true,
+                            ...(path !== undefined ? { path } : {}),
+                        })) || undefined;
                 }
-                // Emitted before delivery, not after: delivery starts a fresh
-                // parent run, and a consumer that keyed "this background child
-                // is still running" off the launch receipt must be able to
-                // clear that state before the new run's events arrive.
+                if (settlement?.kind === "committed") {
+                    outcome = settlement.outcome;
+                    path = settlement.path;
+                    workAttemptId = settlement.attemptId;
+                } else if (settlement?.kind === "retry") {
+                    workAttemptId = settlement.attemptId ?? workAttemptId;
+                }
                 this.emitSettled(sessionArgs.agentType, {
                     parentSessionId,
                     parentToolCallId,
@@ -333,26 +325,33 @@ export class BackgroundSubagentCoordinator {
                     runId,
                     outcome,
                 });
-                const notification = this.formatBackgroundNotification(sessionArgs.agentType, {
+                if (settlement?.kind === "superseded") return;
+                const notification = formatBackgroundNotification(sessionArgs.agentType, {
                     ...result,
                     outcome,
                     path,
                     description,
                 });
-                // Recorded before the attempt, so a delivery that never returns
-                // (process killed mid-flight) still leaves a trace for the next
-                // attach to flush. Cleared only once delivery actually lands.
                 await this.recordPending({
                     workId,
                     parentSessionId,
                     parentToolCallId,
                     subSessionId: childSessionId,
                     runId,
+                    attemptId: workAttemptId,
                     agentType: sessionArgs.agentType,
                     outcome,
                     resultPath: path,
                     description,
+                    ...(settlement?.kind === "retry"
+                        ? {
+                              settlementPending: true,
+                              partial: result.partial === true,
+                              settlementText: result.resultText,
+                          }
+                        : {}),
                 });
+                if (settlement?.kind === "retry") return;
                 // Only clear the pending record if the notice actually
                 // reached the parent. A parent that is not currently attached
                 // (process restarted, workspace disposed) returns `false`
@@ -370,12 +369,21 @@ export class BackgroundSubagentCoordinator {
                 // strictly worse than the record already made, which flush
                 // will retry delivery from.
                 try {
-                    const delivered = await this.deliverNotice(
+                    const delivered = await this.notices.deliverNotice(
                         parentSessionId,
                         notification,
                         workId,
+                        false,
+                        true,
+                        undefined,
+                        workAttemptId,
                     );
-                    if (delivered) await this.dropPending(parentSessionId, parentToolCallId);
+                    if (delivered)
+                        await this.dropPending(parentSessionId, {
+                            parentToolCallId,
+                            runId,
+                            settledAt: 0,
+                        });
                 } catch (e) {
                     log.error("background subagent delivery failed, will retry on next attach", {
                         parentSessionId,
@@ -399,46 +407,100 @@ export class BackgroundSubagentCoordinator {
                 // path to report here, only that the task did not complete
                 // normally. `emitSettled` is idempotent per parentToolCallId,
                 // so this is safe even if it already fired for this spawn.
+                let fallbackSettlement: BackgroundWorkSettlement | undefined;
                 if (workId !== undefined) {
                     // No-op when `.then` already settled it: the first terminal
                     // state wins, so this cannot rewrite a finished Work.
-                    await this.workHooks?.onSettle(workId, parentSessionId, {
-                        outcome: "error",
-                        attemptId: workAttemptId,
-                        resultText: e instanceof Error ? e.message : String(e),
-                        partial: false,
-                    });
+                    fallbackSettlement =
+                        (await this.workHooks?.onSettle(workId, parentSessionId, {
+                            outcome: "error",
+                            attemptId: workAttemptId,
+                            resultText: e instanceof Error ? e.message : String(e),
+                            partial: false,
+                        })) || undefined;
                 }
+                const fallbackOutcome =
+                    fallbackSettlement?.kind === "committed" ? fallbackSettlement.outcome : "error";
                 this.emitSettled(sessionArgs.agentType, {
                     parentSessionId,
                     parentToolCallId,
                     subSessionId: childSessionId,
                     runId,
-                    outcome: "error",
+                    outcome: fallbackOutcome,
                 });
-                const fallback = this.formatBackgroundNotification(sessionArgs.agentType, {
+                if (fallbackSettlement?.kind === "superseded") return;
+                if (fallbackSettlement?.kind === "retry") {
+                    await this.recordPending(
+                        {
+                            workId,
+                            parentSessionId,
+                            parentToolCallId,
+                            subSessionId: childSessionId,
+                            runId,
+                            attemptId: fallbackSettlement.attemptId ?? workAttemptId,
+                            agentType: sessionArgs.agentType,
+                            outcome: "error",
+                            settlementPending: true,
+                            settlementText: e instanceof Error ? e.message : String(e),
+                            description,
+                        },
+                        true,
+                    );
+                    return;
+                }
+                const fallback = formatBackgroundNotification(sessionArgs.agentType, {
                     subSessionId: childSessionId,
                     resultText: e instanceof Error ? e.message : String(e),
-                    outcome: "error",
+                    outcome: fallbackOutcome,
+                    path:
+                        fallbackSettlement?.kind === "committed"
+                            ? fallbackSettlement.path
+                            : undefined,
                     description,
                 });
                 // recordPendingIfAbsent, not recordPending: guards against
                 // this racing a `.then` recordPending call for the same
                 // parentToolCallId — that record, if it exists, is always
                 // at least as good as this fallback.
-                await this.recordPendingIfAbsent({
-                    workId,
-                    parentSessionId,
-                    parentToolCallId,
-                    subSessionId: childSessionId,
-                    runId,
-                    agentType: sessionArgs.agentType,
-                    outcome: "error",
-                    description,
-                });
+                await this.recordPending(
+                    {
+                        workId,
+                        parentSessionId,
+                        parentToolCallId,
+                        subSessionId: childSessionId,
+                        runId,
+                        attemptId:
+                            fallbackSettlement?.kind === "committed"
+                                ? fallbackSettlement.attemptId
+                                : workAttemptId,
+                        agentType: sessionArgs.agentType,
+                        outcome: fallbackOutcome,
+                        resultPath:
+                            fallbackSettlement?.kind === "committed"
+                                ? fallbackSettlement.path
+                                : undefined,
+                        description,
+                    },
+                    true,
+                );
                 try {
-                    const delivered = await this.deliverNotice(parentSessionId, fallback, workId);
-                    if (delivered) await this.dropPending(parentSessionId, parentToolCallId);
+                    const delivered = await this.notices.deliverNotice(
+                        parentSessionId,
+                        fallback,
+                        workId,
+                        false,
+                        true,
+                        undefined,
+                        fallbackSettlement?.kind === "committed"
+                            ? fallbackSettlement.attemptId
+                            : workAttemptId,
+                    );
+                    if (delivered)
+                        await this.dropPending(parentSessionId, {
+                            parentToolCallId,
+                            runId,
+                            settledAt: 0,
+                        });
                 } catch (e2) {
                     log.error("background subagent fallback delivery failed", {
                         parentSessionId,
@@ -448,19 +510,24 @@ export class BackgroundSubagentCoordinator {
                 }
             })
             .finally(async () => {
-                await this.conversation.end(childSessionId, runId, settledResult);
-                clearTimeout(timer);
-                this.release(parentToolCallId);
-                this.backgroundRuns.delete(run);
-                runScope.release();
-                // Safe here, not in emitSettled: by the time this whole chain
-                // settles, both the `.then` and `.catch` branches (the only
-                // callers) have already run to completion, so no later call
-                // for this same parentToolCallId can still be in flight to
-                // race a fresh entry into existence. Without this the set
-                // holds one string per background spawn for the process's
-                // entire lifetime.
-                this.settledEmitted.delete(`${parentToolCallId}:${runId}`);
+                try {
+                    await this.conversation.end(childSessionId, runId, settledResult);
+                } catch (error) {
+                    log.error("background conversation cleanup failed", { error: String(error) });
+                } finally {
+                    clearTimeout(timer);
+                    this.release(parentToolCallId);
+                    this.backgroundRuns.delete(run);
+                    scope.release();
+                    // Safe here, not in emitSettled: by the time this whole chain
+                    // settles, both the `.then` and `.catch` branches (the only
+                    // callers) have already run to completion, so no later call
+                    // for this same parentToolCallId can still be in flight to
+                    // race a fresh entry into existence. Without this the set
+                    // holds one string per background spawn for the process's
+                    // entire lifetime.
+                    this.settledEmitted.delete(`${parentToolCallId}:${runId}`);
+                }
             });
         // Deliberately not awaited or returned — see method doc. A rejection
         // from `run` is already handled by the `.catch` above, so there is no
@@ -500,18 +567,76 @@ export class BackgroundSubagentCoordinator {
             // Queued behind any in-flight recordPending/dropPending for this
             // parent, so this reads a consistent snapshot rather than racing
             // a concurrent settle's write.
-            const pending = await this.withPendingQueue(parentSessionId, () =>
-                this.sessionRegistry.withSession(parentSessionId, (session) =>
-                    readPendingSubagentResults(session),
-                ),
-            );
-            const entries = Object.values(pending);
+            const entries = await this.pending.read(parentSessionId);
+            const managed = await this.workHooks?.pendingParentNotices?.({
+                workspace: this.workspaceKey,
+                sessionId: parentSessionId,
+            });
+            for (const notice of managed ?? []) {
+                const pendingIndex = entries.findIndex(
+                    (entry) =>
+                        entry.workId === notice.workId && entry.attemptId === notice.attemptId,
+                );
+                if (pendingIndex >= 0) {
+                    entries[pendingIndex] = {
+                        ...entries[pendingIndex],
+                        outcome: notice.outcome,
+                        resultPath: notice.path,
+                        settlementPending: false,
+                    };
+                    continue;
+                }
+                entries.push({
+                    workId: notice.workId,
+                    attemptId: notice.attemptId,
+                    parentToolCallId: `work:${notice.workId}:${notice.attemptId}`,
+                    subSessionId: asSessionId(notice.subSessionId),
+                    agentType: notice.agentType,
+                    description: notice.description,
+                    outcome: notice.outcome,
+                    resultPath: notice.path,
+                    settledAt: 0,
+                });
+            }
             if (entries.length === 0) return;
             log.info("flushing undelivered background subagent results", {
                 parentSessionId,
                 count: entries.length,
             });
             for (const entry of entries) {
+                if (entry.settlementPending && entry.workId && this.workHooks) {
+                    const resultText =
+                        (entry.resultPath
+                            ? await readFile(entry.resultPath, "utf8").catch(() => undefined)
+                            : undefined) ?? entry.settlementText;
+                    if (resultText === undefined) continue;
+                    const recoveredPath = await this.writeBackgroundResult(
+                        entry.resultPath ??
+                            subagentResultPath(
+                                parentSessionId,
+                                entry.subSessionId,
+                                this.sessionsRoot,
+                                entry.runId,
+                            ),
+                        resultText,
+                    );
+                    const settlement = await this.workHooks.onSettle(
+                        entry.workId,
+                        parentSessionId,
+                        {
+                            attemptId: entry.attemptId,
+                            outcome: entry.outcome,
+                            resultText,
+                            partial: entry.partial === true,
+                            path: recoveredPath,
+                        },
+                    );
+                    if (settlement?.kind === "retry") continue;
+                    if (settlement?.kind === "superseded") {
+                        await this.dropPending(parentSessionId, entry);
+                        continue;
+                    }
+                }
                 const workId =
                     entry.workId ??
                     this.workHooks?.workIdFor(
@@ -519,7 +644,7 @@ export class BackgroundSubagentCoordinator {
                         entry.parentToolCallId,
                         this.workspaceKey,
                     );
-                const notification = this.formatBackgroundNotification(entry.agentType, {
+                const notification = formatBackgroundNotification(entry.agentType, {
                     subSessionId: entry.subSessionId,
                     resultText: "",
                     outcome: entry.outcome,
@@ -529,7 +654,7 @@ export class BackgroundSubagentCoordinator {
                 });
                 let delivered: boolean;
                 try {
-                    delivered = await this.deliverNotice(
+                    delivered = await this.notices.deliverNotice(
                         parentSessionId,
                         notification,
                         workId,
@@ -538,6 +663,8 @@ export class BackgroundSubagentCoordinator {
                         entry.workId === undefined
                             ? this.workHooks?.workIdFor(parentSessionId, entry.parentToolCallId)
                             : undefined,
+                        entry.attemptId,
+                        true,
                     );
                 } catch (e) {
                     // Still unreachable. Keep the entry and stop: the remaining
@@ -564,7 +691,7 @@ export class BackgroundSubagentCoordinator {
                     });
                     return;
                 }
-                await this.dropPending(parentSessionId, entry.parentToolCallId);
+                await this.dropPending(parentSessionId, entry);
             }
         } catch (e) {
             log.error("failed to flush pending subagent results", {
@@ -578,123 +705,37 @@ export class BackgroundSubagentCoordinator {
         }
     }
 
-    /**
-     * Chain `run` onto this parent's pending-record queue and wait for it.
-     *
-     * `settled` swallows rejections so one failed link cannot poison the
-     * queue for the next caller — the real result (and any throw) is still
-     * awaited and surfaced below. Only the last-scheduled link clears the map
-     * entry, or a queue still draining would lose its tail and let a later
-     * caller run in parallel with an earlier one. Same shape as
-     * `SessionRegistry.withSession`'s `detachedReads`.
-     */
-    private async withPendingQueue<T>(
+    private async recordPending(
+        entry: Omit<PendingSubagentResult, "settledAt"> & {
+            parentSessionId: SessionId;
+        },
+        onlyIfAbsent = false,
+    ): Promise<void> {
+        const { parentSessionId, ...rest } = entry;
+        try {
+            await this.pending.record(
+                parentSessionId,
+                { ...rest, settledAt: Date.now() },
+                onlyIfAbsent,
+            );
+        } catch (error) {
+            log.error("failed to record pending subagent result", {
+                parentSessionId,
+                error: String(error),
+            });
+        }
+    }
+
+    private async dropPending(
         parentSessionId: SessionId,
-        run: () => Promise<T>,
-    ): Promise<T> {
-        const previous = this.pendingWriteQueues.get(parentSessionId);
-        const chained = (previous ?? Promise.resolve()).then(run);
-        const settled = chained.then(
-            () => undefined,
-            () => undefined,
-        );
-        this.pendingWriteQueues.set(parentSessionId, settled);
+        entry: Pick<PendingSubagentResult, "parentToolCallId" | "runId" | "settledAt">,
+    ): Promise<void> {
         try {
-            return await chained;
-        } finally {
-            if (this.pendingWriteQueues.get(parentSessionId) === settled) {
-                this.pendingWriteQueues.delete(parentSessionId);
-            }
-        }
-    }
-
-    /**
-     * Note a settled child whose notice has not been delivered yet.
-     *
-     * Bookkeeping must never be the reason a result is lost, so a failure here
-     * is logged and swallowed: the delivery attempt that follows is the primary
-     * path, and this only exists to make the retry possible if it fails.
-     */
-    private async recordPending(entry: {
-        workId?: string;
-        parentSessionId: SessionId;
-        parentToolCallId: string;
-        subSessionId: SessionId;
-        runId?: string;
-        agentType: string;
-        outcome: "completed" | "error" | "aborted";
-        resultPath?: string;
-        description?: string;
-    }): Promise<void> {
-        const { parentSessionId, ...rest } = entry;
-        try {
-            await this.withPendingQueue(parentSessionId, () =>
-                this.sessionRegistry.withSession(parentSessionId, (session) =>
-                    addPendingSubagentResult(session, { ...rest, settledAt: Date.now() }),
-                ),
-            );
-        } catch (e) {
-            log.error("failed to record pending subagent result", {
-                parentSessionId,
-                parentToolCallId: entry.parentToolCallId,
-                error: e instanceof Error ? e.message : String(e),
-            });
-        }
-    }
-
-    /**
-     * Same as `recordPending`, but only writes when no record for this
-     * `parentToolCallId` exists yet.
-     *
-     * Used by the `.catch` fallback path: reaching there after
-     * `deliverSubagentResult` itself threw means the `.then` branch already
-     * wrote the real outcome before the throw, and this must not clobber it
-     * with a worse one. The read-then-write is inside `withPendingQueue` so
-     * it cannot race the `.then` branch's own `recordPending` for the same
-     * parent.
-     */
-    private async recordPendingIfAbsent(entry: {
-        workId?: string;
-        parentSessionId: SessionId;
-        parentToolCallId: string;
-        subSessionId: SessionId;
-        runId?: string;
-        agentType: string;
-        outcome: "completed" | "error" | "aborted";
-        resultPath?: string;
-        description?: string;
-    }): Promise<void> {
-        const { parentSessionId, ...rest } = entry;
-        try {
-            await this.withPendingQueue(parentSessionId, () =>
-                this.sessionRegistry.withSession(parentSessionId, async (session) => {
-                    const existing = await readPendingSubagentResults(session);
-                    if (entry.parentToolCallId in existing) return;
-                    await addPendingSubagentResult(session, { ...rest, settledAt: Date.now() });
-                }),
-            );
-        } catch (e) {
-            log.error("failed to record pending subagent result", {
-                parentSessionId,
-                parentToolCallId: entry.parentToolCallId,
-                error: e instanceof Error ? e.message : String(e),
-            });
-        }
-    }
-
-    /** Clear a pending notice after it was delivered. Failures are logged, not raised. */
-    private async dropPending(parentSessionId: SessionId, parentToolCallId: string): Promise<void> {
-        try {
-            await this.withPendingQueue(parentSessionId, () =>
-                this.sessionRegistry.withSession(parentSessionId, (session) =>
-                    clearPendingSubagentResult(session, parentToolCallId),
-                ),
-            );
-        } catch (e) {
+            await this.pending.remove(parentSessionId, entry);
+        } catch (error) {
             log.error("failed to clear pending subagent result", {
                 parentSessionId,
-                parentToolCallId,
-                error: e instanceof Error ? e.message : String(e),
+                error: String(error),
             });
         }
     }
@@ -724,10 +765,7 @@ export class BackgroundSubagentCoordinator {
         const chatRunId = args.parentToolCallId.startsWith("chat:")
             ? args.parentToolCallId.slice(5)
             : undefined;
-        if (chatRunId && this.hasChatRun(chatRunId)) {
-            this.settleChatRun(chatRunId, args.outcome);
-            return;
-        }
+        if (chatRunId && this.events.settleChat(chatRunId, args.outcome)) return;
         this.emit("subagent.settled", {
             parentSessionId: args.parentSessionId,
             parentToolCallId: args.parentToolCallId,
@@ -765,147 +803,7 @@ export class BackgroundSubagentCoordinator {
         }
     }
 
-    /**
-     * Hand a settled notice to the parent and report whether it landed.
-     *
-     * With a Work attached, the notice run's reply is held back from the
-     * channel and captured as the message to send. That is what makes the
-     * outcome reliable: the reply is stored with the Work and delivered by
-     * the Work deliverer, instead of leaving through a push that only logs a
-     * failure.
-     */
-    private async deliverNotice(
-        parentSessionId: SessionId,
-        notification: string,
-        workId: string | undefined,
-        trackedOnly = false,
-        tracked = true,
-        legacyWorkId?: string,
-    ): Promise<boolean> {
-        const hooks = this.workHooks;
-        if (!hooks || workId === undefined)
-            return deliverSubagentResult(this.sessionRegistry, parentSessionId, notification);
-        const decision = await hooks.beginParentNotice(
-            workId,
-            tracked,
-            { workspace: this.workspaceKey, sessionId: parentSessionId },
-            legacyWorkId,
-        );
-        if (decision.mode === "skip") return !decision.retry;
-        if (decision.mode === "legacy") {
-            if (trackedOnly) return false;
-            return deliverSubagentResult(this.sessionRegistry, parentSessionId, notification);
-        }
-        workId = decision.workId ?? workId;
-
-        let held = false;
-        let ran = false;
-        let reply: string | undefined;
-        const release = (): void => {
-            if (!held) return;
-            held = false;
-            hooks.onNoticeRunRelease(workId, parentSessionId);
-        };
-        try {
-            const run = () =>
-                deliverSubagentResultDetailed(this.sessionRegistry, parentSessionId, notification, {
-                    enqueueWhenBusy: false,
-                    beforePrompt: () => {
-                        hooks.onNoticeRunStart(workId, parentSessionId, this.workspaceKey);
-                        held = true;
-                    },
-                    afterPrompt: (text, didRun) => {
-                        ran = didRun;
-                        reply = text;
-                        if (!didRun) release();
-                    },
-                });
-            const outcome = hooks.runParentNotice
-                ? await hooks.runParentNotice(workId, decision.claimId, parentSessionId, run)
-                : await run();
-            return outcome === "replied";
-        } finally {
-            try {
-                await hooks.endParentNotice(workId, decision.claimId, {
-                    status: ran ? "completed" : "not_run",
-                    ...(reply === undefined ? {} : { reply }),
-                });
-            } finally {
-                release();
-            }
-        }
-    }
-
-    /**
-     * Envelope injected into the parent session once a background subagent
-     * settles.
-     *
-     * Carries a *pointer*, not the answer: the result text is on disk, so the
-     * parent's context pays for a path instead of an arbitrarily long transcript
-     * it may never need. The `subagent_result` tag is registered `hidden`, so
-     * none of this reaches the user's chat — which is why the body can afford to
-     * spell out what the model should do next, including asking it to open with
-     * a sentence acknowledging the result. Without that, the conversation would
-     * jump straight from unrelated work to a background finding with no bridge.
-     */
-    private formatBackgroundNotification(
-        agentType: string,
-        result: {
-            subSessionId: SessionId;
-            resultText: string;
-            outcome: "completed" | "error" | "aborted";
-            path?: string;
-            /**
-             * The task label from the original `agent` call. Repeated here
-             * because the notice can land many turns later: the conversation has
-             * moved on, and a compaction in between may have collapsed the tool
-             * call that would otherwise say what this subagent was for.
-             */
-            description?: string;
-            /**
-             * Re-delivery of a notice the parent missed while unreachable. Said
-             * out loud because the model may have already told the user this
-             * subagent was still running, and it needs to correct that rather
-             * than present stale news as fresh.
-             */
-            late?: boolean;
-        },
-    ): string {
-        const status = result.outcome;
-        const located = result.path
-            ? `Its full output is saved at: ${result.path}\nThat text is NOT included here — the file is the only copy.`
-            : "Its output could not be saved to disk, so the detail is unavailable. Say so rather than guessing at it.";
-        const guidance =
-            result.outcome === "aborted"
-                ? "This task was stopped deliberately — by the user or by its own time limit. Tell the user in one sentence that it was stopped, and do not restart or respawn it unless they ask."
-                : result.outcome === "error"
-                  ? "Read that file before replying: it holds the error and, if the subagent got partway, how far it got and whether it can be resumed. Then tell the user in one sentence that this background task failed, and propose a next step based on what you read. Do not present its output as a result."
-                  : "Read that file with the read tool now, before you reply. Then tell the user, in your own words, that this background task came back and what it found — do not just hand them the path, and do not claim it is still running. If what you read changes what you were doing, say so.";
-        const lateness = result.late
-            ? " This notice is late — it could not be delivered when the subagent actually" +
-              " finished, so if you previously told the user it was still running, correct that."
-            : "";
-        // In the body, not an attribute: `tagWrap` escapes attribute values but
-        // not the body, and this is the one part of the envelope that is
-        // model-authored text. The body is safe because the balanced parser does
-        // not nest — a forged tag inside it stays inside it.
-        const task = result.description ? `\nIts task was: ${result.description}` : "";
-        return tagWrap(
-            "subagent_result",
-            `The ${agentType} subagent you launched in the background has finished (outcome: ${status}).` +
-                `${lateness}${task}\n` +
-                `${located}\n\n` +
-                guidance,
-            {
-                "agent-type": agentType,
-                session: result.subSessionId,
-                outcome: status,
-                ...(result.path ? { path: result.path } : {}),
-                ...(result.late ? { late: "true" } : {}),
-            },
-        );
-    }
-
+    /** Drain launched executions and their result delivery/cleanup chains. */
     async whenBackgroundRunsSettle(): Promise<void> {
         while (this.backgroundRuns.size > 0) {
             await Promise.allSettled([...this.backgroundRuns]);

@@ -8,7 +8,7 @@
  * technique agentSpawner.resume.test.ts uses for runResume):
  *  - immediate return with a session id, before the stubbed run resolves
  *  - the deferred run's result reaches deliverSubagentResult once it settles
- *  - concurrency gate rejects a launch when backgroundInFlight is full,
+ *  - concurrency gate rejects a ninth unresolved background launch,
  *    without creating a child session
  *  - timeout aborts the child's signal once the wall-clock budget elapses
  *
@@ -23,7 +23,7 @@ import { readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
-import { asSessionId, type SessionId } from "@taco-ai/protocol";
+import { asSessionId, type SessionId, type SubagentSettledPayload } from "@taco-ai/protocol";
 import type { AgentDefinition, SubagentSpawnContext } from "../../src/agents/types.ts";
 import type { ImWorkspacePolicy } from "../../src/channels/imWorkspacePolicy.ts";
 import { harnessContext } from "../../src/lib/harnessContext.ts";
@@ -240,13 +240,34 @@ describe("AgentSpawner.spawnSubagent — background", () => {
     });
 
     it("rejects a background launch when the concurrency limit is already full", async () => {
-        const spawner = (ws.agentSpawner as unknown as { background: unknown })
-            .background as unknown as { backgroundInFlight: Set<string> };
-        const filler = Array.from({ length: 8 }, (_, i) => `filler-${i}`);
-        for (const id of filler) spawner.backgroundInFlight.add(id);
+        const releaseRuns: Array<() => void> = [];
+        const restoreExecute = stubExecute(
+            (args) =>
+                new Promise((resolve) => {
+                    releaseRuns.push(() =>
+                        resolve({
+                            subSessionId: args.childSessionId ?? asSessionId("unused"),
+                            resultText: "done",
+                            isError: false,
+                        }),
+                    );
+                }),
+        );
         try {
             const parent = "bg-parent-3";
             await seedSessionBackground(parent);
+            for (let i = 0; i < 8; i++) {
+                const receipt = await ws.agentSpawner.spawnSubagent({
+                    parentSessionId: asSessionId(parent),
+                    parentToolCallId: `tc-limit-${i}`,
+                    agentType: "explorer",
+                    prompt: "keep running",
+                    background: true,
+                });
+                assert.equal(receipt.isError, false);
+                assert.ok(receipt.subSessionId);
+            }
+            assert.equal(releaseRuns.length, 8, "eight actual runs must remain unresolved");
             const res = await ws.agentSpawner.spawnSubagent({
                 parentSessionId: asSessionId(parent),
                 parentToolCallId: "tc-bg-3",
@@ -258,35 +279,52 @@ describe("AgentSpawner.spawnSubagent — background", () => {
             assert.equal(res.background, true);
             assert.match(res.resultText, /too many background subagents/);
             assert.equal(res.subSessionId, undefined, "a rejected launch must not name a session");
+            assert.equal(releaseRuns.length, 8, "the rejected launch must not execute a child");
         } finally {
-            for (const id of filler) spawner.backgroundInFlight.delete(id);
+            for (const release of releaseRuns) release();
+            await ws.agentSpawner.whenBackgroundRunsSettle();
+            restoreExecute();
         }
     });
 
     it("rejects a duplicate background spawn for the same parentToolCallId", async () => {
-        const spawner = (ws.agentSpawner as unknown as { background: unknown })
-            .background as unknown as { backgroundInFlight: Set<string> };
-        spawner.backgroundInFlight.add("tc-dup");
+        const releaseRuns: Array<() => void> = [];
+        const restoreExecute = stubExecute(
+            (args) =>
+                new Promise((resolve) => {
+                    releaseRuns.push(() =>
+                        resolve({
+                            subSessionId: args.childSessionId ?? asSessionId("unused"),
+                            resultText: "done",
+                            isError: false,
+                        }),
+                    );
+                }),
+        );
         try {
             const parent = "bg-parent-dup";
             await seedSessionBackground(parent);
-            const res = await ws.agentSpawner.spawnSubagent({
+            const args = {
                 parentSessionId: asSessionId(parent),
                 parentToolCallId: "tc-dup",
                 agentType: "explorer",
                 prompt: "do something",
                 background: true,
-            });
+            };
+            const first = await ws.agentSpawner.spawnSubagent(args);
+            assert.equal(first.isError, false);
+            assert.ok(first.subSessionId);
+            assert.equal(releaseRuns.length, 1, "the first run must remain unresolved");
+            const res = await ws.agentSpawner.spawnSubagent(args);
             assert.equal(res.isError, true);
             assert.equal(res.background, true);
             assert.match(res.resultText, /already running/);
-            assert.equal(
-                spawner.backgroundInFlight.size,
-                1,
-                "duplicate must not add a second slot",
-            );
+            assert.equal(releaseRuns.length, 1, "duplicate must not execute a second child");
+            assert.equal(res.subSessionId, undefined);
         } finally {
-            spawner.backgroundInFlight.delete("tc-dup");
+            for (const release of releaseRuns) release();
+            await ws.agentSpawner.whenBackgroundRunsSettle();
+            restoreExecute();
         }
     });
 
@@ -349,11 +387,7 @@ describe("AgentSpawner.spawnSubagent — background", () => {
             },
         });
         try {
-            await (
-                (ws.agentSpawner as unknown as { background: unknown }).background as unknown as {
-                    flush: (id: unknown) => Promise<void>;
-                }
-            ).flush(asSessionId(parent));
+            await ws.agentSpawner.flushPendingSubagentResults(asSessionId(parent));
             assert.ok(delivered, "flush must re-deliver the stranded notice");
             assert.match(delivered ?? "", /late="true"/);
             assert.match(delivered ?? "", /This notice is late/);
@@ -568,14 +602,7 @@ describe("AgentSpawner.spawnSubagent — background", () => {
         }
     });
 
-    // Up to MAX_CONCURRENT_BACKGROUND_SUBAGENTS children of the same parent
-    // can settle within the same tick. End-to-end regression: SessionRegistry
-    // .withSession also serializes detached reads for the same session id
-    // (see sessionRegistry.ts), so this passing does not by itself prove
-    // AgentSpawner.withPendingQueue is pulling weight — see
-    // "withPendingQueue serializes two overlapping writers" below for that.
-    // This test exists to catch a regression in the full call path, should
-    // that other layer's guarantee ever narrow.
+    // Concurrent child completions must preserve every undelivered notice.
     it("keeps both records when two children of the same parent settle concurrently", async () => {
         const registry = ws.sessionRegistry as unknown as {
             getAttached: (id: unknown) => unknown;
@@ -632,66 +659,63 @@ describe("AgentSpawner.spawnSubagent — background", () => {
         }
     });
 
-    it("withPendingQueue serializes two overlapping writers for the same parent", async () => {
-        const spawner = (ws.agentSpawner as unknown as { background: unknown })
-            .background as unknown as {
-            withPendingQueue: <T>(parentSessionId: SessionId, run: () => Promise<T>) => Promise<T>;
-        };
-        const parent = asSessionId("bg-parent-queue-unit");
-        const order: string[] = [];
-        let releaseFirst: (() => void) | undefined;
-        const first = spawner.withPendingQueue(parent, async () => {
-            order.push("first-start");
-            await new Promise<void>((resolve) => {
-                releaseFirst = resolve;
-            });
-            order.push("first-end");
-        });
-        const second = spawner.withPendingQueue(parent, async () => {
-            order.push("second-start");
-        });
-        // Give the second call every chance to run before the first
-        // releases — if the queue were a no-op, "second-start" would land
-        // between "first-start" and "first-end".
-        await new Promise((resolve) => setImmediate(resolve));
-        assert.deepEqual(order, ["first-start"], "second must not start before first finishes");
-        releaseFirst?.();
-        await Promise.all([first, second]);
-        assert.deepEqual(order, ["first-start", "first-end", "second-start"]);
-    });
-
-    // settledEmitted exists only to dedupe the .then/.catch double-emit for
-    // one spawn's own settle sequence; retaining entries past that would
-    // grow this set by one string per background spawn for the process's
-    // entire lifetime.
-    it("removes the parentToolCallId from settledEmitted once its settle sequence ends", async () => {
+    it("emits settled once per run and lets a later run reuse the tool-call slot", async () => {
         const restoreExecute = stubExecute(async (args) => ({
             subSessionId: args.childSessionId ?? asSessionId("unused"),
             resultText: "done",
             isError: false,
         }));
-        const parent = "bg-parent-settled-emitted-cleanup";
+        const parent = asSessionId("bg-parent-settled-reuse");
+        const settled: SubagentSettledPayload[] = [];
+        const onSettled = (event: SubagentSettledPayload) => {
+            settled.push(event);
+            if (settled.length === 1) throw new Error("listener exploded");
+        };
+        ws.agentSpawner.on("subagent.settled", onSettled);
         try {
             await seedSessionBackground(parent);
-            await ws.agentSpawner.spawnSubagent({
-                parentSessionId: asSessionId(parent),
+            const args = {
+                parentSessionId: parent,
                 parentToolCallId: "tc-cleanup",
                 agentType: "explorer",
                 prompt: "do something",
                 background: true,
-            });
+            };
+            const first = await ws.agentSpawner.spawnSubagent(args);
+            assert.equal(first.isError, false);
+            assert.ok(first.subSessionId);
             await ws.agentSpawner.whenBackgroundRunsSettle();
-            const settledEmitted = (
-                (ws.agentSpawner as unknown as { background: unknown }).background as unknown as {
-                    settledEmitted: Set<string>;
-                }
-            ).settledEmitted;
+            assert.equal(settled.length, 1, "the listener failure must not emit a second event");
+            const second = await ws.agentSpawner.spawnSubagent(args);
+            assert.equal(second.isError, false, "the settled run must release its slot");
+            assert.ok(second.subSessionId);
+            assert.notEqual(second.subSessionId, first.subSessionId);
+            await ws.agentSpawner.whenBackgroundRunsSettle();
+            assert.equal(settled.length, 2, "the reused slot must emit for its new run");
+            assert.deepEqual(
+                settled.map(({ parentSessionId, parentToolCallId, subSessionId, outcome }) => ({
+                    parentSessionId,
+                    parentToolCallId,
+                    subSessionId,
+                    outcome,
+                })),
+                [first, second].map(({ subSessionId }) => ({
+                    parentSessionId: parent,
+                    parentToolCallId: "tc-cleanup",
+                    subSessionId,
+                    outcome: "completed",
+                })),
+            );
+            assert.ok(settled[0]?.runId);
+            assert.ok(settled[1]?.runId);
             assert.equal(
-                settledEmitted.has("tc-cleanup"),
-                false,
-                "entry must be removed once the settle chain's .finally runs",
+                new Set(settled.map(({ runId }) => runId)).size,
+                2,
+                "each settled event must identify a distinct run",
             );
         } finally {
+            await ws.agentSpawner.whenBackgroundRunsSettle();
+            ws.agentSpawner.off("subagent.settled", onSettled);
             restoreExecute();
         }
     });

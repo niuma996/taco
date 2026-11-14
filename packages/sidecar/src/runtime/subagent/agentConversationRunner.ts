@@ -1,4 +1,3 @@
-import type { SessionId } from "@taco-ai/protocol";
 import type { AgentChatArgs, AgentChatResult } from "../../agents/agentConversationTypes.ts";
 import type { AgentDefinition, SubagentRuntime } from "../../agents/types.ts";
 import { uuidv7 } from "../pi/values.ts";
@@ -7,40 +6,26 @@ import type { SessionRegistry } from "../session/sessionRegistry.ts";
 import type { AgentMessageRecord } from "./agentConversation.ts";
 import { agentMessageEnvelope } from "./agentConversation.ts";
 import type { AgentConversationRuntime } from "./agentConversationRuntime.ts";
-import type { BackgroundSubagentCoordinator } from "./backgroundSubagentCoordinator.ts";
 import { readClaudeCodeState } from "./claudeCode/claudeCodeState.ts";
 import { readCodexState } from "./codex/codexState.ts";
+import { normalizeSubagentRuntime, sameSubagentRuntime } from "./engines/runtime.ts";
 import type { AgentEngine } from "./engines/types.ts";
-import type { ResumeSubagentArgs } from "./subagentResume.ts";
+import type {
+    BackgroundSubagentLauncher,
+    SubagentChatEvents,
+    SubagentExecution,
+} from "./subagentCoordination.ts";
 import type { SubagentRunLifecycle } from "./subagentRunLifecycle.ts";
-import type { SubagentRunResult } from "./subagentRunner.ts";
 
 export interface AgentConversationRunnerOptions {
     readonly sessionRegistry: SessionRegistry;
     readonly conversation: AgentConversationRuntime;
     readonly engines: Record<SubagentRuntime, AgentEngine>;
-    readonly background: Pick<BackgroundSubagentCoordinator, "launch" | "reserve">;
+    readonly background: BackgroundSubagentLauncher;
     readonly runLifecycle: SubagentRunLifecycle;
-    readonly trackInFlight: <T>(
-        parentSessionId: SessionId,
-        parentToolCallId: string,
-        run: () => Promise<T>,
-    ) => Promise<T>;
+    readonly execution: Pick<SubagentExecution, "resume" | "track">;
     readonly findAgent: (type: string) => AgentDefinition | undefined;
-    readonly announce: (started: {
-        parentSessionId: SessionId;
-        parentToolCallId: string;
-        subSessionId: SessionId;
-        agentType: string;
-        runId: string;
-        messageId: string;
-    }) => void;
-    readonly runResume: (args: ResumeSubagentArgs) => Promise<SubagentRunResult>;
-    readonly settle: (runId: string, outcome: "completed" | "error" | "aborted") => void;
-}
-
-function normalizedRuntime(runtime?: SubagentRuntime): SubagentRuntime {
-    return runtime === "claude-code" || runtime === "codex" ? runtime : "standard";
+    readonly events: SubagentChatEvents;
 }
 
 export class AgentConversationRunner {
@@ -56,13 +41,13 @@ export class AgentConversationRunner {
             throw new Error(
                 "The original agent profile is unavailable; create a new agent explicitly.",
             );
-        if ((facts.runtime ?? "standard") !== (def.runtime ?? "standard")) {
+        if (!sameSubagentRuntime(facts.runtime, def.runtime)) {
             throw new Error(
                 "The agent profile changed execution engine; the existing conversation cannot switch engines.",
             );
         }
         if (
-            facts.runtime === "claude-code" &&
+            normalizeSubagentRuntime(facts.runtime) === "claude-code" &&
             !(await this.options.sessionRegistry.withSession(
                 message.targetSessionId,
                 readClaudeCodeState,
@@ -72,7 +57,7 @@ export class AgentConversationRunner {
                 "This Claude Code session cannot be resumed because it has no saved native session. Create a fresh agent explicitly.",
             );
         }
-        if (facts.runtime === "codex") {
+        if (normalizeSubagentRuntime(facts.runtime) === "codex") {
             if (
                 !(await this.options.sessionRegistry.withSession(
                     message.targetSessionId,
@@ -95,13 +80,13 @@ export class AgentConversationRunner {
             messageId: message.messageId,
         };
         const announce = () => {
-            this.options.announce(started);
+            this.options.events.announce(started);
         };
         const prompt = message.queueEntryId
             ? `Process the queued agent message ${message.messageId}. Its content is in the native message queue.`
             : agentMessageEnvelope(message);
         const delivery =
-            this.options.engines[normalizedRuntime(facts.runtime)].capabilities.delivery;
+            this.options.engines[normalizeSubagentRuntime(facts.runtime)].capabilities.delivery;
         const receipt: AgentChatResult = {
             subSessionId: message.targetSessionId,
             messageId: message.messageId,
@@ -121,28 +106,34 @@ export class AgentConversationRunner {
             const parentToolCallId = `chat:${runId}`;
             if (this.options.background.reserve(parentToolCallId) !== undefined)
                 throw new Error("Too many background subagents already running.");
-            announce();
-            const launched = await this.options.background.launch(
-                {
-                    parentSessionId: message.ownerParentSessionId,
-                    parentToolCallId,
-                    childSessionId: message.targetSessionId,
-                    executionId: runId,
-                    resume: true,
-                    agentType: def.agentType,
-                    prompt,
-                    tools: [],
-                    runtime: facts.runtime,
-                    budget: {
-                        turnsUsed: 0,
-                        startedAt: Date.now(),
-                        ...(def.maxTurns !== undefined ? { maxTurns: def.maxTurns } : {}),
+            try {
+                announce();
+                const launched = await this.options.background.launch(
+                    {
+                        parentSessionId: message.ownerParentSessionId,
+                        parentToolCallId,
+                        childSessionId: message.targetSessionId,
+                        executionId: runId,
+                        resume: true,
+                        agentType: def.agentType,
+                        prompt,
+                        tools: [],
+                        runtime: facts.runtime,
+                        budget: {
+                            turnsUsed: 0,
+                            startedAt: Date.now(),
+                            ...(def.maxTurns !== undefined ? { maxTurns: def.maxTurns } : {}),
+                        },
                     },
-                },
-                def,
-                message.prompt.slice(0, 160),
-            );
-            return { result: { ...receipt, resultPath: launched.resultPath } };
+                    def,
+                    message.prompt.slice(0, 160),
+                );
+                return { result: { ...receipt, resultPath: launched.resultPath } };
+            } catch (error) {
+                this.options.background.release(parentToolCallId);
+                this.options.events.settle(runId, "error");
+                throw error;
+            }
         }
         const executionScope = this.options.runLifecycle.acquire({
             sessionId: message.targetSessionId,
@@ -150,16 +141,22 @@ export class AgentConversationRunner {
             signal: args.signal,
         });
         const executionController = executionScope.controller;
-        announce();
-        this.options.conversation.begin(message.targetSessionId, {
-            runId,
-            parentSessionId: message.ownerParentSessionId,
-            runtime: facts.runtime,
-            phase: "preparing",
-        });
-        const completion = this.options
-            .trackInFlight(message.ownerParentSessionId, args.parentToolCallId, () =>
-                this.options.runResume({
+        try {
+            announce();
+            this.options.conversation.begin(message.targetSessionId, {
+                runId,
+                parentSessionId: message.ownerParentSessionId,
+                runtime: facts.runtime,
+                phase: "preparing",
+            });
+        } catch (error) {
+            executionScope.release();
+            this.options.events.settle(runId, "error");
+            throw error;
+        }
+        const completion = this.options.execution
+            .track(message.ownerParentSessionId, args.parentToolCallId, () =>
+                this.options.execution.resume({
                     parentSessionId: message.ownerParentSessionId,
                     parentToolCallId: args.parentToolCallId,
                     subSessionId: message.targetSessionId,
@@ -174,7 +171,7 @@ export class AgentConversationRunner {
             )
             .then(
                 async (result) => {
-                    this.options.settle(
+                    this.options.events.settle(
                         runId,
                         result.aborted ? "aborted" : result.isError ? "error" : "completed",
                     );
@@ -196,7 +193,7 @@ export class AgentConversationRunner {
                         resultText: String(error),
                         isError: true,
                     };
-                    this.options.settle(runId, "error");
+                    this.options.events.settle(runId, "error");
                     await this.options.conversation.end(message.targetSessionId, runId, result);
                     return {
                         ...receipt,
