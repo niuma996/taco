@@ -1219,6 +1219,14 @@ export class WorkspaceRuntime extends EventEmitter {
         return await this.sessionRegistry.listSessions();
     }
 
+    async createSession(sessionId: SessionId): Promise<JsonlSessionMetadata> {
+        return await this.sessionRegistry.createSession(sessionId, undefined, async () => {});
+    }
+
+    async deleteEmptySession(sessionId: SessionId): Promise<boolean> {
+        return await this.sessionRegistry.deleteEmptySession(sessionId);
+    }
+
     invalidateListCache(): void {
         this.sessionRegistry.invalidateListCache();
     }

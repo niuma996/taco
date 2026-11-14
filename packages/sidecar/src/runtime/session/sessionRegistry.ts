@@ -550,14 +550,15 @@ export class SessionRegistry extends EventEmitter {
         id: SessionId,
         parentSessionId: SessionId | undefined,
         writeFacts: (session: Session) => Promise<void>,
-    ): Promise<void> {
-        await this.withSlot(id, async () => {
+    ): Promise<JsonlSessionMetadata> {
+        const metadata = await this.withSlot(id, async () => {
             const session = await this.repo.create(
                 { id, cwd: this.sessionCwd, parentSessionId },
                 harnessContext,
             );
             try {
                 await writeFacts(session);
+                return session.metadata;
             } finally {
                 // The handle owns pi's slot; a failed facts write must not
                 // leave it open for the rest of the process.
@@ -565,6 +566,23 @@ export class SessionRegistry extends EventEmitter {
             }
         });
         this.invalidateListCache();
+        return metadata;
+    }
+
+    /** Roll back an empty create without publishing a user-visible deletion. */
+    async deleteEmptySession(sessionId: SessionId): Promise<boolean> {
+        return this.withSlot(sessionId, async () => {
+            await this.detachLocked(sessionId);
+            // The failed turn may have written messages since the metadata cache warmed.
+            this.invalidateListCache();
+            const meta = (await this.listSessions()).find((entry) => entry.id === sessionId);
+            if (!meta) return false;
+            const { activityAt, messageCount } = await readSessionMetadataFromDisk(meta.path);
+            if (activityAt !== undefined || messageCount > 0) return false;
+            await this.repo.delete(meta, harnessContext);
+            this.invalidateListCache();
+            return true;
+        });
     }
 
     /**

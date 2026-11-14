@@ -689,6 +689,7 @@ describe("dispatcher.integration", () => {
             }) => Promise<unknown>;
             delete: (meta: { id: SessionId }) => Promise<void>;
         };
+        createSession(id: SessionId): Promise<WorkspaceStub["meta"]>;
         defaultModel: { provider: string; id: string };
         sessionCwd: string;
         invalidateListCache(): void;
@@ -730,6 +731,15 @@ describe("dispatcher.integration", () => {
                 };
                 attached.set(id, stub);
                 return stub;
+            },
+            async createSession(id) {
+                const created = (await this.repo.create({ id, cwd: this.sessionCwd })) as {
+                    metadata: WorkspaceStub["meta"];
+                    close(): Promise<void>;
+                };
+                await created.close();
+                this.invalidateListCache();
+                return created.metadata;
             },
             async detach(id) {
                 attached.delete(id);

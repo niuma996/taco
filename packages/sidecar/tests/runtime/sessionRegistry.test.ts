@@ -648,6 +648,70 @@ describe("SessionRegistry", () => {
         assert.ok(after, "queue must still serve reads after one rejects");
     });
 
+    it("rollback waits for creation and does not emit session.deleted", async () => {
+        const sr = makeRegistry();
+        const id = asSessionId(uuidv7());
+        let entered!: () => void;
+        const ready = new Promise<void>((resolve) => {
+            entered = resolve;
+        });
+        let release!: () => void;
+        const gate = new Promise<void>((resolve) => {
+            release = resolve;
+        });
+        const events: string[] = [];
+        sr.on("session.deleted", () => events.push("deleted"));
+        const created = sr.createSession(id, undefined, async () => {
+            entered();
+            await gate;
+        });
+        await ready;
+        const deletion = sr.deleteEmptySession(id);
+        release();
+        await created;
+        assert.equal(await deletion, true);
+        assert.deepEqual(events, []);
+    });
+
+    it("rollback keeps the transcript when the disk probe fails", async () => {
+        const sr = makeRegistry();
+        const id = asSessionId(uuidv7());
+        const meta = await sr.createSession(id, undefined, async () => {});
+        rmSync(meta.path);
+        // Keep the metadata visible while the underlying file cannot be opened.
+        sr.listSessions = async () => [meta];
+        await assert.rejects(sr.deleteEmptySession(id), /ENOENT/);
+    });
+
+    it("rollback waits for an admitted read and preserves the message it writes", async () => {
+        const sr = makeRegistry();
+        const id = asSessionId(uuidv7());
+        await sr.createSession(id, undefined, async () => {});
+        let entered!: () => void;
+        const ready = new Promise<void>((resolve) => {
+            entered = resolve;
+        });
+        let release!: () => void;
+        const gate = new Promise<void>((resolve) => {
+            release = resolve;
+        });
+        const writing = sr.withSession(id, async (session) => {
+            entered();
+            await gate;
+            const branch = await session.createBranch("main", null, harnessContext);
+            await branch.appendMessage(
+                { role: "user", content: "keep", timestamp: 1 },
+                harnessContext,
+            );
+        });
+        await ready;
+        const deletion = sr.deleteEmptySession(id);
+        release();
+        await writing;
+        assert.equal(await deletion, false);
+        assert.equal((await sr.getHistory(id)).entries.length, 1);
+    });
+
     // An attach opens pi's handle before the session becomes visible in
     // `attached`, and a spawn announces its child before either. The desktop
     // pulls that child's history as soon as it has the id, so the read lands
@@ -940,6 +1004,56 @@ describe("SessionRegistry", () => {
         // Before the fix the handle stayed open and every later read threw
         // "Session is already open".
         assert.equal((await sr.getHistory(asSessionId(id))).entries.length, 0);
+    });
+
+    it("returns the created metadata through the registry lifecycle", async () => {
+        const sr = makeRegistry();
+        const id = uuidv7();
+
+        const meta = await sr.createSession(asSessionId(id), undefined, async () => {});
+
+        assert.equal(meta.id, id);
+        assert.equal(meta.cwd, cwd);
+        assert.equal(
+            (await sr.listSessions()).some((entry) => entry.id === id),
+            true,
+        );
+    });
+
+    it("deletes an empty session through the same slot as reads and attaches", async () => {
+        const sr = makeRegistry();
+        const id = uuidv7();
+        await sr.createSession(asSessionId(id), undefined, async () => {});
+
+        sr.invalidateListCache();
+        assert.equal(await sr.deleteEmptySession(asSessionId(id)), true);
+        assert.equal(
+            (await sr.listSessions()).some((entry) => entry.id === id),
+            false,
+        );
+        assert.equal(await sr.deleteEmptySession(asSessionId(id)), false);
+    });
+
+    it("keeps a session with persisted activity during empty-session rollback", async () => {
+        const sr = makeRegistry();
+        const id = uuidv7();
+        const meta = await sr.createSession(asSessionId(id), undefined, async (session) => {
+            const branch = await session.createBranch("main", null, harnessContext);
+            await branch.appendMessage(
+                {
+                    role: "user",
+                    content: [{ type: "text", text: "already persisted" }],
+                    timestamp: 123,
+                },
+                harnessContext,
+            );
+        });
+
+        assert.equal(await sr.deleteEmptySession(asSessionId(id)), false);
+        assert.equal(
+            (await sr.listSessions()).some((entry) => entry.id === meta.id),
+            true,
+        );
     });
 
     // An attach opens pi's handle before it becomes visible in `attached`.

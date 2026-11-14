@@ -1,8 +1,7 @@
 /**
  * session.* lifecycle handlers — create, attach, detach, delete, rename, list.
  *
- * These handlers touch workspace.repo / invalidateListCache / session
- * metadata; they do not interact with the harness turn loop.
+ * Session file ownership and rollback are delegated to the workspace registry.
  */
 
 import { rm } from "node:fs/promises";
@@ -27,7 +26,6 @@ import {
     SESSION_LIST_MAX_LIMIT,
 } from "@taco-ai/protocol";
 import { composeForSession } from "../../attachments/composePrompt.ts";
-import { harnessContext } from "../../lib/harnessContext.ts";
 import { createLogger } from "../../lib/logger.ts";
 import type { JsonlSessionMetadata } from "../../runtime/pi/types.ts";
 import { uuidv7 } from "../../runtime/pi/values.ts";
@@ -114,18 +112,7 @@ export function registerSessionLifecycleHandlers(): void {
             // pi 0.85 removed. Nothing ever read it back — IM routing is derived
             // from the workspace (`workspace.imRouting`) on every use — so it is
             // simply not persisted any more.
-            const session = await workspace.repo.create(
-                {
-                    id: sessionId,
-                    cwd: workspace.sessionCwd,
-                },
-                harnessContext,
-            );
-            const meta = session.metadata;
-            // create() holds pi's open-session slot, and attach() below opens
-            // the same id — which throws while this handle is still live.
-            await session.close(harnessContext);
-            workspace.invalidateListCache();
+            const meta = await workspace.createSession(asSessionId(sessionId));
 
             let assistantMessage: AgentMessage | null = null;
             const hasInitialImages =
@@ -303,12 +290,7 @@ async function rollbackCreatedSession(
 ): Promise<void> {
     const sessionId = asSessionId(meta.id);
     try {
-        await workspace.detach(sessionId);
-        // The caches predate the failed turn; drop them so the probe reads disk.
-        workspace.invalidateListCache();
-        if ((await workspace.getSessionActivityAt(sessionId)) !== undefined) return;
-        await workspace.repo.delete(meta, harnessContext);
-        workspace.invalidateListCache();
+        await workspace.deleteEmptySession(sessionId);
     } catch (err) {
         log.error("session.create rollback failed; keeping the session", sessionId, err);
     }
