@@ -638,6 +638,37 @@ test("start() removes lock files whose owning pid is dead", async () => {
     });
 });
 
+for (const code of ["EPERM", "EACCES", "EIO"]) {
+    test(`start() preserves a recent lock when probing its owner fails with ${code}`, async (t) => {
+        await withTmp(async (dir) => {
+            const job = intervalJob("protected", 60_000, { enabled: false });
+            const lock = JSON.stringify({ pid: 12345, started_at: new Date().toISOString() });
+            await writeFile(join(dir, "protected.lock"), lock);
+            const store = new MemoryStore();
+            store.jobs.set(job.id, job);
+            let invoked = false;
+            const scheduler = new Scheduler({
+                store,
+                lockDir: dir,
+                invoke: async () => {
+                    invoked = true;
+                },
+            });
+            t.mock.method(process, "kill", () => {
+                throw Object.assign(new Error("cannot probe owner"), { code });
+            });
+            try {
+                await scheduler.start();
+                strictEqual(await readFile(join(dir, "protected.lock"), "utf8"), lock);
+                strictEqual((await scheduler.runNow(job.id)).status, "skipped");
+                strictEqual(invoked, false);
+            } finally {
+                scheduler.stop();
+            }
+        });
+    });
+}
+
 test("runJob on a legacy job (no history field) does not crash and writes ok", async () => {
     await withTmp(async (dir) => {
         // Plant a legacy job object — `history` is undefined. This is the

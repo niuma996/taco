@@ -10,8 +10,11 @@
  * batch of those overflows the context window past what compaction can cut.
  */
 
-import { spawnSync } from "node:child_process";
-import { isAbsolute, relative, resolve } from "node:path";
+import { spawn, spawnSync } from "node:child_process";
+import { mkdtemp, open, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { isAbsolute, join, relative, resolve } from "node:path";
+import * as readline from "node:readline";
 import fg from "fast-glob";
 import ignore from "ignore";
 import type { Static } from "typebox";
@@ -32,6 +35,36 @@ export type GrepTool = AgentHarnessTool<ExecutionToolContext>;
 const MAX_LINES = 300;
 const MAX_LINE_CHARS = 500;
 const MAX_OUTPUT_CHARS = 50_000;
+const MAX_FILE_BYTES = 2 * 1024 * 1024;
+
+interface SearchResult {
+    lines: string[];
+    count: number;
+    size: number;
+    clipped: boolean;
+    skippedLarge: number;
+}
+
+function searchResult(): SearchResult {
+    return { lines: [], count: 0, size: 0, clipped: false, skippedLarge: 0 };
+}
+
+/** Count every match, but retain only the bounded display text. */
+function appendMatch(result: SearchResult, raw: string): void {
+    result.count++;
+    if (result.lines.length >= MAX_LINES) return;
+    const line = clipLine(raw);
+    if (line !== raw) result.clipped = true;
+    if (result.size + line.length + 1 > MAX_OUTPUT_CHARS) return;
+    result.lines.push(line);
+    result.size += line.length + 1;
+}
+
+function searchPattern(params: GrepToolInput): string {
+    return params.glob && !params.glob.includes("/")
+        ? `**/${params.glob}`
+        : (params.glob ?? "**/*");
+}
 
 function clipLine(line: string): string {
     return line.length > MAX_LINE_CHARS ? `${line.slice(0, MAX_LINE_CHARS)}… [line clipped]` : line;
@@ -99,11 +132,7 @@ async function loadIgnoreFilter(
     };
 }
 
-/**
- * Build ripgrep's --ignore-file content (SAFE_DEFAULT_IGNORES + user's
- * .gitignore). rg itself does not support reading ignore-file from stdin so we
- * fall back to no filtering if stdin is unavailable.
- */
+/** Build ripgrep's ignore file from safe defaults and the root's .gitignore. */
 async function buildRipgrepIgnoreContent(
     env: ExecutionToolContext["env"],
     root: string,
@@ -121,30 +150,94 @@ async function runRipgrep(
     root: string,
     params: GrepToolInput,
     ignoreContent: string,
-): Promise<string[]> {
-    const args = [
-        "--line-number",
-        "--no-heading",
-        "--color",
-        "never",
-        "--no-ignore",
-        "--hidden",
-        "--ignore-file",
-        "/dev/stdin",
-    ];
-    if (params.ignoreCase) args.push("--ignore-case");
-    if (params.glob) args.push("--glob", params.glob);
-    args.push(params.pattern, ".");
-    const r = spawnSync("rg", args, {
-        cwd: root,
-        encoding: "utf-8",
-        maxBuffer: 8 * 1024 * 1024,
-        input: ignoreContent,
-        env: scrubbedProcessEnv(),
-        ...HIDDEN_WINDOWS_SPAWN,
-    });
-    if (r.status !== null && r.status > 1) throw new Error(r.stderr || "ripgrep failed");
-    return (r.stdout ?? "").split("\n").filter((l) => l.length > 0);
+    piContext: Context,
+): Promise<SearchResult> {
+    const tempDir = await mkdtemp(join(tmpdir(), "taco-grep-ignore-"));
+    try {
+        const ignorePath = join(tempDir, "ignore");
+        await writeFile(ignorePath, ignoreContent, { mode: 0o600 });
+        const args = [
+            "--line-number",
+            "--no-heading",
+            "--color",
+            "never",
+            "--no-ignore",
+            "--hidden",
+            "--ignore-file",
+            ignorePath,
+            "--max-columns",
+            String(MAX_LINE_CHARS),
+            "--max-columns-preview",
+        ];
+        if (params.ignoreCase) args.push("--ignore-case");
+        if (params.glob) args.push("--glob", params.glob);
+        args.push("--", params.pattern, ".");
+        const result = searchResult();
+        const child = spawn("rg", args, {
+            cwd: root,
+            signal: piContext.abortSignal,
+            env: scrubbedProcessEnv(),
+            ...HIDDEN_WINDOWS_SPAWN,
+        });
+        let stderr = "";
+        child.stderr.setEncoding("utf8");
+        child.stderr.on("data", (chunk: string) => {
+            stderr += chunk.slice(0, 8_192 - stderr.length);
+        });
+        const completion = new Promise<void>((resolve, reject) => {
+            child.once("error", reject);
+            child.once("close", (code, signal) => {
+                if (code === null || code > 1) {
+                    reject(new Error(stderr || `ripgrep failed${signal ? ` (${signal})` : ""}`));
+                } else {
+                    resolve();
+                }
+            });
+        });
+        const lines = readline.createInterface({ input: child.stdout });
+        try {
+            const consume = async (): Promise<void> => {
+                for await (const line of lines) {
+                    if (line.length > 0) appendMatch(result, line);
+                }
+            };
+            await Promise.all([completion, consume()]);
+        } finally {
+            lines.close();
+            if (child.exitCode === null && child.signalCode === null) child.kill();
+        }
+        return result;
+    } finally {
+        await rm(tempDir, { recursive: true, force: true });
+    }
+}
+
+/** Bound the actual read, including files that grow after stat. */
+async function readSearchFile(
+    path: string,
+    buffer: Buffer,
+): Promise<{ text?: string; oversized: boolean }> {
+    const file = await open(path, "r").catch(() => undefined);
+    if (!file) return { oversized: false };
+    try {
+        const info = await file.stat();
+        if (!info.isFile()) return { oversized: false };
+        if (info.size > MAX_FILE_BYTES) return { oversized: true };
+        let size = 0;
+        while (size < buffer.length) {
+            const { bytesRead } = await file.read(buffer, size, buffer.length - size, size);
+            if (bytesRead === 0) break;
+            size += bytesRead;
+        }
+        if (size > MAX_FILE_BYTES) return { oversized: true };
+        const bytes = buffer.subarray(0, size);
+        if (bytes.includes(0)) return { oversized: false };
+        return { text: new TextDecoder("utf-8", { fatal: true }).decode(bytes), oversized: false };
+    } catch {
+        return { oversized: false };
+    } finally {
+        await file.close();
+    }
 }
 
 async function runFallback(
@@ -152,31 +245,35 @@ async function runFallback(
     root: string,
     params: GrepToolInput,
     piContext: Context,
-): Promise<string[]> {
+): Promise<SearchResult> {
     const ig = await loadIgnoreFilter(env, root, piContext);
     const re = new RegExp(params.pattern, params.ignoreCase ? "i" : "");
 
-    let files = fg.sync(params.glob ?? "**/*", {
+    const files = fg.stream(searchPattern(params), {
         cwd: root,
+        dot: true,
         onlyFiles: true,
         followSymbolicLinks: false,
         suppressErrors: true,
         ignore: SAFE_DEFAULT_IGNORES,
     });
-    if (ig) files = files.filter((rel) => !ig(rel));
-
-    const out: string[] = [];
-    for (const rel of files) {
-        const absPath = resolve(root, rel);
-        const textResult = await env.readTextFile(absPath, piContext);
-        if (!textResult.ok) continue; // binary / unreadable — skip
+    const result = searchResult();
+    const buffer = Buffer.alloc(MAX_FILE_BYTES + 1);
+    for await (const entry of files) {
         if (piContext.abortSignal?.aborted) throw new Error("Operation aborted");
-        const lines = textResult.value.split("\n");
+        const rel = String(entry);
+        if (ig?.(rel)) continue;
+        const absPath = resolve(root, rel);
+        const { text, oversized } = await readSearchFile(absPath, buffer);
+        if (oversized) result.skippedLarge++;
+        if (text === undefined) continue;
+        if (piContext.abortSignal?.aborted) throw new Error("Operation aborted");
+        const lines = text.split("\n");
         for (let i = 0; i < lines.length; i++) {
-            if (re.test(lines[i])) out.push(`${rel}:${i + 1}:${lines[i]}`);
+            if (re.test(lines[i])) appendMatch(result, `${rel}:${i + 1}:${lines[i]}`);
         }
     }
-    return out;
+    return result;
 }
 
 export function createGrepTool(): GrepTool {
@@ -184,12 +281,12 @@ export function createGrepTool(): GrepTool {
         name: "grep",
         label: "grep",
         description:
-            "Search file contents by regex or literal string. Respects .gitignore and excludes safe defaults (node_modules/.git/dist/build/.next). Returns matching 'file:line: text' rows, up to 300 lines / 50k chars; long lines are clipped.",
+            "Search file contents by regex or literal string. Respects .gitignore and excludes safe defaults (node_modules/.git/dist/build/.next) and binary files. Without ripgrep, files over 2 MiB are skipped with a notice. Returns matching 'file:line: text' rows, up to 300 lines / 50k chars; long lines are clipped.",
         parameters: grepSchema,
         executionMode: "parallel",
         taco: {
             promptSummary:
-                "Regex / literal search across files — the tool for finding *where* a symbol or string appears; use `glob` to find files by name instead. Honours .gitignore and skips node_modules/.git/dist/build/.next. Returns up to 300 `file:line: text` rows (50k chars total, long lines clipped) — if you hit the cap, narrow the pattern or `glob`. Safe to issue in parallel in the same turn.",
+                "Regex / literal search across files — the tool for finding *where* a symbol or string appears; use `glob` to find files by name instead. Honours .gitignore and skips node_modules/.git/dist/build/.next and binary files. Without ripgrep, files over 2 MiB are skipped with a notice. Returns up to 300 `file:line: text` rows (50k chars total, long lines clipped) — if you hit the cap, narrow the pattern or `glob`. Safe to issue in parallel in the same turn.",
             mutates: false,
         },
         async execute(
@@ -207,30 +304,25 @@ export function createGrepTool(): GrepTool {
             const root = getOrThrow(cwdResult);
             const ignoreContent = await buildRipgrepIgnoreContent(env, root, piContext);
 
-            const rawLines = hasRipgrep()
-                ? await runRipgrep(root, params, ignoreContent)
+            const result = hasRipgrep()
+                ? await runRipgrep(root, params, ignoreContent, piContext)
                 : await runFallback(env, root, params, piContext);
 
             if (signal?.aborted) throw new Error("Operation aborted");
-            const shown: string[] = [];
-            let size = 0;
-            let clipped = false;
-            for (const raw of rawLines.slice(0, MAX_LINES)) {
-                const line = clipLine(raw);
-                if (line !== raw) clipped = true;
-                if (size + line.length + 1 > MAX_OUTPUT_CHARS) break;
-                shown.push(line);
-                size += line.length + 1;
-            }
-            const omitted = rawLines.length - shown.length;
-            const truncated = omitted > 0 || clipped;
+            const shown = result.lines;
+            const omitted = result.count - shown.length;
+            const truncated = omitted > 0 || result.clipped || result.skippedLarge > 0;
             const body =
                 shown.length === 0
                     ? "(no matches)"
                     : shown.join("\n") + (omitted > 0 ? `\n… (${omitted} more)` : "");
+            const skipped =
+                result.skippedLarge > 0
+                    ? `\nSkipped ${result.skippedLarge} file(s) larger than 2 MiB; search is incomplete.`
+                    : "";
             return {
-                content: [{ type: "text", text: body }],
-                details: { count: rawLines.length, truncated },
+                content: [{ type: "text", text: body + skipped }],
+                details: { count: result.count, truncated },
             };
         },
     };

@@ -31,16 +31,14 @@ import {
 
 const log = createLogger("sidecar.scheduler");
 
-/** Probe whether a pid is alive. We don't care why it's gone — ESRCH means
- *  the OS doesn't have the process, EPERM means it's not ours to signal.
- *  Both are safe to treat as "not a current owner" for lock cleanup. */
+/** Only ESRCH proves the owner is gone; permission or probe failures do not. */
 function isPidAlive(pid: number): boolean {
     try {
         process.kill(pid, 0);
         return true;
     } catch (err) {
         const code = (err as NodeJS.ErrnoException)?.code;
-        return code === undefined; // undefined = no error, signal accepted
+        return code !== "ESRCH";
     }
 }
 
