@@ -13,7 +13,7 @@ import {
 } from "../../src/runtime/subagent/subagentPending.ts";
 import { SubagentRunLifecycle } from "../../src/runtime/subagent/subagentRunLifecycle.ts";
 import type { SubagentRunResult } from "../../src/runtime/subagent/subagentRunner.ts";
-import { WorkService } from "../../src/work/workService.ts";
+import { WorkService, type WorkServiceOptions } from "../../src/work/workService.ts";
 import { createTestWorkspace } from "../_helpers/testWorkspace.ts";
 
 const definition: AgentDefinition = {
@@ -35,6 +35,7 @@ async function fixture(
     ws: ReturnType<typeof createTestWorkspace>["ws"];
     service: WorkService;
     coordinator: BackgroundSubagentCoordinator;
+    restart(): Promise<{ service: WorkService; coordinator: BackgroundSubagentCoordinator }>;
 }> {
     const { ws, cwd, sessionsRoot, cleanup } = createTestWorkspace({
         prefix: "background-settlement-recovery",
@@ -46,7 +47,7 @@ async function fixture(
         await session.close(harnessContext);
     }
 
-    const service = new WorkService({
+    const serviceOptions = {
         root: join(cwd, "work"),
         instanceId: "settlement-test-instance",
         channels: {
@@ -55,7 +56,8 @@ async function fixture(
             getDeliveryBinding: () => "binding",
         },
         resolveRoute: () => undefined,
-    });
+    } satisfies WorkServiceOptions;
+    const service = new WorkService(serviceOptions);
     const lifecycle = new SubagentRunLifecycle();
     const engine: AgentEngine = {
         runtime: "standard",
@@ -63,7 +65,7 @@ async function fixture(
         preflight: async () => {},
         run: execute,
     };
-    const coordinator = new BackgroundSubagentCoordinator({
+    const coordinatorOptions = {
         sessionRegistry: ws.sessionRegistry,
         conversation: ws.agentSpawner.conversation,
         runLifecycle: lifecycle,
@@ -84,14 +86,37 @@ async function fixture(
             settleChat: () => false,
             emit: () => {},
         },
-    });
+    } satisfies ConstructorParameters<typeof BackgroundSubagentCoordinator>[0];
+    const coordinator = new BackgroundSubagentCoordinator(coordinatorOptions);
     t.after(async () => {
         coordinator.dispose();
         await coordinator.whenBackgroundRunsSettle();
         service.stop();
         await cleanup();
     });
-    return { parent, child, ws, service, coordinator };
+    return {
+        parent,
+        child,
+        ws,
+        service,
+        coordinator,
+        async restart() {
+            coordinator.dispose();
+            service.stop();
+            const restarted = new WorkService({ ...serviceOptions, instanceId: "restarted" });
+            const recovered = new BackgroundSubagentCoordinator({
+                ...coordinatorOptions,
+                workHooks: restarted,
+            });
+            t.after(async () => {
+                recovered.dispose();
+                await recovered.whenBackgroundRunsSettle();
+                restarted.stop();
+            });
+            await restarted.start();
+            return { service: restarted, coordinator: recovered };
+        },
+    };
 }
 
 function attachPrompt(
@@ -254,4 +279,42 @@ test("uses the committed Work snapshot when a pending settlement points at a sta
     );
     assert.doesNotMatch(prompts[0] ?? "", /stale-result\.txt/);
     assert.deepEqual(await ws.sessionRegistry.withSession(parent, readPendingSubagentResults), {});
+});
+
+test("restarts after settlement failure and delivers the original result path exactly once", async (t) => {
+    let runs = 0;
+    const f = await fixture(t, async () => {
+        runs++;
+        return { subSessionId: f.child, resultText: "original completed answer", isError: false };
+    });
+    const prompts: string[] = [];
+    const setPrompt = attachPrompt(t, f.ws, prompts);
+    f.service.controller.settle = async () => {
+        throw new Error("snapshot disk unavailable");
+    };
+    const receipt = await launch(f.coordinator, f.parent, f.child, "restart-call");
+    const pending = await f.ws.sessionRegistry.withSession(f.parent, readPendingSubagentResults);
+    assert.equal(pending["restart-call"]?.settlementPending, true);
+    const workId = pending["restart-call"]?.workId;
+    assert.ok(workId);
+    const restarted = await f.restart();
+    const work = await restarted.service.store.get(workId);
+    assert.equal(work?.status, "completed");
+    assert.equal(work?.result?.path, receipt.resultPath);
+    assert.equal(work?.attempt.attemptId, pending["restart-call"]?.attemptId);
+    setPrompt(async (text) => {
+        assert.ok(text.includes(receipt.resultPath));
+        assert.match(text, /outcome="completed"/);
+        assert.doesNotMatch(text, /output could not be saved/);
+        assert.equal(await readFile(receipt.resultPath, "utf8"), "original completed answer");
+        return { role: "assistant", content: [] };
+    });
+    await restarted.coordinator.flush(f.parent);
+    await restarted.coordinator.flush(f.parent);
+    assert.equal(runs, 1);
+    assert.equal(prompts.length, 1);
+    assert.deepEqual(
+        await f.ws.sessionRegistry.withSession(f.parent, readPendingSubagentResults),
+        {},
+    );
 });

@@ -20,7 +20,12 @@ import { restrictOwner } from "../lib/fsPermissions.ts";
 import { createLogger } from "../lib/logger.ts";
 import { writeJsonAtomic } from "../store/atomicFile.ts";
 import { KeyedQueue } from "../store/serial.ts";
-import { isTerminal, WORK_SCHEMA_VERSION, type WorkRecord } from "./workTypes.ts";
+import {
+    isTerminal,
+    WORK_SCHEMA_VERSION,
+    type WorkRecord,
+    type WorkSettlementIntent,
+} from "./workTypes.ts";
 
 const log = createLogger("sidecar.work.store");
 
@@ -271,6 +276,54 @@ export class WorkStore {
             if (record) records.push(record);
         }
         return records.sort((a, b) => b.createdAt - a.createdAt);
+    }
+
+    /** Publish the original outcome before writing its result or terminal snapshot. */
+    stageSettlement(
+        workId: string,
+        intent: WorkSettlementIntent,
+    ): Promise<WorkSettlementIntent | undefined> {
+        return this.withQueue(workId, async () => {
+            const work = await this.readSnapshot(workId);
+            if (work?.status !== "running" || work.attempt.attemptId !== intent.attemptId)
+                return undefined;
+            const existing = await this.readSettlement(workId);
+            if (existing?.attemptId === intent.attemptId) return existing;
+            await this.ensureDir(this.dir(workId));
+            await writeJsonAtomic(join(this.dir(workId), "settlement.json"), intent, {
+                secure: true,
+            });
+            return intent;
+        });
+    }
+
+    async readSettlement(workId: string): Promise<WorkSettlementIntent | undefined> {
+        let raw: string;
+        try {
+            raw = await readFile(join(this.dir(workId), "settlement.json"), "utf8");
+        } catch (error) {
+            if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+            throw error;
+        }
+        const intent: WorkSettlementIntent = JSON.parse(raw);
+        if (
+            typeof intent?.attemptId !== "string" ||
+            !intent.attemptId ||
+            !["completed", "error", "aborted"].includes(intent.outcome) ||
+            typeof intent.resultText !== "string" ||
+            typeof intent.partial !== "boolean" ||
+            (intent.path !== undefined && typeof intent.path !== "string")
+        )
+            throw new Error("invalid Work settlement intent");
+        return intent;
+    }
+
+    clearSettlement(workId: string, attemptId: string): Promise<void> {
+        return this.withQueue(workId, async () => {
+            const intent = await this.readSettlement(workId);
+            if (intent?.attemptId === attemptId)
+                await rm(join(this.dir(workId), "settlement.json"), { force: true });
+        });
     }
 
     async delete(workId: string): Promise<void> {

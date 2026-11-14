@@ -179,8 +179,10 @@ cwd 是文件系统层面的"项目目录"标识，pi 的现有 model（`pi-codi
 coordinator 通过窄 execution/event 接口协作，runtime 别名统一在 `engines/runtime.ts`
 解析。`SubagentNoticeDelivery` 从已提交的 Work 快照领取父会话通知；
 `SubagentPendingStore` 串行管理兼容及重试记录，并按 run 身份删除。父会话重新挂载时，
-即使 pending 尚未写入，也可从 Work 恢复未领取的结果；结算失败会保留 attempt 和正文
-供重试，直接续跑则把已通知状态与终态结果一起提交。
+即使 pending 尚未写入，也可从 Work 恢复未领取的结果。后台结果提交前，Work 会先将
+attempt、outcome、正文和结果路径持久化到 `settlement.json`；启动和维护优先重放它，
+再恢复 operation 或判定孤儿中断。写盘仍失败时保留重试记录，提交完成或 attempt 被
+替换后清理。直接续跑则把已通知状态与终态结果一起提交。
 
 **关键 API**
 

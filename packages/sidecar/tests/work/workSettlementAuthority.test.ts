@@ -49,6 +49,139 @@ const incoming = {
     path: "/pending.txt",
 };
 
+for (const outcome of ["completed", "error", "aborted"] as const) {
+    for (const failure of ["result", "snapshot"] as const) {
+        it(`recovers ${outcome} after ${failure} persistence fails and a new service starts`, async (t) => {
+            const { service, root, workId, attemptId } = await rig(t);
+            if (failure === "snapshot") await service.run(workId, "child", async () => {});
+            if (failure === "result") {
+                service.store.writeResult = async () => {
+                    throw new Error("result disk unavailable");
+                };
+            } else {
+                service.store.mutate = async () => {
+                    throw new Error("snapshot disk unavailable");
+                };
+            }
+            assert.equal(
+                (await service.onSettle(workId, parent, { ...incoming, outcome })).kind,
+                "retry",
+            );
+            service.stop();
+            const restarted = new WorkService({
+                root,
+                instanceId: "restarted",
+                channels: {
+                    sendText: async () => ({ kind: "confirmed" }),
+                    maxMessageLength: () => 1000,
+                },
+                resolveRoute: () => undefined,
+                operations: {
+                    inspect: async () => {
+                        throw new Error("settlement must precede operation recovery");
+                    },
+                    abort: async () => {
+                        throw new Error("recovery must not execute an operation");
+                    },
+                },
+            });
+            t.after(() => restarted.stop());
+            await restarted.start();
+            const work = await restarted.store.get(workId);
+            assert.equal(
+                work?.status,
+                outcome === "completed"
+                    ? "completed"
+                    : outcome === "aborted"
+                      ? "cancelled"
+                      : "failed",
+            );
+            assert.equal(work?.attempt.attemptId, attemptId);
+            assert.equal(work?.result?.path, incoming.path);
+            assert.ok(work?.result);
+            assert.equal(
+                (
+                    await restarted.store.readResult(
+                        workId,
+                        work.result.resultId,
+                        work.result.checksum,
+                    )
+                )?.text,
+                incoming.resultText,
+            );
+            const notices = await restarted.pendingParentNotices(target);
+            assert.equal(notices.length, 1);
+            assert.equal(notices[0]?.outcome, outcome);
+            assert.equal(notices[0]?.path, incoming.path);
+            await restarted.start();
+            assert.deepEqual(await restarted.store.get(workId), work);
+        });
+    }
+}
+
+it("defers interruption while a persisted settlement still cannot be committed", async (t) => {
+    const { service, root, workId, attemptId } = await rig(t);
+    await service.run(workId, "child", async () => {});
+    service.controller.settle = async () => {
+        throw new Error("snapshot unavailable");
+    };
+    assert.equal((await service.onSettle(workId, parent, incoming)).kind, "retry");
+    service.stop();
+    let inspected = 0;
+    const restarted = new WorkService({
+        root,
+        instanceId: "restarted",
+        channels: { sendText: async () => ({ kind: "confirmed" }), maxMessageLength: () => 1000 },
+        resolveRoute: () => undefined,
+        operations: {
+            inspect: async () => {
+                inspected++;
+                return { kind: "missing" };
+            },
+            abort: async () => ({ outcome: "accepted", newlyRequested: true }),
+        },
+    });
+    t.after(() => restarted.stop());
+    const settle = restarted.controller.settle.bind(restarted.controller);
+    restarted.controller.settle = async () => {
+        throw new Error("still unavailable");
+    };
+    await restarted.start();
+    assert.equal((await restarted.store.get(workId))?.status, "running");
+    assert.equal((await restarted.store.readSettlement(workId))?.attemptId, attemptId);
+    assert.equal(inspected, 0);
+    restarted.controller.settle = settle;
+    await restarted.start();
+    assert.equal((await restarted.store.get(workId))?.status, "completed");
+    assert.equal(await restarted.store.readSettlement(workId), undefined);
+});
+
+it("never applies a persisted settlement to a replacement attempt", async (t) => {
+    const { service, root, workId } = await rig(t);
+    service.controller.settle = async () => {
+        throw new Error("snapshot unavailable");
+    };
+    assert.equal((await service.onSettle(workId, parent, incoming)).kind, "retry");
+    await service.store.mutate(workId, (work) => ({
+        ...work,
+        ownerInstanceId: "restarted",
+        attempt: { attemptId: "replacement", startedAt: Date.now() },
+    }));
+    const restarted = new WorkService({
+        root,
+        instanceId: "restarted",
+        channels: { sendText: async () => ({ kind: "confirmed" }), maxMessageLength: () => 1000 },
+        resolveRoute: () => undefined,
+    });
+    t.after(() => restarted.stop());
+    await restarted.start();
+    const work = await restarted.store.get(workId);
+    assert.equal(work?.status, "running");
+    assert.equal(work?.attempt.attemptId, "replacement");
+    assert.equal(work?.result, undefined);
+    assert.equal(await restarted.store.readSettlement(workId), undefined);
+});
+
 it("does not mark a replacement attempt as reported when an old resume settles", async (t) => {
     const { service, workId, attemptId } = await rig(t);
     await service.store.mutate(workId, (work) => ({

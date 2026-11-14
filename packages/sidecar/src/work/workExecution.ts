@@ -160,11 +160,12 @@ export class WorkExecution {
     }
 
     /** Read stored outcomes only. Attach-time recovery remains the sole operation driver. */
-    async recover(): Promise<Set<string>> {
-        const deferred = new Set<string>();
+    async recover(pendingSettlements: ReadonlySet<string> = new Set()): Promise<Set<string>> {
+        const deferred = new Set<string>(pendingSettlements);
         if (!this.runtime) return deferred;
         for (const snapshot of await this.store.list()) {
             if (
+                pendingSettlements.has(snapshot.workId) ||
                 snapshot.status !== "running" ||
                 snapshot.attempt.queueId !== undefined ||
                 !snapshot.attempt.operation ||

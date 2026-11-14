@@ -105,6 +105,15 @@ export interface WorkResultRef {
     readonly path?: string;
 }
 
+/** A finished background attempt retained until its terminal snapshot is committed. */
+export interface WorkSettlementIntent {
+    readonly attemptId: string;
+    readonly outcome: "completed" | "error" | "aborted";
+    readonly resultText: string;
+    readonly partial: boolean;
+    readonly path?: string;
+}
+
 /** A crash closes a claimed model notification to replay; platform delivery is independent. */
 export interface ParentNoticeClaim {
     readonly attemptId: string;

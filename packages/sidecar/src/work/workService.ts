@@ -55,6 +55,7 @@ import { WorkQueue } from "./workQueue.ts";
 import { WorkQueueStore } from "./workQueueStore.ts";
 import { isQueueTerminal, type WorkQueueEntry } from "./workQueueTypes.ts";
 import { WorkReconciler } from "./workReconciler.ts";
+import { recoverWorkSettlements } from "./workSettlementRecovery.ts";
 import { isSafeWorkId, legacyWorkIdForSource, WorkStore, workIdForSource } from "./workStore.ts";
 import { isTerminal } from "./workTypes.ts";
 import { buildList, toSummary, type WorkListArgs } from "./workView.ts";
@@ -177,7 +178,7 @@ export class WorkService implements BackgroundWorkHooks, ScheduledWorkHooks, Wor
             (workId, sessionId, run) => this.execution.run(workId, sessionId, run),
         );
         this.maintenance = new WorkMaintenance(async () => {
-            await this.execution.recover();
+            await this.recoverExecution();
             const result = await this.controller.maintain();
             await this.queue?.prune();
             return result;
@@ -304,6 +305,13 @@ export class WorkService implements BackgroundWorkHooks, ScheduledWorkHooks, Wor
         );
     }
 
+    private async recoverExecution(): Promise<Set<string>> {
+        const pending = await recoverWorkSettlements(this.store, (workId, parent, intent) =>
+            this.onSettle(workId, parent, intent),
+        );
+        return this.execution.recover(pending);
+    }
+
     /** Startup: close out Works whose process died, prune, then re-send what is still owed. */
     async start(): Promise<void> {
         await this.store.cleanupDeleted();
@@ -315,7 +323,7 @@ export class WorkService implements BackgroundWorkHooks, ScheduledWorkHooks, Wor
                     this.replyOwner(work.workspace, work.parentSessionId),
                 );
         try {
-            const deferred = await this.execution.recover();
+            const deferred = await this.recoverExecution();
             const { interrupted, pruned } = await this.controller.reconcile(deferred);
             if (interrupted > 0 || pruned > 0) log.info("work reconciled", { interrupted, pruned });
             if (this.options.resolveTargetState) {
@@ -666,6 +674,17 @@ export class WorkService implements BackgroundWorkHooks, ScheduledWorkHooks, Wor
             const work = await this.store.get(workId);
             const route = this.options.resolveRoute(parentSessionId, work?.workspace);
             if (!attemptId) return { kind: "superseded" };
+            if (work?.status === "running" && work.attempt.attemptId === attemptId) {
+                const staged = await this.store.stageSettlement(workId, {
+                    attemptId,
+                    outcome: settle.outcome,
+                    resultText: settle.resultText,
+                    partial: settle.partial,
+                    ...(settle.path !== undefined ? { path: settle.path } : {}),
+                });
+                if (!staged) return { kind: "superseded" };
+                settle = staged;
+            }
             const committed = await this.controller.settle({
                 workId,
                 attemptId,
@@ -682,6 +701,9 @@ export class WorkService implements BackgroundWorkHooks, ScheduledWorkHooks, Wor
             )
                 return { kind: "superseded" };
             if (this.launchAttempts.get(workId) === attemptId) this.launchAttempts.delete(workId);
+            await this.store.clearSettlement(workId, attemptId).catch((error: unknown) => {
+                log.warn("work settlement cleanup failed", { workId, error: String(error) });
+            });
             return {
                 kind: "committed",
                 attemptId,

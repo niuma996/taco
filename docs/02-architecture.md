@@ -203,8 +203,11 @@ Coordinators consume narrow execution and event ports. Runtime aliases resolve i
 `engines/runtime.ts`. `SubagentNoticeDelivery` claims parent awareness from the
 committed Work snapshot, and `SubagentPendingStore` serializes compatibility and
 retry records with run-aware removal. Parent attach recovers unclaimed Work results
-even when no pending record was written. Failed settlements retain their attempt
-and body for retry; direct resumes commit parent awareness with the terminal result.
+even when no pending record was written. Before committing a background result,
+Work persists an attempt-scoped `settlement.json` containing its outcome, body and
+result path. Startup and maintenance replay it before operation recovery or orphan
+interruption, retaining it if persistence still fails. A committed or replaced
+attempt clears its intent; direct resumes commit parent awareness with the terminal result.
 
 **Key surface**
 
