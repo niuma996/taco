@@ -2,27 +2,20 @@
  * AgentSpawner — subagent creation and execution: validates the agentType,
  * narrows the toolset, then drives the child to completion.
  *
- * The child's attach assembly lives in `./childAttach.ts`, its run loop in
- * `./subagentRunner.ts`, and the parent-depth read in `../session/sessionFacts.ts`.
+ * Engine adapters own execution details; SubagentRunLifecycle owns cancellation
+ * scopes. This coordinator owns session creation, Work tracking and parent delivery.
  */
 
 import { EventEmitter } from "node:events";
-import { mkdir, realpath, stat } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { mkdir } from "node:fs/promises";
+import { dirname } from "node:path";
 import { asSessionId, type SessionId, type WorkspaceId } from "@taco-ai/protocol";
 import type { AgentChatArgs, AgentChatResult } from "../../agents/agentConversationTypes.ts";
-import {
-    type AgentToolPolicy,
-    agentToolPolicy,
-    filterToolsForAgent,
-} from "../../agents/filterTools.ts";
+import { agentToolPolicy, filterToolsForAgent } from "../../agents/filterTools.ts";
 import { buildForkedContext, resolveContextMode } from "../../agents/forkedHistory.ts";
 import { MAX_AGENT_TURNS } from "../../agents/loadAgents.ts";
 import type {
     AgentDefinition,
-    AgentFewShot,
-    ClaudeCodePermissionMode,
-    CodexAgentConfig,
     SubagentContextMode,
     SubagentProgressSink,
     SubagentRuntime,
@@ -36,13 +29,10 @@ import { interpolateArgs } from "../../skills/skillMessages.ts";
 import type { SpawnSkillSubagentOptions } from "../../skills/skillTool.ts";
 import { writeTextAtomic } from "../../store/atomicFile.ts";
 import { tagWrap } from "../../tags/builder.ts";
-import type { SubagentBudgetState } from "../../tags/subagentBudget.ts";
 import type { TacoTool } from "../../tools/index.ts";
 import type { BackgroundWorkHooks } from "../../work/workHooks.ts";
 import type { WorkAttemptHandle } from "../../work/workOperationTypes.ts";
-import type { AttachedSession } from "../harness/attachedSession.ts";
 import { findModelById } from "../models/modelLookup.ts";
-import { scrubbedProcessEnv } from "../models/providerKeyStore.ts";
 import type { NodeExecutionEnv } from "../pi/node.ts";
 import type { AgentMessage, Api, Model, MutableModels } from "../pi/types.ts";
 import { uuidv7 } from "../pi/values.ts";
@@ -52,43 +42,36 @@ import {
     resolveParentDepth,
     writeSessionFacts,
 } from "../session/sessionFacts.ts";
-import type { AttachOptions, SessionRegistry } from "../session/sessionRegistry.ts";
+import type { SessionRegistry } from "../session/sessionRegistry.ts";
 import { type AgentMessageRecord, agentMessageEnvelope } from "./agentConversation.ts";
 import { AgentConversationRuntime } from "./agentConversationRuntime.ts";
-import { type ChildAttachDeps, prepareChildAttach } from "./childAttach.ts";
-import { runClaudeCodeSubagent } from "./claudeCode/claudeCodeRunner.ts";
+import type { ChildAttachDeps } from "./childAttach.ts";
 import { findClaudeExecutable, loadClaudeAgentSdk } from "./claudeCode/claudeCodeSdk.ts";
-import { readClaudeCodeState, writeClaudeCodeState } from "./claudeCode/claudeCodeState.ts";
-import {
-    type CodexCommunicationBridge,
-    createCodexCommunicationBridge,
-} from "./codex/codexCommunication.ts";
-import { runCodexSubagent } from "./codex/codexRunner.ts";
-import { codexRuntimeUnavailableMessage } from "./codex/codexRuntimeInstall.ts";
-import {
-    CODEX_SDK_VERSION,
-    createCodexClient,
-    type LoadedCodexSdk,
-    loadCodexSdk,
-} from "./codex/codexSdk.ts";
-import {
-    type CodexState,
-    codexProfileIdentity,
-    readCodexState,
-    writeCodexState,
-} from "./codex/codexState.ts";
+import { readClaudeCodeState } from "./claudeCode/claudeCodeState.ts";
+import { loadCodexSdk } from "./codex/codexSdk.ts";
+import { readCodexState } from "./codex/codexState.ts";
+import { createClaudeCodeEngine } from "./engines/claudeCodeEngine.ts";
+import { createCodexEngine } from "./engines/codexEngine.ts";
+import { createStandardEngine } from "./engines/standardEngine.ts";
+import type { AgentEngine, EngineRunRequest, NativeEngineDeps } from "./engines/types.ts";
 import { deliverSubagentResult, deliverSubagentResultDetailed } from "./subagentDelivery.ts";
 import {
     addPendingSubagentResult,
     clearPendingSubagentResult,
     readPendingSubagentResults,
 } from "./subagentPending.ts";
-import type { SubagentResumability } from "./subagentProgress.ts";
 import { subagentResultPath } from "./subagentResultsDir.ts";
 import { type ResumeSubagentArgs, runSubagentResume } from "./subagentResume.ts";
-import { runAttachedSubagent, type SubagentRunResult } from "./subagentRunner.ts";
+import { SubagentRunLifecycle } from "./subagentRunLifecycle.ts";
+import type { SubagentRunResult } from "./subagentRunner.ts";
+import type { SubagentSessionArgs } from "./subagentTypes.ts";
 
 const log = createLogger("sidecar.agentSpawner");
+
+// Preserve the standard-engine fallback used by legacy in-process callers.
+function normalizedRuntime(runtime?: SubagentRuntime): SubagentRuntime {
+    return runtime === "claude-code" || runtime === "codex" ? runtime : "standard";
+}
 
 /**
  * Global cap on concurrently-running `background: true` spawns, across every
@@ -228,105 +211,7 @@ export interface AgentSpawnerOptions {
 }
 
 /** Arguments for one subagent run. Shared by `executeSubagentSession` and its body. */
-export interface SubagentSessionArgs {
-    parentSessionId: SessionId;
-    parentToolCallId: string;
-    /** Metadata agentType + event agentType (must be consistent). */
-    agentType: string;
-    /** Prompt text sent to the child harness. */
-    prompt: string;
-    /** Pre-filtered toolset (caller handles whitelist + Skill removal). */
-    tools: TacoTool[];
-    model?: Model<Api>;
-    signal?: AbortSignal;
-    /**
-     * Controller behind `signal`, registered under the child session id while
-     * the run executes so `abortSubagentRun` can stop this child alone.
-     * Callers that only pass `signal` get no external-stop handle.
-     */
-    abortController?: AbortController;
-    /**
-     * Profile body from the agent definition's markdown, appended to the
-     * child's system prompt so the role, stop condition and reporting
-     * contract actually reach the model. Skill subagents pass nothing —
-     * their instructions are the prompt itself.
-     */
-    rolePrompt?: string;
-    /**
-     * `claude-code` only: the definition's raw tool names (Claude Code's own,
-     * so `tools` — taco tool objects filtered by those names — cannot carry
-     * them) and its permission mode.
-     */
-    claudeCodeTools?: readonly string[];
-    permissionMode?: ClaudeCodePermissionMode;
-    /** `claude-code` only: the definition's fixed directory. Absent = the execution cwd. */
-    claudeCodeCwd?: string;
-    /** `codex` only: SDK thread options from the definition's `codex:` block. */
-    codexConfig?: CodexAgentConfig;
-    /** `codex` only: profile tool names used to grant the communication bridge. */
-    codexTools?: readonly string[];
-    /**
-     * Optional in-context examples to inject ahead of `rolePrompt`. The
-     * examples establish the contract the profile expects (e.g. citation
-     * shape, stop condition) before the role body takes over. Kept
-     * outside `SystemPromptContributor` because they are profile-specific
-     * rather than workspace-wide.
-     */
-    fewShots?: ReadonlyArray<AgentFewShot>;
-    /**
-     * Turn cap from the agent definition. `AgentHarnessOptions` exposes no
-     * turn limit, so this is enforced by counting `turn_end` on the child
-     * and aborting it — without that the frontmatter value stays inert.
-     */
-    maxTurns?: number;
-    /**
-     * Pre-computed child depth. Callers that already needed it (e.g. for tool
-     * filtering) pass it here to avoid a second openSession() round-trip.
-     * If omitted, we compute it from the parent session's metadata.
-     */
-    childDepth?: number;
-    /**
-     * What the child may load on demand. The profile's declared tool list
-     * plus the main-session-only names the depth guard strips — without it a
-     * subagent could load `configPatch` or a PDF writer its profile never
-     * asked for.
-     */
-    toolPolicy?: AgentToolPolicy;
-    /**
-     * The run's budget. Read live by the budget reminder hook, so the model
-     * is warned as the run nears a limit instead of being cut off mid-turn.
-     * The runner updates `turnsUsed` on every completed turn.
-     */
-    budget?: SubagentBudgetState;
-    /**
-     * Pre-rendered `<forked_context>` block, or undefined when this child runs
-     * independent. Computed by `spawnSubagent` from the parent branch before
-     * delegating; injected ahead of few-shots/role and persisted into the child
-     * metadata so chatToAgent resumes byte-identically.
-     */
-    forkedContext?: string;
-    /**
-     * Pre-generated child session id. A `background: true` spawn needs the id
-     * before the run finishes (to hand back in the launch receipt), so it is
-     * generated by the caller instead of inside `runSubagentSession`. Omitted
-     * by the synchronous path, which has no use for the id before settling.
-     */
-    childSessionId?: SessionId;
-    /** Calling tool's `onUpdate` sink — see subagentRunner for what it emits. */
-    onUpdate?: SubagentProgressSink;
-    /**
-     * Whether chatToAgent can resume this child. `agent` spawns pass
-     * `resumable`; skill subagents must not, because their `skill:<name>`
-     * agentType has no entry in the agent registry and `runResume` fails closed
-     * on a missing definition.
-     */
-    resumability?: SubagentResumability;
-    /** Engine for this run; absent = "standard". */
-    runtime?: SubagentRuntime;
-    executionId?: string;
-    resume?: boolean;
-    backgroundLifecycle?: boolean;
-}
+export type { SubagentSessionArgs } from "./subagentTypes.ts";
 
 export class AgentSpawner extends EventEmitter {
     readonly sessionCwd: WorkspaceId;
@@ -348,7 +233,7 @@ export class AgentSpawner extends EventEmitter {
     private findClaudeCode = findClaudeExecutable;
     private loadCodexSdkForRun = loadCodexSdk;
     readonly conversation: AgentConversationRuntime;
-    private stopping = false;
+    private readonly engines: Record<SubagentRuntime, AgentEngine>;
     private readonly chatRuns = new Map<
         string,
         {
@@ -398,13 +283,41 @@ export class AgentSpawner extends EventEmitter {
         this.deferredIdleFlushes = new Set();
         this.pendingWriteQueues = new Map();
         this.backgroundRuns = new Set();
-        this.subagentControllers = new Map();
-        this.controllerWaiters = new Map();
+        this.runLifecycle = new SubagentRunLifecycle();
         this.conversation = new AgentConversationRuntime({
             registry: this.sessionRegistry,
             findAgent: (name) => this.findAgent(name),
             start: (message, args) => this.startConversationRun(message, args),
         });
+        const nativeDeps: NativeEngineDeps = {
+            registry: this.sessionRegistry,
+            executionCwd: () => this.env.cwd,
+            conversation: {
+                setInput: (id, input) => this.conversation.setInput(id, input),
+                markRunning: (id, runId) => this.conversation.markRunning(id, runId),
+                chat: (id, args) => this.chatToAgent(id, args),
+                list: (id) => this.listAgentSessions(id),
+            },
+            appendMessages: (id, messages) => this.appendChildMessages(id, messages),
+        };
+        this.engines = {
+            standard: createStandardEngine({
+                registry: this.sessionRegistry,
+                childAttachDeps: () => this.childAttachDeps,
+                defaultModelIdentity: () => this.defaultModelIdentity,
+                readLastAssistantText: (id) => this.extractLastAssistantText(id),
+            }),
+            "claude-code": createClaudeCodeEngine({
+                ...nativeDeps,
+                loadClaudeCodeSdk: () => this.loadClaudeCodeSdk(),
+                findClaudeCode: () => this.findClaudeCode(),
+            }),
+            codex: createCodexEngine({
+                ...nativeDeps,
+                getAllowedCwds: () => this.getAllowedCwds(),
+                loadCodexSdkForRun: () => this.loadCodexSdkForRun(),
+            }),
+        };
         // Detached parents retry on attach; busy parents retry after their lane
         // has settled. Neither signal may wait for a model notification to finish.
         const flushPending = ({ sessionId }: { sessionId: SessionId }): void => {
@@ -520,41 +433,8 @@ export class AgentSpawner extends EventEmitter {
      */
     private readonly backgroundRuns: Set<Promise<void>>;
 
-    /**
-     * subSessionId → controller that stops that child's run, for every run
-     * currently executing (sync, resume, or background). `abortSubagentRun`
-     * fires it; the runner's signal listener does the rest. Entries live only
-     * while the child harness runs — outside that window there is nothing to
-     * stop and `abortSubagentRun` says so. The owning parent is stored so a
-     * caller can be restricted to stopping its own children.
-     */
-    private readonly subagentControllers: Map<
-        string,
-        { controller: AbortController; parentSessionId: SessionId }
-    >;
-
-    /**
-     * Resolvers parked by `stopChildrenOf`, keyed by the subSessionId they are
-     * waiting on. Released from `releaseController`, so a waiter observes the
-     * same moment the controller entry disappears — no polling.
-     */
-    private readonly controllerWaiters: Map<string, Set<() => void>>;
-
-    /**
-     * Drop a child's controller entry and release anyone waiting on it.
-     *
-     * Every removal goes through here so `stopChildrenOf` cannot wait forever
-     * on a child that has in fact finished: an entry that vanished without
-     * resolving its waiter would strand the caller until its own timeout.
-     */
-    private releaseController(subSessionId: string, expected?: AbortController): void {
-        if (expected && this.subagentControllers.get(subSessionId)?.controller !== expected) return;
-        this.subagentControllers.delete(subSessionId);
-        const waiters = this.controllerWaiters.get(subSessionId);
-        if (!waiters) return;
-        this.controllerWaiters.delete(subSessionId);
-        for (const resolve of waiters) resolve();
-    }
+    /** Scopes retain cancellation through setup, execution and background settlement. */
+    private readonly runLifecycle: SubagentRunLifecycle;
 
     /**
      * Abort every running child of `parentSessionId` and wait for them to stop,
@@ -570,88 +450,12 @@ export class AgentSpawner extends EventEmitter {
      * timeout this list is non-empty; on a clean stop it is empty.
      */
     async stopChildrenOf(parentSessionId: SessionId, timeoutMs = 5_000): Promise<SessionId[]> {
-        const running = [...this.subagentControllers.entries()]
-            .filter(([, entry]) => entry.parentSessionId === parentSessionId)
-            .map(([subSessionId]) => asSessionId(subSessionId));
-        if (running.length === 0) return [];
-
-        const stopped = running.map(
-            (subSessionId) =>
-                new Promise<void>((resolve) => {
-                    let waiters = this.controllerWaiters.get(subSessionId);
-                    if (!waiters) {
-                        waiters = new Set();
-                        this.controllerWaiters.set(subSessionId, waiters);
-                    }
-                    waiters.add(resolve);
-                }),
-        );
-        for (const subSessionId of running) this.abortSubagentRun(subSessionId, parentSessionId);
-
-        await Promise.race([
-            Promise.all(stopped),
-            new Promise<void>((r) => setTimeout(r, timeoutMs)),
-        ]);
-
-        return running.filter((subSessionId) => this.subagentControllers.has(subSessionId));
+        return this.runLifecycle.stopChildrenOf(parentSessionId, timeoutMs);
     }
 
     /** Looks up a subagent definition in the registry by `agentType`. */
     findAgent(type: string): AgentDefinition | undefined {
         return this.agents.find((a) => a.agentType === type);
-    }
-
-    /** Canonical Codex cwd, constrained to the workspace/associated roots. */
-    private async resolveCodexCwd(requested?: string): Promise<string> {
-        const candidate = await realpath(requested ?? this.env.cwd).catch(() => undefined);
-        if (!candidate)
-            throw new Error(`Codex cwd is not an existing directory: ${requested ?? this.env.cwd}`);
-        const isDir = await stat(candidate)
-            .then((entry) => entry.isDirectory())
-            .catch(() => false);
-        if (!isDir) throw new Error(`Codex cwd is not an existing directory: ${candidate}`);
-        const allowed = await Promise.all(
-            this.getAllowedCwds().map((root) => realpath(root).catch(() => undefined)),
-        );
-        if (!allowed.includes(candidate)) {
-            throw new Error(
-                `Codex cwd must be the workspace directory or one of its associated directories: ${candidate}`,
-            );
-        }
-        return candidate;
-    }
-
-    /** Detect a Git worktree even when cwd is a nested directory. */
-    private async isInsideGitWorktree(cwd: string): Promise<boolean> {
-        let current = cwd;
-        while (true) {
-            const found = await stat(join(current, ".git"))
-                .then(() => true)
-                .catch(() => false);
-            if (found) return true;
-            const parent = dirname(current);
-            if (parent === current) return false;
-            current = parent;
-        }
-    }
-
-    /**
-     * Fail before creating a child when the SDK or its platform binary is
-     * missing.
-     *
-     * Credentials are not checked here: the run uses the user's own Codex
-     * configuration, and a custom provider carries its own credentials, so
-     * only Codex itself can say whether a turn can authenticate. Blocking on
-     * our own guess would refuse runs that work.
-     */
-    private async preflightCodexRuntime(): Promise<void> {
-        let loaded: LoadedCodexSdk;
-        try {
-            loaded = await this.loadCodexSdkForRun();
-            createCodexClient(loaded.module, { env: scrubbedProcessEnv() });
-        } catch (error) {
-            throw new Error(codexRuntimeUnavailableMessage(error));
-        }
     }
 
     /** Swap the agent catalog after an `agents.write` / `agents.delete` rescan. */
@@ -673,13 +477,7 @@ export class AgentSpawner extends EventEmitter {
      * notification) learns the outcome through the normal settle path.
      */
     abortSubagentRun(subSessionId: string, forParentSessionId?: SessionId): boolean {
-        const entry = this.subagentControllers.get(subSessionId);
-        if (!entry || entry.controller.signal.aborted) return false;
-        if (forParentSessionId !== undefined && entry.parentSessionId !== forParentSessionId) {
-            return false;
-        }
-        entry.controller.abort();
-        return true;
+        return this.runLifecycle.abort(subSessionId, forParentSessionId);
     }
 
     /** Child-attach inputs this spawner owns — one definition so spawn and resume agree. */
@@ -751,11 +549,22 @@ export class AgentSpawner extends EventEmitter {
                 args.parentToolCallId,
                 async () => {
                     try {
-                        return await this.runSubagentSession({
-                            ...args,
-                            childSessionId,
-                            executionId: runId,
-                        });
+                        return await this.runLifecycle.run(
+                            {
+                                sessionId: childSessionId,
+                                parentSessionId: args.parentSessionId,
+                                controller: args.abortController,
+                                signal: args.signal,
+                            },
+                            (controller) =>
+                                this.runSubagentSession({
+                                    ...args,
+                                    childSessionId,
+                                    executionId: runId,
+                                    abortController: controller,
+                                    signal: controller.signal,
+                                }),
+                        );
                     } catch (error) {
                         return {
                             subSessionId: childSessionId,
@@ -774,7 +583,7 @@ export class AgentSpawner extends EventEmitter {
     }
 
     /** `executeSubagentSession` body, wrapped by it for in-flight tracking. */
-    private async runSubagentSession(args: SubagentSessionArgs): Promise<SubagentRunResult> {
+    private async runSubagentSession(args: EngineRunRequest): Promise<SubagentRunResult> {
         // Caller must supply `childDepth` — used by tool filtering to gate Skill/agent
         // recursion, and computing it here would require a second openSession() call.
         const childDepth =
@@ -821,84 +630,11 @@ export class AgentSpawner extends EventEmitter {
             ...(args.executionId !== undefined ? { runId: args.executionId } : {}),
         });
 
-        if (args.runtime === "claude-code") {
-            return this.runClaudeCodeChild(asSessionId(childSessionId), args);
-        }
-        if (args.runtime === "codex") {
-            return this.runCodexChild(asSessionId(childSessionId), args);
-        }
-
-        // 3. Build the child's toolset + system prompt.
-        const {
-            tools: childTools,
-            taskState: childTaskState,
-            systemPrompt: childSystemPrompt,
-        } = await prepareChildAttach(this.childAttachDeps, {
-            sessionId: asSessionId(childSessionId),
-            agentType: args.agentType,
-            childDepth,
-            allowedTools: args.tools,
-            ...(args.toolPolicy !== undefined ? { toolPolicy: args.toolPolicy } : {}),
-            rolePrompt: args.rolePrompt,
-            fewShots: args.fewShots,
-            forkedContext: args.forkedContext,
-            // Per-spawn model override wins over the parent default. Without an
-            // override we keep the parent's identity string so the subagent's
-            // `<model_identity>` section reflects what actually runs.
-            modelIdentity: args.model
-                ? `${args.model.provider}/${args.model.id}`
-                : this.defaultModelIdentity,
+        return this.engines[normalizedRuntime(args.runtime)].run({
+            ...args,
+            childSessionId: asSessionId(childSessionId),
+            abortController: args.abortController,
         });
-
-        // 4. Attach child harness
-        let attached: AttachedSession;
-        try {
-            attached = await this.sessionRegistry.attachChild(
-                asSessionId(childSessionId),
-                {
-                    thinkingLevel: "off",
-                    model: args.model,
-                    ...(args.toolPolicy !== undefined ? { toolLoadPolicy: args.toolPolicy } : {}),
-                    ...(args.budget !== undefined ? { getSubagentBudget: () => args.budget } : {}),
-                } satisfies AttachOptions,
-                childTools,
-                childTaskState,
-                childSystemPrompt,
-            );
-        } catch (e) {
-            return {
-                subSessionId: asSessionId(childSessionId),
-                resultText: e instanceof Error ? e.message : String(e),
-                isError: true,
-            };
-        }
-
-        // Registered only while the child harness runs: before this there is
-        // nothing to stop, after it the run has settled — `abortSubagentRun`
-        // reporting "not running" outside the window is the truth.
-        if (args.abortController) {
-            if (this.stopping) args.abortController.abort();
-            this.subagentControllers.set(childSessionId, {
-                controller: args.abortController,
-                parentSessionId: args.parentSessionId,
-            });
-        }
-        try {
-            return await runAttachedSubagent({
-                subSessionId: asSessionId(childSessionId),
-                attached,
-                prompt: args.prompt,
-                agentType: args.agentType,
-                maxTurns: args.maxTurns,
-                ...(args.budget !== undefined ? { budget: args.budget } : {}),
-                signal: args.signal,
-                onUpdate: args.onUpdate,
-                resumability: args.resumability,
-                readLastAssistantText: (id) => this.extractLastAssistantText(id),
-            });
-        } finally {
-            if (args.abortController) this.releaseController(childSessionId);
-        }
     }
 
     /**
@@ -938,35 +674,14 @@ export class AgentSpawner extends EventEmitter {
                 isError: true,
             };
         }
-        // A fixed directory that has since been moved or deleted fails the
-        // spawn: running the CLI somewhere else instead would point a
-        // write-capable agent at a tree its author never chose. Checked before
-        // the slot is reserved so the failure leaves nothing behind.
-        if (def.runtime === "claude-code" && def.cwd !== undefined) {
-            const isDir = await stat(def.cwd)
-                .then((s) => s.isDirectory())
-                .catch(() => false);
-            if (!isDir) {
-                return {
-                    resultText:
-                        `agent type "${def.agentType}" is set to run in ${def.cwd}, which is not an ` +
-                        "existing directory. Ask the user to fix the subagent's directory in its settings.",
-                    isError: true,
-                    ...(args.background ? { background: true as const } : {}),
-                };
-            }
-        }
-        if (def.runtime === "codex") {
-            try {
-                await this.resolveCodexCwd(def.codex?.cwd);
-                await this.preflightCodexRuntime();
-            } catch (error) {
-                return {
-                    resultText: error instanceof Error ? error.message : String(error),
-                    isError: true,
-                    ...(args.background ? { background: true as const } : {}),
-                };
-            }
+        try {
+            await this.engines[normalizedRuntime(def.runtime)].preflight(def);
+        } catch (error) {
+            return {
+                resultText: error instanceof Error ? error.message : String(error),
+                isError: true,
+                ...(args.background ? { background: true as const } : {}),
+            };
         }
         // Reserve the background slot before any `await` so two concurrent
         // launches cannot both pass a stale `size` check. Released in
@@ -1008,295 +723,16 @@ export class AgentSpawner extends EventEmitter {
         }
     }
 
-    /**
-     * `runtime: claude-code` body of `runSubagentSession`, after the child
-     * session exists. The transcript is appended through `withSession` one
-     * batch at a time rather than through a held handle, so a concurrent
-     * history read from the desktop queues behind it instead of failing on
-     * pi's "already open" guard.
-     */
-    private async runClaudeCodeChild(
-        childSessionId: SessionId,
-        args: SubagentSessionArgs,
-    ): Promise<{
-        subSessionId: SessionId;
-        resultText: string;
-        isError: boolean;
-        aborted?: boolean;
-    }> {
-        // The SDK takes a controller, not a signal. Spawn paths always pass one;
-        // a caller with only `signal` gets a controller that follows it.
-        const controller = args.abortController ?? new AbortController();
-        if (this.stopping) controller.abort();
-        const follow = (): void => controller.abort();
-        if (args.signal?.aborted) controller.abort();
-        args.signal?.addEventListener("abort", follow, { once: true });
-        this.subagentControllers.set(childSessionId, {
-            controller,
-            parentSessionId: args.parentSessionId,
+    private async appendChildMessages(childId: SessionId, messages: AgentMessage[]): Promise<void> {
+        await this.sessionRegistry.withSession(childId, async (session) => {
+            const branch =
+                (await session.branch(MAIN_BRANCH, harnessContext)) ??
+                (await session.createBranch(MAIN_BRANCH, null, harnessContext));
+            for (const message of messages) {
+                await branch.appendMessage(message, harnessContext);
+                this.pushChildMessages(childId, message);
+            }
         });
-        try {
-            const native = args.resume
-                ? await this.sessionRegistry.withSession(childSessionId, readClaudeCodeState)
-                : undefined;
-            if (args.resume && !native)
-                return {
-                    subSessionId: childSessionId,
-                    isError: true,
-                    resultText:
-                        "This Claude Code session cannot be resumed: its native session mapping was not saved. Create a fresh agent explicitly.",
-                };
-            const cwd = args.claudeCodeCwd ?? this.env.cwd;
-            if (
-                native &&
-                (native.cwd !== cwd ||
-                    native.configDir !== process.env.CLAUDE_CONFIG_DIR ||
-                    JSON.stringify(native.tools) !== JSON.stringify(args.claudeCodeTools) ||
-                    native.permissionMode !== args.permissionMode)
-            )
-                return {
-                    subSessionId: childSessionId,
-                    isError: true,
-                    resultText:
-                        "Claude Code continuation requires the original cwd, storage environment, tools and permission mode. The profile changed; create a new agent explicitly.",
-                };
-            const communicationNames = (["chatToAgent", "listAgentSessions"] as const).filter(
-                (name) =>
-                    args.claudeCodeTools === undefined ||
-                    args.claudeCodeTools.includes(name) ||
-                    args.claudeCodeTools.includes(`mcp__taco__${name}`),
-            );
-            const nativeTools = args.claudeCodeTools?.filter(
-                (name) =>
-                    ![
-                        "chatToAgent",
-                        "listAgentSessions",
-                        "mcp__taco__chatToAgent",
-                        "mcp__taco__listAgentSessions",
-                    ].includes(name),
-            );
-            return await runClaudeCodeSubagent({
-                subSessionId: childSessionId,
-                resumeSessionId: native?.nativeSessionId,
-                onSessionId: (nativeSessionId) =>
-                    this.sessionRegistry.withSession(childSessionId, (session) =>
-                        writeClaudeCodeState(session, {
-                            nativeSessionId,
-                            cwd,
-                            configDir: process.env.CLAUDE_CONFIG_DIR,
-                            tools: args.claudeCodeTools,
-                            permissionMode: args.permissionMode,
-                        }),
-                    ),
-                onInputReady: (input) => this.conversation.setInput(childSessionId, input),
-                ...(communicationNames.length
-                    ? {
-                          communicationTools: {
-                              allowedNames: communicationNames,
-                              chat: (input: {
-                                  subSessionId: string;
-                                  prompt: string;
-                                  delivery?: "steer" | "followUp";
-                                  background?: boolean;
-                                  inReplyTo?: string;
-                              }) =>
-                                  this.chatToAgent(childSessionId, {
-                                      ...input,
-                                      subSessionId: asSessionId(input.subSessionId),
-                                      parentToolCallId: `cc-message:${uuidv7()}`,
-                                  }),
-                              list: () => this.listAgentSessions(childSessionId),
-                          },
-                      }
-                    : {}),
-                agentType: args.agentType,
-                prompt: args.prompt,
-                rolePrompt: args.rolePrompt,
-                maxTurns: args.maxTurns,
-                tools: nativeTools,
-                permissionMode: args.permissionMode,
-                cwd: args.claudeCodeCwd ?? this.env.cwd,
-                abortController: controller,
-                onUpdate: args.onUpdate,
-                loadSdk: this.loadClaudeCodeSdk,
-                findExecutable: () => this.findClaudeCode(),
-                appendMessages: (messages) =>
-                    this.sessionRegistry.withSession(childSessionId, async (session) => {
-                        const branch =
-                            (await session.branch(MAIN_BRANCH, harnessContext)) ??
-                            (await session.createBranch(MAIN_BRANCH, null, harnessContext));
-                        for (const m of messages) {
-                            await branch.appendMessage(m, harnessContext);
-                            this.pushChildMessages(childSessionId, m);
-                        }
-                    }),
-            });
-        } finally {
-            args.signal?.removeEventListener("abort", follow);
-            this.releaseController(childSessionId, controller);
-        }
-    }
-
-    /**
-     * `runtime: codex` body of `runSubagentSession`. The SDK thread is the
-     * native conversation; Taco persists only the mapping and display
-     * transcript. A resume must use exactly the saved thread and the same
-     * immutable cwd/profile options.
-     */
-    private async runCodexChild(
-        childSessionId: SessionId,
-        args: SubagentSessionArgs,
-    ): Promise<SubagentRunResult> {
-        const controller = args.abortController ?? new AbortController();
-        if (this.stopping) controller.abort();
-        const follow = (): void => controller.abort(args.signal?.reason);
-        if (args.signal?.aborted) controller.abort(args.signal.reason);
-        args.signal?.addEventListener("abort", follow, { once: true });
-        this.subagentControllers.set(childSessionId, {
-            controller,
-            parentSessionId: args.parentSessionId,
-        });
-        let communicationBridge: CodexCommunicationBridge | undefined;
-        try {
-            if (args.resume) await this.preflightCodexRuntime();
-            let cwd: string;
-            try {
-                cwd = await this.resolveCodexCwd(args.codexConfig?.cwd);
-            } catch (error) {
-                return {
-                    subSessionId: childSessionId,
-                    isError: true,
-                    resultText: error instanceof Error ? error.message : String(error),
-                };
-            }
-            // No model override means the user's own Codex configuration
-            // decides — the same rule a Claude Code agent follows.
-            const model = args.codexConfig?.model?.trim();
-            const configWithoutModel = { ...(args.codexConfig ?? {}) };
-            delete configWithoutModel.model;
-            const effectiveConfig = {
-                ...configWithoutModel,
-                ...(model !== undefined && model !== "" ? { model } : {}),
-                sandbox: args.codexConfig?.sandbox ?? ("read-only" as const),
-                approvalPolicy: args.codexConfig?.approvalPolicy ?? ("never" as const),
-            };
-            const skipGitRepoCheck = !(await this.isInsideGitWorktree(cwd));
-            const communicationNames = (["chatToAgent", "listAgentSessions"] as const).filter(
-                (name) =>
-                    args.codexTools === undefined ||
-                    args.codexTools.includes(name) ||
-                    args.codexTools.includes(`mcp__taco__${name}`),
-            );
-            const profileIdentity = codexProfileIdentity(
-                args.agentType,
-                effectiveConfig,
-                communicationNames,
-                args.rolePrompt,
-            );
-            const native = args.resume
-                ? await this.sessionRegistry.withSession(childSessionId, readCodexState)
-                : undefined;
-            if (args.resume && !native) {
-                return {
-                    subSessionId: childSessionId,
-                    isError: true,
-                    resultText:
-                        "This Codex session cannot be resumed because its native thread mapping was not saved. " +
-                        "Create a fresh agent explicitly.",
-                };
-            }
-            if (
-                native &&
-                (native.cwd !== cwd ||
-                    native.profileIdentity !== profileIdentity ||
-                    native.sdkVersion !== CODEX_SDK_VERSION ||
-                    native.threadOptions.skipGitRepoCheck !== skipGitRepoCheck)
-            ) {
-                return {
-                    subSessionId: childSessionId,
-                    isError: true,
-                    resultText:
-                        "Codex continuation requires the original cwd, SDK version, and profile options. " +
-                        "The profile changed; create a new agent explicitly.",
-                };
-            }
-            const state: CodexState = native ?? {
-                nativeThreadId: "",
-                cwd,
-                profileIdentity,
-                sdkVersion: CODEX_SDK_VERSION,
-                threadOptions: {
-                    ...(effectiveConfig.model !== undefined
-                        ? { model: effectiveConfig.model }
-                        : {}),
-                    sandbox: effectiveConfig.sandbox,
-                    approvalPolicy: effectiveConfig.approvalPolicy,
-                    skipGitRepoCheck,
-                    ...(communicationNames.length > 0
-                        ? { communicationTools: communicationNames }
-                        : {}),
-                },
-            };
-            if (communicationNames.length > 0) {
-                communicationBridge = await createCodexCommunicationBridge({
-                    allowedNames: communicationNames,
-                    chat: (input) =>
-                        this.chatToAgent(childSessionId, {
-                            ...input,
-                            subSessionId: asSessionId(input.subSessionId),
-                            parentToolCallId: `codex-message:${uuidv7()}`,
-                        }),
-                    list: () => this.listAgentSessions(childSessionId),
-                });
-            }
-            this.conversation.markRunning(childSessionId, args.executionId);
-            return await runCodexSubagent({
-                subSessionId: childSessionId,
-                agentType: args.agentType,
-                prompt: args.prompt,
-                ...(native ? { resumeThreadId: native.nativeThreadId } : {}),
-                ...(native
-                    ? {}
-                    : {
-                          onThreadId: async (nativeThreadId: string) => {
-                              await this.sessionRegistry.withSession(childSessionId, (session) =>
-                                  writeCodexState(session, { ...state, nativeThreadId }),
-                              );
-                          },
-                      }),
-                rolePrompt: args.rolePrompt,
-                config: effectiveConfig,
-                ...(communicationBridge
-                    ? { mcpServers: { taco: communicationBridge.mcpServer } }
-                    : {}),
-                cwd,
-                skipGitRepoCheck,
-                abortController: controller,
-                onUpdate: args.onUpdate,
-                loadSdk: async () => (await this.loadCodexSdkForRun()).module,
-                appendMessages: (messages) =>
-                    this.sessionRegistry.withSession(childSessionId, async (session) => {
-                        const branch =
-                            (await session.branch(MAIN_BRANCH, harnessContext)) ??
-                            (await session.createBranch(MAIN_BRANCH, null, harnessContext));
-                        for (const message of messages) {
-                            await branch.appendMessage(message, harnessContext);
-                            this.pushChildMessages(childSessionId, message);
-                        }
-                    }),
-            });
-        } finally {
-            try {
-                await communicationBridge?.close();
-            } catch (error) {
-                log.warn("Codex communication bridge cleanup failed", {
-                    subSessionId: childSessionId,
-                    error: error instanceof Error ? error.message : String(error),
-                });
-            }
-            args.signal?.removeEventListener("abort", follow);
-            this.releaseController(childSessionId, controller);
-        }
     }
 
     /**
@@ -1390,14 +826,12 @@ export class AgentSpawner extends EventEmitter {
         // Unlike childDepth there is a safe default, so an omitted value is not
         // a caller error — see resolveContextMode for the precedence rationale.
         const contextMode = resolveContextMode(args.context, def.context);
-        // A Claude Code child is a separate process with its own logs and
-        // telemetry — a new trust domain — so the parent transcript must not
-        // be copied into it (see forkedHistory.ts). The model cannot pass the
-        // runtime, so it may well ask for `fork` here; correct the request
-        // instead of failing it. `<available_agents>` states the constraint, so
-        // a model that reads it never gets here.
-        const effectiveContextMode =
-            def.runtime === "claude-code" || def.runtime === "codex" ? "independent" : contextMode;
+        // Native engines own separate context stores; their adapters cannot import
+        // a parent transcript. Correct a fork request to independent for them.
+        const effectiveContextMode = this.engines[normalizedRuntime(def.runtime)].capabilities
+            .forkContext
+            ? contextMode
+            : "independent";
         // Compute parent depth to feed filterToolsForAgent before delegating.
         // Depth lives in the session's value store, not `JsonlSessionMetadata`
         // (pi 0.85 removed the free-form metadata bag), so it needs a read.
@@ -1463,23 +897,7 @@ export class AgentSpawner extends EventEmitter {
                 : {}),
         };
         if (!args.background) {
-            // Synchronous path: still bounded by the caller's signal, but
-            // linked into a per-child controller so `abortSubagentRun` can
-            // stop this child alone — aborting the parent's signal directly
-            // would tear down the whole parent turn.
-            const controller = new AbortController();
-            if (args.signal?.aborted) controller.abort();
-            const link = (): void => controller.abort();
-            args.signal?.addEventListener("abort", link, { once: true });
-            try {
-                return await this.executeSubagentSession({
-                    ...sessionArgs,
-                    signal: controller.signal,
-                    abortController: controller,
-                });
-            } finally {
-                args.signal?.removeEventListener("abort", link);
-            }
+            return this.executeSubagentSession({ ...sessionArgs, signal: args.signal });
         }
         return this.spawnBackgroundSubagent(sessionArgs, def, args.description);
     }
@@ -1557,7 +975,11 @@ export class AgentSpawner extends EventEmitter {
         // Registered at launch (not when the run starts) so a stop request
         // that arrives during setup still reaches the run: the runner's
         // pre-aborted check turns it into an immediate interruption.
-        this.subagentControllers.set(childSessionId, { controller, parentSessionId });
+        const runScope = this.runLifecycle.acquire({
+            sessionId: childSessionId,
+            parentSessionId,
+            controller,
+        });
         // Recorded before the run starts: the Work must exist for the whole of
         // its run, or a crash mid-flight leaves nothing for the next start to
         // mark interrupted. Never throws; a failed record means no tracking.
@@ -1604,7 +1026,9 @@ export class AgentSpawner extends EventEmitter {
             });
         };
         const execution =
-            workId && this.workHooks?.run && sessionArgs.runtime !== "claude-code"
+            workId &&
+            this.workHooks?.run &&
+            this.engines[normalizedRuntime(sessionArgs.runtime)].capabilities.workLane
                 ? this.workHooks.run(workId, childSessionId, execute)
                 : execute();
         let settledResult: SubagentRunResult | undefined;
@@ -1769,7 +1193,7 @@ export class AgentSpawner extends EventEmitter {
                 clearTimeout(timer);
                 this.backgroundInFlight.delete(parentToolCallId);
                 this.backgroundRuns.delete(run);
-                this.releaseController(childSessionId, controller);
+                runScope.release();
                 // Safe here, not in emitSettled: by the time this whole chain
                 // settles, both the `.then` and `.catch` branches (the only
                 // callers) have already run to completion, so no later call
@@ -2297,9 +1721,8 @@ export class AgentSpawner extends EventEmitter {
     }
 
     async dispose(): Promise<void> {
-        this.stopping = true;
         this.conversation.stopAccepting();
-        for (const { controller } of this.subagentControllers.values()) controller.abort();
+        this.runLifecycle.stop();
         await this.conversation.whenExecutionsSettle();
         await this.whenBackgroundRunsSettle();
         await this.conversation.dispose();
@@ -2345,7 +1768,7 @@ export class AgentSpawner extends EventEmitter {
                     "This Codex session cannot be resumed because its native thread mapping was not saved. Create a fresh agent explicitly.",
                 );
             }
-            await this.preflightCodexRuntime();
+            await this.engines.codex.preflight(def);
         }
         const runId = uuidv7();
         const started = {
@@ -2363,16 +1786,17 @@ export class AgentSpawner extends EventEmitter {
         const prompt = message.queueEntryId
             ? `Process the queued agent message ${message.messageId}. Its content is in the native message queue.`
             : agentMessageEnvelope(message);
+        const delivery = this.engines[normalizedRuntime(facts.runtime)].capabilities.delivery;
         const receipt: AgentChatResult = {
             subSessionId: message.targetSessionId,
             messageId: message.messageId,
             runId,
             status: "started",
             effectiveDelivery:
-                facts.runtime === "claude-code"
-                    ? "nextTurn"
-                    : facts.runtime === "codex"
-                      ? "followUp"
+                delivery === "afterRun"
+                    ? "followUp"
+                    : delivery === "nextTurn"
+                      ? "nextTurn"
                       : message.delivery,
             resultText:
                 "The existing agent conversation is continuing. Completion will be reported to its original parent.",
@@ -2406,16 +1830,12 @@ export class AgentSpawner extends EventEmitter {
             );
             return { result: { ...receipt, resultPath: launched.resultPath } };
         }
-        const executionController = facts.runtime === "codex" ? new AbortController() : undefined;
-        const followChatAbort = (): void => executionController?.abort(args.signal?.reason);
-        if (executionController) {
-            if (args.signal?.aborted) executionController.abort(args.signal.reason);
-            args.signal?.addEventListener("abort", followChatAbort, { once: true });
-            this.subagentControllers.set(message.targetSessionId, {
-                controller: executionController,
-                parentSessionId: message.ownerParentSessionId,
-            });
-        }
+        const executionScope = this.runLifecycle.acquire({
+            sessionId: message.targetSessionId,
+            parentSessionId: message.ownerParentSessionId,
+            signal: args.signal,
+        });
+        const executionController = executionScope.controller;
         announce();
         this.conversation.begin(message.targetSessionId, {
             runId,
@@ -2437,7 +1857,7 @@ export class AgentSpawner extends EventEmitter {
                     newTask: true,
                     managedExternally: true,
                     executionId: runId,
-                    ...(executionController ? { abortController: executionController } : {}),
+                    abortController: executionController,
                 }),
         )
             .then(
@@ -2475,10 +1895,7 @@ export class AgentSpawner extends EventEmitter {
                 },
             )
             .finally(() => {
-                args.signal?.removeEventListener("abort", followChatAbort);
-                if (executionController) {
-                    this.releaseController(message.targetSessionId, executionController);
-                }
+                executionScope.release();
             });
         return { result: receipt, completion };
     }
@@ -2625,52 +2042,55 @@ export class AgentSpawner extends EventEmitter {
             registry: this.sessionRegistry,
             findAgent: (name) => this.findAgent(name),
             getTools: this.getTools,
-            childAttachDeps: this.childAttachDeps,
-            defaultModelIdentity: this.defaultModelIdentity,
-            workHooks: this.workHooks,
             countAssistantTurns: (id) => this.countAssistantTurns(id),
-            readLastAssistantText: (id) => this.extractLastAssistantText(id),
-            reportResumeStart: (id) => this.reportResumeStart(id),
-            reportResumeSettle: (id, result, handle) => this.reportResumeSettle(id, result, handle),
-            registerController: (id, controller, parentSessionId) => {
-                if (this.stopping) controller.abort();
-                this.subagentControllers.set(id, { controller, parentSessionId });
-            },
-            releaseController: (id, controller) => this.releaseController(id, controller),
-            runClaudeCode: (request, def) =>
-                this.runClaudeCodeChild(request.subSessionId, {
-                    parentSessionId: request.parentSessionId,
-                    parentToolCallId: request.parentToolCallId,
-                    agentType: def.agentType,
-                    prompt: request.prompt,
-                    tools: [],
-                    runtime: "claude-code",
-                    resume: true,
-                    rolePrompt: def.systemPrompt,
-                    maxTurns: def.maxTurns,
-                    claudeCodeTools: def.tools,
-                    permissionMode: def.permissionMode,
-                    claudeCodeCwd: def.cwd,
-                    signal: request.signal,
-                    onUpdate: request.onUpdate,
-                }),
-            runCodex: (request, def, controller) =>
-                this.runCodexChild(request.subSessionId, {
-                    parentSessionId: request.parentSessionId,
-                    parentToolCallId: request.parentToolCallId,
-                    agentType: def.agentType,
-                    prompt: request.prompt,
-                    tools: [],
-                    runtime: "codex",
-                    resume: true,
-                    rolePrompt: def.systemPrompt,
-                    ...(def.codex !== undefined ? { codexConfig: def.codex } : {}),
-                    ...(def.tools !== undefined ? { codexTools: def.tools } : {}),
-                    abortController: controller,
-                    signal: request.signal,
-                    onUpdate: request.onUpdate,
-                }),
+            execute: (request, managedExternally, definition) =>
+                this.runResumedEngine(request, managedExternally, definition),
         });
+    }
+
+    private runResumedEngine(
+        args: SubagentSessionArgs & { childSessionId: SessionId },
+        managedExternally: boolean,
+        definition: AgentDefinition,
+    ): Promise<SubagentRunResult> {
+        return this.runLifecycle.run(
+            {
+                sessionId: args.childSessionId,
+                parentSessionId: args.parentSessionId,
+                controller: args.abortController,
+                signal: args.signal,
+            },
+            async (controller) => {
+                const engine = this.engines[normalizedRuntime(args.runtime)];
+                const tracksWork = !managedExternally && engine.capabilities.workLane;
+                const handle = tracksWork
+                    ? await this.reportResumeStart(args.childSessionId)
+                    : undefined;
+                const execute = async () => {
+                    await engine.preflight(definition);
+                    return engine.run({
+                        ...args,
+                        abortController: controller,
+                        signal: controller.signal,
+                    });
+                };
+                let result: SubagentRunResult;
+                try {
+                    result =
+                        handle && this.workHooks?.run
+                            ? await this.workHooks.run(handle.workId, args.childSessionId, execute)
+                            : await execute();
+                } catch (error) {
+                    result = {
+                        subSessionId: args.childSessionId,
+                        resultText: error instanceof Error ? error.message : String(error),
+                        isError: true,
+                    };
+                }
+                if (tracksWork) await this.reportResumeSettle(args.childSessionId, result, handle);
+                return result;
+            },
+        );
     }
 
     /**

@@ -167,6 +167,11 @@ cwd 是文件系统层面的"项目目录"标识，pi 的现有 model（`pi-codi
 - 管理该 cwd 下所有 attached sessions
 - 提供 listAvailableModels(provider?) 给客户端拉可用 model 列表
 
+`AgentSpawner` 负责子会话创建、Work 跟踪和结果回传。`engines/` 适配器负责标准
+harness 挂载和原生 Claude Code/Codex 执行，包括原生会话映射与桥接清理；新建和续跑
+共用引擎入口。`SubagentRunLifecycle` 统一管理取消作用域：后台嵌套执行共享同一
+controller，直到结算完成才释放；父会话停止操作会等待最后一个作用域释放。
+
 **关键 API**
 
 ```typescript

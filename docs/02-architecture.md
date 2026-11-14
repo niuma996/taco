@@ -187,6 +187,13 @@ with other tooling.
 - Owns `PermissionBroker` (5-level risk classification + rule-based allow/deny)
 - Owns `Checkpoints` (turn-scoped pre-write file snapshots)
 
+`AgentSpawner` coordinates child sessions, Work tracking and parent result delivery.
+Its `engines/` adapters own standard harness attachment and native Claude Code/Codex
+execution, including native session mappings and bridge cleanup. Spawn and resume
+share the same engine entry point. `SubagentRunLifecycle` owns cancellation scopes:
+nested background runs share one controller until settlement finishes, and parent
+stop requests wait for the final scope to release.
+
 **Key surface**
 
 ```typescript

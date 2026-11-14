@@ -3,13 +3,10 @@ import { agentToolPolicy, filterToolsForAgent } from "../../agents/filterTools.t
 import type { AgentDefinition, SubagentProgressSink } from "../../agents/types.ts";
 import type { SubagentBudgetState } from "../../tags/subagentBudget.ts";
 import type { TacoTool } from "../../tools/index.ts";
-import type { BackgroundWorkHooks } from "../../work/workHooks.ts";
-import type { WorkAttemptHandle } from "../../work/workOperationTypes.ts";
-import type { AttachedSession } from "../harness/attachedSession.ts";
 import { readSessionFacts, type SessionFacts } from "../session/sessionFacts.ts";
 import type { SessionRegistry } from "../session/sessionRegistry.ts";
-import { type ChildAttachDeps, prepareChildAttach } from "./childAttach.ts";
-import { runAttachedSubagent, type SubagentRunResult } from "./subagentRunner.ts";
+import type { SubagentRunResult } from "./subagentRunner.ts";
+import type { SubagentSessionArgs } from "./subagentTypes.ts";
 
 export interface ResumeSubagentArgs {
     parentSessionId: SessionId;
@@ -29,24 +26,11 @@ export interface SubagentResumeDeps {
     registry: SessionRegistry;
     findAgent(name: string): AgentDefinition | undefined;
     getTools(): TacoTool[];
-    childAttachDeps: ChildAttachDeps;
-    defaultModelIdentity?: string;
-    workHooks?: BackgroundWorkHooks;
     countAssistantTurns(id: SessionId): Promise<number>;
-    readLastAssistantText(id: SessionId): Promise<{ text: string; isEmpty: boolean }>;
-    reportResumeStart(id: SessionId): Promise<WorkAttemptHandle | undefined>;
-    reportResumeSettle(
-        id: SessionId,
-        result: SubagentRunResult,
-        handle?: WorkAttemptHandle,
-    ): Promise<void>;
-    registerController(id: SessionId, controller: AbortController, parent: SessionId): void;
-    releaseController(id: SessionId, controller: AbortController): void;
-    runClaudeCode(args: ResumeSubagentArgs, def: AgentDefinition): Promise<SubagentRunResult>;
-    runCodex(
-        args: ResumeSubagentArgs,
-        def: AgentDefinition,
-        controller: AbortController,
+    execute(
+        args: SubagentSessionArgs & { childSessionId: SessionId },
+        managedExternally: boolean,
+        definition: AgentDefinition,
     ): Promise<SubagentRunResult>;
 }
 
@@ -112,46 +96,10 @@ export async function runSubagentResume(
             resultText:
                 "The agent definition changed runtime; the existing session cannot switch engines.",
         };
-    if (md.runtime === "claude-code") return deps.runClaudeCode(args, def);
-    if (md.runtime === "codex") {
-        const controller = args.abortController ?? new AbortController();
-        const follow = (): void => controller.abort(args.signal?.reason);
-        if (args.signal?.aborted) controller.abort(args.signal.reason);
-        args.signal?.addEventListener("abort", follow, { once: true });
-        deps.registerController(args.subSessionId, controller, args.parentSessionId);
-        try {
-            const handle = args.managedExternally
-                ? undefined
-                : await deps.reportResumeStart(args.subSessionId);
-            const execute = () => deps.runCodex(args, def, controller);
-            let result: SubagentRunResult;
-            try {
-                result =
-                    handle && deps.workHooks?.run
-                        ? await deps.workHooks.run(handle.workId, args.subSessionId, execute)
-                        : await execute();
-            } catch (error) {
-                result = {
-                    subSessionId: args.subSessionId,
-                    resultText: error instanceof Error ? error.message : String(error),
-                    isError: true,
-                };
-            }
-            if (!args.managedExternally) {
-                await deps.reportResumeSettle(args.subSessionId, result, handle);
-            }
-            return result;
-        } finally {
-            args.signal?.removeEventListener("abort", follow);
-            deps.releaseController(args.subSessionId, controller);
-        }
-    }
-    // 2. Compute remaining turn budget. We don't have a turn_end counter
-    //    on disk — assistant messages count one-per-turn and survive across
-    //    resumes. Subtract from `def.maxTurns`; fail fast when depleted
-    //    rather than burn one more LLM round to discover the cap.
+    const standard = md.runtime !== "claude-code" && md.runtime !== "codex";
+    // Only the standard engine counts persisted assistant turns against its harness budget.
     let maxTurns = def.maxTurns;
-    if (!args.newTask && maxTurns !== undefined) {
+    if (standard && !args.newTask && maxTurns !== undefined) {
         const used = await deps.countAssistantTurns(args.subSessionId);
         const remaining = maxTurns - used;
         if (remaining <= 0) {
@@ -164,97 +112,40 @@ export async function runSubagentResume(
         maxTurns = remaining;
     }
 
-    // 3. Rebuild the system prompt from the original agentType's profile
-    //    + few-shots, filtered through the same toolset the spawn used.
-    //    def is guaranteed non-undefined by the early return above.
     const childDepth = typeof md.depth === "number" ? md.depth : Number(md.depth ?? 0);
-    const {
-        tools: attachedChildTools,
-        taskState: childTaskState,
-        systemPrompt: childSystemPrompt,
-    } = await prepareChildAttach(deps.childAttachDeps, {
-        sessionId: args.subSessionId,
-        agentType,
-        childDepth,
-        allowedTools: filterToolsForAgent(deps.getTools(), def.tools, childDepth),
-        toolPolicy: agentToolPolicy(def.tools, childDepth),
-        rolePrompt: def.systemPrompt,
-        fewShots: def.fewShots,
-        // Re-inject the fork transcript from the spawn-time snapshot so a
-        // resume sees the same context the child started with, even if the
-        // parent has since compacted or continued.
-        forkedContext: typeof md.forkedContext === "string" ? md.forkedContext : undefined,
-        modelIdentity: deps.defaultModelIdentity,
-    });
-
-    // A resume gets its own budget object: the remaining turn count is
-    // what this run may still take, and the counter starts fresh from
-    // here. One object, shared with the runner that updates it.
-    const resumeBudget: SubagentBudgetState = args.budget ?? {
-        turnsUsed: 0,
-        startedAt: Date.now(),
-        ...(maxTurns !== undefined ? { maxTurns } : {}),
-    };
-
-    // 4. Attach (returns the existing AttachedSession if still attached).
-    let attached: AttachedSession;
-    try {
-        attached = await deps.registry.attachChild(
-            args.subSessionId,
-            {
-                thinkingLevel: "off",
-                toolLoadPolicy: agentToolPolicy(def.tools, childDepth),
-                getSubagentBudget: () => resumeBudget,
+    return deps.execute(
+        {
+            parentSessionId: args.parentSessionId,
+            parentToolCallId: args.parentToolCallId,
+            childSessionId: args.subSessionId,
+            agentType,
+            prompt: args.prompt,
+            runtime: md.runtime,
+            resume: true,
+            signal: args.signal,
+            abortController: args.abortController,
+            executionId: args.executionId,
+            onUpdate: args.onUpdate,
+            tools: standard ? filterToolsForAgent(deps.getTools(), def.tools, childDepth) : [],
+            childDepth,
+            toolPolicy: standard ? agentToolPolicy(def.tools, childDepth) : undefined,
+            rolePrompt: def.systemPrompt,
+            fewShots: def.fewShots,
+            forkedContext: typeof md.forkedContext === "string" ? md.forkedContext : undefined,
+            maxTurns,
+            budget: args.budget ?? {
+                turnsUsed: 0,
+                startedAt: Date.now(),
+                ...(maxTurns !== undefined ? { maxTurns } : {}),
             },
-            attachedChildTools,
-            childTaskState,
-            childSystemPrompt,
-        );
-    } catch (e) {
-        return {
-            subSessionId: args.subSessionId,
-            resultText: e instanceof Error ? e.message : String(e),
-            isError: true,
-        };
-    }
-
-    // Same per-child controller as the fresh-spawn sync path: the caller's
-    // signal bounds the run, and the registry entry lets `abortSubagentRun`
-    // stop this child without aborting the parent's turn.
-    const controller = new AbortController();
-    if (args.signal?.aborted) controller.abort(args.signal.reason);
-    const link = (): void => controller.abort(args.signal?.reason);
-    args.signal?.addEventListener("abort", link, { once: true });
-    deps.registerController(args.subSessionId, controller, args.parentSessionId);
-    try {
-        // Reopen an interrupted Work before the run so the overview stops
-        // showing it as stopped while it is working again.
-        const handle = args.managedExternally
-            ? undefined
-            : await deps.reportResumeStart(args.subSessionId);
-        const execute = () =>
-            runAttachedSubagent({
-                subSessionId: args.subSessionId,
-                attached,
-                prompt: args.prompt,
-                agentType,
-                maxTurns,
-                budget: resumeBudget,
-                signal: controller.signal,
-                onUpdate: args.onUpdate,
-                // Reached here only after the profile resolved, so it can be resumed again.
-                resumability: "resumable",
-                readLastAssistantText: (id) => deps.readLastAssistantText(id),
-            });
-        const result =
-            handle && deps.workHooks?.run
-                ? await deps.workHooks.run(handle.workId, args.subSessionId, execute)
-                : await execute();
-        if (!args.managedExternally)
-            await deps.reportResumeSettle(args.subSessionId, result, handle);
-        return result;
-    } finally {
-        args.signal?.removeEventListener("abort", link);
-        deps.releaseController(args.subSessionId, controller);
-    }
+            resumability: "resumable",
+            claudeCodeTools: def.tools,
+            permissionMode: def.permissionMode,
+            claudeCodeCwd: def.cwd,
+            codexConfig: def.codex,
+            codexTools: def.tools,
+        },
+        args.managedExternally === true,
+        def,
+    );
 }

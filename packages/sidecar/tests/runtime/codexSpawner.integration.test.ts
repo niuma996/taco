@@ -7,6 +7,7 @@ import { setTimeout as delay, setImmediate as nextImmediate } from "node:timers/
 import { asSessionId, type SessionId } from "@taco-ai/protocol";
 import type { AgentDefinition } from "../../src/agents/types.ts";
 import { harnessContext } from "../../src/lib/harnessContext.ts";
+import { findBranchEntries } from "../../src/runtime/session/sessionBranch.ts";
 import { readSessionFacts, writeSessionFacts } from "../../src/runtime/session/sessionFacts.ts";
 import { readAgentMessages } from "../../src/runtime/subagent/agentMessages.ts";
 import type {
@@ -654,6 +655,49 @@ describe("AgentSpawner — runtime: codex", () => {
         }
     });
 
+    it("preflights Codex before a direct resume can append native input", async () => {
+        const seen: Parameters<typeof fakeSdk>[1] = { inputs: [] };
+        const restore = installSdk(fakeSdk(["initial"], seen));
+        const spawner = ws.agentSpawner as unknown as {
+            loadCodexSdkForRun: () => Promise<LoadedCodexSdk>;
+        };
+        const original = spawner.loadCodexSdkForRun;
+        try {
+            const parent = await seedParent("codex-parent-resume-preflight");
+            const first = await ws.agentSpawner.spawnSubagent({
+                parentSessionId: parent,
+                parentToolCallId: "codex-call-resume-preflight-1",
+                agentType: def.agentType,
+                prompt: "first",
+            });
+            assert.ok(first.subSessionId);
+            const childId = first.subSessionId;
+            const readMessages = () =>
+                ws.sessionRegistry.withSession(childId, async (session) =>
+                    (await findBranchEntries(session)).filter((entry) => entry.type === "message"),
+                );
+            const before = await readMessages();
+            spawner.loadCodexSdkForRun = async () => {
+                throw new Error("Codex runtime is not installed");
+            };
+
+            const resumed = await ws.agentSpawner.resumeSubagent({
+                parentSessionId: parent,
+                parentToolCallId: "codex-call-resume-preflight-2",
+                subSessionId: first.subSessionId,
+                prompt: "must not reach native Codex",
+            });
+            assert.equal(resumed.isError, true);
+            assert.match(resumed.resultText, /not installed/);
+            assert.deepEqual(seen.inputs, ["first"]);
+            assert.equal(seen.resumes, undefined);
+            assert.deepEqual(await readMessages(), before);
+        } finally {
+            spawner.loadCodexSdkForRun = original;
+            restore();
+        }
+    });
+
     it("rejects a deleted cwd on resume without calling the SDK", async () => {
         const seen: Parameters<typeof fakeSdk>[1] = {};
         const restore = installSdk(fakeSdk(["initial", "must not run"], seen));
@@ -690,25 +734,6 @@ describe("AgentSpawner — runtime: codex", () => {
             def.codex = previous;
             restore();
         }
-    });
-
-    it("keeps a newer controller when an older run releases its own", () => {
-        const spawner = ws.agentSpawner as unknown as {
-            subagentControllers: Map<
-                string,
-                { controller: AbortController; parentSessionId: SessionId }
-            >;
-            releaseController(id: string, expected?: AbortController): void;
-        };
-        const id = "codex-stale-controller";
-        const oldController = new AbortController();
-        const newController = new AbortController();
-        const parent = asSessionId("codex-parent-controller");
-        spawner.subagentControllers.set(id, { controller: newController, parentSessionId: parent });
-        spawner.releaseController(id, oldController);
-        assert.equal(spawner.subagentControllers.get(id)?.controller, newController);
-        spawner.releaseController(id, newController);
-        assert.equal(spawner.subagentControllers.has(id), false);
     });
 
     it("rejects resume when the native thread mapping is missing", async () => {
