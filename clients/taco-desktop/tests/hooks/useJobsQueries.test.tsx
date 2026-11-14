@@ -217,12 +217,21 @@ describe("shared jobs queries", () => {
             dreamScheduled: boolean;
         }) => void;
         Object.assign(h.client, {
-            memoryList: vi.fn(
-                () =>
-                    new Promise((yes) => {
-                        resolve = yes;
-                    }),
-            ),
+            memoryList: vi
+                .fn()
+                .mockImplementationOnce(
+                    () =>
+                        new Promise((yes) => {
+                            resolve = yes;
+                        }),
+                )
+                .mockResolvedValue({
+                    enabled: true,
+                    memoryContent: "",
+                    memoryHash: "hash",
+                    topics: [],
+                    dreamScheduled: false,
+                }),
         });
         act(() => memory.result.current.loadMemory());
         await waitFor(() =>
@@ -268,12 +277,21 @@ describe("shared jobs queries", () => {
             dreamScheduled: boolean;
         }) => void;
         Object.assign(h.client, {
-            memoryList: vi.fn(
-                () =>
-                    new Promise((yes) => {
-                        resolveMemory = yes;
-                    }),
-            ),
+            memoryList: vi
+                .fn()
+                .mockImplementationOnce(
+                    () =>
+                        new Promise((yes) => {
+                            resolveMemory = yes;
+                        }),
+                )
+                .mockResolvedValue({
+                    enabled: true,
+                    memoryContent: "",
+                    memoryHash: "hash",
+                    topics: [],
+                    dreamScheduled: false,
+                }),
         });
         const memory = renderHook(
             () => useMemoryPane(h.client, true, "/a", (key) => key, vi.fn()),
@@ -297,6 +315,37 @@ describe("shared jobs queries", () => {
             }),
         );
         await waitFor(() => expect(memory.result.current.memoryData).not.toBeNull());
+        expect(memory.result.current.memoryData?.dreamScheduled).toBe(false);
+    });
+    it("a fresh initial Memory snapshot outranks an older in-flight job read", async () => {
+        const h = fixture();
+        const options = queryWrapper();
+        const original = h.callProcess.getMockImplementation();
+        if (!original) throw new Error("missing transport");
+        let resolveJob!: (value: { job: Job }) => void;
+        h.callProcess.mockImplementation((method, params) =>
+            method === "jobs.get"
+                ? new Promise((resolve) => {
+                      resolveJob = resolve;
+                  })
+                : original(method, params),
+        );
+        Object.assign(h.client, {
+            memoryList: vi.fn(async () => ({
+                enabled: true,
+                memoryContent: "",
+                memoryHash: "hash",
+                topics: [],
+                dreamScheduled: false,
+            })),
+        });
+        const memory = renderHook(
+            () => useMemoryPane(h.client, true, "/a", (key) => key, vi.fn()),
+            options,
+        );
+        await waitFor(() => expect(memory.result.current.memoryData?.dreamScheduled).toBe(false));
+        await act(async () => resolveJob({ job }));
+        await waitFor(() => expect(memory.result.current.dreamConfig?.minHours).toBe(24));
         expect(memory.result.current.memoryData?.dreamScheduled).toBe(false);
     });
 });

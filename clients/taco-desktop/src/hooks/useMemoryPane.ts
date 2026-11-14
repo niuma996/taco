@@ -1,4 +1,4 @@
-import { asWorkspaceId, type Job, type MemoryListResult } from "@taco-ai/protocol";
+import { asWorkspaceId, type MemoryListResult } from "@taco-ai/protocol";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createJobsClient } from "../lib/clients/jobsClient.ts";
@@ -75,7 +75,6 @@ export function useMemoryPane(
     const [memorySelectedId, setMemorySelectedId] = useState<string>(MEMORY_ROOT_ID);
     const [memorySaving, setMemorySaving] = useState(false);
     const queryClient = useQueryClient();
-    const memoryJobRef = useRef<Job | null | undefined>(undefined);
     const dreamJob = useQuery({
         ...jobQuery(client, MEMORY_DREAM_JOB_ID),
         enabled: active && Boolean(activeCwd),
@@ -119,16 +118,12 @@ export function useMemoryPane(
         if (!activeCwd) return;
         const cwd = activeCwd;
         const seq = ++listSeq.current;
-        const jobKey = jobQuery(client, MEMORY_DREAM_JOB_ID).queryKey;
-        const jobAtRequest = queryClient.getQueryData(jobKey);
         setMemoryLoading(true);
         setMemoryError(null);
         void client
             .memoryList({ workspace: asWorkspaceId(cwd) })
             .then((r) => {
                 if (seq !== listSeq.current || cwdRef.current !== cwd) return;
-                // Only job changes admitted after this read may override its schedule flag.
-                memoryJobRef.current = jobAtRequest;
                 setMemoryData(r);
             })
             .catch((e: unknown) => {
@@ -139,12 +134,22 @@ export function useMemoryPane(
             .finally(() => {
                 if (seq === listSeq.current) setMemoryLoading(false);
             });
-    }, [activeCwd, client, queryClient]);
+    }, [activeCwd, client]);
 
     useEffect(() => {
         if (!active || !activeCwd) return;
         loadMemory();
     }, [active, activeCwd, loadMemory]);
+
+    const previousScheduled = useRef<boolean | undefined>(undefined);
+    useEffect(() => {
+        const enabled = dreamJob.data?.enabled;
+        const changed =
+            previousScheduled.current !== undefined && enabled !== previousScheduled.current;
+        previousScheduled.current = enabled;
+        // Keep memory.list authoritative; a changed job retires an older snapshot request.
+        if (changed && enabled !== undefined && active) loadMemory();
+    }, [dreamJob.data?.enabled, active, loadMemory]);
 
     // A selection whose topic is gone after a refetch (deleted elsewhere,
     // merged by consolidation) falls back to the global entry.
@@ -331,10 +336,7 @@ export function useMemoryPane(
     const dreamBusy = dreamBusyFor && dreamBusyFor.cwd === activeCwd ? dreamBusyFor.busy : null;
 
     return {
-        memoryData:
-            memoryData && dreamJob.data && dreamJob.data !== memoryJobRef.current
-                ? { ...memoryData, dreamScheduled: dreamJob.data.enabled }
-                : memoryData,
+        memoryData,
         memoryLoading,
         memoryError,
         memorySelectedId,
