@@ -358,7 +358,8 @@ describe("work × background subagent", () => {
                 },
             });
             try {
-                const spawner = ws.agentSpawner as unknown as {
+                const spawner = (ws.agentSpawner as unknown as { background: unknown })
+                    .background as unknown as {
                     deliverNotice: (p: SessionId, n: string, w: string) => Promise<boolean>;
                 };
                 await spawner.deliverNotice(asSessionId("p-late"), "notice", workId);
@@ -408,12 +409,13 @@ describe("work × background subagent", () => {
                 },
             });
             try {
-                const spawner = ws.agentSpawner as unknown as {
-                    flushPendingSubagentResults(p: SessionId): Promise<void>;
+                const spawner = (ws.agentSpawner as unknown as { background: unknown })
+                    .background as unknown as {
+                    flush(p: SessionId): Promise<void>;
                 };
-                await spawner.flushPendingSubagentResults(asSessionId("p-flushed"));
+                await spawner.flush(asSessionId("p-flushed"));
                 assert.equal(prompts, 1, "delivery to the user does not update the parent model");
-                await spawner.flushPendingSubagentResults(asSessionId("p-flushed"));
+                await spawner.flush(asSessionId("p-flushed"));
                 assert.equal(prompts, 1, "a repeated flush must not prompt twice");
                 assert.equal(handle.sent.length, 1);
                 const pending = await ws.sessionRegistry.withSession(
@@ -608,11 +610,12 @@ describe("work × background subagent", () => {
                     return { role: "assistant", content: [{ type: "text", text: "found it" }] };
                 },
             });
-            const spawner = ws.agentSpawner as unknown as {
+            const spawner = (ws.agentSpawner as unknown as { background: unknown })
+                .background as unknown as {
                 flushingParents: Set<SessionId>;
-                flushPendingSubagentResults(id: SessionId, trackedOnly: boolean): Promise<void>;
+                flush(id: SessionId, trackedOnly: boolean): Promise<void>;
             };
-            const flushing = spawner.flushPendingSubagentResults(parent, true);
+            const flushing = spawner.flush(parent, true);
             try {
                 await until(() => blocked, "busy release to reach its write");
                 assert.equal(spawner.flushingParents.has(parent), true);
@@ -773,7 +776,8 @@ describe("work × background subagent", () => {
         });
         try {
             await launch(parent);
-            const spawner = ws.agentSpawner as unknown as { flushingParents: Set<SessionId> };
+            const spawner = (ws.agentSpawner as unknown as { background: unknown })
+                .background as unknown as { flushingParents: Set<SessionId> };
             await until(() => !spawner.flushingParents.has(parent), "idle flush to finish");
             assert.equal(prompts, 1);
         } finally {

@@ -240,7 +240,8 @@ describe("AgentSpawner.spawnSubagent — background", () => {
     });
 
     it("rejects a background launch when the concurrency limit is already full", async () => {
-        const spawner = ws.agentSpawner as unknown as { backgroundInFlight: Set<string> };
+        const spawner = (ws.agentSpawner as unknown as { background: unknown })
+            .background as unknown as { backgroundInFlight: Set<string> };
         const filler = Array.from({ length: 8 }, (_, i) => `filler-${i}`);
         for (const id of filler) spawner.backgroundInFlight.add(id);
         try {
@@ -263,7 +264,8 @@ describe("AgentSpawner.spawnSubagent — background", () => {
     });
 
     it("rejects a duplicate background spawn for the same parentToolCallId", async () => {
-        const spawner = ws.agentSpawner as unknown as { backgroundInFlight: Set<string> };
+        const spawner = (ws.agentSpawner as unknown as { background: unknown })
+            .background as unknown as { backgroundInFlight: Set<string> };
         spawner.backgroundInFlight.add("tc-dup");
         try {
             const parent = "bg-parent-dup";
@@ -348,10 +350,10 @@ describe("AgentSpawner.spawnSubagent — background", () => {
         });
         try {
             await (
-                ws.agentSpawner as unknown as {
-                    flushPendingSubagentResults: (id: unknown) => Promise<void>;
+                (ws.agentSpawner as unknown as { background: unknown }).background as unknown as {
+                    flush: (id: unknown) => Promise<void>;
                 }
-            ).flushPendingSubagentResults(asSessionId(parent));
+            ).flush(asSessionId(parent));
             assert.ok(delivered, "flush must re-deliver the stranded notice");
             assert.match(delivered ?? "", /late="true"/);
             assert.match(delivered ?? "", /This notice is late/);
@@ -631,7 +633,8 @@ describe("AgentSpawner.spawnSubagent — background", () => {
     });
 
     it("withPendingQueue serializes two overlapping writers for the same parent", async () => {
-        const spawner = ws.agentSpawner as unknown as {
+        const spawner = (ws.agentSpawner as unknown as { background: unknown })
+            .background as unknown as {
             withPendingQueue: <T>(parentSessionId: SessionId, run: () => Promise<T>) => Promise<T>;
         };
         const parent = asSessionId("bg-parent-queue-unit");
@@ -678,8 +681,11 @@ describe("AgentSpawner.spawnSubagent — background", () => {
                 background: true,
             });
             await ws.agentSpawner.whenBackgroundRunsSettle();
-            const settledEmitted = (ws.agentSpawner as unknown as { settledEmitted: Set<string> })
-                .settledEmitted;
+            const settledEmitted = (
+                (ws.agentSpawner as unknown as { background: unknown }).background as unknown as {
+                    settledEmitted: Set<string>;
+                }
+            ).settledEmitted;
             assert.equal(
                 settledEmitted.has("tc-cleanup"),
                 false,

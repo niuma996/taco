@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { it, type TestContext } from "node:test";
 import { asSessionId } from "@taco-ai/protocol";
-import { AgentSpawner } from "../../src/runtime/subagent/agentSpawner.ts";
+import { BackgroundSubagentCoordinator } from "../../src/runtime/subagent/backgroundSubagentCoordinator.ts";
 import type { BackgroundWorkHooks, ParentNoticeOutcome } from "../../src/work/workHooks.ts";
 import { WorkParentNotice } from "../../src/work/workParentNotice.ts";
 import { resumeAttempt } from "../../src/work/workState.ts";
@@ -67,7 +67,7 @@ function noticeSpawner(
 ) {
     let holds = 0;
     const outcomes: ParentNoticeOutcome[] = [];
-    const spawner = Object.assign(Object.create(AgentSpawner.prototype), {
+    const spawner = Object.assign(Object.create(BackgroundSubagentCoordinator.prototype), {
         workHooks: {
             runParentNotice: guard,
             beginParentNotice: (id: string, tracked?: boolean) => notices.begin(id, tracked),
