@@ -6,9 +6,11 @@ import type {
     WorkSummary,
 } from "@taco-ai/protocol";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import type { ReactElement } from "react";
 import { afterEach, describe, it, vi } from "vitest";
 import * as useI18n from "../../src/i18n/useI18n";
 import { WorkPane } from "../../src/views/WorkPane";
+import { queryWrapper } from "../helpers/queryWrapper";
 
 vi.mock("react-i18next", () => ({
     useTranslation: vi.fn(() => ({ t: (key: string) => key, i18n: { language: "en" } })),
@@ -18,6 +20,10 @@ vi.spyOn(useI18n, "useT").mockReturnValue({
 } as unknown as ReturnType<typeof useI18n.useT>);
 
 afterEach(cleanup);
+
+function renderWithQueries(ui: ReactElement) {
+    return render(ui, { wrapper: queryWrapper().wrapper });
+}
 
 const runningWork: WorkSummary = {
     workId: "w-running",
@@ -54,9 +60,47 @@ function overview(work: WorkSummary = runningWork) {
 }
 
 describe("WorkPane result states", () => {
+    it("deduplicates detail RPCs for two consumers opening the same Work", async () => {
+        const workGet = vi.fn(() => new Promise<WorkGetResult>(() => {}));
+        const client = { workGet };
+        renderWithQueries(
+            <>
+                <WorkPane client={client as never} overview={overview()} onOpenSession={() => {}} />
+                <WorkPane client={client as never} overview={overview()} onOpenSession={() => {}} />
+            </>,
+        );
+        for (const button of screen.getAllByRole("button", { name: /Review changes/ })) {
+            fireEvent.click(button);
+        }
+        await waitFor(() => assert.equal(workGet.mock.calls.length, 1));
+    });
+
+    it("reuses the same revision when a detail row is closed and reopened", async () => {
+        const workGet = vi.fn(
+            async (): Promise<WorkGetResult> => ({
+                work: runningWork,
+                resultText: "Cached review",
+            }),
+        );
+        renderWithQueries(
+            <WorkPane
+                client={{ workGet } as never}
+                overview={overview()}
+                onOpenSession={() => {}}
+            />,
+        );
+        const button = screen.getByRole("button", { name: /Review changes/ });
+        fireEvent.click(button);
+        await waitFor(() => assert.ok(screen.getByText("Cached review")));
+        fireEvent.click(button);
+        fireEvent.click(button);
+        await waitFor(() => assert.ok(screen.getByText("Cached review")));
+        assert.equal(workGet.mock.calls.length, 1);
+    });
+
     it("opens a Work with its own workspace and session as one target", () => {
         const onOpenSession = vi.fn();
-        render(
+        renderWithQueries(
             <WorkPane
                 client={{} as never}
                 overview={overview({
@@ -82,7 +126,7 @@ describe("WorkPane result states", () => {
         it(`disables navigation to a ${sessionState} target while keeping its result`, async () => {
             const work = { ...runningWork, sessionState, status: "completed" as const };
             const onOpenSession = vi.fn();
-            render(
+            renderWithQueries(
                 <WorkPane
                     client={
                         { workGet: async () => ({ work, resultText: "Saved findings" }) } as never
@@ -107,7 +151,7 @@ describe("WorkPane result states", () => {
     }
 
     it("keeps records without a workspace unavailable", () => {
-        render(
+        renderWithQueries(
             <WorkPane
                 client={{} as never}
                 overview={overview({ ...runningWork, workspace: undefined })}
@@ -123,7 +167,7 @@ describe("WorkPane result states", () => {
 
     it("says a running Work has no result yet instead of saying it is unavailable", async () => {
         const workGet = vi.fn(async (): Promise<WorkGetResult> => ({ work: runningWork }));
-        render(
+        renderWithQueries(
             <WorkPane
                 client={{ workGet } as never}
                 overview={overview()}
@@ -134,6 +178,23 @@ describe("WorkPane result states", () => {
         await waitFor(() => assert.ok(screen.getByText("work.resultPending")));
         assert.equal(screen.queryByText("work.resultGone"), null);
     });
+
+    for (const status of ["running", "completed"] as const) {
+        it(`keeps the ${status} result fallback when the detail request fails`, async () => {
+            const workGet = vi.fn().mockRejectedValue(new Error("transport gone"));
+            renderWithQueries(
+                <WorkPane
+                    client={{ workGet } as never}
+                    overview={overview({ ...runningWork, status })}
+                    onOpenSession={() => {}}
+                />,
+            );
+            fireEvent.click(screen.getByRole("button", { name: /Review changes/ }));
+            const fallback = status === "running" ? "work.resultPending" : "work.resultGone";
+            await waitFor(() => assert.ok(screen.getByText(fallback)));
+            assert.equal(workGet.mock.calls.length, 1);
+        });
+    }
 
     it("reloads the open row when its revision advances to a result", async () => {
         const finished = {
@@ -146,19 +207,16 @@ describe("WorkPane result states", () => {
             .fn()
             .mockResolvedValueOnce({ work: runningWork })
             .mockResolvedValueOnce({ work: finished, resultText: "The full review" });
-        const view = render(
-            <WorkPane
-                client={{ workGet } as never}
-                overview={overview()}
-                onOpenSession={() => {}}
-            />,
+        const client = { workGet };
+        const view = renderWithQueries(
+            <WorkPane client={client as never} overview={overview()} onOpenSession={() => {}} />,
         );
         fireEvent.click(screen.getByRole("button", { name: /Review changes/ }));
         await waitFor(() => assert.ok(screen.getByText("work.resultPending")));
 
         view.rerender(
             <WorkPane
-                client={{ workGet } as never}
+                client={client as never}
                 overview={overview(finished)}
                 onOpenSession={() => {}}
             />,
@@ -181,7 +239,7 @@ it("shows waiting attention, bounds its description and opens the actual waiting
         },
     };
     const onOpenSession = vi.fn();
-    render(
+    renderWithQueries(
         <WorkPane
             client={{ workGet: async () => ({ work }) } as never}
             overview={{
@@ -223,7 +281,7 @@ function actionClient(methods = ["work.cancel", "work.delete"]) {
 }
 
 it("localizes permission waiting instead of displaying the server description", () => {
-    render(
+    renderWithQueries(
         <WorkPane
             client={{} as never}
             overview={overview({
@@ -244,7 +302,7 @@ it("localizes permission waiting instead of displaying the server description", 
 });
 
 it("hides control actions for legacy rows without attempt fields", () => {
-    render(
+    renderWithQueries(
         <WorkPane
             client={actionClient() as never}
             overview={overview()}
@@ -261,7 +319,9 @@ it("cancels the displayed attempt and refreshes after acceptance", async () => {
         ...overview({ ...runningWork, attemptId: "attempt-shown", canCancel: true }),
         refresh: vi.fn(),
     };
-    render(<WorkPane client={client as never} overview={view} onOpenSession={() => {}} />);
+    renderWithQueries(
+        <WorkPane client={client as never} overview={view} onOpenSession={() => {}} />,
+    );
     fireEvent.click(screen.getByRole("button", { name: "work.cancel" }));
     await waitFor(() => assert.equal(client.workCancel.mock.calls.length, 1));
     assert.deepEqual(client.workCancel.mock.calls[0], [
@@ -280,7 +340,7 @@ it("does not submit twice while cancellation is pending", async () => {
                 finish = resolve;
             }),
     );
-    render(
+    renderWithQueries(
         <WorkPane
             client={client as never}
             overview={overview({ ...runningWork, attemptId: "a", canCancel: true })}
@@ -298,7 +358,7 @@ it("does not submit twice while cancellation is pending", async () => {
 
 it("disables cancellation when the daemon does not advertise the method", () => {
     const client = actionClient([]);
-    render(
+    renderWithQueries(
         <WorkPane
             client={client as never}
             overview={overview({ ...runningWork, attemptId: "a", canCancel: true })}
@@ -318,7 +378,9 @@ for (const status of ["completed", "failed", "cancelled", "interrupted"] as cons
             ...overview({ ...runningWork, status, attemptId: "a", canCancel: false }),
             refresh: vi.fn(),
         };
-        render(<WorkPane client={client as never} overview={view} onOpenSession={() => {}} />);
+        renderWithQueries(
+            <WorkPane client={client as never} overview={view} onOpenSession={() => {}} />,
+        );
         fireEvent.click(screen.getByRole("button", { name: "work.delete" }));
         await waitFor(() =>
             assert.deepEqual(client.workDelete.mock.calls, [[{ workId: runningWork.workId }]]),
@@ -330,7 +392,7 @@ for (const status of ["completed", "failed", "cancelled", "interrupted"] as cons
 
 it("keeps waiting records out of deletion and gates terminal deletion by method", () => {
     const client = actionClient([]);
-    const view = render(
+    const view = renderWithQueries(
         <WorkPane
             client={client as never}
             overview={overview({
@@ -357,7 +419,7 @@ it("keeps waiting records out of deletion and gates terminal deletion by method"
 });
 
 it("safely renders an unknown status without enabling actions", () => {
-    render(
+    renderWithQueries(
         <WorkPane
             client={actionClient() as never}
             overview={overview({
@@ -375,7 +437,7 @@ it("safely renders an unknown status without enabling actions", () => {
 });
 
 it("keeps legacy terminal rows read-only until their daemon supplies attempt metadata", () => {
-    render(
+    renderWithQueries(
         <WorkPane
             client={actionClient() as never}
             overview={overview({ ...runningWork, status: "completed" })}
@@ -393,7 +455,9 @@ it("keeps cancellation available after a failed request and explains a stale att
         ...overview({ ...runningWork, status: "waiting", attemptId: "a", canCancel: true }),
         refresh: vi.fn(),
     };
-    render(<WorkPane client={client as never} overview={view} onOpenSession={() => {}} />);
+    renderWithQueries(
+        <WorkPane client={client as never} overview={view} onOpenSession={() => {}} />,
+    );
     const cancel = screen.getByRole("button", { name: "work.cancel" }) as HTMLButtonElement;
     fireEvent.click(cancel);
     await waitFor(() => assert.equal(screen.getByRole("alert").textContent, "work.actionFailed"));
@@ -418,7 +482,7 @@ it("updates method gating when the connection handshakes again", () => {
             };
         },
     };
-    const view = render(
+    const view = renderWithQueries(
         <WorkPane
             client={client as never}
             overview={overview({ ...runningWork, attemptId: "a", canCancel: true })}
@@ -444,7 +508,9 @@ it("shows a deletion conflict and re-enables the action after refresh", async ()
         ...overview({ ...runningWork, status: "completed", attemptId: "a" }),
         refresh: vi.fn(),
     };
-    render(<WorkPane client={client as never} overview={view} onOpenSession={() => {}} />);
+    renderWithQueries(
+        <WorkPane client={client as never} overview={view} onOpenSession={() => {}} />,
+    );
     const button = screen.getByRole("button", { name: "work.delete" }) as HTMLButtonElement;
     fireEvent.click(button);
     await waitFor(() =>

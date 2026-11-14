@@ -1,14 +1,26 @@
+import type { ReactElement } from "react";
+import { queryWrapper } from "../../helpers/queryWrapper";
 /**
  * SchedulesTab — list vs action error separation: a successful list refresh
  * must not clear a sticky action error, and the two banners stay independent.
  */
 
 import type { Job } from "@taco-ai/protocol";
-import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import {
+    cleanup,
+    render as renderWithoutQueries,
+    screen,
+    waitFor,
+    within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { SchedulesTab } from "../../../src/components/settings/SchedulesTab";
 import type { TacoClient } from "../../../src/lib/clients/tacoClient";
+
+function render(ui: ReactElement) {
+    return renderWithoutQueries(ui, queryWrapper());
+}
 
 vi.mock("react-i18next", () => ({
     useTranslation: vi.fn(() => ({

@@ -14,7 +14,6 @@ import type { SessionTarget } from "@taco-ai/protocol";
 import {
     WORK_RETRYABLE_DELIVERY_STATUSES,
     type WorkDeliverySummary,
-    type WorkGetResult,
     type WorkSummary,
 } from "@taco-ai/protocol";
 import {
@@ -31,6 +30,7 @@ import { IconButton } from "../components/ui/IconButton";
 import { Tag } from "../components/ui/Tag";
 import { useAutoClearError } from "../hooks/primitives/useAutoClearError";
 import { useNow } from "../hooks/useNow";
+import { useWorkDetail } from "../hooks/useWorkDetail";
 import type { UseWorkOverviewResult } from "../hooks/useWorkOverview";
 import { useT, useUiLanguage } from "../i18n/useI18n";
 import type { TacoClient } from "../lib/clients/tacoClient.ts";
@@ -81,9 +81,6 @@ export function WorkPane({ client, overview, onOpenSession }: WorkPaneProps) {
     const nowMs = useNow();
     const listRef = useRef<HTMLDivElement>(null);
     const [expanded, setExpanded] = useState<string | null>(null);
-    const [expandedDetail, setExpandedDetail] = useState<
-        { workId: string; result: WorkGetResult } | undefined
-    >(undefined);
     const pendingRef = useRef(new Set<string>());
     const [pendingIds, setPendingIds] = useState<ReadonlySet<string>>(new Set());
     const { error: actionError, fail, clearError } = useAutoClearError();
@@ -125,28 +122,7 @@ export function WorkPane({ client, overview, onOpenSession }: WorkPaneProps) {
                   (work) => work.workId === expanded,
               );
 
-    const expandedRevision = expandedWork?.revision;
-    useEffect(() => {
-        if (expanded === null || expandedRevision === undefined) {
-            setExpandedDetail(undefined);
-            return;
-        }
-        let stale = false;
-        setExpandedDetail(undefined);
-        // Revision is in the key: a running Work's first answer has no result
-        // yet, and must not remain cached after the run settles.
-        void client
-            .workGet({ workId: expanded })
-            .then((result) => {
-                if (!stale) setExpandedDetail({ workId: expanded, result });
-            })
-            .catch(() => {
-                if (!stale) setExpandedDetail({ workId: expanded, result: { work: null } });
-            });
-        return () => {
-            stale = true;
-        };
-    }, [client, expanded, expandedRevision]);
+    const expandedDetail = useWorkDetail(client, expanded, expandedWork?.revision);
 
     const toggle = (workId: string): void => {
         setExpanded((current) => (current === workId ? null : workId));
@@ -197,7 +173,7 @@ export function WorkPane({ client, overview, onOpenSession }: WorkPaneProps) {
             work.waiting?.toolName === "permission"
                 ? t("work.permissionRequired")
                 : work.waiting?.description;
-        const detail = expandedDetail?.workId === work.workId ? expandedDetail.result : undefined;
+        const detail = isOpen ? expandedDetail : undefined;
         return (
             <li
                 key={work.workId}

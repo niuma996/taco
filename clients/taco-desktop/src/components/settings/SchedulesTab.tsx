@@ -2,8 +2,8 @@
  * SchedulesTab — CRUD UI over the daemon's scheduler; each row is one `Job`.
  *
  * Jobs live as JSON files under $TACO_HOME/jobs/. The UI is stateless:
- * `useEffect` re-fetches on mount and after every mutation; the daemon is
- * the source of truth.
+ * Query re-fetches on entry and invalidates shared job data after mutations;
+ * the daemon is the source of truth.
  *
  * A row's History button opens `ScheduleHistoryDialog` with the job's recent
  * runs and, for agent jobs, what each run answered. The delete button stays
@@ -12,12 +12,15 @@
  */
 
 import type { Job } from "@taco-ai/protocol";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { History, LoaderCircle, Pencil, Play, Plus, Trash, TriangleAlert } from "lucide-react";
-import { type ReactElement, useCallback, useEffect, useMemo, useState } from "react";
+import { type ReactElement, useCallback, useMemo, useState } from "react";
 import { useNow } from "../../hooks/useNow.ts";
 import { useT, useUiLanguage } from "../../i18n/useI18n.ts";
 import { createJobsClient } from "../../lib/clients/jobsClient.ts";
 import type { TacoClient } from "../../lib/clients/tacoClient.ts";
+import { jobsListQuery, publishJob, refreshJobs } from "../../lib/queries/jobsQueries";
+import { queryError } from "../../lib/queries/queryClient";
 import { formatRelativeTime } from "../../lib/relativeTime.ts";
 import { ConfirmModal } from "../ConfirmModal.tsx";
 import { Button } from "../ui/Button.tsx";
@@ -45,54 +48,26 @@ type DialogMode =
 
 const EMPTY_DIALOG_MODE: DialogMode = { kind: "closed" };
 
-/** Tiny custom hook: wraps the jobs client with refresh-on-mount + a
- *  busy / error state the UI can render. Stays local to this file —
- *  other tabs would duplicate the pattern, but the alternative (a
- *  generic `useRpcList`) isn't load-bearing yet. */
+/** Query state stays separate from sticky action failures and dialog drafts. */
 function useJobsClient(client: TacoClient) {
+    const queryClient = useQueryClient();
     const jobsClient = useMemo(() => createJobsClient(client), [client]);
-    const [list, setList] = useState<Job[]>([]);
-    const [busy, setBusy] = useState(false);
-    // Two error buckets: a list-level failure (network/daemon down) is
-    // transient and clears on the next successful refresh; an
-    // action-level failure (create/update/delete/runNow) is sticky
-    // because the user needs to see WHY their edit didn't land and
-    // clearing it on a refresh would silently lose context. Earlier
-    // we used a single `error` field that refresh could overwrite,
-    // which meant a successful refresh after a failed create hid the
-    // form error without any user action.
-    const [listError, setListError] = useState<string | null>(null);
+    const list = useQuery(jobsListQuery(client));
     const [actionError, setActionError] = useState<string | null>(null);
-
-    const refresh = useCallback(async () => {
-        setBusy(true);
-        try {
-            const next = await jobsClient.list();
-            setList(next);
-            // Refresh success ⇒ the daemon is reachable again, so any
-            // prior list failure is no longer the user's truth. Leave
-            // actionError alone — it's a different state machine.
-            setListError(null);
-        } catch (err) {
-            setListError(err instanceof Error ? err.message : String(err));
-        } finally {
-            setBusy(false);
-        }
-    }, [jobsClient]);
-
-    useEffect(() => {
-        void refresh();
-    }, [refresh]);
-
+    const refresh = useCallback(() => refreshJobs(queryClient, client), [queryClient, client]);
     return {
-        list,
-        busy,
-        listError,
+        list: list.data ?? [],
+        busy: list.isFetching,
+        listError: queryError(list.error)?.message ?? null,
         actionError,
         setActionError,
         refresh,
         create: jobsClient.create,
-        update: jobsClient.update,
+        update: async (job: Job) => {
+            const updated = await jobsClient.update(job);
+            await publishJob(queryClient, client, updated);
+            return updated;
+        },
         delete: jobsClient.delete,
         runNow: jobsClient.runNow,
     };

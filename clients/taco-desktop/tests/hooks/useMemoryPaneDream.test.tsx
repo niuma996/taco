@@ -1,7 +1,10 @@
 import type { Job, MemoryListResult } from "@taco-ai/protocol";
-import { act, renderHook, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { useMemoryPane } from "../../src/hooks/useMemoryPane";
+import { queryWrapper } from "../helpers/queryWrapper";
+
+afterEach(cleanup);
 
 const listResult: MemoryListResult = {
     enabled: true,
@@ -55,7 +58,10 @@ function makeClient(runResult: unknown = { status: "previewed", preview: { id: "
 }
 
 function renderMemory(client: ReturnType<typeof makeClient>["client"], notify = vi.fn()) {
-    return renderHook(() => useMemoryPane(client as never, true, "/ws", (key) => key, notify));
+    return renderHook(
+        () => useMemoryPane(client as never, true, "/ws", (key) => key, notify),
+        queryWrapper(),
+    );
 }
 
 describe("useMemoryPane dream actions", () => {

@@ -116,7 +116,7 @@ runs `taco install` to register a system-level daemon:
 ## Management query cache
 
 `main.tsx` provides one TanStack Query client. Providers, models, tools, skills,
-plugins and agent catalog/content/runtime reads share this cache. Keys isolate
+plugins, agent catalog/content/runtime, jobs and Work detail reads share this cache. Keys isolate
 TacoClient instances, workspace targets, configuration scopes and detail identities.
 UI selection and mutation navigation guards stay in their feature hooks.
 
@@ -131,6 +131,16 @@ configuration saves invalidate provider/model entries across all workspaces.
 Inactive entries fetch when enabled again. Cancelling a query protects cache
 publication; it does not abort an RPC already sent to the sidecar. The cache
 holds no secret reveal or provider connection-test results and is not persisted.
+
+Job queries share process-level list/detail/history keys between Schedules and
+Memory consolidation settings. Confirmed updates publish the returned Job before
+refetching so a later read failure retains the acknowledged configuration.
+Open history dialogs poll every 10 seconds, including while the app is unfocused,
+and refresh on Work changes. Closing a dialog disables its reads and polling.
+Work details share a `(client, workId, revision)` key between the Work pane and
+history dialogs; completed reads remain reusable until invalidation, and inactive
+detail entries are collected after 60 seconds. Reconnection invalidates these
+queries through the existing application subscription.
 
 ## Tauri commands exposed
 

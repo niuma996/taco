@@ -1,8 +1,10 @@
-import { asWorkspaceId, type MemoryListResult } from "@taco-ai/protocol";
+import { asWorkspaceId, type Job, type MemoryListResult } from "@taco-ai/protocol";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createJobsClient } from "../lib/clients/jobsClient.ts";
 import type { TacoClient } from "../lib/clients/tacoClient.ts";
 import { MEMORY_ROOT_ID, memoryTopicRowId } from "../lib/memoryPaneTypes.js";
+import { jobQuery, publishJob, refreshJobs } from "../lib/queries/jobsQueries";
 
 export interface MemoryConflict {
     currentContent: string;
@@ -72,7 +74,25 @@ export function useMemoryPane(
     const [memoryError, setMemoryError] = useState<string | null>(null);
     const [memorySelectedId, setMemorySelectedId] = useState<string>(MEMORY_ROOT_ID);
     const [memorySaving, setMemorySaving] = useState(false);
-    const [dreamConfig, setDreamConfig] = useState<MemoryDreamConfig | null>(null);
+    const queryClient = useQueryClient();
+    const memoryJobRef = useRef<Job | null | undefined>(undefined);
+    const dreamJob = useQuery({
+        ...jobQuery(client, MEMORY_DREAM_JOB_ID),
+        enabled: active && Boolean(activeCwd),
+    });
+    const dreamConfig = useMemo<MemoryDreamConfig | null>(() => {
+        if (!dreamJob.data) return null;
+        const args = dreamJob.data.args;
+        return {
+            minHours: typeof args.minHours === "number" ? args.minHours : 24,
+            staleDays: typeof args.staleDays === "number" ? args.staleDays : 90,
+            staleDaysDurable:
+                typeof args.staleDaysDurable === "number" ? args.staleDaysDurable : 180,
+            archiveCleanupEnabled: args.archiveCleanupEnabled === true,
+            archiveRetentionDays:
+                args.archiveRetentionDays === 30 ? 30 : args.archiveRetentionDays === 90 ? 90 : 7,
+        };
+    }, [dreamJob.data]);
     // Busy is per workspace: a run still going in A must not lock B's buttons.
     const [dreamBusyFor, setDreamBusyFor] = useState<{ cwd: string; busy: DreamBusy } | null>(null);
     const jobs = useMemo(() => createJobsClient(client), [client]);
@@ -99,12 +119,16 @@ export function useMemoryPane(
         if (!activeCwd) return;
         const cwd = activeCwd;
         const seq = ++listSeq.current;
+        const jobKey = jobQuery(client, MEMORY_DREAM_JOB_ID).queryKey;
+        const jobAtRequest = queryClient.getQueryData(jobKey);
         setMemoryLoading(true);
         setMemoryError(null);
         void client
             .memoryList({ workspace: asWorkspaceId(cwd) })
             .then((r) => {
                 if (seq !== listSeq.current || cwdRef.current !== cwd) return;
+                // Only job changes admitted after this read may override its schedule flag.
+                memoryJobRef.current = jobAtRequest;
                 setMemoryData(r);
             })
             .catch((e: unknown) => {
@@ -115,38 +139,12 @@ export function useMemoryPane(
             .finally(() => {
                 if (seq === listSeq.current) setMemoryLoading(false);
             });
-    }, [activeCwd, client]);
+    }, [activeCwd, client, queryClient]);
 
     useEffect(() => {
         if (!active || !activeCwd) return;
         loadMemory();
     }, [active, activeCwd, loadMemory]);
-
-    useEffect(() => {
-        if (!active || !activeCwd) return;
-        void jobs
-            .get(MEMORY_DREAM_JOB_ID)
-            .then((job) => {
-                if (!job || cwdRef.current !== activeCwd) return;
-                const args = job.args as Record<string, unknown>;
-                setDreamConfig({
-                    minHours: typeof args.minHours === "number" ? args.minHours : 24,
-                    staleDays: typeof args.staleDays === "number" ? args.staleDays : 90,
-                    staleDaysDurable:
-                        typeof args.staleDaysDurable === "number" ? args.staleDaysDurable : 180,
-                    archiveCleanupEnabled: args.archiveCleanupEnabled === true,
-                    archiveRetentionDays:
-                        args.archiveRetentionDays === 30
-                            ? 30
-                            : args.archiveRetentionDays === 90
-                              ? 90
-                              : 7,
-                });
-            })
-            .catch((error: unknown) => {
-                console.error("[useMemoryPane] memory-dream job read failed:", error);
-            });
-    }, [active, activeCwd, jobs]);
 
     // A selection whose topic is gone after a refetch (deleted elsewhere,
     // merged by consolidation) falls back to the global entry.
@@ -300,9 +298,11 @@ export function useMemoryPane(
                 if (!job) throw new Error("the consolidation job is not available");
                 // Same rule as the Schedules tab: never send server-managed history.
                 const { history: _history, ...rest } = job;
-                await jobs.update({ ...rest, enabled });
+                const updated = await jobs.update({ ...rest, enabled });
+                await publishJob(queryClient, client, updated);
+                await refreshJobs(queryClient, client);
             }),
-        [jobs, runDreamAction],
+        [jobs, runDreamAction, queryClient, client],
     );
 
     const handleDreamConfigSave = useCallback(
@@ -311,11 +311,12 @@ export function useMemoryPane(
                 const job = await jobs.get(MEMORY_DREAM_JOB_ID);
                 if (!job) throw new Error("the consolidation job is not available");
                 const { history: _history, ...rest } = job;
-                await jobs.update({
+                const updated = await jobs.update({
                     ...rest,
                     args: { ...job.args, ...config },
                 });
-                setDreamConfig(config);
+                await publishJob(queryClient, client, updated);
+                await refreshJobs(queryClient, client);
                 return true;
             } catch (error) {
                 notify(
@@ -324,13 +325,16 @@ export function useMemoryPane(
                 return false;
             }
         },
-        [jobs, notify, t],
+        [jobs, notify, t, queryClient, client],
     );
 
     const dreamBusy = dreamBusyFor && dreamBusyFor.cwd === activeCwd ? dreamBusyFor.busy : null;
 
     return {
-        memoryData,
+        memoryData:
+            memoryData && dreamJob.data && dreamJob.data !== memoryJobRef.current
+                ? { ...memoryData, dreamScheduled: dreamJob.data.enabled }
+                : memoryData,
         memoryLoading,
         memoryError,
         memorySelectedId,
