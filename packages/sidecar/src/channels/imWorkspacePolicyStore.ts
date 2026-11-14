@@ -19,6 +19,7 @@ import { restrictOwner } from "../lib/fsPermissions.ts";
 import { createLogger } from "../lib/logger.ts";
 import { checkGrantRootSafety } from "../permissions/grantRootSafety.ts";
 import { writeTextAtomic } from "../store/atomicFile.ts";
+import { SerialChain } from "../store/serial.ts";
 import {
     chatPolicyKey,
     DEFAULT_IM_WORKSPACE_POLICY,
@@ -91,7 +92,7 @@ export class ImWorkspacePolicyStore {
     private readonly policiesDir: string;
     private readonly notifiedFile: string;
     private readonly notified = new Set<string>();
-    private chain: Promise<void> = Promise.resolve();
+    private readonly writes = new SerialChain();
 
     constructor(home: string = tacoHome()) {
         this.home = home;
@@ -100,7 +101,7 @@ export class ImWorkspacePolicyStore {
         this.loadNotified();
     }
 
-    /** Synchronous resolution — reads the in-memory cache. Fail-closed. */
+    /** Synchronous resolution from disk. Fail-closed. */
     resolve(route: ImRoute): ImWorkspacePolicy {
         const doc = this.loadDocument(route.channelId);
         return resolveImWorkspacePolicyFromDocument(doc, route);
@@ -125,12 +126,11 @@ export class ImWorkspacePolicyStore {
         const source = `channel-default:${channelId}`;
         validatePartial(patch, source);
         assertSafeExecutionDir(patch, source);
-        const doc = this.patchDocument(channelId, (d) => {
+        await this.updateDocument(channelId, (d) => {
             const merged = mergeImWorkspacePolicyPatch(d.default ?? {}, patch);
             validatePartial(merged, source);
             return migrateDocument({ ...d, default: merged });
         });
-        await this.persist(channelId, doc);
     }
 
     /** Merge `patch` into this chat's override; omitted fields are preserved. */
@@ -139,12 +139,11 @@ export class ImWorkspacePolicyStore {
         validatePartial(patch, source);
         assertSafeExecutionDir(patch, source);
         const key = chatPolicyKey(route);
-        const doc = this.patchDocument(route.channelId, (d) => {
+        await this.updateDocument(route.channelId, (d) => {
             const merged = mergeImWorkspacePolicyPatch(d.chats?.[key] ?? {}, patch);
             validatePartial(merged, source);
             return migrateDocument({ ...d, chats: { ...(d.chats ?? {}), [key]: merged } });
         });
-        await this.persist(route.channelId, doc);
     }
 
     async clearChatOverride(route: ImRoute): Promise<void> {
@@ -160,12 +159,11 @@ export class ImWorkspacePolicyStore {
      * for stale writes), but never throws.
      */
     async clearChatOverrideByKey(channelId: string, key: string): Promise<void> {
-        const doc = this.patchDocument(channelId, (d) => {
+        await this.updateDocument(channelId, (d) => {
             const chats = { ...(d.chats ?? {}) };
             delete chats[key];
             return { ...d, chats };
         });
-        await this.persist(channelId, doc);
     }
 
     /**
@@ -177,7 +175,7 @@ export class ImWorkspacePolicyStore {
      * daemon shutdown — needs to know when the writes have landed.
      */
     async flush(): Promise<void> {
-        await this.chain;
+        await this.writes.run(async () => {});
     }
 
     hasNotified(workspaceKey: string): boolean {
@@ -201,7 +199,10 @@ export class ImWorkspacePolicyStore {
      * configure a policy, and a cached document would ignore that edit until
      * the sidecar restarted.
      */
-    private loadDocument(channelId: string): ImWorkspacePolicyDocument | undefined {
+    private loadDocument(
+        channelId: string,
+        persistMigration = true,
+    ): ImWorkspacePolicyDocument | undefined {
         try {
             const raw = fs.readFileSync(imWorkspacePoliciesPath(channelId, this.home), "utf8");
             const parsed: unknown = JSON.parse(raw);
@@ -211,9 +212,13 @@ export class ImWorkspacePolicyStore {
                 // Write the migration back once so the file on disk stops
                 // describing the pre-0.2.11 (wider) auto semantics.
                 const migrated = migrateLegacyImPolicyDocument(doc);
-                this.persist(channelId, migrated).catch((e: unknown) =>
-                    log.warn(`im policy migration write-back failed for ${channelId}: ${e}`),
-                );
+                if (persistMigration) {
+                    // Re-read inside the transaction: a queued admin write may already
+                    // have replaced this legacy snapshot by the time migration runs.
+                    this.updateDocument(channelId, (current) => current).catch((e: unknown) =>
+                        log.warn(`im policy migration write-back failed for ${channelId}: ${e}`),
+                    );
+                }
                 return migrated;
             }
         } catch {
@@ -222,25 +227,23 @@ export class ImWorkspacePolicyStore {
         return undefined;
     }
 
-    private patchDocument(
+    private updateDocument(
         channelId: string,
         mutate: (d: ImWorkspacePolicyDocument) => ImWorkspacePolicyDocument,
-    ): ImWorkspacePolicyDocument {
-        const current = this.loadDocument(channelId) ?? {};
-        return mutate(current);
-    }
-
-    private persist(channelId: string, doc: ImWorkspacePolicyDocument): Promise<void> {
-        const run = this.chain.then(async () => {
+    ): Promise<void> {
+        return this.writes.run(async () => {
+            const current = this.loadDocument(channelId, false) ?? {};
+            const next = mutate(current);
             const filePath = imWorkspacePoliciesPath(channelId, this.home);
             await fs.promises.mkdir(this.policiesDir, { recursive: true, mode: 0o700 });
-            const stamped = { ...doc, version: IM_POLICY_DOCUMENT_VERSION };
-            await writeTextAtomic(filePath, `${JSON.stringify(stamped, null, 2)}\n`, {
-                secure: true,
-            });
+            await writeTextAtomic(
+                filePath,
+                `${JSON.stringify({ ...next, version: IM_POLICY_DOCUMENT_VERSION }, null, 2)}\n`,
+                {
+                    secure: true,
+                },
+            );
         });
-        this.chain = run.catch(() => {});
-        return run;
     }
 
     private loadNotified(): void {
@@ -257,7 +260,7 @@ export class ImWorkspacePolicyStore {
     }
 
     private persistNotified(): Promise<void> {
-        const run = this.chain.then(async () => {
+        return this.writes.run(async () => {
             const data: Record<string, true> = {};
             for (const k of this.notified) data[k] = true;
             await fs.promises.mkdir(this.policiesDir, { recursive: true });
@@ -266,8 +269,6 @@ export class ImWorkspacePolicyStore {
                 secure: true,
             });
         });
-        this.chain = run.catch(() => {});
-        return run;
     }
 }
 

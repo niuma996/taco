@@ -7,6 +7,7 @@ import { JobAlreadyExistsError } from "../../src/lib/jobsErrors.ts";
 import { InvalidJobIdError } from "../../src/scheduler/jobId.ts";
 import { JobStore } from "../../src/scheduler/store.ts";
 import type { Job } from "../../src/scheduler/types.ts";
+import { KeyedQueue } from "../../src/store/serial.ts";
 
 describe("store", () => {
     async function withTmp<T>(fn: (dir: string) => Promise<T>): Promise<T> {
@@ -68,6 +69,37 @@ describe("store", () => {
             // into the file would freeze the job to this release's number.
             strictEqual(round?.max_runs, undefined);
             strictEqual(round?.max_consecutive_failures, undefined);
+        });
+    });
+
+    test("legacy migration cannot overwrite a mutation admitted while its read is in flight", async (t) => {
+        await withTmp(async (dir) => {
+            const store = new JobStore(dir);
+            const job = sampleJob({
+                command: "legacy command",
+                args: { workspace: "/tmp/project" },
+            });
+            await writeFile(join(dir, `${job.id}.json`), JSON.stringify(job));
+            const run = KeyedQueue.prototype.run;
+            let update: Promise<Job | null> | undefined;
+            // Insert an update exactly when the read's migration enters the write queue.
+            t.mock.method(KeyedQueue.prototype, "run", function <
+                T,
+            >(this: KeyedQueue, key: string, operation: () => Promise<T>): Promise<T> {
+                if (!update) {
+                    update = Promise.resolve(null);
+                    update = store.mutate(
+                        job.id,
+                        (current) => current && { ...current, pinnedSessionId: "new-pin" },
+                    );
+                }
+                return run.call(this, key, operation) as Promise<T>;
+            });
+            await store.get(job.id);
+            await update;
+            const disk = JSON.parse(await readFile(join(dir, `${job.id}.json`), "utf8")) as Job;
+            strictEqual(disk.pinnedSessionId, "new-pin");
+            strictEqual(disk.command, "agent.invoke");
         });
     });
 
@@ -189,6 +221,64 @@ describe("store", () => {
                 () => store.delete("../escape"),
                 (e: unknown) => e instanceof InvalidJobIdError,
             );
+        });
+    });
+
+    for (const replacement of [null, "recreated"] as const) {
+        test(`a queued migration preserves an earlier ${replacement === null ? "deletion" : "replacement"}`, async (t) => {
+            await withTmp(async (dir) => {
+                const store = new JobStore(dir);
+                const job = sampleJob({ command: "old command", generation: "old" });
+                await writeFile(join(dir, `${job.id}.json`), JSON.stringify(job));
+                const run = KeyedQueue.prototype.run;
+                let change: Promise<void> | undefined;
+                t.mock.method(KeyedQueue.prototype, "run", function <
+                    T,
+                >(this: KeyedQueue, key: string, operation: () => Promise<T>): Promise<T> {
+                    if (!change) {
+                        change = Promise.resolve();
+                        change = (async () => {
+                            await store.delete(job.id);
+                            if (replacement)
+                                await store.create(
+                                    sampleJob({ generation: replacement, name: "new job" }),
+                                );
+                        })();
+                    }
+                    return run.call(this, key, operation) as Promise<T>;
+                });
+                await store.get(job.id);
+                await change;
+                if (replacement) {
+                    const disk = JSON.parse(
+                        await readFile(join(dir, `${job.id}.json`), "utf8"),
+                    ) as Job;
+                    strictEqual(disk.generation, replacement);
+                    strictEqual(disk.name, "new job");
+                    strictEqual(disk.command, "agent.invoke");
+                } else {
+                    await rejects(stat(join(dir, `${job.id}.json`)), /ENOENT/);
+                }
+            });
+        });
+    }
+
+    test("migration never writes an unsafe embedded job id", async () => {
+        await withTmp(async (dir) => {
+            const jobsDir = join(dir, "jobs");
+            const store = new JobStore(jobsDir);
+            await store.ensureDir();
+            await writeFile(
+                join(jobsDir, "safe.json"),
+                JSON.stringify(
+                    sampleJob({
+                        id: "../outside",
+                        command: "legacy command",
+                    }),
+                ),
+            );
+            await store.get("safe");
+            await rejects(stat(join(dir, "outside.json")), /ENOENT/);
         });
     });
 

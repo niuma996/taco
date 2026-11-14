@@ -72,7 +72,7 @@ export class JobStore {
     async create(job: Job): Promise<void> {
         assertSafeJobId(job.id);
         await this.queue.run(job.id, async () => {
-            if (await this.readOne(`${job.id}.json`, job.id, false)) {
+            if (await this.readLocked(`${job.id}.json`, false)) {
                 throw new JobAlreadyExistsError(job.id);
             }
             await this.write(job);
@@ -83,7 +83,7 @@ export class JobStore {
     async mutate(id: string, update: (current: Job | null) => Job | null): Promise<Job | null> {
         assertSafeJobId(id);
         return this.queue.run(id, async () => {
-            const current = await this.readOne(`${id}.json`, id, false);
+            const current = await this.readLocked(`${id}.json`, false);
             const next = update(current);
             if (next === current) return current;
             if (next === null) {
@@ -103,6 +103,7 @@ export class JobStore {
     }
 
     private async write(job: Job): Promise<void> {
+        assertSafeJobId(job.id);
         await this.ensureDir();
         await writeJsonAtomic(join(this.dir, `${job.id}.json`), job, { indent: JSON_INDENT });
     }
@@ -114,11 +115,13 @@ export class JobStore {
         });
     }
 
-    /** Best-effort read — skips malformed files (logs a warning) rather
-     *  than throwing, so a single bad entry can't wedge the scheduler.
-     *  When `id` is provided it has already been validated as safe; when
-     *  omitted the basename is extracted from `name` and validated here. */
-    private async readOne(name: string, id?: string, persistMigration = true): Promise<Job | null> {
+    /** Best-effort read and migration in one transaction for the validated id. */
+    private readOne(name: string, id: string): Promise<Job | null> {
+        return this.queue.run(id, () => this.readLocked(name));
+    }
+
+    /** The caller holds this job's queue for decoding and any migration write-back. */
+    private async readLocked(name: string, persistMigration = true): Promise<Job | null> {
         const path = join(this.dir, name);
         let raw: string;
         try {
@@ -130,13 +133,6 @@ export class JobStore {
         }
         try {
             const job = JSON.parse(raw) as Job;
-            // Validate the id when not pre-validated (e.g. calls from get()).
-            const extracted =
-                id ?? (name.endsWith(".json") ? name.slice(0, -".json".length) : name);
-            if (!isSafeJobId(extracted)) {
-                log.warn(`skipping job with unsafe id ${JSON.stringify(extracted)} in ${path}`);
-                return null;
-            }
             // Older job files predate the `history` field; treat the absence
             // as an empty log so the runner's `[entry, ...job.history]`
             // spread never sees `undefined`. We still write the array back
@@ -174,11 +170,6 @@ export class JobStore {
                 withCounters.sessionStrategy !== "reuse"
                     ? { ...withCounters, sessionStrategy: "reuse" as const }
                     : withCounters;
-            if (withStrategy !== withCounters && persistMigration) {
-                await this.save(withStrategy).catch((err: unknown) =>
-                    log.warn(`failed to persist strategy migration for ${path}: ${String(err)}`),
-                );
-            }
             // Jobs written before `args.prompt` existed carried their intent
             // in `command` (e.g. `command: "mmx search query"`). The dispatcher
             // only routes `agent.invoke`, so translate the old shape into an
@@ -189,6 +180,7 @@ export class JobStore {
             // instead of silently dropping a job. The migrated form is written
             // back so the file picks up the canonical shape on first read; a
             // write failure is logged and retried on the next read.
+            let normalized = withStrategy;
             if (
                 typeof withStrategy.command === "string" &&
                 withStrategy.command !== "agent.invoke" &&
@@ -198,20 +190,22 @@ export class JobStore {
                     .join(" ")
                     .trim();
                 if (taskText) {
-                    const migrated = {
+                    normalized = {
                         ...withStrategy,
                         command: "agent.invoke" as const,
                         args: { ...withStrategy.args, prompt: taskText },
                     };
-                    if (persistMigration) {
-                        await this.save(migrated).catch((err: unknown) =>
-                            log.warn(`failed to persist migration for ${path}: ${String(err)}`),
-                        );
-                    }
-                    return migrated;
                 }
             }
-            return withStrategy;
+            if (
+                persistMigration &&
+                (withStrategy !== withCounters || normalized !== withStrategy)
+            ) {
+                await this.write(normalized).catch((err: unknown) =>
+                    log.warn(`failed to persist migration for ${path}: ${String(err)}`),
+                );
+            }
+            return normalized;
         } catch (err) {
             log.warn(`malformed job file ${path}: ${String(err)}`);
             return null;

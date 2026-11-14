@@ -590,6 +590,52 @@ describe("imWorkspacePolicyStore", () => {
             assert.deepEqual(store.resolve(ROUTE).executionDir, { mode: "per-chat" });
         });
 
+        it("preserves concurrent patches to one channel default", async () => {
+            await Promise.all([
+                store.setChannelDefault("wechat", { tools: { shell: "allow" } }),
+                store.setChannelDefault("wechat", { executionDir: { mode: "per-chat" } }),
+            ]);
+            assert.equal(store.resolve(ROUTE).tools.shell, "allow");
+            assert.deepEqual(store.resolve(ROUTE).executionDir, { mode: "per-chat" });
+        });
+
+        it("preserves concurrent chat overrides and channel defaults", async () => {
+            const sibling = { ...ROUTE, chatId: "c2" };
+            await Promise.all([
+                store.setChatOverride(ROUTE, { tools: { shell: "allow" } }),
+                store.setChatOverride(sibling, { tools: { fsTools: "allow" } }),
+                store.setChannelDefault("wechat", { executionDir: { mode: "per-chat" } }),
+            ]);
+            assert.equal(store.resolve(ROUTE).tools.shell, "allow");
+            assert.equal(store.resolve(sibling).tools.fsTools, "allow");
+            assert.deepEqual(store.resolve(ROUTE).executionDir, { mode: "per-chat" });
+        });
+
+        it("does not restore a cleared override when a sibling update was queued", async () => {
+            await store.setChatOverride(ROUTE, { tools: { shell: "allow" } });
+            const sibling = { ...ROUTE, chatId: "c2" };
+            await Promise.all([
+                store.clearChatOverride(ROUTE),
+                store.setChatOverride(sibling, { tools: { fsTools: "allow" } }),
+            ]);
+            assert.equal(store.resolve(ROUTE).tools.shell, "deny");
+            assert.equal(store.resolve(sibling).tools.fsTools, "allow");
+        });
+
+        it("does not overwrite a queued update with a delayed legacy migration", async () => {
+            fs.mkdirSync(path.dirname(policyPath("wechat")), { recursive: true });
+            fs.writeFileSync(
+                policyPath("wechat"),
+                JSON.stringify({ default: { perChatScratch: true } }),
+            );
+            const update = store.setChannelDefault("wechat", { tools: { shell: "allow" } });
+            store.resolve(ROUTE);
+            await update;
+            await store.flush();
+            assert.equal(store.resolve(ROUTE).tools.shell, "allow");
+            assert.deepEqual(store.resolve(ROUTE).executionDir, { mode: "per-chat" });
+        });
+
         it("clearChatOverride is idempotent and falls back to channel default", async () => {
             await store.setChannelDefault("wechat", { tools: { shell: "allow" } });
             await store.setChatOverride(ROUTE, { tools: { shell: "deny" } });
