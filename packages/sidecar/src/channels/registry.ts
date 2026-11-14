@@ -1,4 +1,5 @@
 import type { ChannelsBindCreds, ImRoute, ServerPush } from "@taco-ai/protocol";
+import { disposeInOrder } from "../lib/async.ts";
 import { createLogger } from "../lib/logger.ts";
 import { isValidChannelId } from "./configValidator.ts";
 import type {
@@ -182,9 +183,7 @@ export class ChannelRegistry {
     }
 
     async stopAll(): Promise<void> {
-        for (const id of [...this.loaded.keys()]) {
-            await this.stop(id);
-        }
+        await disposeInOrder([...this.loaded.keys()].map((id) => () => this.stop(id)));
     }
 
     has(channelId: string): boolean {

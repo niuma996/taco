@@ -30,7 +30,7 @@ import type {
     Model,
     Session,
 } from "../../src/runtime/pi/types.ts";
-import { JsonlSessionRepo, uuidv7 } from "../../src/runtime/pi/values.ts";
+import { AgentHarness, JsonlSessionRepo, uuidv7 } from "../../src/runtime/pi/values.ts";
 import { normalizeMessageUpdate } from "../../src/server/push.ts";
 import type { TaskStore } from "../../src/tasks/taskTypes.ts";
 import type { TacoToolContextBase } from "../../src/tools/context.ts";
@@ -110,6 +110,108 @@ describe("attachedSession.streaming", () => {
         } as never);
 
         return attached;
+    }
+
+    it("unsubscribe continues through failed event disposers to unwire hooks", async (t) => {
+        const create = AgentHarness.create.bind(AgentHarness);
+        const failure = new Error("event unsubscribe failed");
+        const subscribed: string[] = [];
+        const unsubscribed: string[] = [];
+        let eventCount = 0;
+        t.mock.method(AgentHarness, "create", async (...args: Parameters<typeof create>) => {
+            const result = await create(...args);
+            const eventsOn = result.harness.events.on.bind(result.harness.events);
+            const hooksOn = result.harness.hooks.on.bind(result.harness.hooks);
+            t.mock.method(result.harness.events, "on", (...args: Parameters<typeof eventsOn>) => {
+                const off = eventsOn(...args);
+                const id = `event:${subscribed.length}`;
+                const fail = eventCount++ === 0;
+                subscribed.push(id);
+                return () => {
+                    off();
+                    unsubscribed.push(id);
+                    if (fail) throw failure;
+                };
+            });
+            t.mock.method(result.harness.hooks, "on", (...args: Parameters<typeof hooksOn>) => {
+                const off = hooksOn(...args);
+                const id = `hook:${subscribed.length}`;
+                subscribed.push(id);
+                return () => {
+                    off();
+                    unsubscribed.push(id);
+                };
+            });
+            return result;
+        });
+        const attached = await makeAttached("ok");
+        const state = attached as unknown as { unsubscribe?: () => void | Promise<void> };
+        const unsubscribe = state.unsubscribe;
+        assert.ok(unsubscribe);
+        assert.ok(subscribed.some((id) => id.startsWith("event:")));
+        assert.ok(subscribed.some((id) => id.startsWith("hook:")));
+        try {
+            const error = await Promise.resolve()
+                .then(unsubscribe)
+                .catch((error: unknown) => error);
+            assert.deepEqual(unsubscribed, [
+                ...subscribed.filter((id) => id.startsWith("event:")),
+                ...subscribed.filter((id) => id.startsWith("hook:")),
+            ]);
+            assert.ok(error instanceof AggregateError);
+            assert.deepEqual(error.errors, [failure]);
+        } finally {
+            state.unsubscribe = undefined;
+            await attached.dispose();
+        }
+    });
+
+    for (const failureMode of ["sync", "async"] as const) {
+        it(`dispose closes the real harness after ${failureMode} unsubscribe failure only once`, async () => {
+            const attached = await makeAttached("ok");
+            const state = attached as unknown as {
+                unsubscribe?: () => void | Promise<void>;
+                harness: { close: (context: typeof harnessContext) => Promise<void> };
+            };
+            const unsubscribe = state.unsubscribe;
+            const close = state.harness.close.bind(state.harness);
+            assert.ok(unsubscribe);
+            const calls: string[] = [];
+            state.unsubscribe = () => {
+                calls.push("unsubscribe");
+                if (failureMode === "sync") throw new Error("unsubscribe failed");
+                const cleanup = Promise.resolve(unsubscribe()).then(() => {
+                    calls.push("unsubscribe rejected");
+                    throw new Error("unsubscribe failed");
+                });
+                cleanup.catch(() => {});
+                return cleanup;
+            };
+            state.harness.close = async (context) => {
+                calls.push("close");
+                await close(context);
+                throw new Error("close failed after releasing resources");
+            };
+            attached.on("event", () => {});
+            attached.on("error", () => {});
+            try {
+                await attached.dispose();
+                assert.deepEqual(
+                    calls,
+                    failureMode === "sync"
+                        ? ["unsubscribe", "close"]
+                        : ["unsubscribe", "unsubscribe rejected", "close"],
+                );
+                assert.deepEqual(attached.eventNames(), []);
+                await attached.dispose();
+                assert.equal(calls.filter((call) => call === "unsubscribe").length, 1);
+            } finally {
+                state.unsubscribe = undefined;
+                state.harness.close = close;
+                if (failureMode === "sync") await unsubscribe();
+                await attached.dispose();
+            }
+        });
     }
 
     it("preserves the source streaming message timestamp for continuation deltas", async () => {

@@ -274,6 +274,40 @@ describe("registry", () => {
             assert.equal(registry.has("mock-1"), false);
         });
 
+        it("stopAll closes remaining channels and retains failed channels for retry", async () => {
+            const registry = new ChannelRegistry();
+            const calls: string[] = [];
+            const failure = new Error("close failed");
+            let failClose = true;
+            for (const id of ["first", "second", "third"]) {
+                registry.register(id, new MockChannel(), {
+                    push: async () => {},
+                    close: async () => {
+                        calls.push(id);
+                        if (id !== "second" && failClose) throw failure;
+                    },
+                });
+                registry.trackWorkspace(id, `im://${id}/u1/c1`);
+            }
+
+            const error = await registry.stopAll().catch((error: unknown) => error);
+            assert.deepEqual(calls, ["first", "second", "third"]);
+            assert.ok(error instanceof AggregateError);
+            assert.deepEqual(error.errors, [failure, failure]);
+            assert.deepEqual(registry.startedIds(), ["first", "third"]);
+            assert.deepEqual(registry.workspacesForChannel("first"), ["im://first/u1/c1"]);
+            assert.deepEqual(registry.workspacesForChannel("second"), []);
+
+            failClose = false;
+            await registry.stopAll();
+            assert.deepEqual(calls, ["first", "second", "third", "first", "third"]);
+            assert.deepEqual(registry.startedIds(), []);
+            assert.deepEqual(registry.workspacesForChannel("first"), []);
+            assert.deepEqual(registry.workspacesForChannel("third"), []);
+            await registry.stopAll();
+            assert.equal(calls.length, 5);
+        });
+
         it("trackWorkspace associates im workspaces with a channel", () => {
             const registry = new ChannelRegistry();
             registry.trackWorkspace("mock-1", "im://mock-1/u1/c1");

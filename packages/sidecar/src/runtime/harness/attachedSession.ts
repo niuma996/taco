@@ -32,6 +32,7 @@ import type {
     ToolCallHook,
     ToolResultHookBuckets,
 } from "../../extensions/index.ts";
+import { disposeInOrder } from "../../lib/async.ts";
 import { contextFor, harnessContext } from "../../lib/harnessContext.ts";
 import { createLogger } from "../../lib/logger.ts";
 import { textBlocks } from "../../lib/textBlocks.ts";
@@ -326,7 +327,7 @@ export class AttachedSession extends EventEmitter {
      * getter is async. Only `setThinkingLevel` mutates it.
      */
     private thinkingLevel: ThinkingLevel;
-    private unsubscribe?: () => void;
+    private unsubscribe?: () => Promise<void>;
     /**
      * In-flight recovery of operations interrupted by a previous process.
      *
@@ -946,10 +947,7 @@ export class AttachedSession extends EventEmitter {
         // for pinOnce tenants (currently none — see wireHooks.pinOnceConsumer).
         disposers.push(...compactionController.subscribe());
 
-        attached.unsubscribe = () => {
-            for (const dispose of disposers) dispose();
-            unwireHooks();
-        };
+        attached.unsubscribe = () => disposeInOrder([...disposers, unwireHooks]);
 
         // Deliberately last: resume drives a real run, which emits immediately.
         // Every subscriber, hook and the tool surface must already be wired or
@@ -1249,7 +1247,16 @@ export class AttachedSession extends EventEmitter {
                 error instanceof Error ? error.message : String(error),
             );
         }
-        if (this.unsubscribe) this.unsubscribe();
+        const unsubscribe = this.unsubscribe;
+        this.unsubscribe = undefined;
+        try {
+            await unsubscribe?.();
+        } catch (error) {
+            log.debug(
+                "unsubscribe during dispose failed:",
+                error instanceof Error ? error.message : String(error),
+            );
+        }
         try {
             // Releases the hook/event registries and seals the lane so late
             // callbacks reject instead of touching a torn-down session.
