@@ -26,6 +26,7 @@ import type {
     SessionId,
     SidecarCapabilities,
     WorkspaceAssociationKey,
+    WorkspaceCleanupResult,
     WorkspaceId,
 } from "@taco-ai/protocol";
 import type { ExtensionRegistry } from "../extensions/index.ts";
@@ -134,6 +135,9 @@ export interface ServerRpcSurface {
         options?: { refreshConfig?: boolean },
     ): Promise<WorkspaceRuntime>;
     disposeWorkspace(cwd: WorkspaceId): Promise<void>;
+    cleanupWorkspace(cwd: WorkspaceId, preview: boolean): Promise<WorkspaceCleanupResult>;
+    assertWorkspaceAvailable?(cwd: string): void;
+    withWorkspaceAdmission?<T>(cwd: string, operation: () => Promise<T>): Promise<T>;
     getSessionEvents(
         workspace: WorkspaceId,
         sessionId: SessionId,

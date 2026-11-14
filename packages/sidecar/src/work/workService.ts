@@ -6,6 +6,7 @@
  * routing lives here so the controller stays testable with plain fakes.
  */
 
+import { resolve } from "node:path";
 import {
     type AgentMessage,
     type CommandPermissionRequest,
@@ -539,6 +540,29 @@ export class WorkService implements BackgroundWorkHooks, ScheduledWorkHooks, Wor
             await this.store.delete(workId);
         }
         return { outcome };
+    }
+
+    async hasActiveWorkspaceWork(workspace: string): Promise<boolean> {
+        const matches = (key: string) =>
+            key.startsWith("im://") || workspace.startsWith("im://")
+                ? key === workspace
+                : resolve(key) === resolve(workspace);
+        if (
+            (await this.store.list()).some(
+                (work) =>
+                    work.workspace !== undefined &&
+                    matches(work.workspace) &&
+                    !isTerminal(work.status),
+            )
+        )
+            return true;
+        return (
+            (await this.queue?.store.list())?.some(
+                (entry) =>
+                    matches(entry.workspace) &&
+                    !["completed", "failed", "cancelled"].includes(entry.status),
+            ) ?? false
+        );
     }
 
     async list(args: WorkListArgs): Promise<WorkListResult> {

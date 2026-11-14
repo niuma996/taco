@@ -652,6 +652,11 @@ describe("methods.snapshot", () => {
         "work.get": { ensureWorkspace: false },
         "work.list": { ensureWorkspace: false },
         "work.retryDelivery": { ensureWorkspace: false },
+        "workspace.cleanupPreview": {
+            ensureWorkspace: false,
+            workspaceParam: "cwd",
+        },
+        "workspace.cleanup": { ensureWorkspace: false, command: true, workspaceParam: "cwd" },
         "workspace.dispose": { ensureWorkspace: false, command: true, workspaceParam: "cwd" },
         "workspace.ensure": { ensureWorkspace: false, command: true, workspaceParam: "cwd" },
         "workspace.list": { ensureWorkspace: false },

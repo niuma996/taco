@@ -74,6 +74,19 @@ export function registerWorkspaceHandlers(): void {
         { workspaceParam: "cwd", command: true },
     );
 
+    registerMethod(
+        "workspaceCleanupPreview",
+        false,
+        async ({ cwd, server }) => server.cleanupWorkspace(cwd, true),
+        { workspaceParam: "cwd", command: false },
+    );
+    registerMethod(
+        "workspaceCleanup",
+        false,
+        async ({ cwd, server }) => server.cleanupWorkspace(cwd, false),
+        { workspaceParam: "cwd", command: true },
+    );
+
     registerMethod("workspaceAssociationsGet", false, async ({ server, params }) => {
         const key = requireKey(params);
         return { roots: server.associations.get(key) };

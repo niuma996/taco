@@ -450,3 +450,98 @@ for (const mode of ["stdio", "socket"] as const) {
         }
     });
 }
+
+test("cleanup RPCs route by cwd across ConnectionServer and preserve deletion sequence", async () => {
+    const { asWorkspaceId, asSessionId, PushMethods } = await import("@taco-ai/protocol");
+    const { mkdtempSync, mkdirSync, existsSync, rmSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const { tmpdir } = await import("node:os");
+    const { NodeExecutionEnv } = await import("../../src/runtime/pi/node.ts");
+    const { JsonlSessionRepo } = await import("../../src/runtime/pi/values.ts");
+    const { harnessContext } = await import("../../src/lib/harnessContext.ts");
+    const { WorkspaceRegistry } = await import("../../src/server/workspaceRegistry.ts");
+    const base = mkdtempSync(join(tmpdir(), "cleanup-connection-"));
+    const previousHome = process.env.TACO_HOME;
+    process.env.TACO_HOME = join(base, "home");
+    const cwd = asWorkspaceId(join(base, "project"));
+    const sessionsRoot = join(base, "sessions");
+    mkdirSync(cwd, { recursive: true });
+    const repo = new JsonlSessionRepo({ fileSystem: new NodeExecutionEnv({ cwd }), sessionsRoot });
+    const sid = asSessionId("cleanup-session");
+    const session = await repo.create({ cwd, id: sid }, harnessContext);
+    const path = session.metadata.path;
+    await session.close(harnessContext);
+    const runtime = {
+        workspaceKey: cwd,
+        sessionsRoot,
+        getAttached: () => undefined,
+        executionCwd: cwd,
+        dispose: async () => {},
+    } as unknown as WorkspaceRuntime;
+    const registry = new WorkspaceRegistry(async () => runtime);
+    registry.publish(cwd, runtime);
+    const sinks = new ClientSinkRegistry();
+    const host = new SidecarServer({
+        providerKeyStore: new ProviderKeyStore({}),
+        workspaceRegistry: registry,
+        sessionsRoot,
+        clientSinkRegistry: sinks,
+    });
+    const transport = new InMemoryTransport();
+    const connection = new ConnectionServer(host, transport, sinks);
+    await connection.start();
+    try {
+        await request(transport, initialize("cleanup-init"));
+        const preview = await request(transport, {
+            id: "cleanup-preview",
+            method: "workspace.cleanupPreview",
+            params: { cwd },
+        });
+        assert.ok(preview.ok);
+        const simultaneousPreviews = await Promise.all([
+            host.cleanupWorkspace(cwd, true),
+            host.cleanupWorkspace(cwd, true),
+        ]);
+        assert.ok(simultaneousPreviews.every((result) => result.failed.length === 0));
+        assert.ok(existsSync(path));
+        host.clearSessionEvents(cwd, sid);
+        // Seed a cursor that must not reset when cleanup disposes the runtime.
+        const log = (
+            host as unknown as {
+                sessionEvents: import("../../src/server/sessionEventLog.ts").SessionEventLog;
+            }
+        ).sessionEvents;
+        log.append(cwd, sid, (seq) => ({
+            workspace: cwd,
+            session: sid,
+            method: PushMethods.Detached,
+            params: {},
+            seq,
+        }));
+        const before = host.getSessionLastSeq(cwd, sid);
+        const result = await request(transport, {
+            id: "cleanup-run",
+            method: "workspace.cleanup",
+            params: { cwd },
+        });
+        assert.ok(result.ok);
+        assert.equal(existsSync(path), false);
+        assert.ok(existsSync(cwd));
+        const deletion = transport.sent.find(
+            (frame) => "method" in frame && frame.method === PushMethods.SessionDeleted,
+        );
+        assert.ok(deletion && "seq" in deletion && deletion.seq === before + 1);
+        host.broadcastConversationsChanged();
+        const refreshes = transport.sent.filter(
+            (frame) => "method" in frame && frame.method === PushMethods.ConversationsChanged,
+        );
+        assert.equal(refreshes.length, 1);
+        assert.ok("workspace" in refreshes[0] && refreshes[0].workspace === "*");
+    } finally {
+        await connection.stop();
+        await host.stop();
+        if (previousHome === undefined) Reflect.deleteProperty(process.env, "TACO_HOME");
+        else process.env.TACO_HOME = previousHome;
+        rmSync(base, { recursive: true, force: true });
+    }
+});

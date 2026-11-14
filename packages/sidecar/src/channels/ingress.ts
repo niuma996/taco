@@ -50,7 +50,10 @@ export class DefaultChannelContext implements ChannelContext {
                 channelId,
                 inbox,
                 () => binding?.() ?? store.getDeliveryBinding?.(),
-                (message) => router.route(hook, channelId, message.peerId, message.chatId),
+                (message) =>
+                    router.route(hook, channelId, message.peerId, message.chatId, undefined, {
+                        recordActivity: submitInbound === undefined,
+                    }),
                 submitInbound ?? ((message) => this.submitLegacy(message)),
                 submitInbound !== undefined,
             );

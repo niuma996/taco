@@ -29,10 +29,16 @@ function isTypedRpcKey(key: RpcContractKey): key is TypedRpcKey {
 }
 
 /** Workspace lifecycle methods route by `cwd` because no runtime exists yet. */
-type CwdRoutedKey = "workspaceEnsure" | "workspaceDispose";
+type CwdRoutedKey =
+    | "workspaceEnsure"
+    | "workspaceDispose"
+    | "workspaceCleanupPreview"
+    | "workspaceCleanup";
 const CWD_ROUTED: ReadonlySet<string> = new Set<CwdRoutedKey>([
     "workspaceEnsure",
     "workspaceDispose",
+    "workspaceCleanupPreview",
+    "workspaceCleanup",
 ]);
 
 /**

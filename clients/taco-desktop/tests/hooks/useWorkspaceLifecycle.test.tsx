@@ -11,6 +11,7 @@ import {
 import type { TacoClient } from "../../src/lib/clients/tacoClient";
 import { SessionPushProcessor } from "../../src/lib/sessionPushProcessor";
 import { bindSessionSynchronization } from "../../src/lib/sessionSynchronization";
+import { persistWorkspaceRemoval } from "../../src/lib/workspaceStorage";
 
 vi.mock("../../src/hooks/useSidecarStream", () => ({ sidecarLogListenerReady: Promise.resolve() }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn(async () => () => {}) }));
@@ -18,6 +19,7 @@ vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn() }));
 vi.mock("../../src/lib/workspaceStorage", () => ({
     persistActiveCwd: vi.fn(),
     persistCwds: vi.fn(),
+    persistWorkspaceRemoval: vi.fn(async () => {}),
     isValidWorkspaceCwd: () => true,
 }));
 afterEach(cleanup);
@@ -633,4 +635,97 @@ describe("workspace lifecycle isolation", () => {
         expect(h.actions).toContainEqual({ type: "UPSERT_WORKSPACE", cwd: "/A" });
         expect(h.actions).toContainEqual({ type: "UPSERT_WORKSPACE", cwd: "/B" });
     });
+});
+
+describe("workspace removal", () => {
+    it("removes an active workspace and selects a remaining local workspace without attaching", async () => {
+        const h = setup(
+            {},
+            { "/w": createEmptyWorkspace("/w"), "/other": createEmptyWorkspace("/other") },
+        );
+        await act(async () => {
+            await h.result.current.forgetWorkspace("/w");
+        });
+        expect(h.workspacesRef.current["/w"]).toBeUndefined();
+        expect(h.setActiveCwd).toHaveBeenCalledWith("/other");
+        expect(h.client.sessionAttach).not.toHaveBeenCalled();
+    });
+    it("does not navigate when removing a different workspace", async () => {
+        const h = setup(
+            {},
+            { "/w": createEmptyWorkspace("/w"), "/other": createEmptyWorkspace("/other") },
+        );
+        await act(async () => {
+            await h.result.current.forgetWorkspace("/other");
+        });
+        expect(h.setActiveCwd).not.toHaveBeenCalled();
+    });
+    it("allows removing the last workspace without recreating it", async () => {
+        const h = setup();
+        await act(async () => {
+            await h.result.current.forgetWorkspace("/w");
+        });
+        expect(h.workspacesRef.current).toEqual({});
+        expect(h.setActiveCwd).toHaveBeenCalledWith("");
+        expect(h.client.start).not.toHaveBeenCalled();
+    });
+});
+
+describe("workspace removal races", () => {
+    it("keeps the workspace visible if saving the removal fails", async () => {
+        vi.mocked(persistWorkspaceRemoval).mockRejectedValueOnce(new Error("disk full"));
+        const h = setup();
+        await expect(h.result.current.forgetWorkspace("/w")).rejects.toThrow("disk full");
+        expect(h.workspacesRef.current["/w"]).toBeTruthy();
+        expect(h.setActiveCwd).not.toHaveBeenCalled();
+    });
+    it("invalidates a pending list so reopening explicitly can load it again", async () => {
+        const source = deferred<{ sessions: never[]; total: number }>();
+        const h = setup({
+            sessionList: vi
+                .fn()
+                .mockReturnValueOnce(source.promise)
+                .mockResolvedValue({ sessions: [], total: 0 }),
+        });
+        let loading!: Promise<void>;
+        await act(async () => {
+            loading = h.result.current.ensureWorkspaceSessions("/w");
+        });
+        await act(async () => {
+            await h.result.current.forgetWorkspace("/w");
+        });
+        source.resolve({ sessions: [], total: 0 });
+        await act(async () => {
+            await loading;
+        });
+        expect(h.workspacesRef.current["/w"]).toBeUndefined();
+        await act(async () => {
+            await h.result.current.openWorkspace("/w");
+        });
+        expect(h.workspacesRef.current["/w"]?.listTotal).toBe(0);
+    });
+});
+
+it("does not activate a removed workspace when its earlier open finishes", async () => {
+    const source = deferred<{ sessions: never[]; total: number }>();
+    const h = setup(
+        { sessionList: vi.fn(() => source.promise) },
+        {
+            "/w": createEmptyWorkspace("/w"),
+            "/other": createEmptyWorkspace("/other"),
+        },
+    );
+    let opening!: Promise<boolean>;
+    await act(async () => {
+        opening = h.result.current.openWorkspace("/other");
+    });
+    await act(async () => {
+        await h.result.current.forgetWorkspace("/other");
+    });
+    source.resolve({ sessions: [], total: 0 });
+    await act(async () => {
+        await opening;
+    });
+    expect(h.setActiveCwd).not.toHaveBeenCalledWith("/other");
+    expect(h.workspacesRef.current["/other"]).toBeUndefined();
 });

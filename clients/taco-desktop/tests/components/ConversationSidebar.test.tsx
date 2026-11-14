@@ -77,6 +77,7 @@ function props(overrides: Partial<SidebarProps> = {}): SidebarProps {
         onLoadWorkspace: vi.fn().mockResolvedValue(undefined),
         onLoadMore: vi.fn(),
         onDelete: vi.fn(),
+        onRemoveWorkspace: vi.fn(),
         onRename: vi.fn(),
         onNewSession: vi.fn(),
         onOpenFolder: vi.fn(),
@@ -247,8 +248,9 @@ describe("Sidebar conversation groups", () => {
         await user.click(
             within(row as HTMLElement).getByRole("button", { name: "session.moreActions" }),
         );
-        await user.click(screen.getByRole("menuitem", { name: /session.deleteSession/ }));
-        expect(input.onDelete).toHaveBeenCalledWith({ cwd, sessionId: "im-1" });
+        await user.click(screen.getByRole("menuitem", { name: /workspaceRemoval.deleteIm/ }));
+        expect(input.onRemoveWorkspace).toHaveBeenCalledWith({ cwd, cleanup: true });
+        expect(input.onDelete).not.toHaveBeenCalled();
     });
 
     it("filters the flat chat list by channel and can restore all channels", async () => {
@@ -607,5 +609,63 @@ describe("conversation row activity", () => {
                 name: "session.status.error",
             }),
         ).toBeTruthy();
+    });
+});
+
+describe("workspace removal menus", () => {
+    it.each([false, true])(
+        "offers removal and cleanup even with a collapsed local group (cleanup: %s)",
+        async (clean) => {
+            const input = props({ expandedWorkspaces: [] });
+            render(<Sidebar {...input} />);
+            const user = userEvent.setup();
+            const group = screen.getByRole("region", { name: "two" });
+            const menu = within(group).getByRole("button", {
+                name: "workspaceRemoval.moreActions",
+            });
+            menu.focus();
+            await user.keyboard("{Enter}");
+            await user.click(
+                screen.getByRole("menuitem", {
+                    name: clean ? "workspaceRemoval.removeAndClean" : "workspaceRemoval.remove",
+                }),
+            );
+            expect(input.onRemoveWorkspace).toHaveBeenCalledWith({
+                cwd: "/repo/two",
+                cleanup: clean,
+            });
+            expect(input.onOpenSession).not.toHaveBeenCalled();
+            expect(input.onLoadWorkspace).not.toHaveBeenCalled();
+        },
+    );
+
+    it("temporarily removes an IM conversation without deleting or navigating", async () => {
+        const input = props({ mode: "im" });
+        render(<Sidebar {...input} />);
+        const user = userEvent.setup();
+        const row = screen.getByRole("button", { name: "chat-1" }).closest("li");
+        await user.click(
+            within(row as HTMLElement).getByRole("button", { name: "session.moreActions" }),
+        );
+        await user.click(screen.getByRole("menuitem", { name: /workspaceRemoval.hideIm/ }));
+        expect(input.onRemoveWorkspace).toHaveBeenCalledWith({
+            cwd: makeImCwd("wecom", "alice", "chat-1"),
+            cleanup: false,
+        });
+        expect(input.onDelete).not.toHaveBeenCalled();
+        expect(input.onOpenSession).not.toHaveBeenCalled();
+    });
+
+    it("preserves local chat deletion", async () => {
+        const input = props();
+        render(<Sidebar {...input} />);
+        const user = userEvent.setup();
+        const row = screen.getByRole("button", { name: "First chat" }).closest("li");
+        await user.click(
+            within(row as HTMLElement).getByRole("button", { name: "session.moreActions" }),
+        );
+        await user.click(screen.getByRole("menuitem", { name: /session.deleteSession/ }));
+        expect(input.onDelete).toHaveBeenCalledWith({ cwd: "/repo/one", sessionId: "same-id" });
+        expect(input.onRemoveWorkspace).not.toHaveBeenCalled();
     });
 });

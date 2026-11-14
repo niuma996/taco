@@ -974,6 +974,10 @@ export function useWorkspaces(client: TacoClient): UseWorkspacesApi {
             navigationVersion.current++;
             return lifecycle.openWorkspace(cwd);
         },
+        forgetWorkspace: async (cwd) => {
+            await lifecycle.forgetWorkspace(cwd);
+            selectedTargetsRef.current.delete(cwd);
+        },
         browseAndOpen: lifecycle.browseAndOpen,
         openImConversation: (cwd, sid, isCurrent) => {
             navigationVersion.current++;

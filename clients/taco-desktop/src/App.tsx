@@ -6,7 +6,12 @@
  * switching only; per-pane domain logic lives in the hooks.
  */
 
-import type { ChannelStatusEntry, CommandPermissionScope, SessionTarget } from "@taco-ai/protocol";
+import type {
+    ChannelStatusEntry,
+    CommandPermissionScope,
+    SessionTarget,
+    WorkspaceCleanupResult,
+} from "@taco-ai/protocol";
 import { asSessionId, asWorkspaceId, ErrorCodes, IM_CWD_PREFIX } from "@taco-ai/protocol";
 import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityRail } from "./components/ActivityRail";
@@ -29,6 +34,7 @@ import { UpdateDialog } from "./components/UpdateDialog";
 import { WindowControls } from "./components/WindowControls";
 import { WorkspaceAssociationsDialog } from "./components/WorkspaceAssociationsDialog";
 import { type WorkspaceMode, WorkspaceModeTabs } from "./components/WorkspaceModeTabs";
+import { WorkspaceRemovalDialog } from "./components/WorkspaceRemovalDialog";
 import { useChatInputState } from "./hooks/primitives/useChatInputState";
 import { useStableCallback } from "./hooks/primitives/useStableCallback";
 import { useTheme } from "./hooks/primitives/useTheme";
@@ -580,11 +586,41 @@ export default function App() {
         onConversationsChanged,
         markConversationsSeen,
         refreshConversations,
+        hideConversation,
+        restoredUnread,
+        markConversationRead,
     } = useConversationsPane(
         client,
         conversationMode === "im" || mainView === "channels",
         activeCwd,
+        defaultCwdSettled ? getDefaultCwd() : undefined,
     );
+    useEffect(() => {
+        if (mainView !== "chat" || !activeSid || ws?.loadingSessionId === activeSid) return;
+        if (Object.keys(restoredUnread).length === 0) return;
+        const markRead = () => {
+            if (document.visibilityState === "visible" && document.hasFocus())
+                markConversationRead(activeCwd);
+        };
+        markRead();
+        window.addEventListener("focus", markRead);
+        document.addEventListener("visibilitychange", markRead);
+        return () => {
+            window.removeEventListener("focus", markRead);
+            document.removeEventListener("visibilitychange", markRead);
+        };
+    }, [
+        mainView,
+        activeCwd,
+        activeSid,
+        ws?.loadingSessionId,
+        restoredUnread,
+        markConversationRead,
+    ]);
+    const [pendingWorkspaceRemoval, setPendingWorkspaceRemoval] = useState<{
+        cwd: string;
+        cleanup: boolean;
+    } | null>(null);
     onConversationsChangedRef.current = onConversationsChanged;
     const agentsConfig = useConfigurationScope({
         active: mainView === "agents",
@@ -898,7 +934,7 @@ export default function App() {
                             <ConversationSidebar
                                 mode={conversationMode}
                                 workspaces={workspaces}
-                                unread={conversationActivity.unread}
+                                unread={{ ...conversationActivity.unread, ...restoredUnread }}
                                 expandedWorkspaces={expandedWorkspaces}
                                 onExpandedWorkspacesChange={updateExpandedWorkspaces}
                                 activeCwd={activeCwd}
@@ -909,6 +945,7 @@ export default function App() {
                                 onOpenSession={openSessionTarget}
                                 onLoadWorkspace={ensureWorkspaceSessions}
                                 onLoadMore={(cwd) => loadMoreSessions(cwd)}
+                                onRemoveWorkspace={setPendingWorkspaceRemoval}
                                 onDelete={({ cwd, sessionId }) =>
                                     setPendingDeleteSession({ cwd, sessionId })
                                 }
@@ -1360,6 +1397,46 @@ export default function App() {
                     />
                 </div>
             </div>
+            {pendingWorkspaceRemoval && (
+                <WorkspaceRemovalDialog
+                    key={`${pendingWorkspaceRemoval.cwd}:${pendingWorkspaceRemoval.cleanup}`}
+                    {...pendingWorkspaceRemoval}
+                    client={client}
+                    onClose={() => setPendingWorkspaceRemoval(null)}
+                    onRemove={async () => {
+                        const { cwd, cleanup } = pendingWorkspaceRemoval;
+                        const isIm = cwd.startsWith(IM_CWD_PREFIX);
+                        let result: WorkspaceCleanupResult | undefined;
+                        if (cleanup) {
+                            result = await client.workspaceCleanup({ cwd: asWorkspaceId(cwd) });
+                            if (result.failed.length > 0) return result;
+                        } else if (isIm) {
+                            await hideConversation(cwd);
+                        } else {
+                            await client.workspaceDispose({ cwd: asWorkspaceId(cwd) });
+                        }
+                        sessionOpenRequestGuardRef.current.invalidate();
+                        await wsApi.forgetWorkspace(cwd);
+                        setExpandedWorkspaces((previous) =>
+                            previous?.filter((path) => path !== cwd),
+                        );
+                        sessionSearches.forWorkspace(cwd).setQuery("");
+                        if (cleanup) {
+                            const workspace = workspaces[cwd];
+                            const ids = new Set([
+                                ...(workspace?.sessions.map((session) => session.id) ?? []),
+                                ...Object.keys(workspace?.sessionStatesById ?? {}),
+                            ]);
+                            for (const sessionId of ids) {
+                                drafts.release({ kind: "session", workspace: cwd, sessionId });
+                                conversationActivity.release({ workspace: cwd, sessionId });
+                            }
+                            if (isIm) await refreshConversations();
+                        }
+                        return result;
+                    }}
+                />
+            )}
             <ConfirmModal
                 open={confirmNewSession}
                 title={t("session.createNewSessionTitle")}

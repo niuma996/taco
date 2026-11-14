@@ -210,6 +210,8 @@ test("every facade method serializes a payload accepted by its registered schema
     });
     await client.workspaceEnsure({ cwd: workspace });
     await client.workspaceDispose({ cwd: workspace });
+    await client.workspaceCleanupPreview({ cwd: workspace });
+    await client.workspaceCleanup({ cwd: workspace });
     await client.workspaceAssociationsGet({ key: { scope: "workspace", id: workspace } });
     await client.workspaceAssociationsSet({
         key: { scope: "workspace", id: workspace },

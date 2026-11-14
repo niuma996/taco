@@ -15,6 +15,7 @@ import {
     asSessionId,
     asWorkspaceId,
     ErrorCodes,
+    IM_CWD_PREFIX,
     SESSION_LIST_DEFAULT_LIMIT,
 } from "@taco-ai/protocol";
 import { listen } from "@tauri-apps/api/event";
@@ -37,6 +38,7 @@ import {
     loadOpenedCwds,
     persistActiveCwd,
     persistCwds,
+    persistWorkspaceRemoval,
     pruneMissingCwds,
     resolveActiveCwd,
 } from "../lib/workspaceStorage";
@@ -61,6 +63,7 @@ export interface UseWorkspaceLifecycleApi {
     initFromStorage: () => Promise<void>;
     reloadAllWorkspaces: () => Promise<void>;
     loadMoreSessions: (cwd: string) => Promise<boolean>;
+    forgetWorkspace: (cwd: string) => Promise<void>;
     openWorkspace: (rawCwd: string) => Promise<boolean>;
     browseAndOpen: () => Promise<void>;
     /** Whether the switch still owns navigation when loading finishes. */
@@ -119,6 +122,9 @@ export function useWorkspaceLifecycle({
     const connectionGeneration = useRef(0);
     const listEpochs = useRef(new Map<string, number>());
     const listedWorkspaces = useRef(new Set<string>());
+    const removedWorkspaces = useRef(new Set<string>());
+    const activeCwdRef = useRef(activeCwd);
+    activeCwdRef.current = activeCwd;
     const attachOwners = useRef(new Map<string, symbol>());
     const markNavigationIntent = useCallback(() => ++navigationVersion.current, []);
     const getNavigationVersion = useCallback(() => navigationVersion.current, []);
@@ -179,6 +185,7 @@ export function useWorkspaceLifecycle({
      *  useReducer dispatch, so no deps are needed. */
     const dispatchListResult = useCallback(
         (cwd: string, result: SessionListResult, append: boolean): void => {
+            if (removedWorkspaces.current.has(cwd)) return;
             listedWorkspaces.current.add(cwd);
             dispatchWs({
                 type: "LOAD_SESSIONS",
@@ -263,7 +270,8 @@ export function useWorkspaceLifecycle({
             isCurrent: () => boolean = () => true,
         ): Promise<void> => {
             const currentNavigation = beginNavigation();
-            const navigationIsCurrent = () => currentNavigation() && isCurrent();
+            const navigationIsCurrent = () =>
+                currentNavigation() && isCurrent() && !removedWorkspaces.current.has(cwd);
             const owner = Symbol();
             attachOwners.current.set(cwd, owner);
             const releaseLoading = (
@@ -273,7 +281,8 @@ export function useWorkspaceLifecycle({
                     dispatchWs({ type, cwd, sid: sessionId });
             };
             const generation = connectionGeneration.current;
-            const connectionIsCurrent = () => generation === connectionGeneration.current;
+            const connectionIsCurrent = () =>
+                generation === connectionGeneration.current && !removedWorkspaces.current.has(cwd);
             const cached = getSessionState(workspacesRef.current[cwd], sessionId);
             const executionRevision = cached?.executionRevision ?? 0;
             dispatchWs({ type: "ATTACH_START", cwd, sid: sessionId });
@@ -506,10 +515,13 @@ export function useWorkspaceLifecycle({
         // opened[0], then the default cwd. We still validate storedActive
         // against opened because the desktop.json active can outlive a workspace
         // that was dropped during pruning.
-        const activeTarget = resolveActiveCwd(
-            storedActive && opened.includes(storedActive) ? storedActive : null,
-            opened,
-        );
+        const activeTarget =
+            opened.length === 0
+                ? ""
+                : resolveActiveCwd(
+                      storedActive && opened.includes(storedActive) ? storedActive : null,
+                      opened,
+                  );
         if (navigationIsCurrent()) setActiveCwd(activeTarget);
         // Persist the post-prune list back so a workspace that disappeared
         // between sessions does not get carried forward. Failure is logged but
@@ -718,6 +730,7 @@ export function useWorkspaceLifecycle({
                 pushNotification(msg, { kind: "workspace-open" });
                 return false;
             }
+            removedWorkspaces.current.delete(cwd);
             if (!workspacesRef.current[cwd]) {
                 // Build the next cwd list up front and persist it immediately:
                 // reading workspacesRef.current right after dispatchWs would be
@@ -728,7 +741,8 @@ export function useWorkspaceLifecycle({
             }
             try {
                 await loadWorkspaceSessions(cwd);
-                if (navigationIsCurrent()) await switchWorkspace(cwd);
+                if (navigationIsCurrent() && !removedWorkspaces.current.has(cwd))
+                    await switchWorkspace(cwd);
                 return true;
             } catch (err) {
                 const msg = `Failed to open ${cwd}: ${(err as Error).message}`;
@@ -765,12 +779,14 @@ export function useWorkspaceLifecycle({
     const imOpenOwners = useRef(new Map<string, symbol>());
     const openImConversation = useCallback(
         async (cwd: string, sid: string, isCurrent: () => boolean = () => true): Promise<void> => {
+            removedWorkspaces.current.delete(cwd);
             let navigationIsCurrent = beginNavigation();
             const addedNew = !workspacesRef.current[cwd];
             const owner = Symbol("im-open");
             imOpenOwners.current.set(cwd, owner);
             const discardIfStale = (): boolean => {
-                if (isCurrent() && navigationIsCurrent()) return false;
+                if (isCurrent() && navigationIsCurrent() && !removedWorkspaces.current.has(cwd))
+                    return false;
                 const ws = workspacesRef.current[cwd];
                 // Only roll back our own unused placeholder. A later opener or
                 // direct navigation may already own the same workspace.
@@ -923,6 +939,40 @@ export function useWorkspaceLifecycle({
         [client, dispatchWs, pushNotification],
     );
 
+    const forgetWorkspace = useCallback(
+        async (cwd: string): Promise<void> => {
+            const version = getNavigationVersion();
+            const next =
+                Object.keys(workspacesRef.current).find(
+                    (path) => path !== cwd && !path.startsWith(IM_CWD_PREFIX),
+                ) ?? "";
+            if (!cwd.startsWith(IM_CWD_PREFIX)) {
+                await persistWorkspaceRemoval(
+                    cwd,
+                    activeCwdRef.current === cwd ? next : activeCwdRef.current,
+                );
+            }
+            removedWorkspaces.current.add(cwd);
+            beginList(cwd);
+            listedWorkspaces.current.delete(cwd);
+            attachOwners.current.delete(cwd);
+            dispatchWs({ type: "REMOVE_WORKSPACE", cwd });
+            if (activeCwdRef.current === cwd) {
+                if (version === getNavigationVersion()) markNavigationIntent();
+                setActiveCwd(next);
+                dispatchWs({ type: "SET_ACTIVE", cwd: next });
+            }
+        },
+        [
+            dispatchWs,
+            workspacesRef,
+            setActiveCwd,
+            beginList,
+            getNavigationVersion,
+            markNavigationIntent,
+        ],
+    );
+
     const deleteSession = useCallback(
         async (cwd: string, sessionId: string): Promise<void> => {
             try {
@@ -1005,6 +1055,7 @@ export function useWorkspaceLifecycle({
         reloadAllWorkspaces,
         loadMoreSessions,
         openWorkspace,
+        forgetWorkspace,
         browseAndOpen,
         switchWorkspace,
         attachSession,

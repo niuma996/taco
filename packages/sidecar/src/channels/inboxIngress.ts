@@ -99,6 +99,7 @@ export class InboxIngress implements ChannelIngress {
                     target,
                     batch,
                 );
+                target = { workspace, sessionId: result.sessionId };
                 await this.store.finishBatch(batch.batchId, result.failed);
             } catch (error) {
                 if (!this.replayable) await this.store.finishBatch(batch.batchId, true);

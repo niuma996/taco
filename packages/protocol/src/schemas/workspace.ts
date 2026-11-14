@@ -27,6 +27,9 @@ export const workspaceEnsureSchema = Type.Object({
     cwd: workspaceIdSchema,
 });
 
+export const workspaceCleanupPreviewSchema = Type.Object({ cwd: workspaceIdSchema });
+export const workspaceCleanupSchema = Type.Object({ cwd: workspaceIdSchema });
+
 export const workspaceDisposeSchema = Type.Object({
     cwd: workspaceIdSchema,
 });

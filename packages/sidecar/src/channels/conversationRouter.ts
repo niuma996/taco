@@ -31,7 +31,10 @@ export class ConversationRouter extends EventEmitter {
     private readonly routes = new Map<string, RouteEntry>(); // key = imCwd
     private readonly inflight = new Map<
         string,
-        Promise<{ workspace: string; sessionId: string }>
+        {
+            promise: Promise<{ workspace: string; sessionId: string }>;
+            activity: { record: boolean };
+        }
     >();
     private readonly persistPath: string;
     /** Debounce timer for the reuse path — a chatty peer would otherwise
@@ -162,7 +165,12 @@ export class ConversationRouter extends EventEmitter {
             return false;
         const removed = this.routes.delete(workspace);
         if (removed) {
-            await this.persist();
+            try {
+                await this.persist();
+            } catch (error) {
+                if (!this.routes.has(workspace)) this.routes.set(workspace, existing);
+                throw error;
+            }
             // Deletions and stale-route pruning need the same refresh push as
             // new routes; listeners only need to re-read listConversations.
             this.emit("conversation");
@@ -176,15 +184,61 @@ export class ConversationRouter extends EventEmitter {
         peerId: string,
         chatId: string,
         sessionId?: string,
+        options: { recordActivity?: boolean } = {},
     ): Promise<{ workspace: string; sessionId: string }> {
         const key = makeImCwd(channelId, peerId, chatId);
+        if (hook.withWorkspaceAdmission) {
+            return hook.withWorkspaceAdmission(key, () =>
+                this.routeAdmitted(
+                    hook,
+                    key,
+                    channelId,
+                    peerId,
+                    chatId,
+                    sessionId,
+                    options.recordActivity !== false,
+                ),
+            );
+        }
+        return this.routeAdmitted(
+            hook,
+            key,
+            channelId,
+            peerId,
+            chatId,
+            sessionId,
+            options.recordActivity !== false,
+        );
+    }
 
+    private async routeAdmitted(
+        hook: ServerRpcSurface,
+        key: string,
+        channelId: string,
+        peerId: string,
+        chatId: string,
+        sessionId: string | undefined,
+        recordActivity: boolean,
+    ): Promise<{ workspace: string; sessionId: string }> {
+        hook.assertWorkspaceAvailable?.(key);
         // Serialize concurrent routes for the same workspace so two identical
         // triples cannot both miss and create duplicate sessions.
         const inflight = this.inflight.get(key);
-        if (inflight) return inflight;
-        const pending = this.routeOnce(hook, key, channelId, peerId, chatId, sessionId);
-        this.inflight.set(key, pending);
+        if (inflight) {
+            inflight.activity.record ||= recordActivity;
+            return inflight.promise;
+        }
+        const activity = { record: recordActivity };
+        const pending = this.routeOnce(
+            hook,
+            key,
+            channelId,
+            peerId,
+            chatId,
+            sessionId,
+            () => activity.record,
+        );
+        this.inflight.set(key, { promise: pending, activity });
         try {
             return await pending;
         } finally {
@@ -198,7 +252,8 @@ export class ConversationRouter extends EventEmitter {
         channelId: string,
         peerId: string,
         chatId: string,
-        sessionId?: string,
+        sessionId: string | undefined,
+        recordActivity: () => boolean,
     ): Promise<{ workspace: string; sessionId: string }> {
         const workspace = key;
         const existing = this.routes.get(workspace);
@@ -207,7 +262,9 @@ export class ConversationRouter extends EventEmitter {
         // via session.history (not session.list, which filters subagents) before
         // creating to avoid duplicates.
         if (existing && (await this.sessionExists(hook, workspace, existing.sessionId))) {
-            existing.lastUsedAt = Date.now();
+            if (!recordActivity()) return { workspace, sessionId: existing.sessionId };
+            existing.lastUsedAt = Math.max(Date.now(), existing.lastUsedAt + 1);
+            this.emit("activity");
             // Debounced, not immediate: the reuse path is hit on every inbound
             // message, and rewriting routing.json per message is disk churn.
             // 2s coalescing keeps the timestamp close enough to live for the
@@ -229,7 +286,7 @@ export class ConversationRouter extends EventEmitter {
         // Use the caller-supplied id when given so the conversation uses a stable UUID
         // rather than leaking a platform message id into the session identity.
         const sid = sessionId ?? uuidv7();
-        await hook.dispatchRpc?.(
+        const created = await hook.dispatchRpc?.(
             createRpcRequest(randomUUID(), RPC.sessionCreate, {
                 workspace: asWorkspaceId(workspace),
                 sessionId: asSessionId(sid),
@@ -237,16 +294,20 @@ export class ConversationRouter extends EventEmitter {
             }),
         );
 
+        if (!created?.ok)
+            throw new Error(
+                created && !created.ok
+                    ? (created.error?.message ?? "创建路由会话失败。")
+                    : "创建路由会话失败。",
+            );
+        hook.assertWorkspaceAvailable?.(key);
         // One timestamp for both the route entry and the event: sampling
         // Date.now() twice let the pushed payload disagree with what listAll()
         // would report for the same conversation.
         const lastUsedAt = Date.now();
         this.routes.set(workspace, { sessionId: sid, lastUsedAt });
         await this.persist();
-        // Emit only on NEW session creation, not on every route() hit —
-        // a busy peer's stream would otherwise turn this into a push-storm.
-        // ServerRpcSurface subscribers (e.g. SidecarServer.imChannelListener) re-broadcast
-        // as `channels.conversations_changed` to the desktop.
+        // Inbound activity refreshes the list so hidden conversations can return.
         this.emit("conversation", {
             channelId,
             peerId,

@@ -480,5 +480,8 @@ export type {
     WorkspaceAssociationsResolveResult,
     WorkspaceAssociationsSetParams,
     WorkspaceAssociationsSetResult,
+    WorkspaceCleanupParams,
+    WorkspaceCleanupPreviewParams,
+    WorkspaceCleanupResult,
 } from "./workspace.js";
 export { makeImPeerAssociationId } from "./workspace.js";

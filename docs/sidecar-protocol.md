@@ -254,7 +254,8 @@ All method names are listed below, grouped by namespace. Client routing scope
 comes from each `rpcContract` row, not from its namespace: workspace-scoped
 calls carry a routing key, while process-scoped calls do not. The server's
 `ensureWorkspace` flag separately decides whether to resolve a runtime before
-calling the handler. `workspace.ensure` and `workspace.dispose` carry `cwd`;
+calling the handler. `workspace.ensure`, `workspace.dispose`,
+`workspace.cleanupPreview` and `workspace.cleanup` carry `cwd`;
 `workspace.associations.resolve` carries `workspace`, but none needs a runtime
 resolved up front.
 
@@ -360,6 +361,8 @@ fields of `settings.get` or `settings.write`.
 | `workspace.associations.get` | workspace.* |
 | `workspace.associations.resolve` | workspace.* |
 | `workspace.associations.set` | workspace.* |
+| `workspace.cleanup` | workspace.* |
+| `workspace.cleanupPreview` | workspace.* |
 | `workspace.dispose` | workspace.* |
 | `workspace.ensure` | workspace.* |
 | `workspace.list` | workspace.* |
@@ -680,3 +683,13 @@ New fields may be added to push frame `params` objects in any minor version.  Re
 ## Maintenance
 
 This document is generated from source.  Run `pnpm sidecar:docs` to regenerate the RPC/push method tables.  Hand-written sections (this overview, quirks, CLI flags) are preserved by `@manual` markers in the source.
+
+## Workspace removal and cleanup
+
+`workspace.dispose({ cwd })` releases the runtime while retaining files. The desktop separately removes filesystem workspaces from its persisted opened list. An explicitly emptied list stays empty on restart. Reopening the folder restores its retained chat history.
+
+`workspace.cleanupPreview({ cwd })` and `workspace.cleanup({ cwd })` share a server-derived cleanup plan. Both return `{ removed, skipped, failed }`: preview lists proposed paths under `removed`; execution lists completed removals. `skipped` entries contain a path and retention reason; `failed` entries contain a path and error. Clients must show the preview and require explicit confirmation before cleanup. Running sessions or queued work block cleanup. Partial failures retain the dialog for a fresh preview and retry.
+
+Local cleanup targets Taco-owned session history, descendant session data, attachments, staging, memory, checkpoints and workspace association records. Project/source folders and associated folders are retained. Work history/results, completed queue records, inbox logs and scheduled-job definitions are retained and listed in the preview. Enabled scheduled jobs can create future sessions. IM cleanup selects the exact routed session tree and its owned per-chat execution directory; channel-shared and custom execution directories are retained. Removing one conversation never removes another conversation's transcript or the channel configuration.
+
+Temporarily hiding an IM conversation is a desktop preference, preserving routing and history. The hide baseline stores the session ID and inbound `lastUsedAt`. Inbound batches record activity at admission before enqueue; route revalidation itself does not record activity. Reused-route activity refreshes are coalesced in fixed 100 ms windows, so continuous traffic cannot postpone a refresh indefinitely. `channels.conversations_changed` restores the row as unread without changing the selected page. Renames, metadata reads and refreshes do not restore hidden rows. Permanent cleanup removes the route; subsequent inbound traffic creates a fresh session.

@@ -70,7 +70,7 @@ function workspace(overrides: Partial<WorkspaceState>): WorkspaceState {
     };
 }
 
-function renderPane(ws: WorkspaceState) {
+function renderPane(ws: WorkspaceState | undefined) {
     const props: ChatPaneProps = {
         client: {} as ChatPaneProps["client"],
         ws,
@@ -372,5 +372,12 @@ describe("ChatPane 用户消息导轨", () => {
                 .getAttribute("aria-current"),
             "location",
         );
+    });
+});
+
+describe("empty workspace composer", () => {
+    it("disables input after the last workspace is removed", () => {
+        renderPane(undefined);
+        assert.equal((screen.getByRole("textbox") as HTMLTextAreaElement).disabled, true);
     });
 });

@@ -24,6 +24,8 @@ import type {
     workspaceAssociationsGetSchema,
     workspaceAssociationsResolveSchema,
     workspaceAssociationsSetSchema,
+    workspaceCleanupPreviewSchema,
+    workspaceCleanupSchema,
 } from "./schemas/workspace.js";
 
 /**
@@ -94,3 +96,13 @@ export interface WorkspaceAssociationsResolveResult {
     /** Which key supplied them. `undefined` when nothing is associated. */
     readonly source?: WorkspaceAssociationKey;
 }
+
+/** Preview lists planned deletions in removed; cleanup lists only completed deletions. */
+export interface WorkspaceCleanupResult {
+    removed: string[];
+    skipped: { path: string; reason: string }[];
+    failed: { path: string; error: string }[];
+}
+
+export type WorkspaceCleanupPreviewParams = ParamsOf<typeof workspaceCleanupPreviewSchema>;
+export type WorkspaceCleanupParams = ParamsOf<typeof workspaceCleanupSchema>;

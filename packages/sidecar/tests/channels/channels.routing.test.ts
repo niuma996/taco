@@ -629,7 +629,7 @@ describe("conversationRouter", () => {
         });
 
         describe("'conversation' event", () => {
-            it("emits only when a NEW session is created", async () => {
+            it("separates structural changes from inbound activity", async () => {
                 const home = mkdtempSync(path.join(tmpdir(), "router-"));
                 const hook = stubHook();
                 const router = await ConversationRouter.load(home);
@@ -639,9 +639,14 @@ describe("conversationRouter", () => {
                 // First route → new session → event fires.
                 await router.route(hook, "ch1", "u1", "c1");
                 assert.equal(events.length, 1);
-                // Re-routing the same triple reuses the session → no event.
+                let activities = 0;
+                router.on("activity", () => activities++);
+                const previous = router.listAll()[0].lastUsedAt;
+                // Reuse must restore a hidden conversation even within the same millisecond.
                 await router.route(hook, "ch1", "u1", "c1");
                 assert.equal(events.length, 1);
+                assert.equal(activities, 1);
+                assert.ok(router.listAll()[0].lastUsedAt > previous);
                 // A different triple → new session → another event.
                 await router.route(hook, "ch1", "u2", "c2");
                 assert.equal(events.length, 2);

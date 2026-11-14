@@ -4,6 +4,8 @@ import {
     Check,
     ChevronDown,
     ChevronRight,
+    Ellipsis,
+    EyeOff,
     Filter,
     Folder,
     FolderPlus,
@@ -12,9 +14,11 @@ import {
     Plus,
     Search,
     Settings2,
+    Trash,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { SessionList } from "../components/SessionList";
+import { IconButton } from "../components/ui/IconButton";
 import type { WorkspaceMode } from "../components/WorkspaceModeTabs";
 import type { UseSessionSearchesResult } from "../hooks/useSessionSearch";
 import { useT } from "../i18n/useI18n";
@@ -42,6 +46,7 @@ export interface ConversationSidebarProps {
     onSelectWorkspace?: (cwd: string) => void;
     onLoadWorkspace: (cwd: string) => Promise<void>;
     onLoadMore: (cwd: string) => Promise<boolean>;
+    onRemoveWorkspace?: (target: { cwd: string; cleanup: boolean }) => void;
     onDelete: (target: { cwd: string; sessionId: string }) => void;
     onRename: (target: { cwd: string; sessionId: string; currentName?: string }) => void;
     onNewSession: (cwd: string) => void;
@@ -367,10 +372,17 @@ export function ConversationSidebar(props: ConversationSidebarProps) {
                                 currentName: item.label,
                             });
                     }}
-                    onDelete={(row) => {
-                        const item = byKey.get(row.key);
-                        if (item) props.onDelete({ cwd: item.cwd, sessionId: item.sessionId });
-                    }}
+                    onHide={
+                        props.onRemoveWorkspace
+                            ? (row) => props.onRemoveWorkspace?.({ cwd: row.key, cleanup: false })
+                            : undefined
+                    }
+                    deleteLabel={t("workspaceRemoval.deleteIm")}
+                    onDelete={
+                        props.onRemoveWorkspace
+                            ? (row) => props.onRemoveWorkspace?.({ cwd: row.key, cleanup: true })
+                            : undefined
+                    }
                     onManageAssociations={(row) => {
                         const item = byKey.get(row.key);
                         if (item) props.onManageAssociations?.({ workspace: item.cwd });
@@ -568,6 +580,56 @@ export function ConversationSidebar(props: ConversationSidebarProps) {
                                                   </button>
                                               )}
                                           </div>
+                                      )}
+                                      {props.onRemoveWorkspace && (
+                                          <DropdownMenu.Root>
+                                              <DropdownMenu.Trigger asChild>
+                                                  <IconButton
+                                                      aria-label={t("workspaceRemoval.moreActions")}
+                                                      title={t("workspaceRemoval.moreActions")}
+                                                  >
+                                                      <Ellipsis size={14} aria-hidden="true" />
+                                                  </IconButton>
+                                              </DropdownMenu.Trigger>
+                                              <DropdownMenu.Portal>
+                                                  <DropdownMenu.Content
+                                                      className="ui-menu"
+                                                      side="top"
+                                                      align="end"
+                                                      sideOffset={4}
+                                                      collisionPadding={8}
+                                                  >
+                                                      <DropdownMenu.Item
+                                                          className="ui-menu-item"
+                                                          onSelect={() =>
+                                                              props.onRemoveWorkspace?.({
+                                                                  cwd: group.cwd,
+                                                                  cleanup: false,
+                                                              })
+                                                          }
+                                                      >
+                                                          <EyeOff size={14} aria-hidden="true" />
+                                                          <span className="ui-menu-label">
+                                                              {t("workspaceRemoval.remove")}
+                                                          </span>
+                                                      </DropdownMenu.Item>
+                                                      <DropdownMenu.Item
+                                                          className="ui-menu-item session-actions-menu-danger"
+                                                          onSelect={() =>
+                                                              props.onRemoveWorkspace?.({
+                                                                  cwd: group.cwd,
+                                                                  cleanup: true,
+                                                              })
+                                                          }
+                                                      >
+                                                          <Trash size={14} aria-hidden="true" />
+                                                          <span className="ui-menu-label">
+                                                              {t("workspaceRemoval.removeAndClean")}
+                                                          </span>
+                                                      </DropdownMenu.Item>
+                                                  </DropdownMenu.Content>
+                                              </DropdownMenu.Portal>
+                                          </DropdownMenu.Root>
                                       )}
                                   </div>
                                   {isExpanded && (

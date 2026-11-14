@@ -111,6 +111,7 @@ export function reseedDefaultIfEmpty(kept: string[], defaultCwd: string): string
  */
 export async function pruneMissingCwds(cwds: string[]): Promise<string[]> {
     if (cwds.length === 0) {
+        if ((await readDesktopConfig()).workspaces?.emptyAllowed) return [];
         // No stored workspaces — seed with the default cwd so a fresh install
         // (or a wiped webview storage) doesn't render an empty dropdown.
         return defaultCwd ? [defaultCwd] : cwds;
@@ -297,18 +298,17 @@ export function orderWorkspacesForActive(opened: string[], active: string): stri
  * and forget (the function logs but does not throw on failure).
  */
 export async function persistCwds(cwds: string[]): Promise<void> {
-    // Read the current active so we don't accidentally clear it when only
-    // updating the opened list.
-    const current = await readDesktopConfig();
-    const active = current.workspaces?.active ?? "";
     try {
-        const opened = cwds.filter(isValidWorkspaceCwd);
-        await writeDesktopConfig({
-            workspaces: {
-                ...current.workspaces,
-                opened: orderWorkspacesForActive(opened, active),
-                active,
-            },
+        await writeDesktopConfig((current) => {
+            const active = current.workspaces?.active ?? "";
+            const opened = cwds.filter(isValidWorkspaceCwd);
+            return {
+                workspaces: {
+                    ...current.workspaces,
+                    opened: orderWorkspacesForActive(opened, active),
+                    active,
+                },
+            };
         });
     } catch (e) {
         console.warn("[taco] failed to persist workspaces", e);
@@ -326,15 +326,17 @@ export async function persistActiveCwd(cwd: string): Promise<void> {
         console.warn(`[taco] refusing to persist invalid active cwd ${JSON.stringify(cwd)}`);
         return;
     }
-    const current = await readDesktopConfig();
-    const opened = current.workspaces?.opened ?? [];
     try {
-        await writeDesktopConfig({
-            workspaces: {
-                ...current.workspaces,
-                opened: orderWorkspacesForActive(opened, cwd),
-                active: cwd,
-            },
+        await writeDesktopConfig((current) => {
+            const opened = current.workspaces?.opened ?? [];
+            // A queued selection save must not restore a workspace removed by an earlier write.
+            return {
+                workspaces: {
+                    ...current.workspaces,
+                    opened: orderWorkspacesForActive(opened, cwd),
+                    active: opened.includes(cwd) ? cwd : (current.workspaces?.active ?? ""),
+                },
+            };
         });
     } catch (e) {
         console.warn("[taco] failed to persist active cwd", e);
@@ -344,17 +346,39 @@ export async function persistActiveCwd(cwd: string): Promise<void> {
 /** Persist the explicit chat-sidebar expansion preference without dropping
  * other clients' workspace fields. */
 export async function persistExpandedWorkspaces(expanded: readonly string[]): Promise<void> {
-    const current = await readDesktopConfig();
     try {
-        await writeDesktopConfig({
-            workspaces: {
-                ...current.workspaces,
-                opened: current.workspaces?.opened ?? [],
-                active: current.workspaces?.active ?? "",
-                expanded: expanded.filter(isValidWorkspaceCwd),
-            },
+        await writeDesktopConfig((current) => {
+            const opened = Array.isArray(current.workspaces?.opened)
+                ? current.workspaces.opened
+                : [];
+            return {
+                workspaces: {
+                    ...current.workspaces,
+                    opened,
+                    active: current.workspaces?.active ?? "",
+                    expanded: expanded.filter(
+                        (cwd) => isValidWorkspaceCwd(cwd) && opened.includes(cwd),
+                    ),
+                },
+            };
         });
     } catch (e) {
         console.warn("[taco] failed to persist expanded workspaces", e);
     }
+}
+
+/** Persist explicit removal atomically within the workspace preference block; failures stay actionable. */
+export async function persistWorkspaceRemoval(cwd: string, nextActive: string): Promise<void> {
+    await writeDesktopConfig((current) => {
+        const previous = current.workspaces;
+        return {
+            workspaces: {
+                ...previous,
+                opened: (previous?.opened ?? []).filter((path) => path !== cwd),
+                active: isValidWorkspaceCwd(nextActive) ? nextActive : "",
+                expanded: previous?.expanded?.filter((path) => path !== cwd),
+                emptyAllowed: true,
+            },
+        };
+    });
 }

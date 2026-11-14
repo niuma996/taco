@@ -30,9 +30,18 @@ export interface WorkspaceListState {
     active: string;
     /** Filesystem projects whose groups are explicitly expanded in the chat sidebar. */
     expanded?: string[];
+    /** An explicitly emptied local workspace list must not be reseeded on startup. */
+    emptyAllowed?: boolean;
+}
+
+export interface HiddenConversationBaseline {
+    sessionId: string;
+    lastUsedAt: number;
 }
 
 export interface DesktopConfig {
+    /** IM routes hidden until their inbound activity advances past this baseline. */
+    hiddenConversations?: Record<string, HiddenConversationBaseline>;
     onboarding?: OnboardingStatus;
     workspaces?: WorkspaceListState;
     /**
@@ -63,23 +72,36 @@ async function writeRaw(contents: string): Promise<void> {
     await tauriInvoke("desktop_config_write", { contents });
 }
 
-export async function readDesktopConfig(): Promise<DesktopConfig> {
+async function readConfig(): Promise<DesktopConfig> {
+    const raw = await readRaw();
+    const parsed = raw ? (JSON.parse(raw) as unknown) : null;
+    return parsed && typeof parsed === "object" ? (parsed as DesktopConfig) : {};
+}
+
+export async function readDesktopConfig(options?: { strict?: boolean }): Promise<DesktopConfig> {
     try {
-        const raw = await readRaw();
-        const parsed = raw ? (JSON.parse(raw) as unknown) : null;
-        if (parsed && typeof parsed === "object") {
-            return parsed as DesktopConfig;
-        }
+        return await readConfig();
     } catch (error) {
+        if (options?.strict) throw error;
         console.error("[taco] failed to read desktop config", error);
     }
     return {};
 }
 
-export async function writeDesktopConfig(patch: Partial<DesktopConfig>): Promise<void> {
-    const current = await readDesktopConfig();
-    const next: DesktopConfig = { ...current, ...patch };
-    await writeRaw(JSON.stringify(next, null, 2));
+let pendingWrite = Promise.resolve();
+
+/** Serialize read/merge/write operations, including updates to nested config maps. */
+export function writeDesktopConfig(
+    patch: Partial<DesktopConfig> | ((current: DesktopConfig) => Partial<DesktopConfig>),
+): Promise<void> {
+    const write = pendingWrite.then(async () => {
+        // A failed read must not turn a partial update into replacement of the whole config.
+        const current = await readConfig();
+        const next = { ...current, ...(typeof patch === "function" ? patch(current) : patch) };
+        await writeRaw(JSON.stringify(next, null, 2));
+    });
+    pendingWrite = write.catch(() => {});
+    return write;
 }
 
 export function isOnboardingRequired(config: DesktopConfig | null): boolean {

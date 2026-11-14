@@ -27,6 +27,7 @@ import {
     IM_CWD_PREFIX,
     type InstructionsConfig,
     type McpServerConfig,
+    makeImCwd,
     type PushMethodName,
     PushMethods,
     type PushParams,
@@ -44,6 +45,7 @@ import {
     type SupportedLocale,
     WORKSPACE_ANY,
     type WorkspaceAssociationKey,
+    type WorkspaceCleanupResult,
     type WorkspaceId,
 } from "@taco-ai/protocol";
 import { Value } from "typebox/value";
@@ -72,6 +74,7 @@ import type { ChannelContext, Logger } from "../channels/types.ts";
 import { makeImSessionsRoot } from "../channels/virtualWorkspace.ts";
 import { defaultAgentDirs } from "../config/agentDirs.ts";
 import {
+    defaultSessionsRoot,
     defaultSkillDirs,
     type ResolvedCompaction,
     type ResolvedTacoConfig,
@@ -143,6 +146,8 @@ import { StdioTransport } from "./stdioTransport.ts";
 import type { Transport } from "./transport.ts";
 import { parseJsonPointer } from "./validation.ts";
 import { WorkPushAdapter } from "./workPushAdapter.ts";
+import { WorkspaceCleanupService } from "./workspaceCleanup.ts";
+import { WorkspaceCleanupGate } from "./workspaceCleanupGate.ts";
 import { WorkspaceRegistry } from "./workspaceRegistry.ts";
 
 const log = createLogger("sidecar");
@@ -298,6 +303,7 @@ export class SidecarServer implements ServerRpcSurface {
     private readonly sessionEvents: SessionEventLog;
     /** Live workspace table + cold-start single-flight — see workspaceRegistry.ts. */
     private readonly workspaces: WorkspaceRegistry;
+    private readonly cleanupGate = new WorkspaceCleanupGate();
     private readonly options: SidecarServerOptions & { resolveConfig: () => ResolvedTacoConfig };
     /** Command-idempotency cache + turn gate — see commandIdempotency.ts. */
     private readonly idempotency: CommandIdempotencyGate;
@@ -667,6 +673,7 @@ export class SidecarServer implements ServerRpcSurface {
 
         this.conversationRouter ??= await ConversationRouter.load(tacoHome());
         this.conversationRouter.on("conversation", this.onRouterConversation);
+        this.conversationRouter.on("activity", this.onRouterActivity);
         this.channelConfigs = channelConfigs;
         await this.inbox.cleanup().catch(() => log.error("inbox recovery or cleanup failed"));
         this.channelBindBroker.on("status", this.onBrokerStatus);
@@ -696,7 +703,17 @@ export class SidecarServer implements ServerRpcSurface {
     }
 
     /** Named refs for stop() to off() — see start() for why this matters. */
+    private conversationActivityTimer: ReturnType<typeof setTimeout> | undefined;
     private readonly onRouterConversation = () => this.broadcastConversationsChanged();
+    private readonly onRouterActivity = () => {
+        if (this.conversationActivityTimer !== undefined) return;
+        // A fixed window bounds restoration latency even during continuous traffic.
+        this.conversationActivityTimer = setTimeout(() => {
+            this.conversationActivityTimer = undefined;
+            this.broadcastConversationsChanged();
+        }, 100);
+        this.conversationActivityTimer.unref?.();
+    };
     private readonly onBrokerStatus = (s: ChannelBindStatus) => {
         // A channel coming up is the signal that held-back Work notices can go.
         if (s.state === "connected") this.work.onChannelConnected();
@@ -712,6 +729,10 @@ export class SidecarServer implements ServerRpcSurface {
         this.stopped = true;
         this.channelBindBroker.off("status", this.onBrokerStatus);
         this.conversationRouter?.off("conversation", this.onRouterConversation);
+        this.conversationRouter?.off("activity", this.onRouterActivity);
+        if (this.conversationActivityTimer !== undefined)
+            clearTimeout(this.conversationActivityTimer);
+        this.conversationActivityTimer = undefined;
         this.idempotency.stop();
         const resources = disposeInOrder([
             () => this.connection?.stop(),
@@ -753,6 +774,7 @@ export class SidecarServer implements ServerRpcSurface {
         if (!this.conversationRouter) {
             throw new Error("conversationRouter not initialized — call start() first");
         }
+        const router = this.conversationRouter;
         return new DefaultChannelContext(
             channelId,
             this,
@@ -763,22 +785,33 @@ export class SidecarServer implements ServerRpcSurface {
             () => this.channelRegistry.getDeliveryBinding(channelId),
             async (message, target, batch) => {
                 if (!message.bindingId) throw new Error("inbound binding is missing");
-                await this.work.enqueueInbound({
-                    batchId: batch.batchId,
-                    memberReceiptIds: batch.memberReceiptIds,
-                    title: message.text.trim().slice(0, 60) || "IM media",
-                    workspace: target.workspace,
-                    sessionId: target.sessionId,
-                    text: message.text,
-                    ...(message.media ? { media: message.media } : {}),
-                    deliveryTarget: {
-                        channelId: message.channelId,
-                        peerId: message.peerId,
-                        chatId: message.chatId,
-                        bindingId: message.bindingId,
-                    },
+                const workspace = makeImCwd(message.channelId, message.peerId, message.chatId);
+                let currentTarget = target;
+                await this.cleanupGate.run(workspace, async () => {
+                    // Frozen/recovered inbox targets may predate a completed cleanup.
+                    currentTarget = await router.route(
+                        this,
+                        message.channelId,
+                        message.peerId,
+                        message.chatId,
+                    );
+                    await this.work.enqueueInbound({
+                        batchId: batch.batchId,
+                        memberReceiptIds: batch.memberReceiptIds,
+                        title: message.text.trim().slice(0, 60) || "IM media",
+                        workspace: currentTarget.workspace,
+                        sessionId: currentTarget.sessionId,
+                        text: message.text,
+                        ...(message.media ? { media: message.media } : {}),
+                        deliveryTarget: {
+                            channelId: message.channelId,
+                            peerId: message.peerId,
+                            chatId: message.chatId,
+                            bindingId: message.bindingId,
+                        },
+                    });
                 });
-                return { sessionId: target.sessionId };
+                return { sessionId: currentTarget.sessionId };
             },
         );
     }
@@ -787,7 +820,9 @@ export class SidecarServer implements ServerRpcSurface {
         request: QueueScheduledWork,
         onWork?: (workId: string) => void,
     ): Promise<{ workId?: string; status: string; reason?: string }> {
-        return this.work.queueScheduled(request, onWork);
+        return this.cleanupGate.run(request.workspace, () =>
+            this.work.queueScheduled(request, onWork),
+        );
     }
 
     private async executeQueuedWork(entry: WorkQueueEntry): Promise<AgentMessage> {
@@ -935,6 +970,26 @@ export class SidecarServer implements ServerRpcSurface {
         req: RpcRequest,
         reg: NonNullable<ReturnType<typeof getRegisteredMethod>>,
     ): Promise<RpcResponse> {
+        const params = (req.params ?? {}) as Record<string, unknown>;
+        const cwd = params[reg.options.workspaceParam ?? "workspace"];
+        if (
+            typeof cwd !== "string" ||
+            req.method === RPC.workspaceCleanup ||
+            req.method === RPC.workspaceCleanupPreview
+        ) {
+            return this.executeAdmittedRpcRequest(req, reg);
+        }
+        try {
+            return await this.cleanupGate.run(cwd, () => this.executeAdmittedRpcRequest(req, reg));
+        } catch (error) {
+            return normalizeError(req.id, error);
+        }
+    }
+
+    private async executeAdmittedRpcRequest(
+        req: RpcRequest,
+        reg: NonNullable<ReturnType<typeof getRegisteredMethod>>,
+    ): Promise<RpcResponse> {
         try {
             let workspace: WorkspaceRuntime | undefined;
             let cwd: WorkspaceId = WORKSPACE_ANY;
@@ -1071,8 +1126,10 @@ export class SidecarServer implements ServerRpcSurface {
         options: { refreshConfig?: boolean } = {},
     ): Promise<WorkspaceRuntime> {
         if (this.stopped) throw new Error("sidecar is stopped");
-        if (options.refreshConfig !== false) await this.refreshConfiguration();
-        return this.workspaces.ensure(cwd);
+        return this.cleanupGate.run(cwd, async () => {
+            if (options.refreshConfig !== false) await this.refreshConfiguration();
+            return this.workspaces.ensure(cwd);
+        });
     }
 
     /** Apply effective configuration once; construction-only settings wait for a new workspace. */
@@ -1442,11 +1499,55 @@ export class SidecarServer implements ServerRpcSurface {
         );
     }
 
+    assertWorkspaceAvailable(cwd: string): void {
+        this.cleanupGate.assertAvailable(cwd);
+    }
+
+    withWorkspaceAdmission<T>(cwd: string, operation: () => Promise<T>): Promise<T> {
+        return this.cleanupGate.run(cwd, operation);
+    }
+
+    cleanupWorkspace(cwd: WorkspaceId, preview: boolean): Promise<WorkspaceCleanupResult> {
+        const inspectOrClean = () =>
+            new WorkspaceCleanupService({
+                home: tacoHome(),
+                sessionsRoot: defaultSessionsRoot(this.options.sessionsRoot),
+                runtimes: () => this.workspaces.list(),
+                router: this.conversationRouter,
+                policy: this.imPolicyStore,
+                associations: this.associationStore,
+                hasActiveWork: (key) => this.work.hasActiveWorkspaceWork(key),
+                dispose: (key) => this.disposeWorkspace(key, { preserveSessionEvents: true }),
+                beforeSessionDeleted: async (key, sessionId) => {
+                    await this.work.sessionDeleted({
+                        workspace: key,
+                        sessionId: asSessionId(sessionId),
+                    });
+                    await this.sessionEvents.hydrate(key, asSessionId(sessionId));
+                },
+                onSessionDeleted: async (key, sessionId) => {
+                    this.emitPush(PushMethods.SessionDeleted, key, asSessionId(sessionId), {});
+                    setTimeout(
+                        () => this.sessionEvents.clearSession(key, asSessionId(sessionId)),
+                        TOMBSTONE_TTL_MS,
+                    ).unref();
+                },
+            }).run(cwd, preview);
+        // Read-only previews may overlap (including StrictMode effect replays).
+        // They still hold admission so destructive cleanup cannot start mid-inspection.
+        return preview
+            ? this.cleanupGate.run(cwd, inspectOrClean)
+            : this.cleanupGate.cleanup(cwd, inspectOrClean);
+    }
+
     /** For handlers / method layer */
-    async disposeWorkspace(cwd: WorkspaceId): Promise<void> {
+    async disposeWorkspace(
+        cwd: WorkspaceId,
+        options: { preserveSessionEvents?: boolean } = {},
+    ): Promise<void> {
         const disposed = await this.workspaces.remove(cwd);
         if (!disposed) return;
-        this.sessionEvents.clearWorkspace(cwd);
+        if (!options.preserveSessionEvents) this.sessionEvents.clearWorkspace(cwd);
         // Clean the channel → workspace reverse index so dispose does not leave
         // stale keys (memory leak across channel lifetime).
         if (cwd.startsWith(IM_CWD_PREFIX)) {
@@ -1773,20 +1874,20 @@ export class SidecarServer implements ServerRpcSurface {
         }
     }
 
-    /** Invalidate notification for `channels.listConversations`. Triggered by
-     *  route creation/removal and IM title changes (not on every inbound
-     *  message). Empty payload — desktop re-pulls the conversation list.
-     *
-     *  IM workspaces are skipped: the workspace registry is keyed by workspaceKey, so
-     *  every routed conversation occupies a slot. Fanning out to those too
-     *  would make the push count grow with conversation count, and each copy
-     *  costs the client a full listConversations re-pull. Only real (fs)
-     *  workspaces host the Channels pane that consumes this. */
+    /** One process-wide refresh reaches clients even with no local runtime. */
     broadcastConversationsChanged(): void {
-        for (const cwd of this.workspaces.keys()) {
-            if (cwd.startsWith(IM_CWD_PREFIX)) continue;
-            this.emitPush(PushMethods.ConversationsChanged, cwd, undefined, {});
-        }
+        if (this.conversationActivityTimer !== undefined)
+            clearTimeout(this.conversationActivityTimer);
+        this.conversationActivityTimer = undefined;
+        const frame = makePushFrame({
+            method: PushMethods.ConversationsChanged,
+            workspace: WORKSPACE_ANY,
+            params: {},
+        });
+        void this.getTransport()
+            .send(frame)
+            .catch((error) => log.warn("conversation refresh failed", error));
+        this.clientSinkRegistry.fanout(frame, this.transport);
     }
 
     broadcastModelsChanged(): void {
@@ -1854,7 +1955,9 @@ export class SidecarServer implements ServerRpcSurface {
                 : this.sessionEvents.append(workspace, session, (seq) =>
                       makePushFrame({ method, workspace, session, sessionKind, seq, params, id }),
                   );
-        void this.getTransport().send(frame);
+        void this.getTransport()
+            .send(frame)
+            .catch((error) => log.warn("push delivery failed", error));
         this.clientSinkRegistry.fanout(frame, this.transport);
         // im:// workspaces additionally fan-out channel pushes (additive sink; no return; stdio always sends)
         if (workspace.startsWith(IM_CWD_PREFIX)) {

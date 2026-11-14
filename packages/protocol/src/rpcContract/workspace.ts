@@ -11,6 +11,8 @@ import {
     workspaceAssociationsGetSchema,
     workspaceAssociationsResolveSchema,
     workspaceAssociationsSetSchema,
+    workspaceCleanupPreviewSchema,
+    workspaceCleanupSchema,
     workspaceDisposeSchema,
     workspaceEnsureSchema,
     workspaceListSchema,
@@ -19,6 +21,7 @@ import type {
     WorkspaceAssociationsGetResult,
     WorkspaceAssociationsResolveResult,
     WorkspaceAssociationsSetResult,
+    WorkspaceCleanupResult,
 } from "../workspace.js";
 import { domainContract, domainMethods, domainSchemas, row } from "./types.js";
 
@@ -44,6 +47,16 @@ const workspaceRows = {
         "workspace.dispose",
         "workspace",
         workspaceDisposeSchema,
+    ),
+    workspaceCleanupPreview: row<WorkspaceCleanupResult>()(
+        "workspace.cleanupPreview",
+        "workspace",
+        workspaceCleanupPreviewSchema,
+    ),
+    workspaceCleanup: row<WorkspaceCleanupResult>()(
+        "workspace.cleanup",
+        "workspace",
+        workspaceCleanupSchema,
     ),
     workspaceAssociationsGet: row<WorkspaceAssociationsGetResult>()(
         "workspace.associations.get",

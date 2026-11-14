@@ -250,13 +250,13 @@ export function ChatPane(props: ChatPaneProps) {
         attachments,
         onAttachmentsChange,
         onStageAttachment,
-        !compacting && !loadingSession,
+        Boolean(ws) && !compacting && !loadingSession,
     );
     const { t } = useT();
 
     // Loading displays the previous transcript until target hydration completes;
     // lock its controls so they cannot operate on the new target prematurely.
-    const composerLocked = compacting || loadingSession;
+    const composerLocked = !ws || compacting || loadingSession;
     // Until the delay passes, the previous conversation stays up (with the
     // composer locked above); the skeleton only replaces it for slow opens.
     const showSkeleton = useDelayedFlag(loadingSession, SKELETON_DELAY_MS);
@@ -279,7 +279,8 @@ export function ChatPane(props: ChatPaneProps) {
     const loadingMeta = loadingSession
         ? ws?.sessions.find((s) => s.id === ws.loadingSessionId)
         : undefined;
-    const canSend = !loadingSession && (input.trim().length > 0 || attachments.length > 0);
+    const canSend =
+        Boolean(ws) && !loadingSession && (input.trim().length > 0 || attachments.length > 0);
     // Single send/stop toggle: Stop while a run (or compaction) is in flight
     // and the composer is empty; typing switches back to Send so an in-run
     // steer stays one click away. Compaction always shows Stop — the textarea

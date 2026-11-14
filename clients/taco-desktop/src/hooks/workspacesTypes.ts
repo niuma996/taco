@@ -73,6 +73,7 @@ export interface UseWorkspacesApi {
      * ignores the return value.
      */
     openWorkspace: (rawCwd: string) => Promise<boolean>;
+    forgetWorkspace: (cwd: string) => Promise<void>;
     browseAndOpen: () => Promise<void>;
     switchWorkspace: (cwd: string) => Promise<void>;
     attachSession: (cwd: string, sid: string) => Promise<void>;

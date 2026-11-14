@@ -1,6 +1,6 @@
 /** Shared session rows for filesystem workspaces and flat IM conversations. */
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
-import { Ellipsis, Link2, Pencil, Trash } from "lucide-react";
+import { Ellipsis, EyeOff, Link2, Pencil, Trash } from "lucide-react";
 import { type KeyboardEvent, type ReactNode, useId, useRef } from "react";
 import { useNow } from "../hooks/useNow";
 import { useT, useUiLanguage } from "../i18n/useI18n";
@@ -36,7 +36,9 @@ export interface SessionListProps {
     className: string;
     onOpen: (item: SessionListItem) => void;
     onRename: (item: SessionListItem) => void;
-    onDelete: (item: SessionListItem) => void;
+    onDelete?: (item: SessionListItem) => void;
+    onHide?: (item: SessionListItem) => void;
+    deleteLabel?: string;
     onManageAssociations?: (item: SessionListItem) => void;
     /** Search empty states and pagination remain owned by the caller. */
     children?: ReactNode;
@@ -137,7 +139,7 @@ export function SessionList(props: SessionListProps) {
                                 <DropdownMenu.Portal>
                                     <DropdownMenu.Content
                                         className="ui-menu session-actions-menu"
-                                        side="bottom"
+                                        side="top"
                                         align="end"
                                         sideOffset={4}
                                         collisionPadding={8}
@@ -162,15 +164,29 @@ export function SessionList(props: SessionListProps) {
                                                 </span>
                                             </DropdownMenu.Item>
                                         )}
-                                        <DropdownMenu.Item
-                                            className="ui-menu-item session-actions-menu-danger"
-                                            onSelect={() => props.onDelete(item)}
-                                        >
-                                            <Trash size={14} aria-hidden="true" />
-                                            <span className="ui-menu-label">
-                                                {t("session.deleteSession")}
-                                            </span>
-                                        </DropdownMenu.Item>
+                                        {props.onHide && (
+                                            <DropdownMenu.Item
+                                                className="ui-menu-item"
+                                                onSelect={() => props.onHide?.(item)}
+                                            >
+                                                <EyeOff size={14} aria-hidden="true" />
+                                                <span className="ui-menu-label">
+                                                    {t("workspaceRemoval.hideIm")}
+                                                </span>
+                                            </DropdownMenu.Item>
+                                        )}
+                                        {props.onDelete && (
+                                            <DropdownMenu.Item
+                                                className="ui-menu-item session-actions-menu-danger"
+                                                onSelect={() => props.onDelete?.(item)}
+                                            >
+                                                <Trash size={14} aria-hidden="true" />
+                                                <span className="ui-menu-label">
+                                                    {props.deleteLabel ??
+                                                        t("session.deleteSession")}
+                                                </span>
+                                            </DropdownMenu.Item>
+                                        )}
                                     </DropdownMenu.Content>
                                 </DropdownMenu.Portal>
                             </DropdownMenu.Root>

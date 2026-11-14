@@ -57,7 +57,12 @@ test("每个 contract 方法都生成,按 scope 路由并原样透传 params", a
         assert.equal(calls[0].process, isProcess, key);
         const expectedRoute = isProcess
             ? undefined
-            : key === "workspaceEnsure" || key === "workspaceDispose"
+            : [
+                    "workspaceEnsure",
+                    "workspaceDispose",
+                    "workspaceCleanupPreview",
+                    "workspaceCleanup",
+                ].includes(key)
               ? "/c"
               : "/w";
         assert.equal(calls[0].workspace, expectedRoute, key);
