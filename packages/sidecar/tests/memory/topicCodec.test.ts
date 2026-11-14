@@ -240,6 +240,10 @@ describe("topic codec", () => {
             "---\nname: A # B\ndescription: 'quoted'\ntype: user\nnotes: |\n  topicCodec: 2\n  \"topicCodec\": 2\n---\nbody";
         writeFileSync(join(store.topicDir, "unmarked.md"), raw);
         writeFileSync(join(store.topicDir, "archive", "unmarked.md"), raw);
+        // Missing createdAt falls back to each file's mtime; fixture timestamps must match.
+        const fixtureTime = new Date("2020-01-01T00:00:00.000Z");
+        fs.utimesSync(join(store.topicDir, "unmarked.md"), fixtureTime, fixtureTime);
+        fs.utimesSync(join(store.topicDir, "archive", "unmarked.md"), fixtureTime, fixtureTime);
         assert.equal(store.getTopic("unmarked")?.name, "A # B");
         assert.equal(store.getTopic("unmarked")?.description, "'quoted'");
         assert.deepEqual(store.listArchivedTopics(), store.listTopics());
