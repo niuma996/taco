@@ -70,14 +70,13 @@ describe("memory write contract", () => {
         } as unknown as MethodCtx<unknown>);
     }
 
-    it("roundtrips compact JSON provenance and preserves legacy topics", async () => {
+    it("roundtrips YAML provenance and preserves legacy topics", async () => {
         await store.appendEntry({ ...entry, sources: [source, toolSource] });
         const raw = readFileSync(topicPath(), "utf8");
-        assert.ok(raw.includes(`sources: ${JSON.stringify([source, toolSource])}\n`));
         assert.deepEqual(
             matter(raw).data.sources,
             [source, toolSource],
-            "sources are valid YAML flow syntax",
+            "sources are standard YAML data",
         );
         assert.deepEqual(parseTopicFrontmatter(raw)?.sources, [source, toolSource]);
         assert.deepEqual(LocalMemoryStore.openByKey(store.dirKey).getTopic(entry.id)?.sources, [
@@ -352,13 +351,13 @@ describe("memory write contract", () => {
             const before = readFileSync(archivedPath, "utf8");
             const restoring = store.restoreTopic(entry.id, { expectedEntry });
             // Runs after restore is submitted but before its queued synchronous tick.
-            const changed =
-                edit === "metadata"
-                    ? before.replace("name: Theme", "name: Edited while queued")
-                    : before.replace(
-                          `sources: ${JSON.stringify([source])}`,
-                          `sources: ${JSON.stringify([source, toolSource])}`,
-                      );
+            const parsed = matter(before);
+            const changed = matter.stringify(parsed, {
+                ...parsed.data,
+                ...(edit === "metadata"
+                    ? { name: "Edited while queued" }
+                    : { sources: [source, toolSource] }),
+            });
             assert.notEqual(changed, before);
             writeFileSync(archivedPath, changed);
             await assert.rejects(restoring, /changed since it was read/);
@@ -395,14 +394,14 @@ describe("memory write contract", () => {
         assert.ok(expectedEntry);
         const archived = await store.archiveTopic(entry.id, { expectedEntry });
         const archivedPath = join(store.topicDir, "archive", `${entry.id}.md`);
+        const parsed = matter(readFileSync(archivedPath, "utf8"));
         writeFileSync(
             archivedPath,
-            readFileSync(archivedPath, "utf8")
-                .replace("name: Theme", "name: Changed after archive")
-                .replace(
-                    `sources: ${JSON.stringify([source])}`,
-                    `sources: ${JSON.stringify([source, toolSource])}`,
-                ),
+            matter.stringify(parsed, {
+                ...parsed.data,
+                name: "Changed after archive",
+                sources: [source, toolSource],
+            }),
         );
         assert.equal(archived.archivedAt !== undefined, true);
         const { archivedAt: _archivedAt, ...withoutArchiveAge } = archived;

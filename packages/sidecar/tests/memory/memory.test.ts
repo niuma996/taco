@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { MEMORY_CONTENT_MAX_CHARS } from "@taco-ai/protocol";
+import matter from "gray-matter";
 import {
     hashOf,
     LocalMemoryStore,
@@ -86,7 +87,7 @@ describe("store", () => {
                 "user_role.md",
             );
             const topic = readFileSync(topicPath, "utf8");
-            assert.match(topic, /^---\nname: User uses pnpm/);
+            assert.equal(matter(topic).data.name, "User uses pnpm");
             assert.match(topic, /type: user/);
             assert.match(topic, /User explicitly said pnpm\./);
 
@@ -358,14 +359,18 @@ describe("store", () => {
             assert.equal(after?.type, "user"); // preserved
             assert.equal(after?.updatedAt, result.updatedAt);
 
-            // createdAt is preserved in file content (getTopic reads mtime, not frontmatter)
+            // Persisted timestamps remain strings in standard YAML.
             const fileRaw2 = readFileSync(
                 join(tmpRoot, "memory", "projects", workspaceKey("ws-test"), "user_role.md"),
                 "utf8",
             );
-            assert.match(fileRaw2, new RegExp(`createdAt: ${originalCreatedAt}`));
+            const createdAt = matter(fileRaw2).data.createdAt;
+            assert.equal(
+                createdAt instanceof Date ? createdAt.toISOString() : createdAt,
+                originalCreatedAt,
+            );
             assert.match(fileRaw2, /updatedAt:/);
-            assert.match(fileRaw2, /\n---\n\nnew body content$/);
+            assert.equal(matter(fileRaw2).content.trim(), "new body content");
         });
 
         it("updateTopic frontmatter omits updatedAt line when entry.updatedAt undefined (backward compat)", () => {

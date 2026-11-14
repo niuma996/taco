@@ -49,6 +49,7 @@ function verifyFiles(runtime) {
     const nodeName = process.platform === "win32" ? "taco-sidecar-node.exe" : "taco-sidecar-node";
     for (const [file, expected] of [
         ["lib/index.mjs", manifest.bundleSha256],
+        ["lib/codexCommunicationBridge.mjs", manifest.codexCommunicationBridgeSha256],
         [`bin/${nodeName}`, manifest.runtimeSha256],
     ]) {
         assert.equal(typeof expected, "string", `missing checksum: ${file}`);
@@ -135,6 +136,13 @@ async function smoke(runtime, manifest, nodeName) {
             TACO_SIDECAR_RESOURCES: isolated,
             TACO_DISABLE_MCP: "1",
         });
+        const bridge = spawnSync(
+            join(isolated, "bin", nodeName),
+            [join(isolated, "lib/codexCommunicationBridge.mjs")],
+            { cwd: temp, env, encoding: "utf8", timeout: 5_000, windowsHide: true },
+        );
+        assert.equal(bridge.status, 2, bridge.stderr || "Codex bridge failed to execute");
+        assert.match(bridge.stderr, /missing Codex bridge environment/);
         const startupDeadline = Date.now() + 15_000;
         child = spawn(join(isolated, "bin", nodeName), [join(isolated, "lib/index.mjs")], {
             cwd: temp,

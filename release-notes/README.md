@@ -22,3 +22,7 @@ Conventions:
 
 Add a new file when cutting a new release tag. Update this README when
 the convention above changes.
+
+Unreleased user-visible changes are drafted in `unreleased.md` and mirrored in
+`CHANGELOG.md` and `CHANGELOG.zh.md`. Move the draft into the versioned notes
+when cutting the next release; do not amend an already published release.

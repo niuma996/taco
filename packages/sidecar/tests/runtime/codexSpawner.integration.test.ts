@@ -162,7 +162,9 @@ describe("AgentSpawner — runtime: codex", () => {
                 | { mcp_servers?: Record<string, { command?: string; args?: string[] }> }
                 | undefined;
             assert.equal(typeof mcpServers?.mcp_servers?.taco?.command, "string");
-            assert.ok(mcpServers?.mcp_servers?.taco?.args?.includes("--eval"));
+            const bridgeArgs = mcpServers?.mcp_servers?.taco?.args;
+            assert.ok(bridgeArgs?.includes("--experimental-transform-types"));
+            assert.ok(bridgeArgs?.at(-1)?.endsWith("codexCommunicationBridge.ts"));
 
             const facts = await ws.sessionRegistry.withSession(
                 first.subSessionId,

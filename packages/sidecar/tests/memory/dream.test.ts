@@ -20,6 +20,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { MEMORY_CONTENT_MAX_CHARS } from "@taco-ai/protocol";
+import matter from "gray-matter";
 import {
     applyPendingDream,
     DREAM_PROMPT_BUDGET_CHARS,
@@ -1957,11 +1958,14 @@ describe("dream maintenance quality", () => {
                 const archived = await archive(id, options);
                 if (id === "a") {
                     const path = join(store.topicDir, "archive", "a.md");
+                    const parsed = matter(readFileSync(path, "utf8"));
                     writeFileSync(
                         path,
-                        readFileSync(path, "utf8")
-                            .replace(/^name:.*$/m, "name: Replaced archived copy")
-                            .replace(/^sources:.*$/m, `sources: ${JSON.stringify([sourceB])}`),
+                        matter.stringify(parsed, {
+                            ...parsed.data,
+                            name: "Replaced archived copy",
+                            sources: [sourceB],
+                        }),
                     );
                 }
                 return archived;

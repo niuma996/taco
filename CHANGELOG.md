@@ -6,6 +6,37 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 starting with `v0.1.0` (the first open-source release).
 
+## [Unreleased]
+
+### Changed
+
+- Memory topics share a versioned YAML codec for active files and archives.
+  Existing unmarked files retain literal values; reading does not migrate them.
+  Canonical UTC timestamps and JSON provenance remain readable by older releases.
+  CAS mutations read only their target file while still checking external edits.
+- Codex communication uses the MCP SDK in an independently bundled bridge, shipped
+  and checked by both npm and portable-runtime builds. Development startup suppresses
+  experimental warnings; cancellation remains distinct from connection closure.
+
+### Fixed
+
+- Preserve YAML date and numeric provenance identifiers, reject unsupported codec
+  versions, and prevent add/restore from overwriting unreadable existing topics.
+- Close the bridge relay when the SDK transport closes, including oversized input;
+  resolve entry paths correctly through symlinks.
+
+### Downgrade notes
+
+- Back up `$TACO_HOME/memory` before upgrading and restore the backup before
+  downgrading to a pre-codec release. Older readers include YAML quotes in special
+  names/descriptions (for example `A: B`); writing from the old release can persist
+  the changed values.
+- Early codec files with quoted timestamps and block YAML sources are also unsafe
+  for downgrade: older readers lose provenance, cannot parse quoted archive ages,
+  and silently skip retention cleanup for those archives. This build writes bare
+  canonical timestamps and one-line JSON sources, but does not rewrite existing
+  files on read.
+
 ## [0.4.0] — 2026-11-14
 
 A release about seeing everything at once and letting work survive: workspace

@@ -185,6 +185,37 @@ original app's session picker: the native source, cwd, and UI filters can
 influence visibility. Deleting Taco's display transcript does not delete native
 Claude Code or Codex history.
 
+## Memory topic files
+
+New writes use YAML frontmatter with `topicCodec: 1`; active and archived topics
+share one codec. Unmarked files keep the older literal-field interpretation.
+Reading never rewrites a file, and unknown versions are skipped without being
+overwritten by an add or restore. YAML provenance identifiers are strings; quote
+numeric-looking identifiers to preserve leading zeros (a bare number is normalized
+to its decimal string).
+
+Canonical UTC timestamps stay unquoted and `sources` stays a single JSON line,
+so older releases can parse archive ages and provenance after a rollback.
+Names and descriptions that YAML must quote, such as `A: B` or `A # B`, are still
+read by older releases with the quote characters included; an old-version write
+can permanently change those values. Back up `$TACO_HOME/memory` before using
+this build and restore that backup before rolling back to a pre-codec release.
+
+Files produced by an earlier codec build with quoted timestamps and block YAML
+sources need additional care: older releases read the timestamp quotes literally
+(`Date.parse` fails), lose provenance, and silently skip retention cleanup for
+archives whose age is quoted. Merely reading those files with the current release
+does not convert them. Restore a pre-upgrade memory backup before downgrade;
+otherwise keep the codec-aware reader and review/export those files first.
+
+## Codex communication bridge
+
+Codex communication uses the MCP SDK in a separate
+`lib/codexCommunicationBridge.mjs` process. Both npm and portable builds ship
+this self-contained entry beside the main bundle; portable manifests include
+its SHA-256 checksum. Source execution launches the TypeScript entry with
+Node's explicit type transformation flag, suppressing only experimental warnings.
+
 ## Build
 
 ```bash

@@ -14,8 +14,8 @@ pnpm release:preflight --full
 
 固定检查四项：
 
-1. runtime 目标平台、Node/JS 校验和、内置资源及 WASM 文件。
-2. 仓库外、无 node_modules、临时 TACO_HOME 中启动自带 Node，control.ping 返回正确版本和 PID。
+1. runtime 目标平台、Node/主 bundle/Codex MCP bridge 校验和、内置资源及 WASM 文件。
+2. 仓库外、无 node_modules、临时 TACO_HOME 中验证自带 Node 可加载独立 bridge，再启动主进程；control.ping 返回正确版本和 PID。
 3. 数据通道 initialize 握手成功，协议版本与当前客户端一致。
 4. control.shutdown 成功且进程以 0 退出。
 

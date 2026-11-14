@@ -206,6 +206,20 @@ function assertSidecarShimInstalled(consumerDir) {
         "sidecar.mjs",
     );
     if (!existsSync(bundlePath)) throw new Error(`esbuild bundle missing: ${bundlePath}`);
+    const bridgePath = join(dirname(bundlePath), "codexCommunicationBridge.mjs");
+    if (!existsSync(bridgePath)) throw new Error(`Codex bridge missing: ${bridgePath}`);
+    const env = { ...process.env };
+    delete env.TACO_CODEX_BRIDGE_SOCKET;
+    delete env.TACO_CODEX_BRIDGE_TOKEN;
+    const bridge = spawnSync(process.execPath, [bridgePath], {
+        cwd: consumerDir,
+        env,
+        encoding: "utf8",
+        timeout: 5_000,
+    });
+    if (bridge.status !== 2 || !bridge.stderr.includes("missing Codex bridge environment")) {
+        throw new Error(`Codex bridge failed to load: ${bridge.stderr || bridge.stdout}`);
+    }
 }
 
 async function assertSidecarBinShimErrorsCleanlyOnNoPlatform(consumerDir) {

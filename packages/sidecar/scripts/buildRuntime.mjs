@@ -26,6 +26,7 @@ import {
 import { dirname, join, resolve } from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
+import { buildCodexBridge } from "./buildCodexBridge.mjs";
 import { copyPdfJsAssets } from "./copyPdfJsAssets.mjs";
 import { copyShellParserAssets } from "./copyShellParserAssets.mjs";
 import { assertTripleMatchesHost, currentTriple, parseTargetCli } from "./triple.mjs";
@@ -107,6 +108,7 @@ function main() {
         logLevel: "warning",
     });
 
+    const bridgeOut = buildCodexBridge(libDir);
     copyShellParserAssets(libDir);
     copyPdfJsAssets(libDir);
 
@@ -197,6 +199,7 @@ function main() {
         nodePinned: pinnedVersion ?? nodeVersionActual,
         target: triple,
         bundleSha256: bundleSha,
+        codexCommunicationBridgeSha256: sha256File(bridgeOut),
         runtimeSha256: nodeSha,
         // Daemon-mode detection: grep the bundle for the literal the runtime
         // gates on. We can't trust `sidecarVersion` to signal "has daemon

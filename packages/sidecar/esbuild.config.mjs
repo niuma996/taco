@@ -1,4 +1,5 @@
 import { build } from "esbuild";
+import { buildCodexBridge } from "./scripts/buildCodexBridge.mjs";
 import { copyPdfJsAssets } from "./scripts/copyPdfJsAssets.mjs";
 import { copyShellParserAssets } from "./scripts/copyShellParserAssets.mjs";
 
@@ -33,5 +34,6 @@ await build({
     ],
 });
 
+buildCodexBridge("lib");
 copyShellParserAssets("lib");
 copyPdfJsAssets("lib");
