@@ -1,3 +1,4 @@
+import { QueryClientProvider } from "@tanstack/react-query";
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { I18nextProvider } from "react-i18next";
@@ -8,6 +9,7 @@ import { bootstrapI18n, default as i18n } from "./i18n/index.ts";
 import { bootMark } from "./lib/bootTrace";
 import { getGlobalConfig, loadClientConfig } from "./lib/globalConfig.ts";
 import { preloadPeleWhenIdle } from "./lib/peleLoader";
+import { createDesktopQueryClient } from "./lib/queries/queryClient";
 import { resolveTheme } from "./lib/theme";
 import "./components/toolViews"; // side-effect: register tool views before App renders
 import "./styles.css";
@@ -52,14 +54,17 @@ const initialTheme = resolveTheme(getGlobalConfig().client.theme, osDark);
 document.documentElement.dataset.theme = initialTheme;
 
 bootMark("ui.main.react_render_call");
+const queryClient = createDesktopQueryClient();
 ReactDOM.createRoot(rootEl).render(
     <React.StrictMode>
-        <I18nextProvider i18n={i18n}>
-            <ErrorBoundary>
-                <ToastProvider>
-                    <App />
-                </ToastProvider>
-            </ErrorBoundary>
-        </I18nextProvider>
+        <QueryClientProvider client={queryClient}>
+            <I18nextProvider i18n={i18n}>
+                <ErrorBoundary>
+                    <ToastProvider>
+                        <App />
+                    </ToastProvider>
+                </ErrorBoundary>
+            </I18nextProvider>
+        </QueryClientProvider>
     </React.StrictMode>,
 );

@@ -8,9 +8,11 @@ import {
     type ClaudeCodePermissionMode,
     type CodexAgentConfig,
 } from "@taco-ai/protocol";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { TacoClient } from "../lib/clients/tacoClient.ts";
 import { type ConfigurationScope, filterAgentScope } from "../lib/configurationScope";
+import { queryError, refreshQueries, resourceQueryKey } from "../lib/queries/queryClient";
 import { useAutoClearError } from "./primitives/useAutoClearError";
 
 export interface AgentSaveInput {
@@ -60,43 +62,100 @@ export function useAgentsPane(
     activeCwd: string | undefined,
     viewScope: ConfigurationScope = "effective",
 ): UseAgentsPaneResult {
-    const [catalog, setCatalog] = useState<AgentEntry[]>([]);
-    const [globalAgentTypes, setGlobalAgentTypes] = useState<string[]>([]);
-    const [cwdChoices, setCwdChoices] = useState<string[]>([]);
+    const queryClient = useQueryClient();
+    const enabled = active && !!activeCwd;
+    const [selectedAgentType, setSelectedAgentType] = useState<string | null>(null);
+    const [agentSaving, setAgentSaving] = useState(false);
+    const [codexInstalling, setCodexInstalling] = useState(false);
+    const [codexInstallError, setCodexInstallError] = useState<string | null>(null);
     const {
         error: agentsError,
         fail: failAgentsList,
         clearError: clearAgentsError,
     } = useAutoClearError();
-    const [selectedAgentType, setSelectedAgentType] = useState<string | null>(null);
-    const [agentContent, setAgentContent] = useState<AgentsContentResult | null>(null);
-    const [agentContentLoading, setAgentContentLoading] = useState(false);
-    const [agentContentError, setAgentContentError] = useState<string | null>(null);
-    const [agentSaving, setAgentSaving] = useState(false);
-    const [codexRuntimeStatus, setCodexRuntimeStatus] = useState<AgentsRuntimeStatusResult | null>(
-        null,
-    );
-    const [codexStatusLoading, setCodexStatusLoading] = useState(false);
-    const [codexInstalling, setCodexInstalling] = useState(false);
-    const [codexInstallError, setCodexInstallError] = useState<string | null>(null);
-    const requestCounter = useRef(0);
     // A mutation must not revive an earlier target/layer, even after navigating back to it.
     const paneGeneration = useRef(0);
-    const agents = useMemo(() => filterAgentScope(catalog, viewScope), [catalog, viewScope]);
+    const listQuery = (scope: ConfigurationScope, enabled: boolean) => ({
+        queryKey: resourceQueryKey(client, "agents", activeCwd, scope),
+        enabled,
+        retry: false,
+        queryFn: ({ signal }: { signal: AbortSignal }) => {
+            signal.throwIfAborted();
+            return client.agentsList({
+                workspace: asWorkspaceId(activeCwd as string),
+                ...(scope === "effective" ? {} : { scope }),
+            });
+        },
+    });
+    const catalog = useQuery(listQuery(viewScope, enabled));
+    const global = useQuery(listQuery("global", enabled && viewScope === "workspace"));
+    const agents = useMemo(
+        () => filterAgentScope(catalog.data?.agents ?? [], viewScope),
+        [catalog.data, viewScope],
+    );
+    const selected = agents.find((agent) => agent.agentType === selectedAgentType);
+    const contentScope = viewScope === "builtin" ? "builtin" : selected?.scope;
+    const content = useQuery({
+        queryKey: resourceQueryKey(
+            client,
+            "agent-content",
+            activeCwd,
+            viewScope,
+            selected?.agentType,
+            contentScope,
+            selected?.source,
+        ),
+        enabled: enabled && !!selected,
+        retry: false,
+        queryFn: ({ signal }) => {
+            signal.throwIfAborted();
+            return client.agentsContent({
+                workspace: asWorkspaceId(activeCwd as string),
+                agentType: selected?.agentType as string,
+                ...(contentScope ? { scope: contentScope } : {}),
+            });
+        },
+    });
+    const runtime = useQuery({
+        queryKey: resourceQueryKey(client, "agent-runtime", "codex"),
+        enabled: active,
+        retry: false,
+        queryFn: ({ signal }) => {
+            signal.throwIfAborted();
+            return client.agentsRuntimeStatus({ runtime: "codex" });
+        },
+    });
+
+    // biome-ignore lint/correctness/useExhaustiveDependencies: each pane identity transition invalidates mutation ownership.
+    useEffect(() => {
+        paneGeneration.current += 1;
+        setAgentSaving(false);
+        setSelectedAgentType(null);
+        clearAgentsError();
+        return () => {
+            paneGeneration.current += 1;
+        };
+    }, [active, activeCwd, viewScope, client, clearAgentsError]);
+
+    useEffect(() => {
+        if (!enabled) return;
+        setSelectedAgentType((previous) =>
+            previous !== null && agents.some((agent) => agent.agentType === previous)
+                ? previous
+                : (agents[0]?.agentType ?? null),
+        );
+    }, [enabled, agents]);
+
+    useEffect(() => {
+        if (enabled && (catalog.error || (viewScope === "workspace" && global.error))) {
+            failAgentsList(catalog.error ?? global.error);
+        }
+    }, [enabled, viewScope, catalog.error, global.error, failAgentsList]);
 
     const refreshCodexRuntime = useCallback(async () => {
-        setCodexStatusLoading(true);
-        try {
-            const status = await client.agentsRuntimeStatus({ runtime: "codex" });
-            setCodexRuntimeStatus(status);
-            setCodexInstallError(null);
-        } catch (error) {
-            setCodexRuntimeStatus(null);
-            setCodexInstallError(error instanceof Error ? error.message : String(error));
-        } finally {
-            setCodexStatusLoading(false);
-        }
-    }, [client]);
+        setCodexInstallError(null);
+        await refreshQueries(queryClient, { queryKey: resourceQueryKey(client, "agent-runtime") });
+    }, [client, queryClient]);
 
     const installCodexRuntime = useCallback(async () => {
         if (codexInstalling) return;
@@ -112,91 +171,28 @@ export function useAgentsPane(
         }
     }, [client, codexInstalling, refreshCodexRuntime]);
 
-    const reload = useCallback(async () => {
-        if (!activeCwd) return;
-        const request = ++requestCounter.current;
-        const layer = viewScope === "effective" ? undefined : viewScope;
-        const workspace = asWorkspaceId(activeCwd);
-        const [result, globalResult] = await Promise.all([
-            client.agentsList({ workspace, ...(layer ? { scope: layer } : {}) }),
-            viewScope === "workspace"
-                ? client.agentsList({ workspace, scope: "global" })
-                : Promise.resolve(null),
-        ]);
-        if (request !== requestCounter.current) return;
-        setCatalog(result.agents);
-        setGlobalAgentTypes(
-            (globalResult?.agents ?? result.agents)
-                .filter((agent) => agent.scope === "global")
-                .map((agent) => agent.agentType),
-        );
-        setCwdChoices(result.cwdChoices ?? []);
-        const visible = filterAgentScope(result.agents, viewScope);
-        setSelectedAgentType((previous) =>
-            previous !== null && visible.some((agent) => agent.agentType === previous)
-                ? previous
-                : (visible[0]?.agentType ?? null),
-        );
-    }, [activeCwd, client, viewScope]);
-
-    useEffect(() => {
-        const generation = ++paneGeneration.current;
-        setAgentSaving(false);
-        if (active) {
-            setCatalog([]);
-            setSelectedAgentType(null);
-            setAgentContent(null);
-            setAgentContentError(null);
-            clearAgentsError();
-            if (activeCwd) {
-                reload().catch((error: unknown) => {
-                    if (generation !== paneGeneration.current) return;
-                    console.error("[useAgentsPane] agentsList failed:", error);
-                    failAgentsList(error);
-                });
-            }
-            if (active) void refreshCodexRuntime();
-        }
-        return () => {
-            paneGeneration.current += 1;
-            requestCounter.current += 1;
-        };
-    }, [active, activeCwd, reload, clearAgentsError, failAgentsList, refreshCodexRuntime]);
-
-    useEffect(() => {
-        let cancelled = false;
-        setAgentContent(null);
-        setAgentContentError(null);
-        setAgentContentLoading(false);
-        const selected = agents.find((agent) => agent.agentType === selectedAgentType);
-        if (!active || !selected || !activeCwd) return;
-        setAgentContentLoading(true);
-        void client
-            .agentsContent({
-                workspace: asWorkspaceId(activeCwd),
-                agentType: selected.agentType,
-                ...(viewScope === "builtin"
-                    ? { scope: "builtin" as const }
-                    : selected.scope
-                      ? { scope: selected.scope }
-                      : {}),
-            })
-            .then((result) => {
-                if (!cancelled) setAgentContent(result);
-            })
-            .catch((error: unknown) => {
-                if (!cancelled) {
-                    setAgentContentError(error instanceof Error ? error.message : String(error));
-                    setAgentContent(null);
-                }
-            })
-            .finally(() => {
-                if (!cancelled) setAgentContentLoading(false);
-            });
-        return () => {
-            cancelled = true;
-        };
-    }, [active, selectedAgentType, agents, activeCwd, client, viewScope]);
+    const reload = useCallback(
+        async (generation: number, agentTypes: string[], globalWrite: boolean) => {
+            const prefix = resourceQueryKey(client, "agents");
+            const predicate = ({ queryKey: key }: { queryKey: readonly unknown[] }) => {
+                if (key[0] !== prefix[0] || key[1] !== prefix[1]) return false;
+                if (key[2] !== "agents" && key[2] !== "agent-content") return false;
+                if (key[4] === "builtin") return false;
+                const affected =
+                    key[3] === activeCwd ||
+                    (globalWrite && (key[4] === "global" || key[4] === "effective"));
+                return affected && (key[2] === "agents" || agentTypes.includes(key[5] as string));
+            };
+            const current = () => generation === paneGeneration.current;
+            // Hidden completions mark caches stale without interrupting the current reader.
+            await queryClient.cancelQueries({ predicate, type: current() ? "all" : "inactive" });
+            await queryClient.invalidateQueries(
+                { predicate, refetchType: current() ? "active" : "none" },
+                { cancelRefetch: false },
+            );
+        },
+        [activeCwd, client, queryClient],
+    );
 
     const saveAgent = useCallback(
         async (input: AgentSaveInput, previousAgentType?: string, previousScope?: AgentScope) => {
@@ -210,8 +206,11 @@ export function useAgentsPane(
                     ...(previousAgentType !== undefined ? { previousAgentType } : {}),
                     ...(previousScope !== undefined ? { previousScope } : {}),
                 });
-                if (generation !== paneGeneration.current) return;
-                await reload();
+                await reload(
+                    generation,
+                    [input.agentType, previousAgentType ?? input.agentType],
+                    input.scope === "global" || previousScope === "global",
+                );
                 if (generation === paneGeneration.current) setSelectedAgentType(input.agentType);
             } finally {
                 if (generation === paneGeneration.current) setAgentSaving(false);
@@ -231,8 +230,7 @@ export function useAgentsPane(
                     agentType,
                     ...(scope ? { scope } : {}),
                 });
-                if (generation !== paneGeneration.current) return;
-                await reload();
+                await reload(generation, [agentType], scope !== "workspace");
             } finally {
                 if (generation === paneGeneration.current) setAgentSaving(false);
             }
@@ -242,19 +240,21 @@ export function useAgentsPane(
 
     return {
         agents,
-        globalAgentTypes,
-        cwdChoices,
+        globalAgentTypes: ((viewScope === "workspace" ? global.data : catalog.data)?.agents ?? [])
+            .filter((agent) => agent.scope === "global")
+            .map((agent) => agent.agentType),
+        cwdChoices: catalog.data?.cwdChoices ?? [],
         agentsError,
         selectedAgentType,
         setSelectedAgentType,
-        agentContent,
-        agentContentLoading,
-        agentContentError,
+        agentContent: content.data ?? null,
+        agentContentLoading: content.isFetching,
+        agentContentError: queryError(content.error)?.message ?? null,
         agentSaving,
-        codexRuntimeStatus,
-        codexStatusLoading,
+        codexRuntimeStatus: runtime.data ?? null,
+        codexStatusLoading: runtime.isFetching,
         codexInstalling,
-        codexInstallError,
+        codexInstallError: codexInstallError ?? queryError(runtime.error)?.message ?? null,
         refreshCodexRuntime,
         installCodexRuntime,
         saveAgent,

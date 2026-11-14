@@ -1,5 +1,5 @@
 import { asWorkspaceId } from "@taco-ai/protocol";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useProviders } from "../../hooks/useProviders.js";
 import type { UseWorkspacesApi } from "../../hooks/useWorkspaces.js";
 import { useT } from "../../i18n/useI18n.js";
@@ -62,24 +62,11 @@ export function OnboardingModal(props: OnboardingModalProps) {
     // summary's real count. Fetched against `workspaceCwd`; only enabled from the
     // provider step onward so welcome/workspace don't trigger a fetch against the
     // default-cwd placeholder that the sidecar hasn't ensured yet.
-    const { providers, refresh: refreshProviders } = useProviders(
+    const { providers } = useProviders(
         props.client,
         workspace,
         step === "provider" || step === "model" || step === "done",
     );
-    // The parent's useProviders fetched once when entering provider step,
-    // before any key was saved. ProviderStep / ModelStep each own their own
-    // useProviders instances and refresh themselves on key changes, but
-    // this parent snapshot stays stale until something kicks it. Refresh
-    // on every step transition so the DoneStep summary reflects what the
-    // child steps actually saw — without this, saving a key in provider
-    // step then advancing to done showed "已配置供应商: 0" even though
-    // ModelStep's own dropdown correctly listed the provider's models.
-    useEffect(() => {
-        if (step === "provider" || step === "model" || step === "done") {
-            refreshProviders();
-        }
-    }, [step, refreshProviders]);
     const configuredProviderCount = useMemo(
         () => providers.filter((p) => p.configured).length,
         [providers],
@@ -146,15 +133,7 @@ export function OnboardingModal(props: OnboardingModalProps) {
                 if (providerConfigured) setStep("model");
                 break;
             case "model":
-                // Trust ModelStep's configured-provider filter. A defensive
-                // re-check from the parent's stale `providers` snapshot
-                // mis-fires while the parent's `useProviders` fetch is
-                // still in flight (race against the user clicking fast),
-                // which surfaced a spurious "selected model from
-                // unconfigured provider" banner even on correctly-picked
-                // models. ModelStep owns the authoritative provider
-                // list for selection; the sidecar re-validates the
-                // key at session-create time anyway.
+                // ModelStep gates its selection on the shared configured-provider catalog.
                 if (selectedModel && !modelSaving) setStep("done");
                 break;
             case "done":

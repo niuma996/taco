@@ -1,10 +1,22 @@
 import type { ProviderView, TacoGlobalConfigView, WorkspaceId } from "@taco-ai/protocol";
-import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import {
+    act,
+    cleanup,
+    render as renderWithoutQueries,
+    screen,
+    waitFor,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import type { ReactElement } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ModelStep } from "../../../src/components/onboarding/ModelStep";
 import type { TacoClient } from "../../../src/lib/clients/tacoClient";
 import { applyGlobalConfig } from "../../../src/lib/globalConfig";
+import { queryWrapper } from "../../helpers/queryWrapper";
+
+function render(ui: ReactElement) {
+    return renderWithoutQueries(ui, queryWrapper());
+}
 
 vi.mock("react-i18next", () => ({
     useTranslation: () => ({ t: (key: string) => key, i18n: { language: "en" } }),

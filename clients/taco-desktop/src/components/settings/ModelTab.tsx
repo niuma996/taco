@@ -122,11 +122,7 @@ export function ModelTab(props: ModelTabProps) {
             <h3>{t("settings.tabModel")}</h3>
 
             {/* Section ① Providers — list all built-in providers, fill keys inline. */}
-            <ProviderSection
-                client={props.client}
-                workspace={props.workspace}
-                onKeysChanged={props.onRefreshModels}
-            />
+            <ProviderSection client={props.client} workspace={props.workspace} />
 
             <fieldset className="model-config-card" aria-labelledby="main-model-title">
                 <h3 id="main-model-title">{t("settings.defaultModelTitle")}</h3>

@@ -13,6 +13,7 @@ import type {
     WorkspaceCleanupResult,
 } from "@taco-ai/protocol";
 import { asSessionId, asWorkspaceId, ErrorCodes, IM_CWD_PREFIX } from "@taco-ai/protocol";
+import { useQueryClient } from "@tanstack/react-query";
 import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityRail } from "./components/ActivityRail";
 import { ChannelBindDialog } from "./components/ChannelBindDialog";
@@ -50,6 +51,7 @@ import { useConversationDrafts } from "./hooks/useConversationDrafts";
 import { useConversationsPane } from "./hooks/useConversationsPane";
 import { FilePreviewOpenerProvider } from "./hooks/useFilePreviewOpener";
 import { useLlmDump } from "./hooks/useLlmDump";
+import { useManagementQuerySync } from "./hooks/useManagementQuerySync";
 import { useMemoryPane } from "./hooks/useMemoryPane";
 import { usePluginsPane } from "./hooks/usePluginsPane";
 import { useProviders } from "./hooks/useProviders";
@@ -83,6 +85,7 @@ import { defaultModelForNewSession, loadGlobalConfig } from "./lib/globalConfig"
 import { onImPolicyChangedEvent } from "./lib/imPolicyEvents.ts";
 import { createLatestRequestGuard } from "./lib/latestRequest";
 import { type AppNotification, toastsOnArrival } from "./lib/notifications";
+import { invalidateCatalogQueries } from "./lib/queries/queryClient";
 import { onWorkChangedEvent } from "./lib/workEvents.ts";
 import { onWorkspaceAssociationsChangedEvent } from "./lib/workspaceAssociationEvents.ts";
 import { getDefaultCwd, persistExpandedWorkspaces } from "./lib/workspaceStorage.js";
@@ -100,6 +103,8 @@ import { WorkPane } from "./views/WorkPane";
 
 export default function App() {
     const [client] = useState(() => new TacoClient());
+    const queryClient = useQueryClient();
+    useManagementQuerySync(client);
     const wsApi = useWorkspaces(client);
     const drafts = useConversationDrafts(wsApi.composerTarget);
     const { input, setInput, attachments, setAttachments } = drafts;
@@ -384,32 +389,17 @@ export default function App() {
     );
     // Picker only offers models from providers with a configured key —
     // useProviders supplies the configured flag, key changes trigger a refresh.
-    const { providers, refresh: refreshProviders } = useProviders(
+    const { providers } = useProviders(
         client,
         activeCwd ? asWorkspaceId(activeCwd) : null,
         Boolean(ws),
     );
     const configuredProviderIds = new Set(providers.filter((p) => p.configured).map((p) => p.id));
     const filteredOptions = modelOptions.filter((o) => configuredProviderIds.has(o.provider));
-    // Key change → refresh both models (available set) and providers (configured flag).
-    // Triggered by ProviderSection.onKeysChanged → onRefreshModels.
-    const refreshAfterKeyChange = () => {
-        refreshModels();
-        refreshProviders();
+    const refreshModelCatalog = () => {
+        void invalidateCatalogQueries(queryClient, client, activeCwd);
+        void contextInfo.refresh();
     };
-
-    // Timing fix: models and providers fetch in parallel with no ordering.
-    // On cold start, if models returns before providers (or listModels silently
-    // fails), filteredOptions stays empty and neither hook auto-refetches.
-    // Pull models once when the configured-provider set transitions empty → non-empty.
-    const hadConfiguredRef = useRef(false);
-    useEffect(() => {
-        const hasConfigured = configuredProviderIds.size > 0;
-        if (hasConfigured && !hadConfiguredRef.current) {
-            refreshModels();
-        }
-        hadConfiguredRef.current = hasConfigured;
-    });
 
     // Mount-time lifecycle: init, config, update check, FS scope, globalConfig subscription.
     const lifecycle = useAppLifecycle(activeCwd, initFromStorage);
@@ -494,11 +484,8 @@ export default function App() {
         onWarningLine: (line) => pushNotification(line, { source: "sidecar", level: "warn" }),
         onLlmDumpLine: llmDump.push,
         onModelsChanged: (cwd) => {
-            // Only refresh if the push is for the currently active workspace —
-            // other workspaces' menus will re-pull on next activation.
+            void invalidateCatalogQueries(queryClient, client, cwd);
             if (cwd === activeCwd) {
-                refreshModels();
-                refreshProviders();
                 // A model-list edit can change the session model's declared
                 // context window — the usage ring reads that value, so the
                 // indicator must re-pull, not just the picker.
@@ -1339,7 +1326,7 @@ export default function App() {
                             onRestartSidecar={restartSidecar}
                             modelOptions={filteredOptions}
                             workspace={activeCwd ? asWorkspaceId(activeCwd) : null}
-                            onRefreshModels={refreshAfterKeyChange}
+                            onRefreshModels={refreshModelCatalog}
                             updateAvailable={lifecycle.updateStatus.available}
                             updateChecking={lifecycle.updateStatus.checking}
                             updateError={lifecycle.updateStatus.error}

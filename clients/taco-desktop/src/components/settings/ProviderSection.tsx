@@ -5,8 +5,7 @@
  * Clicking a card opens the shared ProviderDetailModal, which holds the API
  * key, custom-only fields, and the model list in one panel.
  *
- * After any save, refresh the providers list and model list via
- * `useProviders.refresh` + `onKeysChanged`.
+ * Shared catalog invalidation updates every provider/model reader after a save.
  */
 
 import type {
@@ -16,6 +15,7 @@ import type {
     ProviderView,
     WorkspaceId,
 } from "@taco-ai/protocol";
+import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { useGlobalConfig } from "../../hooks/primitives/useGlobalConfig.ts";
 import { useSaveConfigPatch } from "../../hooks/primitives/useSaveConfigPatch.ts";
@@ -23,6 +23,7 @@ import { useProviders } from "../../hooks/useProviders.ts";
 import { useT } from "../../i18n/useI18n.ts";
 import type { TacoClient } from "../../lib/clients/tacoClient.ts";
 import { getGlobalConfig } from "../../lib/globalConfig.ts";
+import { invalidateCatalogQueries } from "../../lib/queries/queryClient";
 import { Button } from "../ui/Button";
 import { Tag } from "../ui/Tag.tsx";
 import { ProviderDetailModal } from "./ProviderDetailModal.tsx";
@@ -32,8 +33,6 @@ export interface ProviderSectionProps {
     client: TacoClient;
     /** Current workspace — providers.list requires it; not rendered until a workspace is ensured. */
     workspace: WorkspaceId | null;
-    /** Notify the parent to refetch the model list after a key / custom-provider save. */
-    onKeysChanged?: () => void;
 }
 
 type Detail =
@@ -44,7 +43,8 @@ type Detail =
 
 export function ProviderSection(props: ProviderSectionProps) {
     const { t } = useT();
-    const { providers, refresh } = useProviders(props.client, props.workspace);
+    const queryClient = useQueryClient();
+    const { providers } = useProviders(props.client, props.workspace);
     const { save, saving, error } = useSaveConfigPatch(props.client);
     const globalState = useGlobalConfig();
     const [detail, setDetail] = useState<Detail>(null);
@@ -108,8 +108,7 @@ export function ProviderSection(props: ProviderSectionProps) {
         }
         if (Object.keys(patch).length === 0) return;
         await save({ kind: "global", patch });
-        refresh();
-        props.onKeysChanged?.();
+        await invalidateCatalogQueries(queryClient, props.client);
     };
 
     const saveCustom = async (cfg: CustomProviderConfig, apiKey: string): Promise<void> => {
@@ -125,8 +124,7 @@ export function ProviderSection(props: ProviderSectionProps) {
         } = { customProviders: next };
         if (apiKey) patch.apiKeys = { [cfg.id]: apiKey };
         await save({ kind: "global", patch });
-        refresh();
-        props.onKeysChanged?.();
+        await invalidateCatalogQueries(queryClient, props.client);
     };
 
     const deleteCustom = async (id: string): Promise<void> => {
@@ -149,8 +147,7 @@ export function ProviderSection(props: ProviderSectionProps) {
             patch.defaultProvider = null;
         }
         await save({ kind: "global", patch });
-        refresh();
-        props.onKeysChanged?.();
+        await invalidateCatalogQueries(queryClient, props.client);
     };
 
     return (

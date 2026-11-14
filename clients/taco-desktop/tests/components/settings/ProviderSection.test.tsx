@@ -1,3 +1,5 @@
+import type { ReactElement } from "react";
+import { queryWrapper } from "../../helpers/queryWrapper";
 /**
  * ProviderSection — deleting a custom provider must not leave the global
  * config pointing at it.
@@ -13,13 +15,17 @@
  */
 
 import type { CustomProviderConfig, ProviderView, WorkspaceId } from "@taco-ai/protocol";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render as renderWithoutQueries, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ProviderSection } from "../../../src/components/settings/ProviderSection";
 import type { TacoClient } from "../../../src/lib/clients/tacoClient.ts";
 import { applyGlobalConfig } from "../../../src/lib/globalConfig";
+
+function render(ui: ReactElement) {
+    return renderWithoutQueries(ui, queryWrapper());
+}
 
 vi.mock("react-i18next", () => ({
     useTranslation: vi.fn(() => ({

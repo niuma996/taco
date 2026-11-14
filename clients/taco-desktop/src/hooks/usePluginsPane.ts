@@ -1,7 +1,9 @@
 import type { ExtensionsStatusResult } from "@taco-ai/protocol";
-import { useEffect, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
 import type { TacoClient } from "../lib/clients/tacoClient.ts";
 import { applyGlobalConfig, getGlobalConfig } from "../lib/globalConfig.js";
+import { queryError, refreshQueries, resourceQueryKey } from "../lib/queries/queryClient";
 import { useAutoClearError } from "./primitives/useAutoClearError";
 
 export interface UsePluginsPaneResult {
@@ -22,29 +24,21 @@ export function usePluginsPane(
     activeCwd: string | undefined,
     restartSidecar: () => Promise<void>,
 ): UsePluginsPaneResult {
-    const [extensionStatus, setExtensionStatus] = useState<ExtensionsStatusResult | null>(null);
-    const [extensionLoading, setExtensionLoading] = useState(false);
+    const queryClient = useQueryClient();
+    const queryKey = resourceQueryKey(client, "plugins");
+    const status = useQuery({
+        retry: false,
+        queryKey,
+        enabled: active && Boolean(activeCwd),
+        queryFn: ({ signal }) => {
+            signal.throwIfAborted();
+            return client.extensionsStatus();
+        },
+    });
     const [extensionSavingName, setExtensionSavingName] = useState<string | null>(null);
     const [extensionPendingRestart, setExtensionPendingRestart] = useState(false);
     const [extensionRestarting, setExtensionRestarting] = useState(false);
     const { error: extensionError, fail: failWith, clearError } = useAutoClearError();
-
-    useEffect(() => {
-        if (!active || !activeCwd) return;
-        setExtensionLoading(true);
-        clearError();
-        void client
-            .extensionsStatus()
-            .then((r) => {
-                setExtensionStatus(r);
-            })
-            .catch((e: unknown) => {
-                failWith(e);
-            })
-            .finally(() => {
-                setExtensionLoading(false);
-            });
-    }, [active, activeCwd, client, clearError, failWith]);
 
     // Toggle an extension's disabled state. Writes disabledExtensions to taco.json,
     // takes effect after restart.
@@ -58,7 +52,8 @@ export function usePluginsPane(
                 : current.filter((n) => n !== name);
             const result = await client.settingsWrite({ global: { disabledExtensions: next } });
             applyGlobalConfig(result.global);
-            setExtensionStatus((prev) => {
+            await queryClient.cancelQueries({ queryKey });
+            queryClient.setQueryData<ExtensionsStatusResult>(queryKey, (prev) => {
                 if (!prev) return prev;
                 if (nextDisabled) {
                     return {
@@ -83,8 +78,7 @@ export function usePluginsPane(
         try {
             await restartSidecar();
             setExtensionPendingRestart(false);
-            const r = await client.extensionsStatus();
-            setExtensionStatus(r);
+            await refreshQueries(queryClient, { queryKey });
         } catch (e) {
             failWith(e);
         } finally {
@@ -93,9 +87,9 @@ export function usePluginsPane(
     };
 
     return {
-        extensionStatus,
-        extensionLoading,
-        extensionError,
+        extensionStatus: status.data ?? null,
+        extensionLoading: status.isFetching,
+        extensionError: extensionError ?? queryError(status.error)?.message ?? null,
         extensionSavingName,
         extensionPendingRestart,
         extensionRestarting,

@@ -113,6 +113,25 @@ runs `taco install` to register a system-level daemon:
   and `tauri:build` via `tauri.conf.json`'s `beforeDevCommand` /
   `beforeBuildCommand`.
 
+## Management query cache
+
+`main.tsx` provides one TanStack Query client. Providers, models, tools, skills,
+plugins and agent catalog/content/runtime reads share this cache. Keys isolate
+TacoClient instances, workspace targets, configuration scopes and detail identities.
+UI selection and mutation navigation guards stay in their feature hooks.
+
+Providers and models remain fresh for 30 seconds, with at most five retries
+(1/2/4/8/8 seconds). Other migrated panes refresh on entry and report read failures
+without retries. Browser focus and network reconnect events do not trigger RPCs:
+the local sidecar is independent from browser online status.
+
+Connection readiness cancels pending query results before invalidating this
+client's cache. `models.changed` invalidates the affected workspace; provider
+configuration saves invalidate provider/model entries across all workspaces.
+Inactive entries fetch when enabled again. Cancelling a query protects cache
+publication; it does not abort an RPC already sent to the sidecar. The cache
+holds no secret reveal or provider connection-test results and is not persisted.
+
 ## Tauri commands exposed
 
 | Command | Purpose |

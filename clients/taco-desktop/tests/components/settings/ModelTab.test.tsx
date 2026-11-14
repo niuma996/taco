@@ -1,11 +1,23 @@
 import type { LiteThinkingLevel } from "@taco-ai/protocol";
-import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import {
+    cleanup,
+    render as renderWithoutQueries,
+    screen,
+    waitFor,
+    within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import type { ReactElement } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ModelOption } from "../../../src/components/settings/ModelPicker";
 import { ModelTab } from "../../../src/components/settings/ModelTab";
 import type { TacoClient } from "../../../src/lib/clients/tacoClient.ts";
 import { applyGlobalConfig } from "../../../src/lib/globalConfig.ts";
+import { queryWrapper } from "../../helpers/queryWrapper";
+
+function render(ui: ReactElement) {
+    return renderWithoutQueries(ui, queryWrapper());
+}
 
 vi.mock("react-i18next", () => ({
     useTranslation: () => ({ t: (key: string) => key, i18n: { language: "en" } }),

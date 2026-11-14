@@ -13,7 +13,7 @@ export interface ProviderStepProps {
 
 export function ProviderStep(props: ProviderStepProps) {
     const { t } = useT();
-    const { providers, refresh } = useProviders(props.client, props.workspace);
+    const { providers } = useProviders(props.client, props.workspace);
     const configuredCount = providers.filter((p) => p.configured).length;
 
     useEffect(() => {
@@ -26,11 +26,7 @@ export function ProviderStep(props: ProviderStepProps) {
         <div className="onboarding-step">
             <h2>{t("onboarding.providerTitle")}</h2>
             <p>{t("onboarding.providerBody")}</p>
-            <ProviderSection
-                client={props.client}
-                workspace={props.workspace}
-                onKeysChanged={refresh}
-            />
+            <ProviderSection client={props.client} workspace={props.workspace} />
             {configuredCount === 0 && (
                 <div className="error-banner" role="status">
                     {t("onboarding.providerRequired")}

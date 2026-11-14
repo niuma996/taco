@@ -1,5 +1,5 @@
 import type { GlobalConfigPatch, ThinkingLevel, WorkspaceId } from "@taco-ai/protocol";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useGlobalConfig } from "../../hooks/primitives/useGlobalConfig.ts";
 import { useSaveConfigPatch } from "../../hooks/primitives/useSaveConfigPatch.ts";
 import { useStableCallback } from "../../hooks/primitives/useStableCallback.ts";
@@ -41,17 +41,6 @@ export function ModelStep(props: ModelStepProps) {
         () => options.filter((o) => configuredProviderIds.has(o.provider)),
         [options, configuredProviderIds],
     );
-
-    // First transition empty → non-empty triggers a model refresh, matching App.tsx's
-    // timing fix — otherwise listModels may resolve before providers on cold start.
-    const hadConfiguredRef = useRef(false);
-    useEffect(() => {
-        const hasConfigured = configuredProviderIds.size > 0;
-        if (hasConfigured && !hadConfiguredRef.current) {
-            hadConfiguredRef.current = true;
-            refreshModels();
-        }
-    }, [configuredProviderIds, refreshModels]);
 
     const value = useMemo<ModelOption | undefined>(() => {
         const selected = defaultModelForNewSession(global);
