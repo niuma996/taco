@@ -7,7 +7,6 @@
  */
 
 import type {
-    ChannelStatusEntry,
     CommandPermissionScope,
     SessionTarget,
     WorkspaceCleanupResult,
@@ -16,12 +15,13 @@ import { asSessionId, asWorkspaceId, ErrorCodes, IM_CWD_PREFIX } from "@taco-ai/
 import { useQueryClient } from "@tanstack/react-query";
 import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityRail } from "./components/ActivityRail";
-import { ChannelBindDialog } from "./components/ChannelBindDialog";
 import { ChatWorkspaceContext } from "./components/ChatWorkspaceContext";
 import { ConfirmModal } from "./components/ConfirmModal";
 import { ConfigurationAgentsController } from "./components/configuration/ConfigurationAgentsController";
+import { ConfigurationChannelsController } from "./components/configuration/ConfigurationChannelsController";
 import { ConfigurationMemoryController } from "./components/configuration/ConfigurationMemoryController";
 import { ConfigurationPluginsController } from "./components/configuration/ConfigurationPluginsController";
+import { ConfigurationSettingsController } from "./components/configuration/ConfigurationSettingsController";
 import { ConfigurationSkillsController } from "./components/configuration/ConfigurationSkillsController";
 import { ConfigurationToolsController } from "./components/configuration/ConfigurationToolsController";
 import { FilesDrawer } from "./components/FilesDrawer";
@@ -46,7 +46,6 @@ import { useTheme } from "./hooks/primitives/useTheme";
 import { useToast } from "./hooks/primitives/useToast";
 import { useAppLifecycle } from "./hooks/useAppLifecycle";
 import { AskUserProvider } from "./hooks/useAskUser";
-import { CHANNEL_NAME_WECOM, useChannelsPane } from "./hooks/useChannelsPane";
 import { useCheckpointsPane } from "./hooks/useCheckpointsPane";
 import { useConversationActivity } from "./hooks/useConversationActivity";
 import { useConversationDrafts } from "./hooks/useConversationDrafts";
@@ -69,6 +68,7 @@ import { useWorkOverview } from "./hooks/useWorkOverview";
 import { useWorkspaceModels } from "./hooks/useWorkspaceModels";
 import { useWorkspaces } from "./hooks/useWorkspaces";
 import { useT } from "./i18n/useI18n";
+import { onChannelStatusChangedEvent } from "./lib/channelEvents";
 import type { UiMessage } from "./lib/chat/chatUtils";
 import type { ConversationTarget } from "./lib/chat/conversationDrafts";
 import { getSessionState, type SessionState } from "./lib/chat/sessionState";
@@ -89,11 +89,9 @@ import { invalidateCatalogQueries } from "./lib/queries/queryClient";
 import { onWorkChangedEvent } from "./lib/workEvents.ts";
 import { onWorkspaceAssociationsChangedEvent } from "./lib/workspaceAssociationEvents.ts";
 import { getDefaultCwd, persistExpandedWorkspaces } from "./lib/workspaceStorage.js";
-import { ChannelsPane } from "./views/ChannelsPane";
 import { ChatPane } from "./views/ChatPane";
 import { CheckpointsPane } from "./views/CheckpointsPane";
 import { ConversationSidebar } from "./views/ConversationSidebar";
-import { SettingsPane } from "./views/SettingsPane";
 import { WorkPane } from "./views/WorkPane";
 
 const EMPTY_MESSAGES: UiMessage[] = [];
@@ -462,8 +460,6 @@ export default function App() {
         filteredOptions[0] ??
         null;
 
-    /** Set once useChannelsPane is initialized; see onChannelStatusChanged below. */
-    const applyChannelStatusRef = useRef<((channel: ChannelStatusEntry) => void) | null>(null);
     // Same indirection for conversations — see comment on onConversationsChanged.
     const onConversationsChangedRef = useRef<(() => void) | null>(null);
     // `im.policy_changed` reaches every open ImPolicyDialog through a
@@ -492,9 +488,7 @@ export default function App() {
             }
         },
         onMemoryChanged: onMemoryChangedEvent,
-        // Indirected through a ref: useChannelsPane is declared further down,
-        // so naming applyChannelStatus here would read it before init.
-        onChannelStatusChanged: (channel) => applyChannelStatusRef.current?.(channel),
+        onChannelStatusChanged: onChannelStatusChangedEvent,
         onConversationsChanged: () => onConversationsChangedRef.current?.(),
         onImPolicyChanged: (channelId) => onImPolicyChangedEvent(channelId),
         // Process-level invalidate: the Work pane may not be mounted yet, so
@@ -616,24 +610,6 @@ export default function App() {
         conversationsError,
         onRetryTargets: () => void refreshConversations(),
     };
-    const {
-        channelsStatus,
-        channelsLoading,
-        channelsError,
-        channelsSavingId,
-        channelsInstallingId,
-        bindChannel,
-        unbindChannel,
-        retryChannel,
-        installChannelSdk,
-        submitVerifyCode,
-        createChannel,
-        channelsPendingRestart,
-        channelsRestarting,
-        restartForChannels,
-        applyChannelStatus,
-    } = useChannelsPane(client, mainView === "channels", activeCwd, restartSidecar);
-    applyChannelStatusRef.current = applyChannelStatus;
     const workOverview = useWorkOverview(client, mainView === "work", activeCwd);
     const sessionOpenRequestGuardRef = useRef(createLatestRequestGuard());
     const selectConversationMode = useCallback((mode: WorkspaceMode) => {
@@ -682,15 +658,10 @@ export default function App() {
         (workspace: string, sessionId: string) => openSessionTarget({ workspace, sessionId }),
         [openSessionTarget],
     );
-    /** channelId whose bind dialog is open; null closes it. */
-    const [bindingChannelId, setBindingChannelId] = useState<string | null>(null);
     /** Filesystem workspace or exact IM chat whose associations dialog is open. */
     const [associationsTarget, setAssociationsTarget] = useState<{
         workspace: string;
     } | null>(null);
-    const isWeComChannel = (channelId: string): boolean =>
-        channelsStatus?.configured.find((c) => c.channelId === channelId)?.name ===
-        CHANNEL_NAME_WECOM;
     const checkpoints = useCheckpointsPane(
         client,
         mainView === "checkpoints" || Boolean(activeSid),
@@ -842,6 +813,32 @@ export default function App() {
                         client={client}
                         activeCwd={activeCwd}
                         restartSidecar={restartSidecar}
+                    />
+                    <ConfigurationChannelsController
+                        active={mainView === "channels"}
+                        client={client}
+                        activeCwd={activeCwd}
+                        restartSidecar={restartSidecar}
+                        conversations={conversations}
+                        conversationsLoading={conversationsLoading}
+                        conversationsError={conversationsError}
+                        conversationsUnread={conversationsUnread}
+                        markConversationsSeen={markConversationsSeen}
+                        onOpenConversation={(cwd, sessionId) =>
+                            openSessionTarget({ workspace: cwd, sessionId })
+                        }
+                    />
+                    <ConfigurationSettingsController
+                        active={mainView === "settings"}
+                        activeCwd={activeCwd}
+                        client={client}
+                        restartSidecar={restartSidecar}
+                        modelOptions={filteredOptions}
+                        onRefreshModels={refreshModelCatalog}
+                        updateAvailable={lifecycle.updateStatus.available}
+                        updateChecking={lifecycle.updateStatus.checking}
+                        updateError={lifecycle.updateStatus.error}
+                        onCheckUpdate={lifecycle.runUpdateCheck}
                     />
                     {mainView === "chat" ? (
                         <>
@@ -1052,43 +1049,6 @@ export default function App() {
                                 </SubagentProvider>
                             </FilePreviewOpenerProvider>
                         </>
-                    ) : mainView === "channels" ? (
-                        <ChannelsPane
-                            client={client}
-                            status={channelsStatus}
-                            loading={channelsLoading}
-                            error={channelsError}
-                            savingId={channelsSavingId}
-                            installingId={channelsInstallingId}
-                            pendingRestart={channelsPendingRestart}
-                            restarting={channelsRestarting}
-                            onCreate={(name) => void createChannel(name)}
-                            onRestart={() => void restartForChannels()}
-                            onBind={(channelId) => {
-                                setBindingChannelId(channelId);
-                                if (!isWeComChannel(channelId)) {
-                                    void bindChannel(channelId);
-                                }
-                            }}
-                            onRebind={(channelId) => {
-                                setBindingChannelId(channelId);
-                                if (!isWeComChannel(channelId)) {
-                                    void bindChannel(channelId, true);
-                                }
-                            }}
-                            onRetry={(channelId) => void retryChannel(channelId)}
-                            onInstallSdk={(channelId) => void installChannelSdk(channelId)}
-                            onUnbind={(channelId) => void unbindChannel(channelId)}
-                            conversations={conversations}
-                            conversationsLoading={conversationsLoading}
-                            conversationsError={conversationsError}
-                            conversationsUnread={conversationsUnread}
-                            markConversationsSeen={markConversationsSeen}
-                            onOpenConversation={(cwd, sid) => {
-                                openSessionTarget({ workspace: cwd, sessionId: sid });
-                            }}
-                            activeCwd={activeCwd}
-                        />
                     ) : mainView === "work" ? (
                         <WorkPane
                             client={client}
@@ -1123,18 +1083,6 @@ export default function App() {
                                 </div>
                             </div>
                         </div>
-                    ) : mainView === "settings" ? (
-                        <SettingsPane
-                            client={client}
-                            onRestartSidecar={restartSidecar}
-                            modelOptions={filteredOptions}
-                            workspace={activeCwd ? asWorkspaceId(activeCwd) : null}
-                            onRefreshModels={refreshModelCatalog}
-                            updateAvailable={lifecycle.updateStatus.available}
-                            updateChecking={lifecycle.updateStatus.checking}
-                            updateError={lifecycle.updateStatus.error}
-                            onCheckUpdate={lifecycle.runUpdateCheck}
-                        />
                     ) : mainView === "mcp" ? (
                         <div className="settings-pane">
                             <div className="settings-pane-content">
@@ -1256,25 +1204,6 @@ export default function App() {
                     })();
                 }}
                 onCancel={() => setPendingRenameSession(null)}
-            />
-            <ChannelBindDialog
-                open={bindingChannelId !== null}
-                channel={
-                    channelsStatus?.configured.find((c) => c.channelId === bindingChannelId) ?? null
-                }
-                error={channelsError}
-                onSubmitVerifyCode={submitVerifyCode}
-                onBindCreds={(creds) => {
-                    const id = bindingChannelId;
-                    if (id === null) return;
-                    // force=true if already connected, so Rebind rewrites creds
-                    // and reconnects rather than reusing the stale token.
-                    const force =
-                        channelsStatus?.configured.find((c) => c.channelId === id)?.state ===
-                        "connected";
-                    void bindChannel(id, force, creds);
-                }}
-                onCancel={() => setBindingChannelId(null)}
             />
             <WorkspaceAssociationsDialog
                 key={associationsTarget?.workspace ?? "none"}

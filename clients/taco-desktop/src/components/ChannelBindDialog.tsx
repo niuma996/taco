@@ -22,8 +22,8 @@ export interface ChannelBindDialogProps {
     error?: string | null;
     onSubmitVerifyCode: (requestId: string, code: string) => Promise<boolean>;
     /** Bind with pasted credentials; only invoked for channels without a QR
-     *  flow (weCom today). The dialog decides when this fires — the App
-     *  layer only opens the dialog, never the RPC. */
+     *  flow (weCom today). The dialog decides when this fires — the
+     *  controller only opens the dialog, never the RPC. */
     onBindCreds: (creds: ChannelsBindCreds) => void;
     onCancel: () => void;
 }
