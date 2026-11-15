@@ -20,11 +20,11 @@ import {
     type AgentScope,
     type AgentsRuntimeStatusResult,
     type ClaudeCodePermissionMode,
-    type CodexAgentConfig,
     type CodexApprovalPolicy,
     type CodexSandboxMode,
 } from "@taco-ai/protocol";
-import { useState } from "react";
+import { useRef } from "react";
+import { Controller, useForm } from "react-hook-form";
 import { useT } from "../../i18n/useI18n.ts";
 import { Button } from "../ui/Button.tsx";
 import { FormField } from "../ui/FormField.tsx";
@@ -33,21 +33,20 @@ import { Select } from "../ui/Select.tsx";
 import { Switch } from "../ui/Switch.tsx";
 import { Textarea } from "../ui/Textarea.tsx";
 import { TextInput } from "../ui/TextInput.tsx";
+import {
+    type AgentFormDraft,
+    type AgentFormValue,
+    agentDraftToValue,
+    agentFormDefaults,
+    isExactAgentInteger,
+    parseAgentTools,
+} from "./agentFormDraft.ts";
 import { CodexRuntimeNotice } from "./CodexRuntimeNotice.tsx";
 
-/** Claude Code tool names, as the sidecar validates them. */
-const TOOL_NAME_PATTERN = AGENT_TOOL_NAME_PATTERN;
+export { type AgentFormValue, defaultMaxTurns } from "./agentFormDraft.ts";
 
 /** Never available to a subagent: it would open a prompt no one can answer. */
 const BLOCKED_CC_TOOLS = new Set(["AskUserQuestion"]);
-
-/**
- * Initial turn budget required by the definition schema. Standard and Claude
- * Code enforce it; the Codex adapter currently uses the SDK turn lifecycle.
- */
-export function defaultMaxTurns(): number {
-    return 100;
-}
 
 const PERMISSION_MODES: ReadonlyArray<ClaudeCodePermissionMode> = [
     "auto",
@@ -71,25 +70,6 @@ const CODEX_APPROVALS: ReadonlyArray<CodexApprovalPolicy> = [
     "on-request",
     "never",
 ];
-
-/** What the form produces; the pane adds `previousAgentType`. */
-export interface AgentFormValue {
-    scope: AgentScope;
-    agentType: string;
-    description: string;
-    whenToUse?: string;
-    runtime: AgentRuntime;
-    maxTurns: number;
-    /** Wall-clock budget for a background spawn, in minutes. Unset = derived. */
-    timeoutMinutes?: number;
-    systemPrompt: string;
-    tools?: string[];
-    permissionMode?: ClaudeCodePermissionMode;
-    /** `claude-code` only: the directory it runs in. */
-    cwd?: string;
-    /** `codex` only: SDK engine settings. */
-    codex?: CodexAgentConfig;
-}
 
 export interface AgentFormProps {
     /** Which dialog to show. Edit mode passes the existing definition's runtime. */
@@ -118,17 +98,8 @@ export interface AgentFormProps {
     onRefreshCodexRuntime?: () => void;
     /** Save errors (RPC-level) are shown in the form so the draft survives. */
     error?: string | null;
-    onSave: (value: AgentFormValue) => void;
+    onSave: (value: AgentFormValue) => void | Promise<void>;
     onCancel: () => void;
-}
-
-/** Comma/whitespace separated tool names → list; empty input = undefined (preset). */
-function parseTools(raw: string): string[] | undefined {
-    const names = raw
-        .split(/[\s,]+/)
-        .map((s) => s.trim())
-        .filter(Boolean);
-    return names.length > 0 ? names : undefined;
 }
 
 export function AgentForm(props: AgentFormProps) {
@@ -137,46 +108,32 @@ export function AgentForm(props: AgentFormProps) {
     const isCc = props.runtime === "claude-code";
     const isCodex = props.runtime === "codex";
 
-    const [scope, setScope] = useState<AgentScope>(
-        props.existing?.scope ?? props.fixedScope ?? "global",
-    );
-    const [agentType, setAgentType] = useState(props.existing?.agentType ?? "");
-    const [description, setDescription] = useState(props.existing?.description ?? "");
-    const [whenToUse, setWhenToUse] = useState(props.existing?.whenToUse ?? "");
-    const [maxTurns, setMaxTurns] = useState(String(props.existing?.maxTurns ?? defaultMaxTurns()));
-    // Empty = the daemon derives the budget from the turn budget, which is the
-    // right default; a number here overrides it.
-    const [timeoutMinutes, setTimeoutMinutes] = useState(
-        props.existing?.timeoutMinutes === undefined ? "" : String(props.existing.timeoutMinutes),
-    );
-    const [systemPrompt, setSystemPrompt] = useState(props.existing?.systemPrompt ?? "");
-    // Off by default and only reachable by flipping it: an empty md body is a
-    // valid definition (no role contributor is appended to the child's
-    // prompt), so this switch buys no new capability — it makes the choice
-    // explicit instead of letting a forgotten field silently produce a
-    // role-less agent. A create form has nothing to inherit, so it starts off
-    // regardless — hence the explicit guard rather than an optional chain.
-    const [noRolePrompt, setNoRolePrompt] = useState(
-        props.existing !== undefined && props.existing.systemPrompt.trim() === "",
-    );
-    const [tools, setTools] = useState(props.existing?.tools?.join(", ") ?? "");
-    const [permissionMode, setPermissionMode] = useState<ClaudeCodePermissionMode>(
-        props.existing?.permissionMode ?? "auto",
-    );
-    // Shown and saved even when the definition has none: an agent saved before
-    // this field existed already runs in the workspace directory, so that is
-    // what the picker states, and saving makes it explicit.
-    const [cwd, setCwd] = useState<string>(props.existing?.cwd ?? props.cwdChoices[0] ?? "");
-    const [codexCwd, setCodexCwd] = useState<string>(
-        props.existing?.codex?.cwd ?? props.cwdChoices[0] ?? "",
-    );
-    const [codexModel, setCodexModel] = useState(props.existing?.codex?.model ?? "");
-    const [codexSandbox, setCodexSandbox] = useState<CodexSandboxMode>(
-        props.existing?.codex?.sandbox ?? "read-only",
-    );
-    const [codexApprovalPolicy, setCodexApprovalPolicy] = useState<CodexApprovalPolicy>(
-        props.existing?.codex?.approvalPolicy ?? "never",
-    );
+    const {
+        register,
+        control,
+        watch,
+        handleSubmit,
+        formState: { isValid, isSubmitting, errors },
+    } = useForm<AgentFormDraft>({
+        defaultValues: agentFormDefaults(props.existing, props.fixedScope, props.cwdChoices),
+        mode: "onChange",
+    });
+    const [scope, agentType, noRolePrompt, permissionMode, cwd, codexCwd, codexApprovalPolicy] =
+        watch([
+            "scope",
+            "agentType",
+            "noRolePrompt",
+            "permissionMode",
+            "cwd",
+            "codexCwd",
+            "codexApprovalPolicy",
+        ]);
+    const submitting = useRef(false);
+    const saving = props.saving || isSubmitting;
+    const maxTurnsField = register("maxTurns", {
+        validate: (value) => isExactAgentInteger(value, 500) || t("agents.form.maxTurnsInvalid"),
+    });
+
     // A directory saved from another workspace is kept as a choice so editing
     // other fields here does not silently move the agent.
     const cwdOptions =
@@ -189,76 +146,26 @@ export function AgentForm(props: AgentFormProps) {
             : props.cwdChoices;
 
     const trimmedType = agentType.trim();
-    const typeValid = AGENT_TYPE_PATTERN.test(trimmedType);
     // Moving a global agent to the workspace under its own name is a move, not a shadow.
     const shadowsGlobal =
         scope === "workspace" &&
         trimmedType !== props.existing?.agentType &&
         props.shadowedTypes.includes(trimmedType);
-    const turns = Number.parseInt(maxTurns.trim(), 10);
-    const turnsValid =
-        Number.isInteger(turns) && turns >= 1 && turns <= 500 && String(turns) === maxTurns.trim();
-    const timeoutText = timeoutMinutes.trim();
-    const timeoutParsed = Number.parseInt(timeoutText, 10);
-    const timeoutValue = timeoutText === "" ? undefined : timeoutParsed;
-    const timeoutValid =
-        timeoutText === "" ||
-        (Number.isInteger(timeoutParsed) &&
-            timeoutParsed >= 1 &&
-            timeoutParsed <= 600 &&
-            String(timeoutParsed) === timeoutText);
-    const toolList = parseTools(tools);
-    const blockedTool = toolList?.find((n) => BLOCKED_CC_TOOLS.has(n));
-    const toolsError =
-        blockedTool !== undefined
-            ? t("agents.form.ccToolBlocked", { tool: blockedTool })
-            : (toolList?.some((n) => !TOOL_NAME_PATTERN.test(n)) ?? false)
-              ? t("agents.form.ccToolsInvalid")
-              : undefined;
-    // Mirrors agentsWriteSchema: `maxLength` on the inputs stops typing, but a
-    // value set any other way (e.g. a pre-limit definition) must not reach a
-    // write the sidecar rejects.
-    const canSave =
-        typeValid &&
-        description.trim() !== "" &&
-        description.trim().length <= 1024 &&
-        whenToUse.trim().length <= 2048 &&
-        turnsValid &&
-        timeoutValid &&
-        (noRolePrompt || systemPrompt.trim() !== "") &&
-        systemPrompt.trim().length <= 65536 &&
-        (!isCc || toolsError === undefined) &&
-        (!isCodex || codexModel.trim().length <= 256);
-
-    const save = () => {
-        if (!canSave) return;
-        props.onSave({
-            scope,
-            agentType: trimmedType,
-            description: description.trim(),
-            whenToUse: whenToUse.trim() === "" ? undefined : whenToUse.trim(),
-            runtime: props.runtime,
-            maxTurns: turns,
-            ...(timeoutValue !== undefined ? { timeoutMinutes: timeoutValue } : {}),
-            systemPrompt: noRolePrompt ? "" : systemPrompt,
-            ...(isCc ? { tools: toolList, permissionMode, ...(cwd !== "" ? { cwd } : {}) } : {}),
-            ...(isCodex
-                ? {
-                      // There is no Codex tool picker; preserve the profile's whitelist verbatim.
-                      ...(props.existing?.tools !== undefined
-                          ? { tools: props.existing.tools }
-                          : {}),
-                      codex: {
-                          ...(codexCwd !== "" ? { cwd: codexCwd } : {}),
-                          // No model means the user's own Codex configuration
-                          // decides — the same rule a Claude Code agent follows.
-                          ...(codexModel.trim() !== "" ? { model: codexModel.trim() } : {}),
-                          sandbox: codexSandbox,
-                          approvalPolicy: codexApprovalPolicy,
-                      },
-                  }
-                : {}),
-        });
+    const save = async () => {
+        // isSubmitting disables the next render; the ref also covers two clicks
+        // in the same event batch, before validation or onSave has completed.
+        if (props.saving || submitting.current) return;
+        submitting.current = true;
+        try {
+            await handleSubmit(async (draft) => {
+                await props.onSave(agentDraftToValue(draft, props.runtime, props.existing));
+            })();
+        } catch {
+            // The caller presents RPC failures through props.error. Keep the
+            // draft available for retry even when its callback rejects.
+        } finally {
+            submitting.current = false;
+        }
     };
 
     const title = isCodex
@@ -281,11 +188,11 @@ export function AgentForm(props: AgentFormProps) {
             className="agent-form-modal"
             actions={
                 <>
-                    <Button variant="ghost" onClick={props.onCancel} disabled={props.saving}>
+                    <Button variant="ghost" onClick={props.onCancel} disabled={saving}>
                         {t("agents.form.cancel")}
                     </Button>
-                    <Button variant="primary" disabled={!canSave || props.saving} onClick={save}>
-                        {props.saving ? t("agents.form.saving") : t("agents.form.save")}
+                    <Button variant="primary" disabled={!isValid || saving} onClick={save}>
+                        {saving ? t("agents.form.saving") : t("agents.form.save")}
                     </Button>
                 </>
             }
@@ -320,25 +227,31 @@ export function AgentForm(props: AgentFormProps) {
                 />
             )}
             {props.fixedScope === undefined && (
-                <FormField
-                    label={t("agents.form.scope")}
-                    hint={t(
-                        scope === "global"
-                            ? "agents.form.scopeGlobalHint"
-                            : "agents.form.scopeWorkspaceHint",
+                <Controller
+                    control={control}
+                    name="scope"
+                    render={({ field }) => (
+                        <FormField
+                            label={t("agents.form.scope")}
+                            hint={t(
+                                scope === "global"
+                                    ? "agents.form.scopeGlobalHint"
+                                    : "agents.form.scopeWorkspaceHint",
+                            )}
+                        >
+                            <Select
+                                value={field.value}
+                                onValueChange={field.onChange}
+                                options={SCOPES.map((value) => ({
+                                    value,
+                                    label: t(`agents.scope.${value}`),
+                                }))}
+                                disabled={!props.hasProjectDir}
+                                label={t("agents.form.scope")}
+                            />
+                        </FormField>
                     )}
-                >
-                    <Select
-                        value={scope}
-                        onValueChange={(v) => setScope(v as AgentScope)}
-                        options={SCOPES.map((value) => ({
-                            value,
-                            label: t(`agents.scope.${value}`),
-                        }))}
-                        disabled={!props.hasProjectDir}
-                        label={t("agents.form.scope")}
-                    />
-                </FormField>
+                />
             )}
             {shadowsGlobal && (
                 <div className="agent-form-notice">{t("agents.form.shadowsGlobal")}</div>
@@ -347,73 +260,105 @@ export function AgentForm(props: AgentFormProps) {
                 <FormField
                     label={t("agents.form.name")}
                     hint={t("agents.form.nameHint")}
-                    error={
-                        trimmedType !== "" && !typeValid ? t("agents.form.nameInvalid") : undefined
-                    }
+                    error={trimmedType !== "" ? errors.agentType?.message : undefined}
                 >
                     <TextInput
-                        value={agentType}
-                        onChange={(e) => setAgentType(e.target.value)}
+                        {...register("agentType", {
+                            validate: (value) =>
+                                AGENT_TYPE_PATTERN.test(value.trim()) ||
+                                t("agents.form.nameInvalid"),
+                        })}
                         placeholder="code-reviewer"
                     />
                 </FormField>
                 <FormField label={t("agents.form.description")}>
                     <TextInput
-                        value={description}
-                        onChange={(e) => setDescription(e.target.value)}
+                        {...register("description", {
+                            validate: (value) => value.trim() !== "" && value.trim().length <= 1024,
+                        })}
                         maxLength={1024}
                     />
                 </FormField>
             </div>
             <FormField label={t("agents.form.whenToUse")}>
                 <TextInput
-                    value={whenToUse}
-                    onChange={(e) => setWhenToUse(e.target.value)}
+                    {...register("whenToUse", {
+                        validate: (value) => value.trim().length <= 2048,
+                    })}
                     maxLength={2048}
                 />
             </FormField>
             {isCc && (
                 <>
-                    <FormField label={t("agents.form.ccCwd")} hint={t("agents.form.ccCwdHint")}>
-                        <Select
-                            value={cwd}
-                            onValueChange={setCwd}
-                            options={cwdOptions.map((dir, i) => ({
-                                value: dir,
-                                label: dir,
-                                ...(dir === props.cwdChoices[0] && i === cwdOptions.indexOf(dir)
-                                    ? { badge: t("agents.form.ccCwdWorkspace") }
-                                    : {}),
-                            }))}
-                            disabled={cwdOptions.length === 0}
-                            label={t("agents.form.ccCwd")}
-                        />
-                    </FormField>
+                    <Controller
+                        control={control}
+                        name="cwd"
+                        render={({ field }) => (
+                            <FormField
+                                label={t("agents.form.ccCwd")}
+                                hint={t("agents.form.ccCwdHint")}
+                            >
+                                <Select
+                                    value={field.value}
+                                    onValueChange={field.onChange}
+                                    options={cwdOptions.map((dir, i) => ({
+                                        value: dir,
+                                        label: dir,
+                                        ...(dir === props.cwdChoices[0] &&
+                                        i === cwdOptions.indexOf(dir)
+                                            ? { badge: t("agents.form.ccCwdWorkspace") }
+                                            : {}),
+                                    }))}
+                                    disabled={cwdOptions.length === 0}
+                                    label={t("agents.form.ccCwd")}
+                                />
+                            </FormField>
+                        )}
+                    />
                     <FormField
                         label={t("agents.form.ccTools")}
                         hint={t("agents.form.ccToolsHint")}
-                        error={toolsError}
+                        error={errors.tools?.message}
                     >
                         <TextInput
-                            value={tools}
-                            onChange={(e) => setTools(e.target.value)}
+                            {...register("tools", {
+                                validate: (value) => {
+                                    const names = parseAgentTools(value);
+                                    const blocked = names?.find((name) =>
+                                        BLOCKED_CC_TOOLS.has(name),
+                                    );
+                                    if (blocked !== undefined)
+                                        return t("agents.form.ccToolBlocked", { tool: blocked });
+                                    return (
+                                        !names?.some(
+                                            (name) => !AGENT_TOOL_NAME_PATTERN.test(name),
+                                        ) || t("agents.form.ccToolsInvalid")
+                                    );
+                                },
+                            })}
                             placeholder="Read, Grep, Glob, Edit, Bash"
                         />
                     </FormField>
-                    <FormField
-                        label={t("agents.form.ccPermissionMode")}
-                        hint={t(`agents.form.ccMode.${permissionMode}Hint`)}
-                    >
-                        <Select
-                            value={permissionMode}
-                            onValueChange={(v) => setPermissionMode(v as ClaudeCodePermissionMode)}
-                            options={PERMISSION_MODES.map((m) => ({
-                                value: m,
-                                label: t(`agents.form.ccMode.${m}`),
-                            }))}
-                            label={t("agents.form.ccPermissionMode")}
-                        />
-                    </FormField>
+                    <Controller
+                        control={control}
+                        name="permissionMode"
+                        render={({ field }) => (
+                            <FormField
+                                label={t("agents.form.ccPermissionMode")}
+                                hint={t(`agents.form.ccMode.${permissionMode}Hint`)}
+                            >
+                                <Select
+                                    value={field.value}
+                                    onValueChange={field.onChange}
+                                    options={PERMISSION_MODES.map((m) => ({
+                                        value: m,
+                                        label: t(`agents.form.ccMode.${m}`),
+                                    }))}
+                                    label={t("agents.form.ccPermissionMode")}
+                                />
+                            </FormField>
+                        )}
+                    />
                     {permissionMode === "bypassPermissions" && (
                         <div className="agent-form-notice agent-form-notice--warn" role="note">
                             {t("agents.form.ccBypassImNotice")}
@@ -432,70 +377,85 @@ export function AgentForm(props: AgentFormProps) {
                         </p>
                     </div>
                     <div className="agent-form-grid">
-                        <FormField
-                            className="agent-form-grid-full"
-                            label={t("agents.form.codexCwd")}
-                            hint={t("agents.form.codexCwdHint")}
-                        >
-                            <Select
-                                value={codexCwd}
-                                onValueChange={setCodexCwd}
-                                options={codexCwdOptions.map((dir, i) => ({
-                                    value: dir,
-                                    label: dir,
-                                    ...(dir === props.cwdChoices[0] &&
-                                    i === codexCwdOptions.indexOf(dir)
-                                        ? { badge: t("agents.form.codexCwdWorkspace") }
-                                        : {}),
-                                }))}
-                                disabled={codexCwdOptions.length === 0}
-                                label={t("agents.form.codexCwd")}
-                            />
-                        </FormField>
+                        <Controller
+                            control={control}
+                            name="codexCwd"
+                            render={({ field }) => (
+                                <FormField
+                                    className="agent-form-grid-full"
+                                    label={t("agents.form.codexCwd")}
+                                    hint={t("agents.form.codexCwdHint")}
+                                >
+                                    <Select
+                                        value={field.value}
+                                        onValueChange={field.onChange}
+                                        options={codexCwdOptions.map((dir, i) => ({
+                                            value: dir,
+                                            label: dir,
+                                            ...(dir === props.cwdChoices[0] &&
+                                            i === codexCwdOptions.indexOf(dir)
+                                                ? { badge: t("agents.form.codexCwdWorkspace") }
+                                                : {}),
+                                        }))}
+                                        disabled={codexCwdOptions.length === 0}
+                                        label={t("agents.form.codexCwd")}
+                                    />
+                                </FormField>
+                            )}
+                        />
                         <FormField
                             label={t("agents.form.codexModel")}
                             hint={t("agents.form.codexModelHint")}
                         >
                             <TextInput
-                                value={codexModel}
-                                onChange={(e) => setCodexModel(e.target.value)}
+                                {...register("codexModel", {
+                                    validate: (value) => value.trim().length <= 256,
+                                })}
                                 maxLength={256}
                                 placeholder={t("agents.form.codexModelPlaceholder")}
                             />
                         </FormField>
-                        <FormField
-                            label={t("agents.form.codexSandbox")}
-                            hint={t("agents.form.codexSandboxHint")}
-                        >
-                            <Select
-                                value={codexSandbox}
-                                onValueChange={(value) =>
-                                    setCodexSandbox(value as CodexSandboxMode)
-                                }
-                                options={CODEX_SANDBOXES.map((value) => ({
-                                    value,
-                                    label: t(`agents.form.codexSandboxMode.${value}`),
-                                }))}
-                                label={t("agents.form.codexSandbox")}
-                            />
-                        </FormField>
-                        <FormField
-                            className="agent-form-grid-full"
-                            label={t("agents.form.codexApproval")}
-                            hint={t("agents.form.codexApprovalHint")}
-                        >
-                            <Select
-                                value={codexApprovalPolicy}
-                                onValueChange={(value) =>
-                                    setCodexApprovalPolicy(value as CodexApprovalPolicy)
-                                }
-                                options={CODEX_APPROVALS.map((value) => ({
-                                    value,
-                                    label: t(`agents.form.codexApprovalMode.${value}`),
-                                }))}
-                                label={t("agents.form.codexApproval")}
-                            />
-                        </FormField>
+                        <Controller
+                            control={control}
+                            name="codexSandbox"
+                            render={({ field }) => (
+                                <FormField
+                                    label={t("agents.form.codexSandbox")}
+                                    hint={t("agents.form.codexSandboxHint")}
+                                >
+                                    <Select
+                                        value={field.value}
+                                        onValueChange={field.onChange}
+                                        options={CODEX_SANDBOXES.map((value) => ({
+                                            value,
+                                            label: t(`agents.form.codexSandboxMode.${value}`),
+                                        }))}
+                                        label={t("agents.form.codexSandbox")}
+                                    />
+                                </FormField>
+                            )}
+                        />
+                        <Controller
+                            control={control}
+                            name="codexApprovalPolicy"
+                            render={({ field }) => (
+                                <FormField
+                                    className="agent-form-grid-full"
+                                    label={t("agents.form.codexApproval")}
+                                    hint={t("agents.form.codexApprovalHint")}
+                                >
+                                    <Select
+                                        value={field.value}
+                                        onValueChange={field.onChange}
+                                        options={CODEX_APPROVALS.map((value) => ({
+                                            value,
+                                            label: t(`agents.form.codexApprovalMode.${value}`),
+                                        }))}
+                                        label={t("agents.form.codexApproval")}
+                                    />
+                                </FormField>
+                            )}
+                        />
                     </div>
                     {codexApprovalPolicy !== "never" && (
                         <div className="agent-form-notice agent-form-notice--warn" role="note">
@@ -513,26 +473,24 @@ export function AgentForm(props: AgentFormProps) {
                     </ul>
                 </section>
             )}
+            {isCodex && <input type="hidden" {...maxTurnsField} />}
             {!isCodex && (
-                <FormField
-                    label={t("agents.form.maxTurns")}
-                    error={!turnsValid ? t("agents.form.maxTurnsInvalid") : undefined}
-                >
-                    <TextInput
-                        value={maxTurns}
-                        onChange={(e) => setMaxTurns(e.target.value)}
-                        inputMode="numeric"
-                    />
+                <FormField label={t("agents.form.maxTurns")} error={errors.maxTurns?.message}>
+                    <TextInput {...maxTurnsField} inputMode="numeric" />
                 </FormField>
             )}
             <FormField
                 label={t("agents.form.timeoutMinutes")}
                 hint={t("agents.form.timeoutMinutesHint")}
-                error={!timeoutValid ? t("agents.form.timeoutMinutesInvalid") : undefined}
+                error={errors.timeoutMinutes?.message}
             >
                 <TextInput
-                    value={timeoutMinutes}
-                    onChange={(e) => setTimeoutMinutes(e.target.value)}
+                    {...register("timeoutMinutes", {
+                        validate: (value) =>
+                            value.trim() === "" ||
+                            isExactAgentInteger(value, 600) ||
+                            t("agents.form.timeoutMinutesInvalid"),
+                    })}
                     inputMode="numeric"
                     placeholder={t("agents.form.timeoutMinutesAuto")}
                 />
@@ -542,18 +500,29 @@ export function AgentForm(props: AgentFormProps) {
                 hint={t("agents.form.systemPromptHint")}
                 action={
                     <span className="agent-form-no-role">
-                        <Switch
-                            checked={noRolePrompt}
-                            onChange={setNoRolePrompt}
-                            label={t("agents.form.noRolePrompt")}
+                        <Controller
+                            control={control}
+                            name="noRolePrompt"
+                            rules={{ deps: "systemPrompt" }}
+                            render={({ field }) => (
+                                <Switch
+                                    checked={field.value}
+                                    onChange={field.onChange}
+                                    onBlur={field.onBlur}
+                                    label={t("agents.form.noRolePrompt")}
+                                />
+                            )}
                         />
                         {t("agents.form.noRolePrompt")}
                     </span>
                 }
             >
                 <Textarea
-                    value={systemPrompt}
-                    onChange={(e) => setSystemPrompt(e.target.value)}
+                    {...register("systemPrompt", {
+                        validate: (value, draft) =>
+                            (draft.noRolePrompt || value.trim() !== "") &&
+                            value.trim().length <= 65536,
+                    })}
                     rows={12}
                     maxLength={65536}
                     disabled={noRolePrompt}

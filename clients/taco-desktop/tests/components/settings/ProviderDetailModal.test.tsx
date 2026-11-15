@@ -6,8 +6,8 @@
  * keys verbatim.
  */
 
-import type { ProviderView, WorkspaceId } from "@taco-ai/protocol";
-import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import type { CustomProviderConfig, ProviderView, WorkspaceId } from "@taco-ai/protocol";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ProviderDetailModal } from "../../../src/components/settings/ProviderDetailModal";
@@ -42,6 +42,14 @@ function renderCreate(listModels: ListModels) {
 
 const fetchButton = () =>
     screen.getByRole("button", { name: "settings.customProviderFetch" }) as HTMLButtonElement;
+
+async function clickSave(user: ReturnType<typeof userEvent.setup>) {
+    const button = screen.getByRole("button", {
+        name: "settings.providerSaveKey",
+    }) as HTMLButtonElement;
+    await waitFor(() => expect(button.disabled).toBe(false));
+    await user.click(button);
+}
 
 /** baseUrl + key are both required before the button unlocks (create mode). */
 async function fillPrerequisites(user: ReturnType<typeof userEvent.setup>) {
@@ -201,6 +209,37 @@ describe("ProviderDetailModal — create-custom model discovery", () => {
         expect(within(candidateList()).getAllByText("dup").length).toBe(1);
     });
 
+    it("filters a late discovery response against manual edits made while it was pending", async () => {
+        const user = userEvent.setup({ delay: null });
+        let resolveFetch!: (result: { ok: true; models: string[] }) => void;
+        renderCreate(
+            vi.fn(
+                () =>
+                    new Promise((resolve) => {
+                        resolveFetch = resolve;
+                    }),
+            ) as ListModels,
+        );
+        await fillPrerequisites(user);
+        await user.click(fetchButton());
+        await user.type(
+            screen.getByPlaceholderText("settings.providerModelAddPlaceholder"),
+            "late{Enter}",
+        );
+        await act(async () => resolveFetch({ ok: true, models: ["late", "late", "other"] }));
+        expect(within(candidateList()).queryByText("late")).toBeNull();
+        expect(within(candidateList()).getAllByText("other")).toHaveLength(1);
+        await user.click(screen.getByRole("button", { name: "settings.providerModelRemove" }));
+        expect(within(candidateList()).getAllByText("late")).toHaveLength(1);
+        await user.click(
+            within(candidateList()).getAllByRole("button", {
+                name: "settings.providerModelAdd",
+            })[0],
+        );
+        expect(within(modelList()).getAllByText("late")).toHaveLength(1);
+        expect(within(candidateList()).queryByText("late")).toBeNull();
+    });
+
     it("surfaces the message when the RPC reports a failure", async () => {
         const user = userEvent.setup({ delay: null });
         const listModels = vi.fn().mockResolvedValue({
@@ -352,7 +391,7 @@ describe("ProviderDetailModal — built-in provider", () => {
         const { onSaveBuiltin } = renderBuiltin();
         await user.click(screen.getByRole("button", { name: "settings.providerModelRemove" }));
         await user.click(screen.getByRole("button", { name: "settings.providerModelHide" }));
-        await user.click(screen.getByRole("button", { name: "settings.providerSaveKey" }));
+        await clickSave(user);
 
         await waitFor(() =>
             expect(onSaveBuiltin).toHaveBeenCalledWith(undefined, [], ["MiniMax-M2"]),
@@ -405,7 +444,7 @@ describe("ProviderDetailModal — built-in provider", () => {
         // The row moves to the removed section, tagged and struck through.
         await waitFor(() => expect(screen.getByText("settings.providerOriginHidden")).toBeTruthy());
         await user.click(screen.getByRole("button", { name: "settings.providerModelRestore" }));
-        await user.click(screen.getByRole("button", { name: "settings.providerSaveKey" }));
+        await clickSave(user);
 
         await waitFor(() =>
             expect(onSaveBuiltin).toHaveBeenCalledWith(undefined, [{ id: "MiniMax-M3.1" }], []),
@@ -437,7 +476,7 @@ describe("ProviderDetailModal — built-in provider", () => {
         const { onSaveBuiltin } = renderBuiltin();
         const windowInput = await openCustomWindowInput(user, "MiniMax-M3.1");
         await user.type(windowInput, "999999");
-        await user.click(screen.getByRole("button", { name: "settings.providerSaveKey" }));
+        await clickSave(user);
 
         await waitFor(() =>
             expect(onSaveBuiltin).toHaveBeenCalledWith(
@@ -453,7 +492,7 @@ describe("ProviderDetailModal — built-in provider", () => {
         const { onSaveBuiltin } = renderBuiltin();
         const windowInput = await openCustomWindowInput(user, "MiniMax-M3.1");
         await user.type(windowInput, "1024k");
-        await user.click(screen.getByRole("button", { name: "settings.providerSaveKey" }));
+        await clickSave(user);
 
         await waitFor(() =>
             expect(onSaveBuiltin).toHaveBeenCalledWith(
@@ -508,7 +547,7 @@ describe("ProviderDetailModal — built-in provider", () => {
         const scope = row.parentElement as HTMLElement;
         await user.click(within(scope).getByRole("combobox"));
         await user.click(await screen.findByRole("option", { name: "1m" }));
-        await user.click(screen.getByRole("button", { name: "settings.providerSaveKey" }));
+        await clickSave(user);
 
         await waitFor(() =>
             expect(onSaveBuiltin).toHaveBeenCalledWith(
@@ -558,7 +597,7 @@ describe("ProviderDetailModal — built-in provider", () => {
         await user.click(
             await screen.findByRole("option", { name: "settings.providerModelWindowDefault" }),
         );
-        await user.click(screen.getByRole("button", { name: "settings.providerSaveKey" }));
+        await clickSave(user);
 
         await waitFor(() =>
             expect(onSaveBuiltin).toHaveBeenCalledWith(undefined, [{ id: "MiniMax-M3.1" }], []),
@@ -593,7 +632,7 @@ describe("ProviderDetailModal — built-in provider", () => {
                 onClose={vi.fn()}
             />,
         );
-        await user.click(screen.getByRole("button", { name: "settings.providerSaveKey" }));
+        await clickSave(user);
 
         // The catalog reports the id as the name when none was declared, so a
         // name that differs is a real one — and opening the panel must not
@@ -680,7 +719,7 @@ describe("ProviderDetailModal — built-in provider", () => {
         expect(sw.hasAttribute("aria-label")).toBe(false);
         await user.click(sw);
         expect(within(row).getByText("settings.providerModelImagesBadge")).toBeTruthy();
-        await user.click(screen.getByRole("button", { name: "settings.providerSaveKey" }));
+        await clickSave(user);
 
         await waitFor(() =>
             expect(onSaveBuiltin).toHaveBeenCalledWith(
@@ -730,7 +769,7 @@ describe("ProviderDetailModal — built-in provider", () => {
                 name: "settings.providerModelImages",
             }),
         );
-        await user.click(screen.getByRole("button", { name: "settings.providerSaveKey" }));
+        await clickSave(user);
 
         await waitFor(() =>
             expect(onSaveBuiltin).toHaveBeenCalledWith(undefined, [{ id: "MiniMax-M3.1" }], []),
@@ -874,5 +913,399 @@ describe("ProviderDetailModal — test connection", () => {
             apiKey: "sk-test",
             modelId: "m-1",
         });
+    });
+});
+
+describe("ProviderDetailModal — save contracts", () => {
+    const cfg: CustomProviderConfig = {
+        id: "custom:existing",
+        name: "Existing",
+        api: "anthropic",
+        baseUrl: "https://example.com/v1",
+        models: [
+            {
+                id: "rich",
+                name: "Rich model",
+                contextWindow: 999999,
+                maxTokens: 4321,
+                reasoning: false,
+                input: ["text", "image"],
+            },
+            { id: "bare" },
+            { id: "empty-input", input: [] },
+        ],
+    };
+    const provider: ProviderView = {
+        id: cfg.id,
+        name: cfg.name,
+        custom: true,
+        configured: true,
+        models: [],
+    };
+    const saveButton = () =>
+        screen.getByRole("button", {
+            name: "settings.providerSaveKey",
+        }) as HTMLButtonElement;
+
+    function renderCustom(onSaveCustom = vi.fn().mockResolvedValue(undefined)) {
+        return render(
+            <ProviderDetailModal
+                client={
+                    {
+                        providersRevealKey: vi.fn().mockResolvedValue({ key: "sk-revealed" }),
+                    } as unknown as TacoClient
+                }
+                workspace={WS}
+                provider={provider}
+                cfg={cfg}
+                existingIds={[cfg.id]}
+                mask="sk-mask…1234"
+                saving={false}
+                onSaveCustom={onSaveCustom}
+                onClose={vi.fn()}
+            />,
+        );
+    }
+
+    it("preserves frozen custom fields and all model metadata without sending a revealed key", async () => {
+        const user = userEvent.setup({ delay: null });
+        const onSave = vi.fn().mockResolvedValue(undefined);
+        renderCustom(onSave);
+        await user.click(screen.getByRole("button", { name: "settings.providerDetailReveal" }));
+        await screen.findByText("sk-revealed");
+        const endpoint = screen.getByLabelText("settings.customProviderBaseUrl");
+        await user.clear(endpoint);
+        await user.type(endpoint, "  https://changed.example/v1  ");
+        await user.click(saveButton());
+        await waitFor(() =>
+            expect(onSave).toHaveBeenCalledWith(
+                {
+                    ...cfg,
+                    baseUrl: "https://changed.example/v1",
+                },
+                "",
+            ),
+        );
+        const models = onSave.mock.calls[0][0].models;
+        expect(models).toStrictEqual(cfg.models);
+        expect(models[1]).not.toHaveProperty("input");
+        expect(models[1]).not.toHaveProperty("contextWindow");
+        expect(models[2].input).toEqual([]);
+    });
+
+    it("preserves the JSON property order of unchanged built-in extras", async () => {
+        const user = userEvent.setup({ delay: null });
+        const onSave = vi.fn().mockResolvedValue(undefined);
+        const extras = [
+            {
+                id: "rich",
+                name: "Rich model",
+                contextWindow: 999999,
+                maxTokens: 4321,
+                reasoning: false,
+                input: [],
+            },
+        ];
+        render(
+            <ProviderDetailModal
+                client={{} as TacoClient}
+                workspace={WS}
+                provider={{
+                    ...provider,
+                    id: "builtin",
+                    custom: false,
+                    models: extras.map((model) => ({
+                        ...model,
+                        provider: "builtin",
+                        origin: "extra" as const,
+                    })),
+                }}
+                existingIds={[]}
+                saving={false}
+                onSaveBuiltin={onSave}
+                onClose={vi.fn()}
+            />,
+        );
+        await clickSave(user);
+        await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
+        expect(JSON.stringify(onSave.mock.calls[0][1])).toBe(JSON.stringify(extras));
+    });
+
+    it.each(["", "   ", "  sk-new  "])(
+        "keeps or replaces a custom key from typed input %j",
+        async (key) => {
+            const user = userEvent.setup({ delay: null });
+            const onSave = vi.fn().mockResolvedValue(undefined);
+            renderCustom(onSave);
+            await user.click(screen.getByRole("button", { name: "settings.providerReplaceKey" }));
+            if (key) await user.type(screen.getByLabelText("settings.providerDetailKey"), key);
+            await user.click(saveButton());
+            await waitFor(() => expect(onSave).toHaveBeenCalledWith(cfg, key.trim()));
+        },
+    );
+
+    it.each(["   ", "  sk-new  "])(
+        "keeps or replaces a built-in key from typed input %j",
+        async (key) => {
+            const user = userEvent.setup({ delay: null });
+            const onSave = vi.fn().mockResolvedValue(undefined);
+            render(
+                <ProviderDetailModal
+                    client={{} as TacoClient}
+                    workspace={WS}
+                    provider={{
+                        ...provider,
+                        id: "builtin",
+                        custom: false,
+                        models: [
+                            {
+                                provider: "builtin",
+                                id: "rich",
+                                origin: "extra",
+                                name: "Rich model",
+                                contextWindow: 999999,
+                                maxTokens: 4321,
+                                reasoning: false,
+                                input: [],
+                            },
+                            { provider: "builtin", id: "bare", name: "bare", origin: "extra" },
+                        ],
+                    }}
+                    existingIds={[]}
+                    saving={false}
+                    onSaveBuiltin={onSave}
+                    onClose={vi.fn()}
+                />,
+            );
+            await user.click(screen.getByRole("button", { name: "settings.providerReplaceKey" }));
+            await user.type(screen.getByLabelText("settings.providerDetailKey"), key);
+            await user.click(saveButton());
+            await waitFor(() =>
+                expect(onSave).toHaveBeenCalledWith(
+                    key.trim() || undefined,
+                    [
+                        {
+                            id: "rich",
+                            name: "Rich model",
+                            contextWindow: 999999,
+                            maxTokens: 4321,
+                            reasoning: false,
+                            input: [],
+                        },
+                        { id: "bare" },
+                    ],
+                    [],
+                ),
+            );
+        },
+    );
+
+    it("updates custom validity on changes to required fields, id collisions and model removal", async () => {
+        const user = userEvent.setup({ delay: null });
+        const onSave = vi.fn().mockResolvedValue(undefined);
+        render(
+            <ProviderDetailModal
+                client={{} as TacoClient}
+                workspace={WS}
+                existingIds={["custom:taken"]}
+                saving={false}
+                onSaveCustom={onSave}
+                onClose={vi.fn()}
+            />,
+        );
+        expect(saveButton().disabled).toBe(true);
+        const name = screen.getByLabelText("settings.customProviderName");
+        const id = screen.getByLabelText("settings.customProviderId");
+        const endpoint = screen.getByLabelText("settings.customProviderBaseUrl");
+        await user.type(name, "  New provider  ");
+        await user.type(endpoint, "  https://new.example/v1  ");
+        await user.type(
+            screen.getByPlaceholderText("settings.providerModelAddPlaceholder"),
+            "model{Enter}",
+        );
+        await waitFor(() => expect(saveButton().disabled).toBe(false));
+        for (const invalidId of ["custom:taken", "wrong-prefix"]) {
+            await user.clear(id);
+            await user.type(id, invalidId);
+            await waitFor(() => expect(saveButton().disabled).toBe(true));
+        }
+        await user.clear(id);
+        await user.type(id, "custom:new");
+        await waitFor(() => expect(saveButton().disabled).toBe(false));
+        await user.clear(name);
+        await user.type(name, "   ");
+        await waitFor(() => expect(saveButton().disabled).toBe(true));
+        await user.type(name, "New provider");
+        await user.clear(endpoint);
+        await waitFor(() => expect(saveButton().disabled).toBe(true));
+        await user.type(endpoint, "  https://new.example/v1  ");
+        await user.click(screen.getByRole("button", { name: "settings.providerModelRemove" }));
+        await waitFor(() => expect(saveButton().disabled).toBe(true));
+        await user.type(
+            screen.getByPlaceholderText("settings.providerModelAddPlaceholder"),
+            "model{Enter}",
+        );
+        await waitFor(() => expect(saveButton().disabled).toBe(false));
+        await user.click(saveButton());
+        await waitFor(() =>
+            expect(onSave).toHaveBeenCalledWith(
+                {
+                    id: "custom:new",
+                    name: "New provider",
+                    api: "chatcomplete",
+                    baseUrl: "https://new.example/v1",
+                    models: [{ id: "model" }],
+                },
+                "",
+            ),
+        );
+    });
+
+    it("preserves a preset when selecting custom and clears only the window for invalid raw text", async () => {
+        const user = userEvent.setup({ delay: null });
+        const onSave = vi.fn((_cfg: CustomProviderConfig, _key: string): void => {});
+        render(
+            <ProviderDetailModal
+                client={{} as TacoClient}
+                workspace={WS}
+                provider={provider}
+                cfg={{ ...cfg, models: [{ ...cfg.models[0], contextWindow: 128000 }] }}
+                existingIds={[]}
+                saving={false}
+                onSaveCustom={onSave}
+                onClose={vi.fn()}
+            />,
+        );
+        await user.click(screen.getByRole("button", { name: "settings.providerModelWindowEdit" }));
+        await user.click(screen.getByRole("combobox", { name: "settings.providerModelWindow" }));
+        await user.click(
+            await screen.findByRole("option", { name: "settings.providerModelWindowCustom" }),
+        );
+        const input = screen.getByPlaceholderText("settings.providerModelWindowPlaceholder");
+        expect((input as HTMLInputElement).value).toBe("128000");
+        await clickSave(user);
+        await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
+        expect(onSave.mock.calls[0][0].models).toStrictEqual([
+            { ...cfg.models[0], contextWindow: 128000 },
+        ]);
+        await user.clear(input);
+        await user.type(input, "invalid");
+        await clickSave(user);
+        await waitFor(() => expect(onSave).toHaveBeenCalledTimes(2));
+        const { contextWindow: _window, ...expected } = cfg.models[0];
+        expect(onSave.mock.calls[1][0].models).toStrictEqual([expected]);
+    });
+
+    it("keeps model ids and metadata aligned after removing an earlier field-array row", async () => {
+        const user = userEvent.setup({ delay: null });
+        const onSave = vi.fn().mockResolvedValue(undefined);
+        renderCustom(onSave);
+        await user.click(
+            screen.getAllByRole("button", { name: "settings.providerModelRemove" })[0],
+        );
+        await user.click(
+            screen.getAllByRole("button", { name: "settings.providerModelWindowEdit" })[0],
+        );
+        await user.click(screen.getByRole("switch", { name: "settings.providerModelImages" }));
+        await clickSave(user);
+        await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
+        expect(onSave.mock.calls[0][0].models).toStrictEqual([
+            { id: "bare", input: ["text", "image"] },
+            { id: "empty-input", input: [] },
+        ]);
+    });
+
+    it("drops an explicit input declaration after toggling images on then off", async () => {
+        const user = userEvent.setup({ delay: null });
+        const onSave = vi.fn().mockResolvedValue(undefined);
+        renderCustom(onSave);
+        await user.click(
+            screen.getAllByRole("button", { name: "settings.providerModelWindowEdit" })[2],
+        );
+        const toggle = screen.getByRole("switch", { name: "settings.providerModelImages" });
+        await user.click(toggle);
+        await user.click(toggle);
+        await clickSave(user);
+        await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
+        expect(onSave.mock.calls[0][0].models).toStrictEqual([
+            cfg.models[0],
+            cfg.models[1],
+            { id: "empty-input" },
+        ]);
+    });
+
+    it("blocks duplicate saves until an async callback settles even before parent saving updates", async () => {
+        const user = userEvent.setup({ delay: null });
+        let resolveSave!: () => void;
+        const onSave = vi.fn(
+            () =>
+                new Promise<void>((resolve) => {
+                    resolveSave = resolve;
+                }),
+        );
+        renderCustom(onSave);
+        await waitFor(() => expect(saveButton().disabled).toBe(false));
+        await user.click(saveButton());
+        await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
+        expect(saveButton().disabled).toBe(true);
+        await user.click(saveButton());
+        expect(onSave).toHaveBeenCalledTimes(1);
+        await act(async () => resolveSave());
+        await waitFor(() => expect(saveButton().disabled).toBe(false));
+        await user.click(saveButton());
+        expect(onSave).toHaveBeenCalledTimes(2);
+        await act(async () => resolveSave());
+    });
+
+    it("serializes clicks in the same event batch and unlocks after an awaited save rejection", async () => {
+        let rejectSave!: (error: Error) => void;
+        const onSave = vi.fn(
+            () =>
+                new Promise<void>((_resolve, reject) => {
+                    rejectSave = reject;
+                }),
+        );
+        renderCustom(onSave);
+        await waitFor(() => expect(saveButton().disabled).toBe(false));
+        act(() => {
+            fireEvent.click(saveButton());
+            fireEvent.click(saveButton());
+        });
+        await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
+        expect(saveButton().disabled).toBe(true);
+        await act(async () => rejectSave(new Error("save failed")));
+        await waitFor(() => expect(saveButton().disabled).toBe(false));
+        act(() => {
+            fireEvent.click(saveButton());
+            fireEvent.click(saveButton());
+        });
+        await waitFor(() => expect(onSave).toHaveBeenCalledTimes(2));
+        await act(async () => rejectSave(new Error("retry failed")));
+        await waitFor(() => expect(saveButton().disabled).toBe(false));
+    });
+
+    it("retains the draft after rejection and respects parent saving and error props", async () => {
+        const user = userEvent.setup({ delay: null });
+        const onSave = vi.fn().mockRejectedValue(new Error("save failed"));
+        const { rerender } = renderCustom(onSave);
+        await waitFor(() => expect(saveButton().disabled).toBe(false));
+        await user.click(saveButton());
+        await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
+        rerender(
+            <ProviderDetailModal
+                client={{} as TacoClient}
+                workspace={WS}
+                provider={provider}
+                cfg={cfg}
+                existingIds={[]}
+                saving
+                saveError="save failed"
+                onSaveCustom={onSave}
+                onClose={vi.fn()}
+            />,
+        );
+        expect(screen.getByRole("alert").textContent).toBe("save failed");
+        expect(saveButton().disabled).toBe(true);
+        expect(screen.getByDisplayValue(cfg.baseUrl)).toBeTruthy();
     });
 });

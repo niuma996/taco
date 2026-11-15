@@ -9,7 +9,8 @@
  */
 import type { McpServerConfig, McpTransportKind } from "@taco-ai/protocol";
 import { MCP_TRANSPORT_KINDS } from "@taco-ai/protocol";
-import { useState } from "react";
+import { useRef } from "react";
+import { Controller, useForm, useWatch } from "react-hook-form";
 import { useT } from "../../i18n/useI18n.ts";
 import { Button } from "../ui/Button.tsx";
 import { FormField } from "../ui/FormField.tsx";
@@ -17,6 +18,12 @@ import { Modal } from "../ui/Modal.tsx";
 import { Select } from "../ui/Select.tsx";
 import { Textarea } from "../ui/Textarea.tsx";
 import { TextInput } from "../ui/TextInput.tsx";
+import {
+    type McpServerDraft,
+    mcpServerConfig,
+    mcpServerDefaults,
+    mcpServerResolver,
+} from "./mcpServerFormValues";
 
 const TRANSPORT_LABEL_KEYS = {
     stdio: "settings.mcpServerTransportStdio",
@@ -28,8 +35,6 @@ const TRANSPORT_OPTIONS = MCP_TRANSPORT_KINDS.map((value) => ({
     labelKey: TRANSPORT_LABEL_KEYS[value],
 }));
 
-const ID_PATTERN = /^[a-zA-Z0-9_-]+$/;
-
 export interface McpServerFormProps {
     /** Edit mode (existing server) or new (id must not be provided). */
     existing?: McpServerConfig;
@@ -37,7 +42,7 @@ export interface McpServerFormProps {
     existingIds: ReadonlyArray<string>;
     /** While saving, both action buttons are disabled to prevent double submits. */
     saving?: boolean;
-    onSave: (cfg: McpServerConfig) => void;
+    onSave: (cfg: McpServerConfig) => void | Promise<void>;
     onCancel: () => void;
 }
 
@@ -45,113 +50,32 @@ export function McpServerForm(props: McpServerFormProps) {
     const { t } = useT();
     const isEdit = props.existing !== undefined;
 
-    const [id, setId] = useState(props.existing?.id ?? "");
-    const [transport, setTransport] = useState<McpTransportKind>(
-        props.existing?.transport ?? "stdio",
-    );
-    const [command, setCommand] = useState(props.existing?.command ?? "");
-    const [args, setArgs] = useState((props.existing?.args ?? []).join("\n"));
-    const [env, setEnv] = useState(
-        Object.entries(props.existing?.env ?? {})
-            .map(([k, v]) => `${k}=${v}`)
-            .join("\n"),
-    );
-    const [cwd, setCwd] = useState(props.existing?.cwd ?? "");
-    const [url, setUrl] = useState(props.existing?.url ?? "");
-    const [headers, setHeaders] = useState(
-        Object.entries(props.existing?.headers ?? {})
-            .map(([k, v]) => `${k}: ${v}`)
-            .join("\n"),
-    );
-    const [timeoutMs, setTimeoutMs] = useState(
-        props.existing?.timeoutMs !== undefined ? String(props.existing.timeoutMs) : "",
-    );
-    const [alwaysLoaded, setAlwaysLoaded] = useState(
-        (props.existing?.alwaysLoaded ?? []).join("\n"),
-    );
-
-    const trimmedId = id.trim();
-    const trimmedCommand = command.trim();
-    const trimmedCwd = cwd.trim();
-    const trimmedUrl = url.trim();
-
-    const idClash = !isEdit && trimmedId !== "" && props.existingIds.includes(trimmedId);
-    const idValid = trimmedId === "" || ID_PATTERN.test(trimmedId);
-
-    // http URL must be a valid URL the sidecar's validateMcpServers will accept.
-    let urlValid = true;
-    if (transport === "http" && trimmedUrl !== "") {
+    const {
+        register,
+        control,
+        handleSubmit,
+        trigger,
+        formState: { errors, isValid, isSubmitting },
+    } = useForm<McpServerDraft>({
+        defaultValues: mcpServerDefaults(props.existing),
+        resolver: mcpServerResolver(props.existingIds, isEdit),
+        mode: "onChange",
+    });
+    const transport = useWatch({ control, name: "transport" });
+    const saving = props.saving || isSubmitting;
+    const submitting = useRef(false);
+    const save = async () => {
+        if (props.saving || submitting.current) return;
+        submitting.current = true;
         try {
-            const parsed = new URL(trimmedUrl);
-            if (parsed.protocol !== "http:" && parsed.protocol !== "https:") urlValid = false;
+            await handleSubmit(async (values) => {
+                await props.onSave(mcpServerConfig(values));
+            })();
         } catch {
-            urlValid = false;
+            // The section presents save errors and keeps this draft open for retry.
+        } finally {
+            submitting.current = false;
         }
-    }
-
-    const timeoutInt = timeoutMs === "" ? NaN : Number.parseInt(timeoutMs, 10);
-    const timeoutValid = timeoutMs === "" || (!Number.isNaN(timeoutInt) && timeoutInt > 0);
-    const canSave =
-        trimmedId !== "" &&
-        !idClash &&
-        idValid &&
-        (transport === "stdio" ? trimmedCommand !== "" : trimmedUrl !== "") &&
-        urlValid &&
-        timeoutValid;
-
-    const save = () => {
-        if (!canSave) return;
-        const cfg: McpServerConfig = {
-            id: trimmedId,
-            transport,
-            command: transport === "stdio" ? trimmedCommand : undefined,
-            args:
-                transport === "stdio" && args.trim() !== ""
-                    ? args
-                          .split("\n")
-                          .map((s) => s.trim())
-                          .filter(Boolean)
-                    : undefined,
-            env:
-                transport === "stdio" && env.trim() !== ""
-                    ? Object.fromEntries(
-                          env
-                              .split("\n")
-                              .map((s) => s.trim())
-                              .filter(Boolean)
-                              .map((s) => {
-                                  const idx = s.indexOf("=");
-                                  return idx > 0 ? [s.slice(0, idx), s.slice(idx + 1)] : [s, ""];
-                              }),
-                      )
-                    : undefined,
-            cwd: transport === "stdio" && trimmedCwd !== "" ? trimmedCwd : undefined,
-            url: transport === "http" ? trimmedUrl : undefined,
-            headers:
-                transport === "http" && headers.trim() !== ""
-                    ? Object.fromEntries(
-                          headers
-                              .split("\n")
-                              .map((s) => s.trim())
-                              .filter(Boolean)
-                              .map((s) => {
-                                  const idx = s.indexOf(":");
-                                  return idx > 0
-                                      ? [s.slice(0, idx).trim(), s.slice(idx + 1).trim()]
-                                      : [s, ""];
-                              }),
-                      )
-                    : undefined,
-            timeoutMs: timeoutMs !== "" ? Number.parseInt(timeoutMs, 10) : undefined,
-            alwaysLoaded:
-                alwaysLoaded.trim() !== ""
-                    ? alwaysLoaded
-                          .split("\n")
-                          .map((s) => s.trim())
-                          .filter(Boolean)
-                    : undefined,
-        };
-        props.onSave(cfg);
     };
 
     return (
@@ -162,45 +86,47 @@ export function McpServerForm(props: McpServerFormProps) {
             className="mcp-server-modal"
             actions={
                 <>
-                    <Button variant="ghost" onClick={props.onCancel} disabled={props.saving}>
+                    <Button variant="ghost" onClick={props.onCancel} disabled={saving}>
                         {t("settings.mcpServerCancel")}
                     </Button>
-                    <Button variant="primary" disabled={!canSave || props.saving} onClick={save}>
-                        {props.saving ? t("settings.mcpServerSaving") : t("settings.mcpServerSave")}
+                    <Button variant="primary" disabled={!isValid || saving} onClick={save}>
+                        {saving ? t("settings.mcpServerSaving") : t("settings.mcpServerSave")}
                     </Button>
                 </>
             }
         >
             <FormField
                 label={t("settings.mcpServerId")}
-                error={
-                    idClash
-                        ? t("settings.mcpServerIdClash")
-                        : idValid
-                          ? undefined
-                          : t("settings.mcpServerIdInvalid")
-                }
+                error={errors.id?.message ? t(errors.id.message) : undefined}
             >
                 <TextInput
                     type="text"
-                    value={id}
+                    {...register("id")}
                     placeholder="e.g. github, filesystem"
                     disabled={isEdit}
-                    onChange={(e) => setId(e.target.value)}
                 />
             </FormField>
 
-            <FormField label={t("settings.mcpServerTransport")}>
-                <Select
-                    value={transport}
-                    onValueChange={(v) => setTransport(v as McpTransportKind)}
-                    options={TRANSPORT_OPTIONS.map((o) => ({
-                        value: o.value,
-                        label: t(o.labelKey),
-                    }))}
-                    label={t("settings.mcpServerTransport")}
-                />
-            </FormField>
+            <Controller
+                control={control}
+                name="transport"
+                render={({ field }) => (
+                    <FormField label={t("settings.mcpServerTransport")}>
+                        <Select
+                            value={field.value}
+                            onValueChange={(value) => {
+                                field.onChange(value);
+                                void trigger();
+                            }}
+                            options={TRANSPORT_OPTIONS.map((o) => ({
+                                value: o.value,
+                                label: t(o.labelKey),
+                            }))}
+                            label={t("settings.mcpServerTransport")}
+                        />
+                    </FormField>
+                )}
+            />
 
             {transport === "stdio" && (
                 <>
@@ -210,9 +136,8 @@ export function McpServerForm(props: McpServerFormProps) {
                     >
                         <TextInput
                             type="text"
-                            value={command}
+                            {...register("command")}
                             placeholder="npx, /usr/local/bin/my-server, …"
-                            onChange={(e) => setCommand(e.target.value)}
                         />
                     </FormField>
 
@@ -221,10 +146,9 @@ export function McpServerForm(props: McpServerFormProps) {
                         hint={t("settings.mcpServerArgsHint")}
                     >
                         <Textarea
-                            value={args}
+                            {...register("args")}
                             rows={3}
                             placeholder="--flag value\n--option key=value"
-                            onChange={(e) => setArgs(e.target.value)}
                         />
                     </FormField>
 
@@ -233,10 +157,9 @@ export function McpServerForm(props: McpServerFormProps) {
                         hint={t("settings.mcpServerEnvHint")}
                     >
                         <Textarea
-                            value={env}
+                            {...register("env")}
                             rows={3}
                             placeholder="API_KEY=sk-…\nDEBUG=true"
-                            onChange={(e) => setEnv(e.target.value)}
                         />
                     </FormField>
 
@@ -246,9 +169,8 @@ export function McpServerForm(props: McpServerFormProps) {
                     >
                         <TextInput
                             type="text"
-                            value={cwd}
+                            {...register("cwd")}
                             placeholder={t("settings.mcpServerCwdPlaceholder")}
-                            onChange={(e) => setCwd(e.target.value)}
                         />
                     </FormField>
                 </>
@@ -258,13 +180,12 @@ export function McpServerForm(props: McpServerFormProps) {
                 <>
                     <FormField
                         label={t("settings.mcpServerUrl")}
-                        error={urlValid ? undefined : t("settings.mcpServerUrlInvalid")}
+                        error={errors.url?.message ? t(errors.url.message) : undefined}
                     >
                         <TextInput
                             type="text"
-                            value={url}
+                            {...register("url")}
                             placeholder="https://my-mcp-server.example.com/mcp"
-                            onChange={(e) => setUrl(e.target.value)}
                         />
                     </FormField>
 
@@ -273,10 +194,9 @@ export function McpServerForm(props: McpServerFormProps) {
                         hint={t("settings.mcpServerHeadersHint")}
                     >
                         <Textarea
-                            value={headers}
+                            {...register("headers")}
                             rows={3}
                             placeholder="Authorization: Bearer sk-…\nX-Custom-Header: value"
-                            onChange={(e) => setHeaders(e.target.value)}
                         />
                     </FormField>
                 </>
@@ -286,12 +206,7 @@ export function McpServerForm(props: McpServerFormProps) {
                 label={t("settings.mcpServerTimeout")}
                 hint={t("settings.mcpServerTimeoutHint")}
             >
-                <TextInput
-                    type="text"
-                    value={timeoutMs}
-                    placeholder="15000"
-                    onChange={(e) => setTimeoutMs(e.target.value)}
-                />
+                <TextInput type="text" {...register("timeoutMs")} placeholder="15000" />
             </FormField>
 
             <FormField
@@ -299,10 +214,9 @@ export function McpServerForm(props: McpServerFormProps) {
                 hint={t("settings.mcpServerAlwaysLoadedHint")}
             >
                 <Textarea
-                    value={alwaysLoaded}
+                    {...register("alwaysLoaded")}
                     rows={3}
                     placeholder={t("settings.mcpServerAlwaysLoadedPlaceholder")}
-                    onChange={(e) => setAlwaysLoaded(e.target.value)}
                 />
             </FormField>
         </Modal>

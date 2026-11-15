@@ -188,3 +188,51 @@ describe("ProviderSection — brand marks", () => {
         expect(card.querySelector(".provider-row-title .provider-row-dot")).toBeNull();
     });
 });
+
+describe("ProviderSection — unchanged built-in configuration", () => {
+    it("closes an unedited built-in modal without writing settings for unchanged extras", async () => {
+        const user = userEvent.setup({ delay: null });
+        const extras = [
+            {
+                id: "extra-model",
+                name: "Extra model",
+                contextWindow: 200000,
+                maxTokens: 8192,
+                reasoning: false,
+                input: ["text", "image"],
+            },
+        ];
+        const settingsWrite = vi.fn().mockResolvedValue({ global: {} });
+        const client = {
+            settingsWrite,
+            providersList: vi.fn().mockResolvedValue({
+                providers: [
+                    {
+                        ...BUILTIN_VIEW,
+                        models: [
+                            ...BUILTIN_VIEW.models,
+                            ...extras.map((model) => ({
+                                ...model,
+                                provider: BUILTIN_VIEW.id,
+                                origin: "extra",
+                            })),
+                        ],
+                    },
+                ],
+            }),
+        } as unknown as TacoClient;
+        applyGlobalConfig({
+            providerExtraModels: { [BUILTIN_VIEW.id]: extras },
+            customProviders: [],
+        } as never);
+        render(<ProviderSection client={client} workspace={WS} />);
+        await user.click(await screen.findByLabelText("Anthropic — settings.providerConfigured"));
+        const saveButton = screen.getByRole("button", {
+            name: "settings.providerSaveKey",
+        }) as HTMLButtonElement;
+        await waitFor(() => expect(saveButton.disabled).toBe(false));
+        await user.click(saveButton);
+        await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+        expect(settingsWrite).not.toHaveBeenCalled();
+    });
+});

@@ -18,11 +18,11 @@ import type {
     WorkspaceId,
 } from "@taco-ai/protocol";
 import { CUSTOM_PROVIDER_APIS, CUSTOM_PROVIDER_PREFIX } from "@taco-ai/protocol";
-import { CircleCheck, CircleX, Eye, EyeOff, Pencil, Plus, Trash, Undo2 } from "lucide-react";
-import { Fragment, useState } from "react";
+import { CircleCheck, CircleX, Eye, EyeOff } from "lucide-react";
+import { useMemo, useRef, useState } from "react";
+import { Controller, useForm, useWatch } from "react-hook-form";
 import { useT } from "../../i18n/useI18n.ts";
 import type { TacoClient } from "../../lib/clients/tacoClient.ts";
-import { formatModelWindow, parseModelWindow } from "../../lib/modelWindow.ts";
 import { ConfirmModal } from "../ConfirmModal.tsx";
 import { Button } from "../ui/Button.tsx";
 import { FormField } from "../ui/FormField.tsx";
@@ -30,9 +30,10 @@ import { IconButton } from "../ui/IconButton.tsx";
 import { Modal } from "../ui/Modal.tsx";
 import { SecretInput } from "../ui/SecretInput.tsx";
 import { Select } from "../ui/Select.tsx";
-import { Switch } from "../ui/Switch.tsx";
-import { Tag } from "../ui/Tag.tsx";
 import { TextInput } from "../ui/TextInput.tsx";
+
+import { ProviderModelFields } from "./ProviderModelFields.tsx";
+import { modelPayload, type ProviderFormDraft, providerDefaults } from "./providerForm.ts";
 
 export interface ProviderDetailModalProps {
     client: TacoClient;
@@ -62,9 +63,9 @@ export interface ProviderDetailModalProps {
         apiKey: string | undefined,
         extras: CustomModelEntry[],
         hidden: string[],
-    ) => Promise<void>;
+    ) => void | Promise<void>;
     /** Custom save: whole provider config + optional new key ("" = keep/none). */
-    onSaveCustom?: (cfg: CustomProviderConfig, apiKey: string) => Promise<void>;
+    onSaveCustom?: (cfg: CustomProviderConfig, apiKey: string) => void | Promise<void>;
     onDeleteCustom?: () => Promise<void>;
     onClose: () => void;
 }
@@ -80,71 +81,35 @@ const PROTOCOL_OPTIONS = CUSTOM_PROVIDER_APIS.map((value) => ({
     labelKey: PROTOCOL_LABEL_KEYS[value],
 }));
 
-/** Common context-window presets offered in the model rows. The "k" = 1000
- *  convention matches parseModelWindow, so a preset round-trips through the
- *  free-text input. */
-const WINDOW_PRESETS = [32_000, 128_000, 200_000, 256_000, 512_000, 1_000_000] as const;
-const WINDOW_DEFAULT = "default";
-const WINDOW_CUSTOM = "custom";
-
-/** Default id for new providers (`custom:<first 8 chars of uuid>`). */
-function defaultId(): string {
-    const slug = crypto.randomUUID().slice(0, 8);
-    return `${CUSTOM_PROVIDER_PREFIX}${slug}`;
-}
-
 export function ProviderDetailModal(props: ProviderDetailModalProps) {
     const { t } = useT();
     const provider = props.provider;
     const isCreate = provider === undefined;
     const isCustom = isCreate || provider.custom;
 
-    // Custom fields — name/api/id freeze once created (pi keys providers by id).
-    const [id, setId] = useState(props.cfg?.id ?? defaultId());
-    const [name, setName] = useState(props.cfg?.name ?? "");
-    const [api, setApi] = useState<CustomProviderApi>(props.cfg?.api ?? "chatcomplete");
-    const [baseUrl, setBaseUrl] = useState(props.cfg?.baseUrl ?? "");
+    const defaultValues = useMemo(
+        () => providerDefaults(provider, props.cfg),
+        [provider, props.cfg],
+    );
+    const form = useForm<ProviderFormDraft>({
+        mode: "onChange",
+        defaultValues,
+    });
+    const {
+        register,
+        control,
+        handleSubmit,
+        formState: { isValid, isSubmitting, errors },
+    } = form;
+    const [api, baseUrl, keyInput, models, hidden] = useWatch({
+        control,
+        name: ["api", "baseUrl", "keyInput", "models", "hidden"],
+    });
+    const saving = props.saving || isSubmitting;
 
     const [keyMode, setKeyMode] = useState<"view" | "edit">(provider?.configured ? "view" : "edit");
-    const [keyInput, setKeyInput] = useState("");
     const [revealedKey, setRevealedKey] = useState<string | null>(null);
     const [revealing, setRevealing] = useState(false);
-
-    // Models the user manages in this modal: extras for built-ins, the whole
-    // list for customs. Built-in static rows render separately — removable,
-    // with hidden ones offered back for restore. The entries keep the
-    // declared window so a save does not silently reset it to the default.
-    const [models, setModels] = useState<CustomModelEntry[]>(() => {
-        if (isCreate) return [];
-        if (isCustom) return props.cfg?.models ?? [];
-        return (provider?.models ?? [])
-            .filter((m) => m.origin === "extra")
-            .map((m) => ({
-                id: m.id,
-                // The catalog falls back to the id when the user declared no
-                // display name, so only a name that differs from the id is a
-                // real one — and it has to survive the save, or opening the
-                // panel would rewrite the entry as a bare id.
-                ...(m.name !== undefined && m.name !== m.id ? { name: m.name } : {}),
-                ...(m.contextWindow === undefined ? {} : { contextWindow: m.contextWindow }),
-                ...(m.maxTokens === undefined ? {} : { maxTokens: m.maxTokens }),
-                // A declared thinking flag must survive a save: dropping it
-                // would let the model fall back to the provider's default.
-                ...(m.reasoning === undefined ? {} : { reasoning: m.reasoning }),
-                ...(m.input === undefined ? {} : { input: m.input }),
-            }));
-    });
-    const [hidden, setHidden] = useState<string[]>(() =>
-        isCustom
-            ? []
-            : (provider?.models ?? []).filter((m) => m.origin === "hidden").map((m) => m.id),
-    );
-    // Ids from the last fetch that are not yet in the list — shown row-by-row
-    // with an add button; stays until the user adds or re-fetches.
-    const [fetched, setFetched] = useState<string[] | null>(null);
-    const [fetching, setFetching] = useState(false);
-    const [fetchError, setFetchError] = useState<string | null>(null);
-    const [manualId, setManualId] = useState("");
 
     // Visible static rows = catalog entries minus every hidden id, including
     // the ones hidden in this session (the server view only reflects saves).
@@ -153,38 +118,8 @@ export function ProviderDetailModal(props: ProviderDetailModalProps) {
         : (provider?.models ?? []).filter(
               (m) => m.origin !== "extra" && m.origin !== "hidden" && !hidden.includes(m.id),
           );
-    const staticIds = new Set(staticModels.map((m) => m.id));
 
-    /**
-     * Fetch candidates, filtered on every render rather than snapshotted at
-     * fetch time: the user can add or hide models after a fetch, and a stale
-     * snapshot would keep offering ids that are already in the list. Deduped
-     * too — an endpoint that repeats an id would otherwise render two rows
-     * with the same React key.
-     */
-    const candidates =
-        fetched === null
-            ? null
-            : [
-                  ...new Set(
-                      fetched.filter(
-                          (m) =>
-                              !staticIds.has(m) &&
-                              !models.some((x) => x.id === m) &&
-                              !hidden.includes(m),
-                      ),
-                  ),
-              ];
-
-    const idClash = isCreate && props.existingIds.includes(id);
-    const trimmedName = name.trim();
     const trimmedBaseUrl = baseUrl.trim();
-
-    // Saved providers resolve baseUrl/api/key server-side; the create form
-    // still needs the literal endpoint + typed key.
-    const canFetch = isCreate
-        ? trimmedBaseUrl !== "" && keyInput.trim() !== "" && !fetching
-        : (provider?.configured ?? false) && !fetching;
 
     // Connection test: every model the user could pick, in list order.
     const testableModels = [...staticModels.map((m) => m.id), ...models.map((m) => m.id)];
@@ -257,153 +192,39 @@ export function ProviderDetailModal(props: ProviderDetailModalProps) {
         }
     };
 
-    const fetchModels = async () => {
-        setFetching(true);
-        setFetchError(null);
-        try {
-            const result = isCreate
-                ? await props.client.providerListModels({
-                      baseUrl: trimmedBaseUrl,
-                      api,
-                      apiKey: keyInput.trim(),
-                  })
-                : await props.client.providerListModels({ providerId: provider?.id ?? "" });
-            if (!result.ok) {
-                setFetchError(result.message);
-                return;
-            }
-            if (result.models.length === 0) {
-                setFetchError(t("settings.customProviderFetchEmpty"));
-                return;
-            }
-            // Stored raw; the visible candidate list is derived per render.
-            setFetched(result.models);
-        } catch (e) {
-            setFetchError(e instanceof Error ? e.message : String(e));
-        } finally {
-            setFetching(false);
-        }
-    };
-
-    const addModel = (mid: string) => {
-        const trimmed = mid.trim();
-        if (!trimmed || staticIds.has(trimmed) || models.some((m) => m.id === trimmed)) return;
-        setModels([...models, { id: trimmed }]);
-        setManualId("");
-    };
-
-    const removeModel = (mid: string) => {
-        setModels(models.filter((m) => m.id !== mid));
-        setEditedModel((cur) => (cur === mid ? null : cur));
-        setWindowModes((d) => {
-            const { [mid]: _drop, ...rest } = d;
-            return rest;
-        });
-    };
-
-    /**
-     * Declare the model's context window. Empty / unparsable clears it, which
-     * puts the model back on the server-side default — the field is optional
-     * because a catalog model already knows its own window.
-     */
-    const writeModelWindow = (mid: string, contextWindow: number | undefined) => {
-        setModels(
-            models.map((m) => {
-                if (m.id !== mid) return m;
-                const { contextWindow: _drop, ...rest } = m;
-                return contextWindow === undefined ? rest : { ...rest, contextWindow };
-            }),
-        );
-    };
-
-    /** Declare whether the model takes images. Off drops the field: text-only is the default. */
-    const writeModelImages = (mid: string, images: boolean) => {
-        setModels(
-            models.map((m) => {
-                if (m.id !== mid) return m;
-                const { input: _drop, ...rest } = m;
-                return images ? { ...rest, input: ["text", "image"] } : rest;
-            }),
-        );
-    };
-
-    /** Raw text of the custom-window input, kept while it does not parse —
-     *  without it, invalid keystrokes would vanish on the controlled re-render. */
-    const [windowDrafts, setWindowDrafts] = useState<Record<string, string>>({});
-    /** Picker mode per model ("default" / a preset / "custom"). Explicit
-     *  state — choosing "custom" must stick even with no value declared yet,
-     *  which a value-derived mode cannot express. */
-    const [windowModes, setWindowModes] = useState<Record<string, string>>({});
-    /** Which model row has its window editor expanded; one at a time. */
-    const [editedModel, setEditedModel] = useState<string | null>(null);
-
-    /** Which control the window slot renders for this model: a preset, the
-     *  server default, or the free-text input (a draft or a non-preset value). */
-    const windowMode = (m: CustomModelEntry): string => {
-        if (windowModes[m.id] !== undefined) return windowModes[m.id];
-        if (m.contextWindow === undefined) return WINDOW_DEFAULT;
-        return WINDOW_PRESETS.includes(m.contextWindow as (typeof WINDOW_PRESETS)[number])
-            ? String(m.contextWindow)
-            : WINDOW_CUSTOM;
-    };
-
-    const onWindowModeChange = (m: CustomModelEntry, value: string) => {
-        setWindowModes((d) => ({ ...d, [m.id]: value }));
-        setWindowDrafts((d) => {
-            const { [m.id]: _drop, ...rest } = d;
-            return rest;
-        });
-        if (value === WINDOW_DEFAULT) {
-            writeModelWindow(m.id, undefined);
-        } else if (value !== WINDOW_CUSTOM) {
-            writeModelWindow(m.id, Number(value));
-        }
-    };
-
-    const onWindowDraftChange = (m: CustomModelEntry, raw: string) => {
-        setWindowDrafts((d) => ({ ...d, [m.id]: raw }));
-        writeModelWindow(m.id, parseModelWindow(raw));
-    };
-
-    const hideModel = (mid: string) => {
-        setHidden([...hidden, mid]);
-    };
-
-    const restoreModel = (mid: string) => {
-        setHidden(hidden.filter((x) => x !== mid));
-    };
-
-    const canSave = isCustom
-        ? trimmedName !== "" &&
-          trimmedBaseUrl !== "" &&
-          models.length > 0 &&
-          id.startsWith(CUSTOM_PROVIDER_PREFIX) &&
-          !idClash
-        : true;
-
-    const submit = async () => {
-        if (!canSave || props.saving) return;
+    const submitLock = useRef(false);
+    const saveDraft = handleSubmit(async (draft) => {
+        const payloadModels = draft.models.map(modelPayload);
         try {
             if (isCustom) {
                 await props.onSaveCustom?.(
                     {
-                        id,
-                        name: trimmedName,
-                        api,
-                        baseUrl: trimmedBaseUrl,
-                        models,
+                        id: draft.id,
+                        name: draft.name.trim(),
+                        api: draft.api,
+                        baseUrl: draft.baseUrl.trim(),
+                        models: payloadModels,
                     },
-                    keyInput.trim(),
+                    draft.keyInput.trim(),
                 );
             } else {
-                // Edit mode with a typed key replaces it; view mode (or an empty
-                // field) leaves the stored key untouched.
-                const newKey =
-                    keyMode === "edit" && keyInput.trim() !== "" ? keyInput.trim() : undefined;
-                await props.onSaveBuiltin?.(newKey, models, hidden);
+                // Only explicitly typed secrets can replace the stored key.
+                const newKey = keyMode === "edit" ? draft.keyInput.trim() || undefined : undefined;
+                await props.onSaveBuiltin?.(newKey, payloadModels, draft.hidden);
             }
         } catch {
-            // Surfaced through the caller's saveError prop; keep the modal open.
+            // The caller supplies saveError; retain the draft for retry.
+        }
+    });
+
+    const submit = async () => {
+        // RHF updates isSubmitting on render; the lock also covers same-batch events.
+        if (saving || submitLock.current) return;
+        submitLock.current = true;
+        try {
+            await saveDraft();
+        } finally {
+            submitLock.current = false;
         }
     };
 
@@ -431,18 +252,18 @@ export function ProviderDetailModal(props: ProviderDetailModalProps) {
                         <Button
                             variant="danger"
                             className="provider-detail-delete"
-                            disabled={props.saving}
+                            disabled={saving}
                             onClick={() => setConfirmingDelete(true)}
                         >
                             {t("settings.customProviderDeleteBtn")}
                         </Button>
                     )}
-                    <Button variant="ghost" disabled={props.saving} onClick={props.onClose}>
+                    <Button variant="ghost" disabled={saving} onClick={props.onClose}>
                         {t("settings.providerCancel")}
                     </Button>
                     <Button
                         variant="primary"
-                        disabled={props.saving || !canSave}
+                        disabled={saving || !isValid}
                         onClick={() => void submit()}
                     >
                         {t("settings.providerSaveKey")}
@@ -498,12 +319,11 @@ export function ProviderDetailModal(props: ProviderDetailModalProps) {
                     </div>
                 ) : (
                     <SecretInput
-                        value={keyInput}
+                        {...register("keyInput")}
                         placeholder={t("settings.providerKeyPlaceholder")}
                         autoComplete="off"
                         revealLabel={t("settings.providerDetailReveal")}
                         hideLabel={t("settings.providerDetailHide")}
-                        onChange={(e) => setKeyInput(e.target.value)}
                     />
                 )}
             </FormField>
@@ -513,42 +333,60 @@ export function ProviderDetailModal(props: ProviderDetailModalProps) {
                     <FormField label={t("settings.customProviderName")}>
                         <TextInput
                             type="text"
-                            value={name}
+                            {...register("name", {
+                                validate: (value) => !isCustom || value.trim() !== "",
+                            })}
                             placeholder={t("settings.customProviderNamePlaceholder")}
                             disabled={!isCreate}
-                            onChange={(e) => setName(e.target.value)}
                         />
                     </FormField>
                     <FormField
                         label={t("settings.customProviderId")}
-                        error={idClash ? t("settings.customProviderIdClash") : undefined}
+                        error={
+                            errors.id?.type === "clash"
+                                ? t("settings.customProviderIdClash")
+                                : undefined
+                        }
                     >
                         <TextInput
                             type="text"
-                            value={id}
+                            {...register("id", {
+                                validate: {
+                                    prefix: (value) =>
+                                        !isCustom || value.startsWith(CUSTOM_PROVIDER_PREFIX),
+                                    clash: (value) =>
+                                        !isCreate || !props.existingIds.includes(value),
+                                },
+                            })}
                             disabled={!isCreate}
-                            onChange={(e) => setId(e.target.value)}
                         />
                     </FormField>
-                    <FormField label={t("settings.customProviderApi")}>
-                        <Select
-                            className="provider-api-select"
-                            value={api}
-                            disabled={!isCreate}
-                            onValueChange={(v) => setApi(v as CustomProviderApi)}
-                            options={PROTOCOL_OPTIONS.map((opt) => ({
-                                value: opt.value,
-                                label: t(opt.labelKey),
-                            }))}
-                            label={t("settings.customProviderApi")}
-                        />
-                    </FormField>
+                    <Controller
+                        control={control}
+                        name="api"
+                        render={({ field }) => (
+                            <FormField label={t("settings.customProviderApi")}>
+                                <Select
+                                    className="provider-api-select"
+                                    value={field.value}
+                                    disabled={!isCreate}
+                                    onValueChange={field.onChange}
+                                    options={PROTOCOL_OPTIONS.map((opt) => ({
+                                        value: opt.value,
+                                        label: t(opt.labelKey),
+                                    }))}
+                                    label={t("settings.customProviderApi")}
+                                />
+                            </FormField>
+                        )}
+                    />
                     <FormField label={t("settings.customProviderBaseUrl")}>
                         <TextInput
                             type="text"
-                            value={baseUrl}
+                            {...register("baseUrl", {
+                                validate: (value) => !isCustom || value.trim() !== "",
+                            })}
                             placeholder={t("settings.customProviderBaseUrlPlaceholder")}
-                            onChange={(e) => setBaseUrl(e.target.value)}
                         />
                     </FormField>
                 </>
@@ -580,230 +418,14 @@ export function ProviderDetailModal(props: ProviderDetailModalProps) {
                 </>
             )}
 
-            <FormField
-                label={t("settings.providerDetailModels")}
-                group
-                action={
-                    <Button
-                        type="button"
-                        size="sm"
-                        disabled={!canFetch}
-                        onClick={() => void fetchModels()}
-                    >
-                        {fetching
-                            ? t("settings.customProviderFetching")
-                            : t("settings.customProviderFetch")}
-                    </Button>
-                }
-                error={fetchError ?? undefined}
-                hint={
-                    !isCreate && !provider?.configured
-                        ? t("settings.providerFetchNeedKey")
-                        : candidates !== null && candidates.length === 0
-                          ? t("settings.providerFetchAllKnown")
-                          : undefined
-                }
-            >
-                <div className="provider-detail-models">
-                    {staticModels.map((m) => (
-                        <div className="provider-detail-model-row" key={m.id}>
-                            <span className="provider-detail-model-id" title={m.id}>
-                                {m.id}
-                            </span>
-                            <Tag className="provider-row-badge">
-                                {t("settings.providerOriginBuiltin")}
-                            </Tag>
-                            <IconButton
-                                size="sm"
-                                tone="danger"
-                                aria-label={t("settings.providerModelHide")}
-                                title={t("settings.providerModelHide")}
-                                disabled={props.saving}
-                                onClick={() => hideModel(m.id)}
-                            >
-                                <Trash size={12} aria-hidden="true" />
-                            </IconButton>
-                        </div>
-                    ))}
-                    {models.map((m) => (
-                        <Fragment key={m.id}>
-                            <div className="provider-detail-model-row">
-                                <span className="provider-detail-model-id" title={m.id}>
-                                    {m.id}
-                                </span>
-                                {!isCustom && (
-                                    <Tag className="provider-row-badge">
-                                        {t("settings.providerOriginExtra")}
-                                    </Tag>
-                                )}
-                                <Tag
-                                    className="provider-row-badge"
-                                    title={t("settings.providerModelWindow")}
-                                >
-                                    {m.contextWindow === undefined
-                                        ? t("settings.providerModelWindowDefault")
-                                        : formatModelWindow(m.contextWindow)}
-                                </Tag>
-                                {m.input?.includes("image") && (
-                                    <Tag className="provider-row-badge">
-                                        {t("settings.providerModelImagesBadge")}
-                                    </Tag>
-                                )}
-                                <IconButton
-                                    size="sm"
-                                    aria-label={t("settings.providerModelWindowEdit")}
-                                    title={t("settings.providerModelWindowEdit")}
-                                    disabled={props.saving}
-                                    aria-expanded={editedModel === m.id}
-                                    onClick={() =>
-                                        setEditedModel((cur) => (cur === m.id ? null : m.id))
-                                    }
-                                >
-                                    <Pencil size={12} aria-hidden="true" />
-                                </IconButton>
-                                <IconButton
-                                    size="sm"
-                                    tone="danger"
-                                    aria-label={t("settings.providerModelRemove")}
-                                    title={t("settings.providerModelRemove")}
-                                    disabled={props.saving}
-                                    onClick={() => removeModel(m.id)}
-                                >
-                                    <Trash size={12} aria-hidden="true" />
-                                </IconButton>
-                            </div>
-                            {editedModel === m.id && (
-                                <div className="provider-detail-model-editor">
-                                    <span className="provider-detail-model-editor-label">
-                                        {t("settings.providerModelWindow")}
-                                    </span>
-                                    {windowMode(m) === WINDOW_CUSTOM ? (
-                                        <TextInput
-                                            type="text"
-                                            inputMode="numeric"
-                                            className="provider-detail-model-window"
-                                            value={
-                                                windowDrafts[m.id] ??
-                                                m.contextWindow?.toString() ??
-                                                ""
-                                            }
-                                            placeholder={t(
-                                                "settings.providerModelWindowPlaceholder",
-                                            )}
-                                            title={t("settings.providerModelWindowTitle")}
-                                            autoFocus
-                                            onChange={(e) => onWindowDraftChange(m, e.target.value)}
-                                        />
-                                    ) : (
-                                        <Select
-                                            className="provider-detail-model-window"
-                                            label={t("settings.providerModelWindow")}
-                                            value={windowMode(m)}
-                                            onValueChange={(v) => onWindowModeChange(m, v)}
-                                            options={[
-                                                {
-                                                    value: WINDOW_DEFAULT,
-                                                    label: t("settings.providerModelWindowDefault"),
-                                                },
-                                                ...WINDOW_PRESETS.map((p) => ({
-                                                    value: String(p),
-                                                    label: formatModelWindow(p),
-                                                })),
-                                                {
-                                                    value: WINDOW_CUSTOM,
-                                                    label: t("settings.providerModelWindowCustom"),
-                                                },
-                                            ]}
-                                        />
-                                    )}
-                                    {/* editedModel opens one editor, so this id stays unique. */}
-                                    <span
-                                        id="provider-detail-model-images"
-                                        className="provider-detail-model-editor-label"
-                                    >
-                                        {t("settings.providerModelImages")}
-                                    </span>
-                                    <Switch
-                                        labelledBy="provider-detail-model-images"
-                                        checked={m.input?.includes("image") ?? false}
-                                        disabled={props.saving}
-                                        onChange={(on) => writeModelImages(m.id, on)}
-                                    />
-                                </div>
-                            )}
-                        </Fragment>
-                    ))}
-                    {hidden.map((mid) => (
-                        <div
-                            className="provider-detail-model-row provider-detail-model-row--off"
-                            key={mid}
-                        >
-                            <span className="provider-detail-model-id" title={mid}>
-                                {mid}
-                            </span>
-                            <Tag className="provider-row-badge">
-                                {t("settings.providerOriginHidden")}
-                            </Tag>
-                            <IconButton
-                                size="sm"
-                                aria-label={t("settings.providerModelRestore")}
-                                title={t("settings.providerModelRestore")}
-                                disabled={props.saving}
-                                onClick={() => restoreModel(mid)}
-                            >
-                                <Undo2 size={12} aria-hidden="true" />
-                            </IconButton>
-                        </div>
-                    ))}
-                    {isCustom && models.length === 0 && (
-                        <div className="provider-detail-empty">
-                            {t("settings.providerDetailNoModels")}
-                        </div>
-                    )}
-                </div>
-            </FormField>
-
-            {candidates !== null && candidates.length > 0 && (
-                <div className="provider-detail-models provider-detail-fetched">
-                    {candidates.map((mid) => (
-                        <div className="provider-detail-model-row" key={mid}>
-                            <span className="provider-detail-model-id" title={mid}>
-                                {mid}
-                            </span>
-                            <IconButton
-                                size="sm"
-                                aria-label={t("settings.providerModelAdd")}
-                                title={t("settings.providerModelAdd")}
-                                onClick={() => addModel(mid)}
-                            >
-                                <Plus size={12} aria-hidden="true" />
-                            </IconButton>
-                        </div>
-                    ))}
-                </div>
-            )}
-
-            <div className="provider-detail-add-row">
-                <TextInput
-                    type="text"
-                    value={manualId}
-                    placeholder={t("settings.providerModelAddPlaceholder")}
-                    onChange={(e) => setManualId(e.target.value)}
-                    onKeyDown={(e) => {
-                        if (e.key === "Enter") {
-                            e.preventDefault();
-                            addModel(manualId);
-                        }
-                    }}
-                />
-                <Button
-                    variant="default"
-                    disabled={!manualId.trim()}
-                    onClick={() => addModel(manualId)}
-                >
-                    {t("settings.providerModelAdd")}
-                </Button>
-            </div>
+            <ProviderModelFields
+                form={form}
+                client={props.client}
+                provider={provider}
+                isCustom={isCustom}
+                saving={saving}
+                staticModels={staticModels}
+            />
 
             <FormField
                 label={t("settings.providerTestTitle")}
@@ -881,7 +503,7 @@ export function ProviderDetailModal(props: ProviderDetailModalProps) {
                     confirmLabel={t("settings.customProviderDeleteConfirmBtn")}
                     cancelLabel={t("settings.providerCancel")}
                     tone="danger"
-                    busy={props.saving}
+                    busy={saving}
                     onConfirm={() => {
                         setConfirmingDelete(false);
                         void props.onDeleteCustom?.();

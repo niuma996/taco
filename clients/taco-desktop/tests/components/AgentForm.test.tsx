@@ -3,7 +3,7 @@
  * different fields; each must save only what belongs to its runtime.
  */
 import { strict as assert } from "node:assert";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, it, vi } from "vitest";
 
@@ -32,7 +32,381 @@ async function fillRequired(name: string) {
     return user;
 }
 
+function deferred() {
+    let resolve = () => {};
+    let reject = (_reason: Error) => {};
+    const promise = new Promise<void>((resolvePromise, rejectPromise) => {
+        resolve = () => resolvePromise();
+        reject = rejectPromise;
+    });
+    return { promise, resolve, reject };
+}
+
 describe("AgentForm", () => {
+    const validExisting: AgentFormValue = {
+        scope: "global",
+        agentType: "reviewer",
+        description: "Reviews changes",
+        runtime: "standard",
+        maxTurns: 100,
+        systemPrompt: "Review carefully.",
+    };
+    const saveButton = () =>
+        screen.getByRole<HTMLButtonElement>("button", { name: "agents.form.save" });
+    const change = (label: string, value: string) =>
+        fireEvent.change(screen.getByRole("textbox", { name: label }), { target: { value } });
+
+    it("trims metadata but preserves prompt whitespace and optional property semantics", async () => {
+        const onSave = vi.fn();
+        render(
+            <AgentForm
+                {...base}
+                runtime="standard"
+                existing={validExisting}
+                onSave={onSave}
+                onCancel={() => {}}
+            />,
+        );
+        change("agents.form.name", "  reviewer-two  ");
+        change("agents.form.description", "  trimmed description  ");
+        change("agents.form.whenToUse", "  ");
+        change("agents.form.timeoutMinutes", "  ");
+        change("agents.form.systemPrompt", "  Keep this whitespace.\n  ");
+        await waitFor(() => assert.equal(saveButton().disabled, false));
+        await userEvent.setup({ delay: null }).click(saveButton());
+        assert.deepEqual(onSave.mock.calls[0]?.[0], {
+            ...validExisting,
+            agentType: "reviewer-two",
+            description: "trimmed description",
+            whenToUse: undefined,
+            systemPrompt: "  Keep this whitespace.\n  ",
+        });
+        change("agents.form.whenToUse", "  For code review  ");
+        await waitFor(() => assert.equal(saveButton().disabled, false));
+        await userEvent.setup({ delay: null }).click(saveButton());
+        assert.equal(onSave.mock.calls[1]?.[0].whenToUse, "For code review");
+    });
+
+    for (const [label, valid, invalid] of [
+        [
+            "agents.form.maxTurns",
+            ["1", "500", " 30 "],
+            ["", "0", "501", "01", "+1", "1.0", "1e2", "10x", "-1"],
+        ],
+        [
+            "agents.form.timeoutMinutes",
+            ["", "  ", "1", "600", " 45 "],
+            ["0", "601", "01", "+1", "1.0", "1e2", "10x", "-1"],
+        ],
+    ] as const) {
+        it(`requires exact integer text and range for ${label}`, async () => {
+            const onSave = vi.fn();
+            render(
+                <AgentForm
+                    {...base}
+                    runtime="standard"
+                    existing={validExisting}
+                    onSave={onSave}
+                    onCancel={() => {}}
+                />,
+            );
+            for (const value of invalid) {
+                change(label, value);
+                await waitFor(() =>
+                    assert.equal(saveButton().disabled, true, JSON.stringify(value)),
+                );
+            }
+            for (const value of valid) {
+                change(label, value);
+                await waitFor(() =>
+                    assert.equal(saveButton().disabled, false, JSON.stringify(value)),
+                );
+                await userEvent.setup({ delay: null }).click(saveButton());
+                const saved = onSave.mock.calls.at(-1)?.[0];
+                const field = label === "agents.form.maxTurns" ? "maxTurns" : "timeoutMinutes";
+                assert.equal(saved[field], value.trim() === "" ? undefined : Number(value.trim()));
+            }
+        });
+    }
+
+    it("ignores foreign runtime fields while retaining the existing scope", async () => {
+        const onSave = vi.fn();
+        render(
+            <AgentForm
+                {...base}
+                runtime="standard"
+                fixedScope="workspace"
+                existing={{
+                    ...validExisting,
+                    tools: ["AskUserQuestion"],
+                    cwd: "/foreign",
+                    permissionMode: "plan",
+                    codex: { model: "x".repeat(257) },
+                }}
+                onSave={onSave}
+                onCancel={() => {}}
+            />,
+        );
+        await waitFor(() => assert.equal(saveButton().disabled, false));
+        await userEvent.setup({ delay: null }).click(saveButton());
+        assert.deepEqual(onSave.mock.calls[0]?.[0], { ...validExisting, whenToUse: undefined });
+    });
+
+    it("preserves a Codex cwd from another workspace and omits cleared model and cwd", async () => {
+        const onSave = vi.fn();
+        const existing = {
+            ...validExisting,
+            runtime: "codex" as const,
+            codex: { cwd: "/elsewhere/repo", model: "  custom-model  " },
+        };
+        const { unmount } = render(
+            <AgentForm
+                {...base}
+                runtime="codex"
+                existing={existing}
+                onSave={onSave}
+                onCancel={() => {}}
+            />,
+        );
+        assert.match(
+            screen.getByRole("combobox", { name: "agents.form.codexCwd" }).textContent ?? "",
+            /elsewhere/,
+        );
+        await waitFor(() => assert.equal(saveButton().disabled, false));
+        await userEvent.setup({ delay: null }).click(saveButton());
+        assert.deepEqual(onSave.mock.calls[0]?.[0].codex, {
+            cwd: "/elsewhere/repo",
+            model: "custom-model",
+            sandbox: "read-only",
+            approvalPolicy: "never",
+        });
+        unmount();
+        render(
+            <AgentForm
+                {...base}
+                cwdChoices={[]}
+                runtime="codex"
+                existing={{ ...existing, codex: { cwd: "", model: "  " } }}
+                onSave={onSave}
+                onCancel={() => {}}
+            />,
+        );
+        await waitFor(() => assert.equal(saveButton().disabled, false));
+        await userEvent.setup({ delay: null }).click(saveButton());
+        assert.deepEqual(onSave.mock.calls[1]?.[0].codex, {
+            sandbox: "read-only",
+            approvalPolicy: "never",
+        });
+    });
+
+    it("retains invalid hidden Codex turn budgets and over-limit prompts as validation failures", async () => {
+        const onSave = vi.fn();
+        const { unmount } = render(
+            <AgentForm
+                {...base}
+                runtime="codex"
+                existing={{ ...validExisting, runtime: "codex", maxTurns: 501 }}
+                onSave={onSave}
+                onCancel={() => {}}
+            />,
+        );
+        await waitFor(() => assert.equal(saveButton().disabled, true));
+        unmount();
+        render(
+            <AgentForm
+                {...base}
+                runtime="standard"
+                existing={{ ...validExisting, systemPrompt: "x".repeat(65537) }}
+                onSave={onSave}
+                onCancel={() => {}}
+            />,
+        );
+        await userEvent.setup({ delay: null }).click(screen.getByRole("switch"));
+        assert.equal(saveButton().disabled, true);
+    });
+
+    it("waits for onSave and prevents duplicate submissions until it settles", async () => {
+        const pending = deferred();
+        const onSave = vi.fn(() => pending.promise);
+        const onCancel = vi.fn();
+        render(
+            <AgentForm
+                {...base}
+                runtime="standard"
+                existing={validExisting}
+                onSave={onSave}
+                onCancel={onCancel}
+            />,
+        );
+        await waitFor(() => assert.equal(saveButton().disabled, false));
+        const save = saveButton();
+        act(() => {
+            fireEvent.click(save);
+            fireEvent.click(save);
+        });
+        await waitFor(() => assert.equal(onSave.mock.calls.length, 1));
+        const busy = await screen.findByRole<HTMLButtonElement>("button", {
+            name: "agents.form.saving",
+        });
+        assert.equal(busy.disabled, true);
+        const cancel = screen.getByRole<HTMLButtonElement>("button", {
+            name: "agents.form.cancel",
+        });
+        assert.equal(cancel.disabled, true);
+        fireEvent.click(busy);
+        fireEvent.click(cancel);
+        assert.equal(onSave.mock.calls.length, 1);
+        assert.equal(onCancel.mock.calls.length, 0);
+        await act(async () => pending.resolve());
+        await waitFor(() => assert.equal(saveButton().disabled, false));
+        assert.equal(cancel.disabled, false);
+    });
+
+    it("retains the draft after a rejected save and allows retry", async () => {
+        const pending = deferred();
+        const onSave = vi
+            .fn<(value: AgentFormValue) => Promise<void>>()
+            .mockImplementationOnce(() => pending.promise)
+            .mockResolvedValueOnce(undefined);
+        const props = {
+            ...base,
+            runtime: "standard" as const,
+            existing: validExisting,
+            onSave,
+            onCancel: () => {},
+        };
+        const { rerender } = render(<AgentForm {...props} />);
+        change("agents.form.description", "Draft survives");
+        await waitFor(() => assert.equal(saveButton().disabled, false));
+        fireEvent.click(saveButton());
+        await screen.findByRole("button", { name: "agents.form.saving" });
+        await act(async () => pending.reject(new Error("Write failed")));
+        rerender(<AgentForm {...props} error="Write failed" />);
+        assert.equal(screen.getByRole("alert").textContent, "Write failed");
+        assert.equal(
+            screen.getByRole<HTMLInputElement>("textbox", { name: "agents.form.description" })
+                .value,
+            "Draft survives",
+        );
+        await waitFor(() => assert.equal(saveButton().disabled, false));
+        await userEvent.setup({ delay: null }).click(saveButton());
+        assert.equal(onSave.mock.calls.length, 2);
+        assert.deepEqual(onSave.mock.calls[0]?.[0], onSave.mock.calls[1]?.[0]);
+    });
+
+    it("keeps both buttons disabled while external saving is active", async () => {
+        const onSave = vi.fn();
+        const props = {
+            ...base,
+            runtime: "standard" as const,
+            existing: validExisting,
+            onSave,
+            onCancel: () => {},
+        };
+        const { rerender } = render(<AgentForm {...props} saving />);
+        assert.equal(
+            screen.getByRole<HTMLButtonElement>("button", { name: "agents.form.saving" }).disabled,
+            true,
+        );
+        assert.equal(
+            screen.getByRole<HTMLButtonElement>("button", { name: "agents.form.cancel" }).disabled,
+            true,
+        );
+        rerender(<AgentForm {...props} saving={false} />);
+        await waitFor(() => assert.equal(saveButton().disabled, false));
+    });
+
+    for (const runtime of ["standard", "claude-code", "codex"] as const) {
+        it(`${runtime} pickers retain native labels and linked hints`, () => {
+            render(<AgentForm {...base} runtime={runtime} onSave={() => {}} onCancel={() => {}} />);
+            for (const picker of screen.getAllByRole("combobox")) {
+                const label = document.querySelector<HTMLLabelElement>(`label[for="${picker.id}"]`);
+                assert.ok(label, "Controller must leave Select as FormField's direct child");
+                assert.equal(label.control === picker, true);
+                const hint = picker.getAttribute("aria-describedby");
+                assert.ok(hint);
+                assert.ok(document.getElementById(hint));
+            }
+        });
+    }
+
+    it("submits an empty role body without losing the prompt used on the next save", async () => {
+        const onSave = vi.fn();
+        render(
+            <AgentForm
+                {...base}
+                runtime="standard"
+                existing={validExisting}
+                onSave={onSave}
+                onCancel={() => {}}
+            />,
+        );
+        const user = userEvent.setup({ delay: null });
+        await user.click(screen.getByRole("switch"));
+        await waitFor(() => assert.equal(saveButton().disabled, false));
+        await user.click(saveButton());
+        assert.equal(onSave.mock.calls[0]?.[0].systemPrompt, "");
+        await user.click(screen.getByRole("switch"));
+        await user.click(saveButton());
+        assert.equal(onSave.mock.calls[1]?.[0].systemPrompt, validExisting.systemPrompt);
+    });
+
+    it("Claude Code keeps an empty cwd omitted and separator-only tools explicitly undefined", async () => {
+        const onSave = vi.fn();
+        render(
+            <AgentForm
+                {...base}
+                cwdChoices={[]}
+                runtime="claude-code"
+                existing={{ ...validExisting, runtime: "claude-code", cwd: "", tools: [] }}
+                onSave={onSave}
+                onCancel={() => {}}
+            />,
+        );
+        change("agents.form.ccTools", " , \n , ");
+        await waitFor(() => assert.equal(saveButton().disabled, false));
+        await userEvent.setup({ delay: null }).click(saveButton());
+        const saved = onSave.mock.calls[0]?.[0];
+        assert.equal(Object.hasOwn(saved, "cwd"), false);
+        assert.equal(Object.hasOwn(saved, "tools"), true);
+        assert.equal(saved.tools, undefined);
+    });
+
+    it("validates Codex model limits and submits changed engine pickers", async () => {
+        const onSave = vi.fn();
+        render(
+            <AgentForm
+                {...base}
+                runtime="codex"
+                existing={{ ...validExisting, runtime: "codex" }}
+                onSave={onSave}
+                onCancel={() => {}}
+            />,
+        );
+        await waitFor(() => assert.equal(saveButton().disabled, false));
+        change("agents.form.codexModel", "x".repeat(257));
+        await waitFor(() => assert.equal(saveButton().disabled, true));
+        change("agents.form.codexModel", "  custom-model  ");
+        await waitFor(() => assert.equal(saveButton().disabled, false));
+        const user = userEvent.setup({ delay: null });
+        for (const [label, option] of [
+            ["agents.form.codexCwd", "/work/assoc"],
+            ["agents.form.codexSandbox", "agents.form.codexSandboxMode.workspace-write"],
+            ["agents.form.codexApproval", "agents.form.codexApprovalMode.on-request"],
+        ]) {
+            await user.click(screen.getByRole("combobox", { name: label }));
+            await user.click(await screen.findByRole("option", { name: option }));
+        }
+        assert.ok(screen.getByText("agents.form.codexApprovalNotice"));
+        await user.click(saveButton());
+        assert.deepEqual(onSave.mock.calls[0]?.[0].codex, {
+            cwd: "/work/assoc",
+            model: "custom-model",
+            sandbox: "workspace-write",
+            approvalPolicy: "on-request",
+        });
+    });
+
     it("locks creation to the scope selected in the pane", async () => {
         const onSave = vi.fn<(v: AgentFormValue) => void>();
         render(
@@ -118,7 +492,7 @@ describe("AgentForm", () => {
     });
 
     for (const tools of [undefined, [], ["chatToAgent"]]) {
-        it(`Codex dialog: preserves tools ${JSON.stringify(tools)} when editing the description`, () => {
+        it(`Codex dialog: preserves tools ${JSON.stringify(tools)} when editing the description`, async () => {
             const onSave = vi.fn<(v: AgentFormValue) => void>();
             render(
                 <AgentForm
@@ -140,7 +514,9 @@ describe("AgentForm", () => {
             fireEvent.change(screen.getByRole("textbox", { name: "agents.form.description" }), {
                 target: { value: "updated" },
             });
-            fireEvent.click(screen.getByText("agents.form.save"));
+            await waitFor(() => assert.equal(saveButton().disabled, false));
+            await userEvent.setup({ delay: null }).click(saveButton());
+            await waitFor(() => assert.equal(onSave.mock.calls.length, 1));
             const saved = onSave.mock.calls[0]?.[0];
             assert.ok(saved);
             assert.equal(saved.description, "updated");
@@ -279,7 +655,7 @@ describe("AgentForm", () => {
         ["systemPrompt", (inputs) => [inputs[inputs.length - 1] as HTMLElement, "x".repeat(65537)]],
     ];
     for (const [field, pick] of limitCases) {
-        it(`disables save when ${field} exceeds the server limit`, () => {
+        it(`disables save when ${field} exceeds the server limit`, async () => {
             const onSave = vi.fn<(v: AgentFormValue) => void>();
             render(<AgentForm {...base} runtime="standard" onSave={onSave} onCancel={() => {}} />);
             const inputs = screen.getAllByRole("textbox");
@@ -291,11 +667,13 @@ describe("AgentForm", () => {
             const save = screen
                 .getByText("agents.form.save")
                 .closest("button") as HTMLButtonElement;
-            assert.equal(save.disabled, false, "baseline form must be savable");
+            await waitFor(() =>
+                assert.equal(save.disabled, false, "baseline form must be savable"),
+            );
 
             const [el, value] = pick(screen.getAllByRole("textbox"));
             fireEvent.change(el, { target: { value } });
-            assert.equal(save.disabled, true);
+            await waitFor(() => assert.equal(save.disabled, true));
             assert.equal(onSave.mock.calls.length, 0);
         });
     }
@@ -554,7 +932,9 @@ describe("AgentForm", () => {
                 />,
             );
             assert.match(cwdTrigger().textContent ?? "", /\/work\/repo/);
-            await userEvent.setup({ delay: null }).click(screen.getByText("agents.form.save"));
+            await waitFor(() => assert.equal(saveButton().disabled, false));
+            await userEvent.setup({ delay: null }).click(saveButton());
+            await waitFor(() => assert.equal(onSave.mock.calls.length, 1));
             assert.equal(onSave.mock.calls[0]?.[0].cwd, "/work/repo");
         });
 
@@ -582,7 +962,9 @@ describe("AgentForm", () => {
                 />,
             );
             assert.match(cwdTrigger().textContent ?? "", /\/elsewhere\/repo/);
-            await userEvent.setup({ delay: null }).click(screen.getByText("agents.form.save"));
+            await waitFor(() => assert.equal(saveButton().disabled, false));
+            await userEvent.setup({ delay: null }).click(saveButton());
+            await waitFor(() => assert.equal(onSave.mock.calls.length, 1));
             assert.equal(onSave.mock.calls[0]?.[0].cwd, "/elsewhere/repo");
         });
 
