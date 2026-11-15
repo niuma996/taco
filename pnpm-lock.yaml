@@ -236,8 +236,8 @@ importers:
         specifier: 1.30.0
         version: 1.30.0(zod@4.4.3)
       '@taco-ai/pi-harness':
-        specifier: 0.2.0
-        version: 0.2.0(@earendil-works/chord@1.5.2(esbuild@0.28.2)(ws@8.21.0))(@earendil-works/pi-ai@1.5.2(@aws-sdk/credential-provider-node@3.972.83)(@modelcontextprotocol/sdk@1.30.0(zod@4.4.3))(@smithy/signature-v4@5.7.3)(ws@8.21.0)(zod@4.4.3))(@earendil-works/pi-telemetry@1.5.2)
+        specifier: 0.2.1
+        version: 0.2.1(@earendil-works/chord@1.5.2(esbuild@0.28.2)(ws@8.21.0))(@earendil-works/pi-ai@1.5.2(@aws-sdk/credential-provider-node@3.972.83)(@modelcontextprotocol/sdk@1.30.0(zod@4.4.3))(@smithy/signature-v4@5.7.3)(ws@8.21.0)(zod@4.4.3))(@earendil-works/pi-telemetry@1.5.2)
       '@taco-ai/protocol':
         specifier: workspace:*
         version: link:../protocol
@@ -1996,8 +1996,8 @@ packages:
   '@standard-schema/spec@1.1.0':
     resolution: {integrity: sha512-l2aFy5jALhniG5HgqrD6jXLi/rUWrKvqN/qJx6yoJsgKhblVd+iqqU4RCXavm/jPityDo5TCvKMnpjKnOriy0w==}
 
-  '@taco-ai/pi-harness@0.2.0':
-    resolution: {integrity: sha512-4QGoEOG+kSLViNltLmAq7qshUIl4BuOadb5eDuVcOxartDrTOpZaHz7EesoPMKyZPDuVcc3mEE2xKSyCZf0jeg==}
+  '@taco-ai/pi-harness@0.2.1':
+    resolution: {integrity: sha512-A845L6gu5+MXgQSv8Ea/kYZKARcmyHIVoSXhmZJ8NIYS7QsgwgD1iZUkoBBdyktcakqLI/rBCIJ5ULuyfaIhEA==}
     engines: {node: '>=22.19.0'}
     peerDependencies:
       '@earendil-works/chord': 1.5.2
@@ -5851,7 +5851,7 @@ snapshots:
 
   '@standard-schema/spec@1.1.0': {}
 
-  '@taco-ai/pi-harness@0.2.0(@earendil-works/chord@1.5.2(esbuild@0.28.2)(ws@8.21.0))(@earendil-works/pi-ai@1.5.2(@aws-sdk/credential-provider-node@3.972.83)(@modelcontextprotocol/sdk@1.30.0(zod@4.4.3))(@smithy/signature-v4@5.7.3)(ws@8.21.0)(zod@4.4.3))(@earendil-works/pi-telemetry@1.5.2)':
+  '@taco-ai/pi-harness@0.2.1(@earendil-works/chord@1.5.2(esbuild@0.28.2)(ws@8.21.0))(@earendil-works/pi-ai@1.5.2(@aws-sdk/credential-provider-node@3.972.83)(@modelcontextprotocol/sdk@1.30.0(zod@4.4.3))(@smithy/signature-v4@5.7.3)(ws@8.21.0)(zod@4.4.3))(@earendil-works/pi-telemetry@1.5.2)':
     dependencies:
       '@earendil-works/chord': 1.5.2(esbuild@0.28.2)(ws@8.21.0)
       '@earendil-works/pi-ai': 1.5.2(@aws-sdk/credential-provider-node@3.972.83)(@modelcontextprotocol/sdk@1.30.0(zod@4.4.3))(@smithy/signature-v4@5.7.3)(ws@8.21.0)(zod@4.4.3)

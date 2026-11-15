@@ -33,6 +33,7 @@ minimumReleaseAgeExclude:
   - pele@1.13.0
   - '@taco-ai/pi-harness'
   - '@taco-ai/pi-harness@0.2.0'
+  - '@taco-ai/pi-harness@0.2.1'
 peerDependencyRules:
   ignoreMissing:
     - "@earendil-works/*"
