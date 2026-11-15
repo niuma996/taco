@@ -30,6 +30,21 @@ async function pageWidths(bytes: Uint8Array): Promise<number[]> {
 }
 
 describe("mergePdfs", () => {
+    for (const field of ["source", "page"] as const) {
+        const invalid = [0.5, 1.5, NaN, Infinity, -Infinity, -1];
+        if (field === "page") invalid.push(0);
+        for (const value of invalid) {
+            it(`reports invalid ${field} ${value} without throwing`, async () => {
+                const merged = await mergePdfs(
+                    [buildTextPdf(["first", "last"], 2)],
+                    [{ source: 0, page: 1, [field]: value }],
+                );
+                assert.ok(!merged.ok);
+                assert.equal(merged.failure.kind, "no_such_page");
+            });
+        }
+    }
+
     it("joins documents in order, keeping every page", async () => {
         const a = buildTextPdf(["first"], 1);
         const b = buildTextPdf(["second"], 2);
@@ -93,6 +108,33 @@ describe("mergePdfs", () => {
 });
 
 describe("splitPdf", () => {
+    for (const field of ["from", "to"] as const) {
+        for (const value of [0, -1, 0.5, 1.5, NaN, Infinity, -Infinity]) {
+            it(`reports invalid ${field} ${value} without throwing`, async () => {
+                const parts = await splitPdf(buildTextPdf(["first", "last"], 2), [
+                    { from: 1, to: 2, [field]: value },
+                ]);
+                assert.ok(!parts.ok);
+                assert.equal(parts.failure.kind, "no_such_page");
+            });
+        }
+    }
+
+    it("keeps the first and last page as inclusive singleton ranges", async () => {
+        const parts = await splitPdf(await pdfWithWidths([200, 300]), [
+            { from: 1, to: 1 },
+            { from: 2, to: 2 },
+        ]);
+        assert.ok(parts.ok);
+        assert.deepEqual(await Promise.all(parts.value.map(pageWidths)), [[200], [300]]);
+    });
+
+    it("reports a reversed range", async () => {
+        const parts = await splitPdf(buildTextPdf(["first", "last"], 2), [{ from: 2, to: 1 }]);
+        assert.ok(!parts.ok);
+        assert.equal(parts.failure.kind, "no_such_page");
+    });
+
     it("cuts the document into one file per range", async () => {
         const doc = await PDFDocument.create();
         for (let i = 0; i < 5; i++) doc.addPage([612, 792]);

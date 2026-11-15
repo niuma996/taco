@@ -13,11 +13,28 @@ import {
     agentMessageEnvelope,
 } from "./agentConversation.ts";
 import { readAgentMessages, writeAgentMessages } from "./agentMessages.ts";
+import { readClaudeCodeState } from "./claudeCode/claudeCodeState.ts";
 import { readCodexState } from "./codex/codexState.ts";
 import { normalizeSubagentRuntime, sameSubagentRuntime } from "./engines/runtime.ts";
 import type { SubagentRunResult } from "./subagentRunner.ts";
 
 const log = createLogger("sidecar.agentConversation");
+
+/** Native continuations require the same saved mapping in discovery and execution. */
+export async function hasAgentNativeState(
+    registry: SessionRegistry,
+    id: SessionId,
+    runtime?: SubagentRuntime,
+): Promise<boolean> {
+    switch (normalizeSubagentRuntime(runtime)) {
+        case "claude-code":
+            return Boolean(await registry.withSession(id, readClaudeCodeState));
+        case "codex":
+            return (await registry.withSession(id, readCodexState)) !== undefined;
+        default:
+            return true;
+    }
+}
 
 export interface AgentExecutionState {
     runId: string;
@@ -271,8 +288,7 @@ export class AgentConversationRuntime {
             const canResume =
                 def !== undefined &&
                 sameSubagentRuntime(def.runtime, facts.runtime) &&
-                (normalizeSubagentRuntime(facts.runtime) !== "codex" ||
-                    (await registry.withSession(id, readCodexState)) !== undefined);
+                (await hasAgentNativeState(registry, id, facts.runtime));
             out.push({
                 subSessionId: id,
                 agentType: facts.agentType ?? "unknown",

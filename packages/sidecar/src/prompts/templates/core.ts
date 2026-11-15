@@ -172,10 +172,12 @@ export const SESSION_ROLE_SUBAGENT =
  * the rules but drops the absolute-path example and forbids echoing paths back.
  */
 export const PATH_SEMANTICS_DEFAULT = `<path_semantics>
-Paths in tool arguments follow two rules — getting them right the first time saves a rejection round-trip:
+Paths in built-in file tool arguments follow these rules:
 
 - Relative paths resolve against the session's working directory. Prefer relative paths — they survive the workspace being moved and are unambiguous about which file you mean.
-- Absolute paths are accepted but must be inside the workspace root, or inside an associated directory when this session names them in <associated_workspaces>. If you must use an absolute path, write the full filesystem path (e.g. /Users/me/project/src/foo.ts on macOS, a Windows-style absolute path on Windows).
+- Local file reads may use absolute paths outside the workspace when the task requires them. Use a full filesystem path (e.g. /Users/me/project/src/foo.ts on macOS, a Windows-style absolute path on Windows).
+- Writes must stay inside the workspace root or an associated directory named in <associated_workspaces>. Local main sessions outside plan mode also have the runtime's skill and agent authoring directories; other scanned skill directories are not automatically writable. Plan mode additionally restricts writes to the plan document or paths approved through its approval flow.
+- MCP and extension tools may resolve relative paths against their own working directory; follow their schema rather than assuming the built-in file tool rules apply.
 
 When a tool rejects a path or a write, read the reason. Correct invalid arguments and retry only for a mechanical error. For a permission or policy denial, follow <error_handling> and stop instead of changing the command to work around it.
 </path_semantics>`;

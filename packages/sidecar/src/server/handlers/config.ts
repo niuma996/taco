@@ -8,17 +8,17 @@
  * separately would leave a gap between the two.
  *
  * The desktop's own path is `settings.write` — the user is already at the
- * settings pane, so no approval is needed there. Both land through the same
- * write helper, so a change takes effect the same way whichever path it came
- * from.
+ * settings pane, so no approval is needed there. Both persist through the
+ * config transaction store and refresh the runtime after writing.
  */
 
 import type { ConfigPatchResult, GlobalConfigPatch } from "@taco-ai/protocol";
 import { asSessionId, ErrorCodes, IM_CWD_PREFIX } from "@taco-ai/protocol";
+import { updateGlobalConfig, validateCommandPermissions } from "../../config/config.ts";
 import { createLogger } from "../../lib/logger.ts";
 import { patchFields } from "../../tools/config.ts";
 import { RpcHandlerError, registerMethod } from "../methodRegistry.ts";
-import { applyGlobalConfigPatch } from "./settings.ts";
+import { toView } from "./settings.ts";
 
 const log = createLogger("config");
 
@@ -80,7 +80,21 @@ export function registerConfigHandlers(): void {
             }
 
             try {
-                const global = await applyGlobalConfigPatch(server, patch);
+                const next = updateGlobalConfig((current) => {
+                    if (!patch.commandPermissions) return patch;
+                    validateCommandPermissions(patch.commandPermissions, "patch");
+                    // Only config.patch merges permission fields; settings.write still replaces.
+                    // Derive after approval inside the lock so omitted fields keep the latest value.
+                    return {
+                        ...patch,
+                        commandPermissions: {
+                            ...validateCommandPermissions(current.commandPermissions, "current"),
+                            ...patch.commandPermissions,
+                        },
+                    };
+                });
+                await server.refreshConfiguration();
+                const global = toView(next);
                 log.info(`config patched: ${fields.join(", ")}`);
                 return { approved: true, fields, global };
             } catch (e) {

@@ -33,6 +33,12 @@ function parseTaskList(content: string, filePath: string): TaskList | undefined 
         log.warn(`skipping task file ${filePath}: unsupported schemaVersion ${version}`);
         return undefined;
     }
+    // Legacy counters were reused across lists. Never expose ambiguous IDs to taskUpdate.
+    for (const task of parsed.tasks) {
+        if (/^task-\d+$/.test(task.id)) {
+            task.id = `task-${parsed.id}-${task.id.slice("task-".length)}`;
+        }
+    }
     return parsed;
 }
 

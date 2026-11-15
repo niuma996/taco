@@ -95,7 +95,8 @@ export function createSkillTool(
     const baseDescription =
         "Invoke a skill — a specialized playbook or workflow loaded from the skill library. " +
         "Use this when the task matches a skill's description. " +
-        "The skill body is injected into context after this call completes.";
+        "Inline skills inject their body into the current context after this call completes. " +
+        "Skills configured with runAs=subagent execute in a child session and return its result instead of injecting the body here.";
     return {
         name: "skill",
         label: "skill",

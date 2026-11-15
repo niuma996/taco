@@ -293,13 +293,18 @@ describe("taskCreate tool", () => {
             { env: new NodeExecutionEnv({ cwd: "/" }) },
         );
 
-        const details = result.details as { taskIds: string[] };
-        assert.deepEqual(details.taskIds, ["task-1", "task-2"]);
+        const details = result.details as { listId: string; taskIds: string[] };
+        const list = store.lists.get(details.listId);
+        assert.ok(list);
+        assert.deepEqual(
+            details.taskIds,
+            list.tasks.map((task) => task.id),
+        );
+        assert.equal(new Set(details.taskIds).size, 2);
         const textContent = result.content[0];
         assert.equal(textContent.type, "text");
         if (textContent.type !== "text") throw new Error("expected text content");
-        assert.match(textContent.text, /task-1/);
-        assert.match(textContent.text, /task-2/);
+        for (const id of details.taskIds) assert.ok(textContent.text.includes(id));
     });
 });
 
@@ -327,8 +332,7 @@ describe("taskUpdate tool", () => {
         const _result = await invokeTool(
             tool,
             {
-                listId: "test-list",
-                taskId: "task-1",
+                taskId: store.lists.get("test-list")?.tasks[0].id,
                 updates: {
                     status: "completed",
                 },
@@ -355,13 +359,13 @@ describe("taskUpdate — clears currentListId when the active list runs out of u
     it("resets currentListId to null after all tasks reach a terminal status", async () => {
         const store = createTaskStore("session-clears");
         createTaskList(store, "l1", "list");
-        addTask(store, "l1", { content: "x", status: "pending", activeForm: "x" });
+        const task = addTask(store, "l1", { content: "x", status: "pending", activeForm: "x" });
         store.currentListId = "l1";
 
         const tool = createTaskUpdateTool(store, testDir, testTaskPublisher(), TEST_SESSION_ID);
         await invokeTool(
             tool,
-            { taskId: "task-1", updates: { status: "completed" } },
+            { taskId: task.id, updates: { status: "completed" } },
             { env: new NodeExecutionEnv({ cwd: "/" }) },
             { toolCallId: "tu" },
         );
@@ -584,9 +588,10 @@ describe("memory tool schema", () => {
             "description must not include snake_case example",
         );
         assert.ok(
-            tool.description.includes("Underscores"),
+            /writes reject underscores/i.test(tool.description),
             "description must explicitly reject underscores",
         );
+        assert.match(tool.description, /legacy uppercase and underscore ids remain readable/);
     });
 });
 

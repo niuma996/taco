@@ -65,10 +65,9 @@ export function projectContextForPrompt(options: ProjectContextOptions): string 
         lines.push("");
     }
     lines.push(
-        "The following paths are excluded from the repository by .gitignore.",
-        "Avoid grep / glob / read on these paths unless the user explicitly",
-        "asks for them — the tools already filter results, so searching them",
-        "wastes tokens.",
+        "The following .gitignore rules guide default file searches; they are not access restrictions.",
+        "Search tools normally skip ignored paths and generated dependency/build directories.",
+        "Explicit `read` calls do not apply .gitignore; read a known ignored file when the task requires it.",
         "",
         `.gitignore (truncated by lines to ${String(maxChars)} chars):`,
         "```",

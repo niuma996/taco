@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
 import { asSessionId, asWorkspaceId, type SessionListEntry } from "@taco-ai/protocol";
+import type { TObject, TSchemaOptions } from "typebox";
 import {
     readUserQuestionsFromDisk,
     UserQuestionCache,
@@ -310,6 +311,46 @@ describe("sessionSearch", () => {
 });
 
 describe("sessionList", () => {
+    it("describes activity date bounds independently from question search bounds", () => {
+        type DateSchema = TObject<Record<string, TSchemaOptions>>;
+        const list = createSessionListTool(new UserQuestionCache()).parameters as DateSchema;
+        const search = createSessionSearchTool(new UserQuestionCache()).parameters as DateSchema;
+        for (const field of ["since", "until"]) {
+            const listDescription = list.properties?.[field]?.description ?? "";
+            assert.match(listDescription, /last active/);
+            assert.match(listDescription, /updatedAt/);
+            assert.match(listDescription, /createdAt/);
+            assert.match(listDescription, field === "since" ? /at or after/ : /before/);
+            assert.doesNotMatch(listDescription, /questions asked/);
+            assert.match(search.properties?.[field]?.description ?? "", /questions asked/);
+        }
+    });
+
+    it("filters activity with inclusive since and exclusive until, falling back to creation", async () => {
+        const file = writeSession("activity", [header("activity"), userEntry(T0, "old question")]);
+        const sessions = [
+            { ...entry("since", file, T0), updatedAt: new Date(T0 + DAY).toISOString() },
+            { ...entry("until", file, T0), updatedAt: new Date(T0 + 2 * DAY).toISOString() },
+            { ...entry("before", file, T0 + DAY), updatedAt: new Date(T0).toISOString() },
+            { ...entry("fallback", file, T0 + DAY), updatedAt: undefined },
+        ];
+        const { ctx } = ctxWith(sessions);
+        const out = text(
+            await invokeTool(
+                createSessionListTool(new UserQuestionCache()),
+                {
+                    since: new Date(T0 + DAY).toISOString(),
+                    until: new Date(T0 + 2 * DAY).toISOString(),
+                },
+                ctx,
+            ),
+        );
+        assert.match(out, /2 past sessions/);
+        assert.match(out, /· since ·/);
+        assert.match(out, /· fallback ·/);
+        assert.doesNotMatch(out, /· (until|before) ·/);
+    });
+
     it("pages sessions with a first-question excerpt and transcript path", async () => {
         const sessions = [0, 1, 2].map((i) =>
             entry(

@@ -25,6 +25,7 @@ import { Value } from "typebox/value";
 import { withMemoryWriteOrigin } from "../memory/writeOrigin.ts";
 import type { AgentHarnessTool } from "../runtime/pi/types.ts";
 import type { TacoToolContext } from "./context.ts";
+import { resolveVisibleSession } from "./sessionHistoryVisibility.ts";
 
 // ─── schema ──────────────────────────────────────────────────────────────────
 
@@ -95,7 +96,7 @@ export function createMemoryTool(): AgentHarnessTool<TacoToolContext> {
         description:
             "Save durable information to long-term memory that survives across sessions. " +
             "Storage: one topic file per memory under $TACO_HOME/memory/projects/<workspace-key>/. " +
-            "Newest 100 topic summaries are injected into the LLM context as <memory> notes; " +
+            "Up to 100 topic summaries, subject to the context byte budget, are injected as <memory> notes; " +
             "use action=read with the summary's memoryLayer, sourceId and id to fetch the full content. " +
             "Inherited memory is read-only; writes always target the current conversation/workspace. " +
             "Default to no write. Write only for an explicit request to remember, a stable user preference, " +
@@ -106,7 +107,9 @@ export function createMemoryTool(): AgentHarnessTool<TacoToolContext> {
             "One memory holds one coherent durable theme in Markdown, with a self-contained conclusion " +
             "in the first paragraph. Headings, lists, scope, reasons and exceptions are welcome when useful. " +
             `Typically 300-1000 characters; ${MEMORY_CONTENT_MAX_CHARS} is the hard maximum. ` +
-            "Existing sources identify sessions; use sessionRead to resolve ambiguity before rewriting. " +
+            "On a local main session, current-memory reads may include visible source-session references. " +
+            "To resolve ambiguity, load sessionRead with addTools if listed in <deferred_tools>, then use the returned sessionId. " +
+            "The memory sourceId selects a memory store; it is never a sessionId. History recall is unavailable in IM and subagent sessions. " +
             "Never store architecture overviews, directory layouts, code snippets, or command output: " +
             "write those to a doc in the repo and save a `reference` memory pointing at it. " +
             "ACTIONS: read (read-only; requires memoryLayer, sourceId and id from the context reference), " +
@@ -114,8 +117,9 @@ export function createMemoryTool(): AgentHarnessTool<TacoToolContext> {
             "replace (update content and optional name/description; preserves createdAt, type and sources; " +
             "refreshes updatedAt only when content or metadata changes), " +
             "remove (delete by id; permanent). " +
-            "ID NAMING: kebab-case — lowercase letters, digits, and single hyphens only, ≤64 chars. " +
-            "Examples: 'user-role', 'feedback-auth'. Underscores, uppercase, dots, or spaces will be rejected.",
+            "WRITE ID NAMING: kebab-case — lowercase letters, digits, and hyphens only, ≤64 chars. " +
+            "Examples: 'user-role', 'feedback-auth'. Writes reject underscores, uppercase, dots, and spaces. " +
+            "For reads, copy the reference id unchanged; legacy uppercase and underscore ids remain readable.",
         parameters: memoryToolSchema,
         executionMode: "sequential",
         taco: {
@@ -145,8 +149,34 @@ export function createMemoryTool(): AgentHarnessTool<TacoToolContext> {
                     sourceId: params.sourceId,
                     id: params.id,
                 });
+                const references: string[] = [];
+                if (ctx.sessionKind === "main" && !ctx.isIm && params.memoryLayer === "current") {
+                    const ids = [
+                        ...new Set(result.topic.sources?.map((source) => source.sessionId)),
+                    ].filter((id) => typeof id === "string" && id.trim() && id.length <= 200);
+                    for (const id of ids.reverse()) {
+                        try {
+                            const session = await resolveVisibleSession(ctx, id);
+                            references.push(
+                                `sessionRead ${JSON.stringify({ sessionId: session.id })}`,
+                            );
+                            if (references.length === 5) break;
+                        } catch {
+                            // A deleted or inaccessible source must not prevent reading the memory.
+                        }
+                    }
+                }
+                const content = [{ type: "text" as const, text: result.topic.content }];
+                if (references.length) {
+                    content.push({
+                        type: "text",
+                        text:
+                            "Visible source sessions (up to 5; load sessionRead with addTools if needed):\n" +
+                            references.join("\n"),
+                    });
+                }
                 return {
-                    content: [{ type: "text", text: result.topic.content }],
+                    content,
                     details: result,
                 };
             }

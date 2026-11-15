@@ -66,7 +66,7 @@ export async function mergePdfs(
     for (const spec of picked) {
         const doc = docs[spec.source];
         // A source past the end is a failed merge, not a shorter document.
-        if (!doc) {
+        if (!Number.isInteger(spec.source) || !doc) {
             return {
                 ok: false,
                 failure: { kind: "no_such_page", page: spec.page, pages: 0, source: spec.source },
@@ -75,7 +75,7 @@ export async function mergePdfs(
         const pageIndex = spec.page - 1;
         // pdf-lib throws on an out-of-range page rather than returning
         // nothing, so the bound is checked before it is asked.
-        if (pageIndex < 0 || pageIndex >= doc.getPageCount()) {
+        if (!Number.isInteger(spec.page) || pageIndex < 0 || pageIndex >= doc.getPageCount()) {
             return {
                 ok: false,
                 failure: {
@@ -213,8 +213,8 @@ async function load(bytes: Uint8Array): Promise<PdfOpResult<PDFDocument>> {
  * to a page that exists.
  */
 function offendingPage(range: { from: number; to: number }, total: number): number | undefined {
-    if (range.from < 1 || range.from > total) return range.from;
-    if (range.to > total) return range.to;
+    if (!Number.isInteger(range.from) || range.from < 1 || range.from > total) return range.from;
+    if (!Number.isInteger(range.to) || range.to < 1 || range.to > total) return range.to;
     if (range.from > range.to) return range.from;
     return undefined;
 }

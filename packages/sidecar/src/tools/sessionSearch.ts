@@ -64,8 +64,18 @@ const searchSchema = Type.Object({
 });
 
 const listSchema = Type.Object({
-    since: sinceSchema,
-    until: untilSchema,
+    since: Type.Optional(
+        Type.String({
+            description:
+                "Only include sessions last active at or after this ISO date/time (e.g. 2026-10-01), using updatedAt (createdAt if absent).",
+        }),
+    ),
+    until: Type.Optional(
+        Type.String({
+            description:
+                "Only include sessions last active before this ISO date/time, using updatedAt (createdAt if absent).",
+        }),
+    ),
     limit: Type.Optional(
         Type.Integer({
             minimum: 1,

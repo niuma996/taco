@@ -40,7 +40,7 @@ const questionSchema = Type.Object({
     }),
     multiSelect: Type.Boolean({
         description:
-            "Set true only when the choices can be combined (e.g. picking which features to enable). Default false — single-select — for mutually exclusive decisions where exactly one answer applies.",
+            "Required: explicitly pass false for single-select, mutually exclusive decisions where exactly one answer applies. Pass true only when the choices can be combined (e.g. picking which features to enable).",
     }),
 });
 

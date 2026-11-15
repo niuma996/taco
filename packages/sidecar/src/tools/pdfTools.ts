@@ -53,8 +53,14 @@ const mergeSchema = Type.Object({
     pages: Type.Optional(
         Type.Array(
             Type.Object({
-                source: Type.Number({ description: "Which input the page comes from, 1-based." }),
-                page: Type.Number({ description: "The page within that input, 1-based." }),
+                source: Type.Integer({
+                    minimum: 1,
+                    description: "Which input the page comes from, 1-based.",
+                }),
+                page: Type.Integer({
+                    minimum: 1,
+                    description: "The page within that input, 1-based.",
+                }),
             }),
             {
                 description:
@@ -69,8 +75,11 @@ const splitSchema = Type.Object({
     input: Type.String({ description: "Path of the PDF to split." }),
     ranges: Type.Array(
         Type.Object({
-            from: Type.Number({ description: "First page of the range, 1-based." }),
-            to: Type.Number({ description: "Last page of the range, 1-based, inclusive." }),
+            from: Type.Integer({ minimum: 1, description: "First page of the range, 1-based." }),
+            to: Type.Integer({
+                minimum: 1,
+                description: "Last page of the range, 1-based, inclusive.",
+            }),
         }),
         { minItems: 1, maxItems: MAX_SPLIT_PARTS },
     ),
@@ -125,9 +134,9 @@ function failureText(failure: { kind: string } & Record<string, unknown>): strin
         case "no_such_page":
             // `source` is 0-based: the tool subtracted 1 before calling mergePdfs.
             if (failure.pages === 0 && typeof failure.source === "number") {
-                return `There is no input ${String(failure.source + 1)}.`;
+                return `There is no input ${String(failure.source + 1)}. Choose an integer input number from 1 to the number of inputs.`;
             }
-            return `That page does not exist: page ${String(failure.page)} of ${String(failure.pages)}.`;
+            return `That page does not exist: page ${String(failure.page)} of ${String(failure.pages)}. Use integer page numbers from 1 to ${String(failure.pages)}, with from <= to.`;
         case "no_such_field":
             return `The form has no field named "${String(failure.field)}". List the fields first.`;
         case "field_not_fillable":

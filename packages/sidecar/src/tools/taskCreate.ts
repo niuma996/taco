@@ -1,4 +1,4 @@
-import { randomBytes } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import type { SessionId, WorkspaceId } from "@taco-ai/protocol";
 import type { Static } from "typebox";
 import { Type } from "typebox";
@@ -30,7 +30,8 @@ export function createTaskCreateTool(
             "Start a new named task list and make it active. Use for tracked, multi-step work the user " +
             "should follow. Only ONE list may be active at a time — if one is already active (has " +
             "unfinished tasks), finish it (taskUpdate each task to completed/failed) or replace it with " +
-            "todoWrite first. Each created task gets a stable id (task-N) to reuse in taskUpdate.\n" +
+            "todoWrite first. Each created task gets a stable, list-scoped ID. Reuse the exact returned " +
+            "ID in taskUpdate; never infer it from a task's position.\n" +
             "\n" +
             "Delegate a subtask only when the agent tool is available, the work is independent, and " +
             "delegation helps complete the requested result. Tool-call count alone does not justify " +
@@ -64,7 +65,7 @@ export function createTaskCreateTool(
                     details: { listId: null, taskCount: 0, taskIds: [] },
                 };
             }
-            const listId = `list-${randomBytes(3).toString("hex")}`;
+            const listId = `list-${randomUUID()}`;
             const list = createTaskList(store, listId, params.listName);
             store.currentListId = listId;
             const taskIds: string[] = [];

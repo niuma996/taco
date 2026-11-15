@@ -5,9 +5,7 @@ import { readSessionFacts } from "../session/sessionFacts.ts";
 import type { SessionRegistry } from "../session/sessionRegistry.ts";
 import type { AgentMessageRecord } from "./agentConversation.ts";
 import { agentMessageEnvelope } from "./agentConversation.ts";
-import type { AgentConversationRuntime } from "./agentConversationRuntime.ts";
-import { readClaudeCodeState } from "./claudeCode/claudeCodeState.ts";
-import { readCodexState } from "./codex/codexState.ts";
+import { type AgentConversationRuntime, hasAgentNativeState } from "./agentConversationRuntime.ts";
 import { normalizeSubagentRuntime, sameSubagentRuntime } from "./engines/runtime.ts";
 import type { AgentEngine } from "./engines/types.ts";
 import type {
@@ -47,27 +45,19 @@ export class AgentConversationRunner {
             );
         }
         if (
-            normalizeSubagentRuntime(facts.runtime) === "claude-code" &&
-            !(await this.options.sessionRegistry.withSession(
+            !(await hasAgentNativeState(
+                this.options.sessionRegistry,
                 message.targetSessionId,
-                readClaudeCodeState,
+                facts.runtime,
             ))
         ) {
             throw new Error(
-                "This Claude Code session cannot be resumed because it has no saved native session. Create a fresh agent explicitly.",
+                normalizeSubagentRuntime(facts.runtime) === "codex"
+                    ? "This Codex session cannot be resumed because its native thread mapping was not saved. Create a fresh agent explicitly."
+                    : "This Claude Code session cannot be resumed because it has no saved native session. Create a fresh agent explicitly.",
             );
         }
         if (normalizeSubagentRuntime(facts.runtime) === "codex") {
-            if (
-                !(await this.options.sessionRegistry.withSession(
-                    message.targetSessionId,
-                    readCodexState,
-                ))
-            ) {
-                throw new Error(
-                    "This Codex session cannot be resumed because its native thread mapping was not saved. Create a fresh agent explicitly.",
-                );
-            }
             await this.options.engines.codex.preflight(def);
         }
         const runId = uuidv7();

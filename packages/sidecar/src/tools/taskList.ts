@@ -11,7 +11,8 @@ export function createTaskListTool(store: TaskStore): AgentHarnessTool<Execution
         label: "taskList",
         description:
             "List this session's task lists: the active list (with each task's id/status/content, for " +
-            "taskUpdate) plus completed (history) lists as one-line summaries.",
+            "taskUpdate) plus completed (history) lists as one-line summaries. Reuse the exact IDs " +
+            "shown here; refresh them after restoring an older session or replacing tasks with todoWrite.",
         parameters: taskListSchema,
         executionMode: "sequential",
         taco: {

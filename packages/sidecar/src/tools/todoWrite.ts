@@ -1,4 +1,4 @@
-import { randomBytes } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import type { SessionId, WorkspaceId } from "@taco-ai/protocol";
 import type { Static } from "typebox";
 import { Type } from "typebox";
@@ -48,7 +48,7 @@ export function createTodoWriteTool(
         ): Promise<{ content: TextContent[]; details: { taskCount: number } }> {
             let listId = store.currentListId ?? findActiveListId(store);
             if (!listId) {
-                listId = `list-${randomBytes(3).toString("hex")}`;
+                listId = `list-${randomUUID()}`;
                 createTaskList(store, listId, "Tasks");
                 store.currentListId = listId;
             }

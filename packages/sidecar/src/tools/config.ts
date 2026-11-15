@@ -29,7 +29,13 @@ import type {
     GlobalConfigPatch,
     TacoGlobalConfigView,
 } from "@taco-ai/protocol";
-import { asToolCallId, RPC, THINKING_LEVELS } from "@taco-ai/protocol";
+import {
+    asToolCallId,
+    COMPACTION_THRESHOLD_MAX,
+    COMPACTION_THRESHOLD_MIN,
+    RPC,
+    THINKING_LEVELS,
+} from "@taco-ai/protocol";
 import type { Static } from "typebox";
 import { Type } from "typebox";
 import { denialGuidance } from "../permissions/denialGuidance.ts";
@@ -48,7 +54,12 @@ const configPatchSchema = Type.Object({
             compaction: Type.Optional(
                 Type.Object({
                     enabled: Type.Optional(Type.Boolean()),
-                    threshold: Type.Optional(Type.Number({ minimum: 0, maximum: 1 })),
+                    threshold: Type.Optional(
+                        Type.Number({
+                            minimum: COMPACTION_THRESHOLD_MIN,
+                            maximum: COMPACTION_THRESHOLD_MAX,
+                        }),
+                    ),
                 }),
             ),
             instructions: Type.Optional(
@@ -65,18 +76,24 @@ const configPatchSchema = Type.Object({
                 }),
             ),
             commandPermissions: Type.Optional(
-                Type.Object({
-                    mode: Type.Optional(Type.Union([Type.Literal("ask"), Type.Literal("auto")])),
-                    allow: Type.Optional(Type.Array(Type.String())),
-                    deny: Type.Optional(Type.Array(Type.String())),
-                }),
+                Type.Object(
+                    {
+                        mode: Type.Optional(
+                            Type.Union([Type.Literal("ask"), Type.Literal("auto")]),
+                        ),
+                        allow: Type.Optional(Type.Array(Type.String())),
+                        deny: Type.Optional(Type.Array(Type.String())),
+                    },
+                    { additionalProperties: false },
+                ),
             ),
         },
         {
             description:
                 "Config fields to change. Only the fields you list are touched; " +
-                "everything else keeps its current value. The allow/deny arrays are " +
-                "REPLACED wholesale, not merged — send the full list you want.",
+                "everything else keeps its current value, including omitted command permission " +
+                "fields. Explicit allow/deny arrays REPLACE the stored list; [] clears it. " +
+                "Omitted arrays stay unchanged. Authorized directories cannot be changed here.",
         },
     ),
 });
@@ -199,6 +216,15 @@ function createConfigPatch(): TacoTool {
                 throw new Error("configPatch: no self-RPC dispatcher in this workspace");
             }
             const patch = params.patch as GlobalConfigPatch;
+            if (patch.commandPermissions) {
+                for (const field of Object.keys(patch.commandPermissions)) {
+                    if (field !== "mode" && field !== "allow" && field !== "deny") {
+                        throw new Error(
+                            `configPatch: unsupported commandPermissions field: ${field}`,
+                        );
+                    }
+                }
+            }
             const result = await ctx.call(RPC.configPatch, ctx.workspace, {
                 workspace: ctx.workspace,
                 sessionId: ctx.sessionId,

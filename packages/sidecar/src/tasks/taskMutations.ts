@@ -29,7 +29,7 @@ export function addTask(
 
     const now = new Date().toISOString();
     const task: Task = {
-        id: `task-${list.metadata.nextTaskId}`,
+        id: `task-${list.id}-${list.metadata.nextTaskId}`,
         content: input.content,
         status: input.status,
         activeForm: input.activeForm,

@@ -456,6 +456,26 @@ describe("buildSystemPrompt", () => {
         assert.ok(out.includes("/Users/me/project/src/foo.ts"), "default keeps absolute example");
     });
 
+    it("separates local read access from write containment", () => {
+        const out = buildSystemPrompt({ tools: [stubTool("read"), stubTool("write")] });
+        assert.match(out, /Local file reads may use absolute paths outside the workspace/);
+        assert.match(out, /Writes must stay inside/);
+        assert.match(out, /MCP.*own working directory/);
+    });
+
+    it("limits memory recall guidance to local main sessions with history tools", () => {
+        for (const options of [
+            { hideWorkspacePath: true },
+            { sessionKind: { role: "subagent" as const, depth: 1 } },
+        ]) {
+            const out = buildSystemPrompt({ tools: [stubTool("memory")], ...options });
+            assert.doesNotMatch(out, /use `sessionRead` to resolve ambiguity/);
+        }
+        const out = buildSystemPrompt({ tools: [stubTool("memory"), stubTool("sessionRead")] });
+        assert.match(out, /returned `sessionId`/);
+        assert.match(out, /`sourceId`.*not.*`sessionId`/);
+    });
+
     it("uses the hidden path_semantics block (no absolute example) when hideWorkspacePath", () => {
         const out = buildSystemPrompt({
             tools: [stubTool("read")],
@@ -655,7 +675,8 @@ describe("projectContextForPrompt", () => {
         const out = projectContextForPrompt({ cwd: dir });
         assert.match(out, /Working directory:\s+.+/);
         assert.match(out, /```\nnode_modules\/\n```/);
-        assert.match(out, /Avoid grep \/ glob \/ read on these paths/);
+        assert.match(out, /Search tools normally skip ignored paths/);
+        assert.match(out, /Explicit `read` calls do not apply .gitignore/);
     });
 
     it("includes a channel_safety paragraph when hideWorkspacePath is true", () => {
@@ -803,6 +824,15 @@ describe("formatSkillsForSystemPrompt", () => {
         assert.match(out, /resolve it against the skill directory/);
     });
 
+    it("keeps inline and subagent behavior clear when descriptions exceed the budget", () => {
+        for (const metadataBudget of [1, 20_000]) {
+            const out = formatSkillsForSystemPrompt([skill], { metadataBudget });
+            assert.match(out, /Inline skills inject/);
+            assert.match(out, /runAs=subagent.*return its result instead/);
+            assert.doesNotMatch(out, /call `skill` with the name to load that skill's body/);
+        }
+    });
+
     // Regression: the 250-char cap used to truncate the merged
     // "description — whenToUse" string, so a long description ate the hint —
     // the one part that tells the model when to invoke.
@@ -842,7 +872,7 @@ describe("formatSkillAuthoringGuidance", () => {
         assert.ok(guidance.includes("checked in order, first match by name wins"));
     });
 
-    it("lists every user-writable dir from defaultSkillDirs, in order", () => {
+    it("lists every user skill search dir without granting write access", () => {
         const cwd = "/work/project";
         const guidance = formatSkillAuthoringGuidance(cwd);
         const dirs = defaultSkillDirs(cwd);
@@ -856,6 +886,8 @@ describe("formatSkillAuthoringGuidance", () => {
             assert.ok(idx > lastIndex, `expected ${dir.path} to appear after the previous dir`);
             lastIndex = idx;
         }
+        assert.match(guidance, /Search locations are not write grants/);
+        assert.match(guidance, /local main session.*outside plan mode/);
     });
 
     it("separates the dir list from the frontmatter section with a blank line", () => {

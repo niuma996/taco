@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, describe, it } from "node:test";
 import { PDFDocument } from "pdf-lib";
+import { Value } from "typebox/value";
 import { NodeExecutionEnv } from "../../src/runtime/pi/node.ts";
 import { defaultTools } from "../../src/tools/index.ts";
 import { pdfToolCandidates } from "../../src/tools/pdfCandidates.ts";
@@ -42,6 +43,47 @@ const textOf = (content: { type: string; text?: string }[]): string =>
         .join("\n");
 
 describe("pdf tools", () => {
+    for (const field of ["source", "page", "from", "to"] as const) {
+        const name = field === "source" || field === "page" ? "pdfMerge" : "pdfSplit";
+        const paramsFor = (value: number) =>
+            name === "pdfMerge"
+                ? {
+                      inputs: ["validation.pdf"],
+                      output: `invalid-${field}.pdf`,
+                      pages: [{ source: 1, page: 1, [field]: value }],
+                  }
+                : {
+                      input: "validation.pdf",
+                      outputDir: `invalid-${field}`,
+                      ranges: [{ from: 1, to: 2, [field]: value }],
+                  };
+
+        it(`requires ${field} to be an integer at least 1 in the schema`, () => {
+            assert.equal(Value.Check(tool(name).parameters, paramsFor(1)), true);
+            assert.equal(Value.Check(tool(name).parameters, paramsFor(2)), true);
+            for (const value of [0, -1, 0.5, 1.5, NaN, Infinity, -Infinity]) {
+                assert.equal(
+                    Value.Check(tool(name).parameters, paramsFor(value)),
+                    false,
+                    `${value}`,
+                );
+            }
+        });
+
+        for (const value of [0, -1, 0.5, 1.5, NaN, Infinity, -Infinity]) {
+            it(`returns a readable failure for ${field} ${value} when schema validation is bypassed`, async () => {
+                writeFileSync(join(cwd, "validation.pdf"), await pdfWithWidths([200, 300]));
+                const result = await call(name, paramsFor(value));
+                assert.match(textOf(result.content), /integer|does not exist|no input/);
+                const output =
+                    name === "pdfMerge"
+                        ? `invalid-${field}.pdf`
+                        : join(`invalid-${field}`, "validation-1.pdf");
+                assert.equal(existsSync(join(cwd, output)), false);
+            });
+        }
+    }
+
     it("is deferred: absent from the resident set, offered as builtin candidates", async () => {
         const resident = defaultTools().map((t) => t.name);
         for (const name of PDF_TOOL_NAMES) {
@@ -102,6 +144,29 @@ describe("pdf tools", () => {
         assert.match(textOf(result.content), /Wrote 1 file/);
         const part = await PDFDocument.load(readFileSync(join(cwd, "parts", "four-1.pdf")));
         assert.equal(part.getPageCount(), 2);
+    });
+
+    it("accepts inclusive first and last page boundaries through the split tool", async () => {
+        writeFileSync(join(cwd, "boundaries.pdf"), await pdfWithWidths([200, 300]));
+        const params = {
+            input: "boundaries.pdf",
+            ranges: [
+                { from: 1, to: 1 },
+                { from: 2, to: 2 },
+            ],
+            outputDir: "boundaries",
+        };
+        assert.equal(Value.Check(tool("pdfSplit").parameters, params), true);
+        assert.match(textOf((await call("pdfSplit", params)).content), /Wrote 2 file/);
+        for (const [index, width] of [200, 300].entries()) {
+            const part = await PDFDocument.load(
+                readFileSync(join(cwd, "boundaries", `boundaries-${index + 1}.pdf`)),
+            );
+            assert.deepEqual(
+                part.getPages().map((page) => page.getWidth()),
+                [width],
+            );
+        }
     });
 
     it("lists the fields of a form", async () => {

@@ -143,7 +143,7 @@ export function defaultTools(opts?: {
         description: `${readBase.description} PDF files are parsed: their text layer is returned, and a scanned document (no text layer) has its pages rendered as images. Other binary files (Office, archives, and files with NUL bytes) are not decoded as text, and the result names the format and what to use instead.`,
         taco: {
             promptSummary:
-                "Read a file — prefer it over `shell cat` for truncation-aware output and image support. Text is truncated to ~30k tokens / 2000 lines; use `offset` and `limit` to page. Images (jpg/png/gif/webp) come back as attachments. A PDF returns its text; a scanned PDF returns page images. Other binary files are not decoded.",
+                "Read a file — prefer it over `shell cat` for truncation-aware output and image support. Text is truncated at 2000 lines or 50 KiB, whichever comes first; use `offset` and `limit` to page. Images come back as attachments. A PDF returns its text; a scanned PDF returns page images. Other binary files are not decoded.",
             mutates: false,
         },
         execute: readExecute,

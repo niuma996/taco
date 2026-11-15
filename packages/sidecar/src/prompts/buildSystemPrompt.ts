@@ -106,7 +106,11 @@ export function filterContributorsForTools(
  * actually available in this session. Empty guidance returns the empty string
  * so we never emit a bare `<session_guidance>` heading.
  */
-function buildSessionGuidanceSection(toolNames: readonly string[], isMain: boolean): string {
+function buildSessionGuidanceSection(
+    toolNames: readonly string[],
+    isMain: boolean,
+    isIm: boolean,
+): string {
     const tools = new Set(toolNames);
     const lines: string[] = [];
 
@@ -157,8 +161,13 @@ function buildSessionGuidanceSection(toolNames: readonly string[], isMain: boole
     }
     if (tools.has("memory")) {
         lines.push(
-            "- Default to no memory write. Set explicitlyRequested=true only when the user directly asked you to remember something; set it false for proactive writes. Use `memory` for an explicit request to remember, a stable user preference, a general correction, a confirmed decision, or a recurring reference. Avoid one-off chatter, current-task details, and assistant guesses. Write one coherent durable theme in Markdown with a self-contained first-paragraph conclusion; use headings, lists, scope, reasons or exceptions when useful (typically 300-1000 characters, maximum 2000). Memory sources identify sessions; use `sessionRead` to resolve ambiguity.",
+            "- Default to no memory write. Set explicitlyRequested=true only when the user directly asked you to remember something; set it false for proactive writes. Use `memory` for an explicit request to remember, a stable user preference, a general correction, a confirmed decision, or a recurring reference. Avoid one-off chatter, current-task details, and assistant guesses. Write one coherent durable theme in Markdown with a self-contained first-paragraph conclusion; use headings, lists, scope, reasons or exceptions when useful (typically 300-1000 characters, maximum 2000).",
         );
+        if (isMain && !isIm && (tools.has("sessionRead") || tools.has("addTools"))) {
+            lines.push(
+                "- Current-memory reads may return visible source-session references. Use the returned `sessionId` with `sessionRead` to resolve ambiguity; if deferred, load it with `addTools` only when listed in <deferred_tools>. A memory `sourceId` selects a store, not a `sessionId`. Do not guess a missing source-session ID.",
+            );
+        }
     }
     if (tools.has("askUser")) {
         lines.push(
@@ -251,7 +260,11 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
     });
     const platform = buildPlatformPrompt(options.platform, toolNames, options.readOnlyShell);
     const toolSummary = toolSummaryForPrompt(options.tools);
-    const sessionGuidance = buildSessionGuidanceSection(toolNames, isMain);
+    const sessionGuidance = buildSessionGuidanceSection(
+        toolNames,
+        isMain,
+        !!options.hideWorkspacePath,
+    );
     const projectContext = options.projectContext ?? "";
 
     const environmentSection = options.environmentContext

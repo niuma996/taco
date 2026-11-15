@@ -3,6 +3,7 @@
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
 import type { AskUserQuestion } from "@taco-ai/protocol";
+import { Value } from "typebox/value";
 import { NodeExecutionEnv } from "../../src/runtime/pi/node.ts";
 import type { TextContent } from "../../src/runtime/pi/types.ts";
 import { createAskUserTool } from "../../src/tools/askUser.ts";
@@ -22,6 +23,33 @@ function textOf(result: { content: Array<{ type?: string; text?: string }> }): s
 describe("askUser tool — execute", () => {
     // askUser execute ignores context — pass minimal shape
     const mockContext = { env: new NodeExecutionEnv({ cwd: "/" }) };
+
+    it("requires explicit multiSelect and documents the required boolean", async () => {
+        const tool = createAskUserTool();
+        const question = {
+            question: "Which color?",
+            header: "Color",
+            options: [{ label: "Red", description: "warm" }],
+        };
+        assert.equal(Value.Check(tool.parameters, { questions: [question] }), false);
+        for (const multiSelect of [false, true]) {
+            const params = { questions: [{ ...question, multiSelect }] };
+            assert.equal(Value.Check(tool.parameters, params), true);
+            const result = await invokeTool(tool, params, mockContext);
+            assert.deepEqual(result.details, { questions: params.questions, waiting: true });
+            assert.equal(result.terminate, true);
+        }
+        const schema = tool.parameters as {
+            properties: {
+                questions: { items: { properties: { multiSelect: { description: string } } } };
+            };
+        };
+        const description = schema.properties.questions.items.properties.multiSelect.description;
+        assert.doesNotMatch(description, /default false/i);
+        assert.match(description, /required/i);
+        assert.match(description, /false/);
+        assert.match(description, /true/);
+    });
 
     it("first call (no answers) → waiting=true + terminate=true", async () => {
         const tool = createAskUserTool();

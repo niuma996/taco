@@ -1,16 +1,16 @@
 /** Bounded recall of a visible same-workspace conversation via session.history. */
 
-import type { SessionHistoryEntry, SessionListEntry } from "@taco-ai/protocol";
+import type { SessionHistoryEntry } from "@taco-ai/protocol";
 import { RPC } from "@taco-ai/protocol";
 import { type Static, Type } from "typebox";
 import { applyTuiVisibilityToContent } from "../tags/index.ts";
 import type { TacoToolContext } from "./context.ts";
 import type { TacoTool } from "./index.ts";
+import { resolveVisibleSession } from "./sessionHistoryVisibility.ts";
 
 const MAX_SEGMENTS = 10;
 const SEGMENT_CHARS = 2_000;
 const PAGE_CHARS = 20_000;
-const METADATA_PAGE_SIZE = 50;
 
 const readSchema = Type.Object({
     sessionId: Type.String({
@@ -91,39 +91,6 @@ function* transcriptSegments(
     }
 }
 
-async function visibleTarget(ctx: TacoToolContext, sessionId: string): Promise<SessionListEntry> {
-    if (!ctx.call) throw new Error("sessionRead: no self-RPC dispatcher in this workspace");
-    // Query before pagination: metadata never requires a full-store response.
-    let cursor: { updatedAt: string; id: SessionListEntry["id"] } | undefined;
-    const seen = new Set<string>();
-    do {
-        const result = await ctx.call(RPC.sessionList, ctx.workspace, {
-            workspace: ctx.workspace,
-            query: sessionId,
-            limit: METADATA_PAGE_SIZE,
-            ...(cursor ? { cursor } : {}),
-        });
-        const target = result.sessions.find(
-            (s) =>
-                s.id === sessionId &&
-                s.cwd === ctx.workspace &&
-                s.kind !== "subagent" &&
-                !s.parentSessionId,
-        );
-        if (target) return target;
-        cursor = result.nextCursor;
-        if (cursor) {
-            const key = JSON.stringify(cursor);
-            if (seen.has(key))
-                throw new Error("sessionRead: session list pagination did not advance");
-            seen.add(key);
-        }
-    } while (cursor);
-    throw new Error(
-        "sessionRead: session not found or unavailable in this workspace (it may have been deleted).",
-    );
-}
-
 export function createSessionReadTool(): TacoTool {
     return {
         name: "sessionRead",
@@ -167,7 +134,7 @@ export function createSessionReadTool(): TacoTool {
                 throw new Error("offset must be a non-negative safe integer");
             if (!Number.isInteger(limit) || limit < 1 || limit > MAX_SEGMENTS)
                 throw new Error(`limit must be an integer from 1 to ${MAX_SEGMENTS}`);
-            const target = await visibleTarget(ctx, params.sessionId);
+            const target = await resolveVisibleSession(ctx, params.sessionId);
             if (!ctx.call) throw new Error("sessionRead: no self-RPC dispatcher in this workspace");
             const history = await ctx
                 .call(RPC.sessionHistory, ctx.workspace, {

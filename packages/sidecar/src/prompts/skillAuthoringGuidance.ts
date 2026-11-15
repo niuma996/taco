@@ -31,12 +31,12 @@ import { defaultSkillDirs } from "../config/config.ts";
  */
 export function formatSkillAuthoringGuidance(cwd: string): string {
     const dirs = defaultSkillDirs(cwd);
-    const writable: string[] = [];
+    const userLocations: string[] = [];
     let builtin: string | undefined;
     for (const dir of dirs) {
         switch (dir.source) {
             case "user":
-                writable.push(dir.path);
+                userLocations.push(dir.path);
                 break;
             case "builtin":
                 builtin = dir.path;
@@ -55,8 +55,12 @@ export function formatSkillAuthoringGuidance(cwd: string): string {
 
     const lines = [
         "<skill_authoring>",
-        "To add a new skill, create SKILL.md in one of these directories (checked in order, first match by name wins):",
-        ...writable.map((p, i) => `  ${i + 1}. ${p}`),
+        "Skill search locations (checked in order, first match by name wins):",
+        ...userLocations.map((p, i) => `  ${i + 1}. ${p}`),
+        "Search locations are not write grants. Prefer a project skill under .taco/skills/<name>/SKILL.md. " +
+            "A local main session may also write under the runtime's $TACO_HOME/skills outside plan mode. " +
+            "Other user search locations are writable only when already within the workspace or its associated directories. " +
+            "IM and subagent sessions do not receive the global authoring grant. Follow plan-mode restrictions and runtime refusals.",
     ];
     if (builtin) {
         lines.push(
@@ -76,7 +80,7 @@ export function formatSkillAuthoringGuidance(cwd: string): string {
         "  - model: string — overrides the model for subagent mode.",
         "  - whenToUse: string — a one-line hint shown in the system prompt's skill listing so the model " +
             "knows when to invoke this skill rather than guessing from `description` alone.",
-        "Changes to SKILL.md in these user-writable directories take effect automatically shortly after " +
+        "Changes to SKILL.md in these user skill directories take effect automatically shortly after " +
             "saving. An already-open session can invoke a new or changed skill by name, but start a new " +
             "session before expecting <available_skills> to list a newly-created skill.",
         "</skill_authoring>",

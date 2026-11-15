@@ -10,7 +10,10 @@ import type { TaskSnapshotPublisher } from "../tasks/taskPushAdapter.ts";
 import { isUnfinishedStatus, type TaskStore, taskStatusSchema } from "../tasks/taskTypes.ts";
 
 const taskUpdateSchema = Type.Object({
-    taskId: Type.String({ description: "Task ID (from taskCreate output / taskList)" }),
+    taskId: Type.String({
+        description:
+            "Exact task ID from taskCreate output / taskList; IDs from previous lists are invalid",
+    }),
     updates: Type.Object({
         content: Type.Optional(Type.String()),
         status: Type.Optional(

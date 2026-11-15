@@ -4,21 +4,185 @@ import { describe, it, type TestContext } from "node:test";
 import { setImmediate as nextImmediate } from "node:timers/promises";
 import { asSessionId, type SessionId } from "@taco-ai/protocol";
 import type { AgentChatArgs, AgentChatResult } from "../../src/agents/agentConversationTypes.ts";
+import type { AgentDefinition } from "../../src/agents/types.ts";
 import { harnessContext } from "../../src/lib/harnessContext.ts";
 import type { QueueKind, SteerEnqueueResult } from "../../src/runtime/harness/laneQueue.ts";
 import type { Session } from "../../src/runtime/pi/types.ts";
-import { writeSessionFacts } from "../../src/runtime/session/sessionFacts.ts";
+import { readSessionFacts, writeSessionFacts } from "../../src/runtime/session/sessionFacts.ts";
 import type { SessionRegistry } from "../../src/runtime/session/sessionRegistry.ts";
 import {
     type AgentMessageRecord,
     agentMessageEnvelope,
 } from "../../src/runtime/subagent/agentConversation.ts";
+import { AgentConversationRunner } from "../../src/runtime/subagent/agentConversationRunner.ts";
 import { AgentConversationRuntime } from "../../src/runtime/subagent/agentConversationRuntime.ts";
 import { readAgentMessages, writeAgentMessages } from "../../src/runtime/subagent/agentMessages.ts";
+import { writeClaudeCodeState } from "../../src/runtime/subagent/claudeCode/claudeCodeState.ts";
+import { writeCodexState } from "../../src/runtime/subagent/codex/codexState.ts";
+import type { AgentEngine } from "../../src/runtime/subagent/engines/types.ts";
+import { SubagentRunLifecycle } from "../../src/runtime/subagent/subagentRunLifecycle.ts";
 import { createTestWorkspace } from "../_helpers/testWorkspace.ts";
 
 const parent = asSessionId("parent");
 const child = asSessionId("child");
+
+describe("agent conversation resume eligibility", () => {
+    for (const runtime of [undefined, "standard", "claude-code", "codex"] as const) {
+        const standard = runtime === undefined || runtime === "standard";
+        for (const mapped of standard ? [false] : [false, true]) {
+            it(`lists ${runtime ?? "legacy standard"} sessions with native mapping=${mapped} consistently with resume requirements`, async (t) => {
+                const agent: AgentDefinition = {
+                    agentType: "explorer",
+                    description: "Explore",
+                    systemPrompt: "Explore",
+                    source: "builtin",
+                    filePath: "/agents/explorer.md",
+                    runtime,
+                };
+                const workspace = createTestWorkspace({ agents: [agent] });
+                t.after(() => workspace.cleanup());
+                const registry = workspace.ws.sessionRegistry;
+                await registry.createSession(parent, undefined, async (session) => {
+                    await writeSessionFacts(session, { kind: "main", depth: 0 });
+                });
+                await registry.createSession(child, parent, async (session) => {
+                    await writeSessionFacts(session, {
+                        kind: "subagent",
+                        parentSessionId: parent,
+                        agentType: agent.agentType,
+                        runtime,
+                        depth: 1,
+                    });
+                    if (mapped && runtime === "claude-code") {
+                        await writeClaudeCodeState(session, {
+                            nativeSessionId: "native-claude-session",
+                            cwd: workspace.cwd,
+                        });
+                    }
+                    if (mapped && runtime === "codex") {
+                        await writeCodexState(session, {
+                            nativeThreadId: "native-codex-thread",
+                            cwd: workspace.cwd,
+                            profileIdentity: "explorer",
+                            sdkVersion: "test",
+                            threadOptions: {},
+                        });
+                    }
+                });
+                const lookups: SessionId[] = [];
+                const withSession = registry.withSession.bind(registry);
+                t.mock.method(
+                    registry,
+                    "withSession",
+                    <T>(id: SessionId, action: (session: Session) => Promise<T>) => {
+                        lookups.push(id);
+                        return withSession(id, action);
+                    },
+                );
+                const [listed] = await workspace.ws.agentSpawner.listAgentSessions(parent);
+                assert.ok(listed);
+                assert.equal(listed.subSessionId, child);
+                assert.equal(listed.canResume, standard || mapped);
+                if (standard) {
+                    assert.deepEqual(
+                        lookups,
+                        [parent],
+                        "standard discovery must not open child history",
+                    );
+                }
+                if (!standard && !mapped) {
+                    const result = await workspace.ws.agentSpawner.chatToAgent(parent, {
+                        subSessionId: child,
+                        parentToolCallId: "resume-missing-mapping",
+                        prompt: "Continue",
+                        background: false,
+                    });
+                    assert.equal(result.isError, true);
+                    assert.match(
+                        result.resultText,
+                        runtime === "claude-code"
+                            ? /no saved native session/
+                            : /native thread mapping was not saved/,
+                    );
+                }
+            });
+        }
+    }
+
+    for (const runtime of [undefined, "standard"] as const) {
+        it(`starts ${runtime ?? "legacy standard"} without a native state lookup`, async () => {
+            const agent: AgentDefinition = {
+                agentType: "explorer",
+                description: "Explore",
+                systemPrompt: "Explore",
+                source: "builtin",
+                filePath: "/agents/explorer.md",
+                runtime,
+            };
+            const registry = {
+                async withSession<T>(
+                    id: SessionId,
+                    action: (session: Session) => Promise<T>,
+                ): Promise<T> {
+                    assert.equal(id, child);
+                    assert.equal(action, readSessionFacts, "standard runner must only read facts");
+                    return { agentType: agent.agentType, runtime, parentSessionId: parent } as T;
+                },
+            } as unknown as SessionRegistry;
+            const engine: AgentEngine = {
+                runtime: "standard",
+                capabilities: { delivery: "nativeQueue", forkContext: true, workLane: true },
+                async preflight() {
+                    assert.fail("standard continuation needs no preflight");
+                },
+                async run() {
+                    assert.fail("background launcher owns execution");
+                },
+            };
+            const runner = new AgentConversationRunner({
+                sessionRegistry: registry,
+                conversation: {} as AgentConversationRuntime,
+                findAgent: () => agent,
+                engines: { standard: engine, "claude-code": engine, codex: engine },
+                runLifecycle: new SubagentRunLifecycle(),
+                execution: {
+                    async resume() {
+                        assert.fail("background launcher owns execution");
+                    },
+                    track: (_parent, _call, run) => run(),
+                },
+                events: { announce() {}, settle() {} },
+                background: {
+                    reserve: () => undefined,
+                    release() {},
+                    launch: async () => ({
+                        subSessionId: child,
+                        resultText: "",
+                        isError: false,
+                        background: true,
+                        resultPath: "result.md",
+                    }),
+                },
+            });
+            const message = recoveredMessage({
+                receipt: {
+                    subSessionId: child,
+                    messageId: "recovered-message",
+                    status: "queued",
+                    effectiveDelivery: "followUp",
+                    resultText: "Accepted",
+                    isError: false,
+                },
+            });
+            const { result } = await runner.start(message, {
+                subSessionId: child,
+                parentToolCallId: "standard-resume",
+                prompt: "Continue",
+            });
+            assert.equal(result.status, "started");
+        });
+    }
+});
 
 class NativeQueue {
     running = false;
