@@ -301,13 +301,19 @@ export class LocalMemoryStore implements MemoryStore {
             noteBody,
             [
                 {
-                    heading: `Workspace memory notes (newest first; use the read tool to fetch <id>.md from ${this.workspaceDir}):`,
+                    heading:
+                        "Workspace memory notes (newest first; use memory action=read with the shown reference):",
                     entries: this.listTopics(),
+                    readReference: (topic) =>
+                        JSON.stringify({
+                            memoryLayer: "current",
+                            sourceId: this.dirKey,
+                            id: topic.id,
+                        }),
                 },
             ],
             {
-                omittedNotice: (count) =>
-                    `${count} additional topics not listed; their files remain in the topic directory.`,
+                omittedNotice: (count) => `${count} additional topics not listed.`,
                 omittedSeparator: "\n",
             },
         );

@@ -169,19 +169,30 @@ describe("store", () => {
             assert.ok(s.buildMemoryBlock().includes("free text"));
         });
 
-        it("buildMemoryBlock prints the topic directory once and ids on each row", async () => {
+        it("buildMemoryBlock includes scoped read references on each row", async () => {
             const s = mkStore();
             await s.appendEntry(entry());
             await s.appendEntry(entry({ id: "feedback", name: "Use real DB", type: "feedback" }));
             const block = s.buildMemoryBlock();
-            const topicDir = join(tmpRoot, "memory", "projects", workspaceKey("ws-test"));
             assert.match(block, /Workspace memory notes/);
-            assert.ok(block.includes(`fetch <id>.md from ${topicDir}`));
+            assert.match(block, /use memory action=read with the shown reference/);
+            const references = [...block.matchAll(/memory\.read (\{[^\n]+\})/g)].map((match) =>
+                JSON.parse(match[1] ?? "{}"),
+            );
+            assert.deepEqual(
+                references,
+                s.listTopics().map((topic) => ({
+                    memoryLayer: "current",
+                    sourceId: s.dirKey,
+                    id: topic.id,
+                })),
+            );
             assert.ok(
                 block.includes("- [user] User uses pnpm — Project uses pnpm not npm — user_role"),
             );
             assert.ok(block.includes("[feedback] Use real DB"));
-            assert.ok(!block.includes(join(topicDir, "user_role.md")));
+            assert.ok(!block.includes(s.topicDir));
+            assert.doesNotMatch(block, /use the read tool|<id>\.md/);
         });
 
         it("buildMemoryBlock sorts replaced topics by updatedAt", async () => {
@@ -221,10 +232,10 @@ describe("store", () => {
                 assert.ok(topicBytes <= 32 * 1024, `topic context used ${topicBytes} bytes`);
                 const count = block.match(/^- \[/gm)?.length ?? 0;
                 assert.ok(count > 0 && count < 100);
-                assert.ok(block.includes(`fetch <id>.md from ${s.topicDir}`));
+                assert.match(block, /use memory action=read with the shown reference/);
                 assert.ok(block.includes(`${100 - count} additional topics not listed`));
-                assert.match(block, /— topic-99\n/);
-                assert.doesNotMatch(block, /— topic-0(?:\n|$)/);
+                assert.match(block, /— topic-99 — memory\.read /);
+                assert.doesNotMatch(block, /— topic-0 — memory\.read /);
             });
         }
 

@@ -78,14 +78,21 @@ describe("scoped memory reads", () => {
         inheritManagedGlobal,
         managedGlobalRoots: managedRoots,
     });
-    async function rpc(method: string, params: unknown): Promise<unknown> {
+    async function rpc(
+        method: string,
+        params: unknown,
+        target: "channel" | "workspace" = "channel",
+    ): Promise<unknown> {
         const registered = getRegisteredMethod(method);
         assert.ok(registered, `${method} must be registered`);
         assert.equal(Value.Check(registered.schema as never, params), true, "valid RPC params");
         return registered.handler({
             workspace: {
                 memoryStore: current,
-                imRouting: { channelId: "mock", peerId: "peer", chatId: "chat" },
+                imRouting:
+                    target === "channel"
+                        ? { channelId: "mock", peerId: "peer", chatId: "chat" }
+                        : undefined,
                 associatedRoots: () => roots,
                 inheritsManagedGlobalMemory: () => inheritManagedGlobal,
                 managedGlobalMemoryRoots: () => managedRoots,
@@ -161,6 +168,42 @@ describe("scoped memory reads", () => {
                 assert.ok(schema?.properties?.[name], `${api} must retain ${name}`);
             }
         }
+    });
+
+    it("reads the injected desktop reference through the memory tool and RPC", async () => {
+        const desktopWorkspace = asWorkspaceId(join(home, "desktop-workspace"));
+        const store = new LocalMemoryStore();
+        store.initialize(desktopWorkspace);
+        await store.appendEntry(topic);
+        current = store;
+
+        const block = store.buildMemoryBlock();
+        const referenceText = block.match(/memory\.read (\{[^\n]+\})/)?.[1];
+        assert.ok(referenceText, "desktop summary must carry a usable scoped reference");
+        const reference = JSON.parse(referenceText);
+        assert.deepEqual(reference, {
+            memoryLayer: "current",
+            sourceId: store.dirKey,
+            id: topic.id,
+        });
+        const tool = createMemoryTool();
+        const input = { action: "read", ...reference };
+        assert.equal(Value.Check(tool.parameters, input), true);
+        assert.equal(Value.Check(tool.parameters, { ...input, sourceId: undefined }), false);
+        const result = await invokeTool(tool, input, {
+            workspace: desktopWorkspace,
+            call: (method: string, _workspace: unknown, params: unknown) =>
+                rpc(method, params, "workspace"),
+        });
+        assert.deepEqual(result.content, [{ type: "text", text: topic.content }]);
+        await assert.rejects(
+            rpc(
+                "memory.read",
+                { workspace: desktopWorkspace, ...reference, memoryLayer: "workspace" },
+                "workspace",
+            ),
+            /not available/i,
+        );
     });
 
     it("reads the injected inherited reference through the memory tool and RPC", async () => {
