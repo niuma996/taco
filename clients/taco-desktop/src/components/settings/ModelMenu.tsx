@@ -14,6 +14,7 @@ import { useT } from "../../i18n/useI18n.ts";
 import { Divider } from "../ui/Divider.tsx";
 import { TextInput } from "../ui/TextInput.tsx";
 import type { ModelOption, ModelSelection } from "./ModelPicker";
+import { ProviderIcon } from "./ProviderIcon.tsx";
 import { ThinkingSlider } from "./ThinkingSlider";
 
 interface ModelMenuProps {
@@ -115,7 +116,11 @@ export function ModelMenu(props: ModelMenuProps) {
             >
                 <span className="model-trigger-label">{label}</span>
                 {hasSelection && props.value && (
-                    <span className="model-trigger-provider">({props.value.provider})</span>
+                    <>
+                        {/* Flex gap separates the two visually; this space only
+                            keeps the button's text readable when copied. */}{" "}
+                        <span className="model-trigger-provider">· {props.value.provider}</span>
+                    </>
                 )}
             </button>
             {open && (
@@ -135,7 +140,10 @@ export function ModelMenu(props: ModelMenuProps) {
                         )}
                         {[...groups.entries()].map(([provider, opts]) => (
                             <div key={provider} className="model-menu-group">
-                                <div className="model-menu-group-header">{provider}</div>
+                                <div className="model-menu-group-header">
+                                    <ProviderIcon providerId={provider} name={provider} size={12} />
+                                    <span>{provider}</span>
+                                </div>
                                 {opts.map((opt) => {
                                     const selected =
                                         props.value !== undefined &&

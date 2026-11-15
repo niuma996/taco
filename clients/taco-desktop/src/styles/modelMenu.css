@@ -7,9 +7,11 @@
     white-space: nowrap;
     min-width: 0;
 }
+/* The provider is a qualifier, not a second model name — it is set apart by a
+   separator, a quieter ink and a smaller size, never by a badge of its own. */
 .model-trigger-provider {
     color: var(--fg-dim);
-    font-size: 0.75rem;
+    font-size: var(--text-xs);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -37,6 +39,15 @@
     /* Plain conditional render (no Radix), so this is entrance only. */
     animation: ui-fade-in var(--motion-duration-base) var(--motion-ease-out);
 }
+/* Model names are the content of this list. The shared .ui-menu-item tone
+   (--fg-dim) is for secondary menus — here it would leave the model name no
+   stronger than the group header above it. */
+.model-menu-popup .ui-menu-item {
+    color: var(--fg);
+}
+.model-menu-popup .ui-menu-item[aria-checked="true"] .ui-menu-label {
+    font-weight: var(--weight-medium);
+}
 /* settings pane: trigger is near the top, flip to downward popup to avoid pane overflow clipping. */
 .model-menu--down .model-menu-popup {
     bottom: auto;
@@ -62,13 +73,36 @@
     text-transform: uppercase;
     letter-spacing: 0.05em;
 }
-/* Provider group header — same tone as the section headers. */
+/* Provider group header — the only place a provider is named in the list, so
+   it has to read as a group boundary at a glance: a hairline above it, the
+   provider's brand mark, an uppercase micro-label and some air before the
+   rows it introduces. */
 .model-menu-group-header {
-    padding: 0.3rem 0.6rem 0.1rem;
-    font-size: 0.7rem;
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    margin-top: 0.4rem;
+    padding: 0.35rem 0.6rem 0.2rem;
+    border-top: 1px solid var(--divider-section);
+    font-size: var(--text-2xs);
+    font-weight: var(--weight-medium);
     color: var(--fg-dim);
     text-transform: uppercase;
-    letter-spacing: 0.05em;
+    letter-spacing: 0.08em;
+}
+/* The mark is sized by a token meant for provider cards (1.35rem); in a group
+   header it has to sit at the label's own size. */
+.model-menu-group-header .provider-icon {
+    width: 0.8rem;
+    height: 0.8rem;
+    background-color: var(--fg-dim);
+}
+/* The first group sits right under the search row — it needs no rule of its
+   own, and a hairline there would read as a divider of the whole menu. */
+.model-menu-group:first-child .model-menu-group-header {
+    margin-top: 0;
+    padding-top: 0.2rem;
+    border-top: 0;
 }
 .model-menu-empty {
     padding: 0.6rem;

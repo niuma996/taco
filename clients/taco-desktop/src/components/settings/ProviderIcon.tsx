@@ -54,6 +54,8 @@ export interface ProviderIconProps {
     providerId: string;
     /** Provider name, kept for the accessible label on the card. */
     name: string;
+    /** Glyph size for the fallback mark. The brand mark is sized by CSS. */
+    size?: number;
 }
 
 /**
@@ -67,7 +69,7 @@ export function ProviderIcon(props: ProviderIconProps) {
     if (!shape) {
         return (
             <span className="provider-icon provider-icon--fallback" aria-hidden="true">
-                <Box size={16} strokeWidth={1.7} />
+                <Box size={props.size ?? 16} strokeWidth={1.7} />
             </span>
         );
     }
