@@ -1,9 +1,9 @@
 /**
  * App shell — assembles workspace/session state (useWorkspaces), sidecar push
- * routing (useSidecarStream), five secondary pane hooks (tools/skills/agents/
- * plugins/memory), ChatPane UI state (useChatInputState), and the cross-pane
- * restartSidecar shared by Settings + Plugins. Layout + top-level view
- * switching only; per-pane domain logic lives in the hooks.
+ * routing (useSidecarStream), configuration page controllers, ChatPane UI
+ * state (useChatInputState), and the cross-pane restartSidecar shared by
+ * Settings + Plugins. Layout + top-level view switching only; page domain
+ * logic lives in the controllers and hooks.
  */
 
 import type {
@@ -20,6 +20,9 @@ import { ChannelBindDialog } from "./components/ChannelBindDialog";
 import { ChatWorkspaceContext } from "./components/ChatWorkspaceContext";
 import { ConfigurationScopeBar } from "./components/ConfigurationScopeBar";
 import { ConfirmModal } from "./components/ConfirmModal";
+import { ConfigurationAgentsController } from "./components/configuration/ConfigurationAgentsController";
+import { ConfigurationSkillsController } from "./components/configuration/ConfigurationSkillsController";
+import { ConfigurationToolsController } from "./components/configuration/ConfigurationToolsController";
 import { FilesDrawer } from "./components/FilesDrawer";
 import { LlmDumpDock } from "./components/LlmDumpPanel";
 import { OnboardingModal } from "./components/onboarding/OnboardingModal.js";
@@ -40,7 +43,6 @@ import { useChatInputState } from "./hooks/primitives/useChatInputState";
 import { useStableCallback } from "./hooks/primitives/useStableCallback";
 import { useTheme } from "./hooks/primitives/useTheme";
 import { useToast } from "./hooks/primitives/useToast";
-import { useAgentsPane } from "./hooks/useAgentsPane";
 import { useAppLifecycle } from "./hooks/useAppLifecycle";
 import { AskUserProvider } from "./hooks/useAskUser";
 import { CHANNEL_NAME_WECOM, useChannelsPane } from "./hooks/useChannelsPane";
@@ -64,9 +66,7 @@ import {
     sidecarLogListenerReady,
     useSidecarStream,
 } from "./hooks/useSidecarStream";
-import { useSkillsPane } from "./hooks/useSkillsPane";
 import { SubagentProvider } from "./hooks/useSubagent";
-import { useToolsPane } from "./hooks/useToolsPane";
 import { useWorkOverview } from "./hooks/useWorkOverview";
 import { useWorkspaceModels } from "./hooks/useWorkspaceModels";
 import { useWorkspaces } from "./hooks/useWorkspaces";
@@ -90,7 +90,6 @@ import { invalidateCatalogQueries } from "./lib/queries/queryClient";
 import { onWorkChangedEvent } from "./lib/workEvents.ts";
 import { onWorkspaceAssociationsChangedEvent } from "./lib/workspaceAssociationEvents.ts";
 import { getDefaultCwd, persistExpandedWorkspaces } from "./lib/workspaceStorage.js";
-import { AgentsPane } from "./views/AgentsPane";
 import { ChannelsPane } from "./views/ChannelsPane";
 import { ChatPane } from "./views/ChatPane";
 import { CheckpointsPane } from "./views/CheckpointsPane";
@@ -98,8 +97,6 @@ import { ConversationSidebar } from "./views/ConversationSidebar";
 import { MemoryPane } from "./views/MemoryPane";
 import { PluginsPane } from "./views/PluginsPane";
 import { SettingsPane } from "./views/SettingsPane";
-import { SkillsPane } from "./views/SkillsPane";
-import { ToolsPane } from "./views/ToolsPane";
 import { WorkPane } from "./views/WorkPane";
 
 const EMPTY_MESSAGES: UiMessage[] = [];
@@ -616,27 +613,16 @@ export default function App() {
         cleanup: boolean;
     } | null>(null);
     onConversationsChangedRef.current = onConversationsChanged;
-    const agentsConfig = useConfigurationScope({
-        active: mainView === "agents",
+    const configurationPageProps = {
+        client,
         mode: conversationMode,
         activeCwd,
         workspaces,
         conversations,
-    });
-    const skillsConfig = useConfigurationScope({
-        active: mainView === "skills",
-        mode: conversationMode,
-        activeCwd,
-        workspaces,
-        conversations,
-    });
-    const runtimeConfig = useConfigurationScope({
-        active: mainView === "tools",
-        mode: conversationMode,
-        activeCwd,
-        workspaces,
-        conversations,
-    });
+        conversationsLoading,
+        conversationsError,
+        onRetryTargets: () => void refreshConversations(),
+    };
     const memoryConfig = useConfigurationScope({
         active: mainView === "memory",
         mode: conversationMode,
@@ -644,44 +630,6 @@ export default function App() {
         workspaces,
         conversations,
     });
-    const { tools, error: toolsError } = useToolsPane(
-        client,
-        mainView === "tools",
-        runtimeConfig.targetCwd,
-    );
-    const {
-        skills,
-        totalCount: skillsTotalCount,
-        query: skillsQuery,
-        setQuery: setSkillsQuery,
-        diagnostics,
-        skillsError,
-        selectedSkillName,
-        setSelectedSkillName,
-        skillContent,
-        skillContentLoading,
-        skillContentError,
-    } = useSkillsPane(client, mainView === "skills", skillsConfig.targetCwd, skillsConfig.scope);
-    const {
-        agents,
-        globalAgentTypes,
-        cwdChoices: agentCwdChoices,
-        agentsError,
-        selectedAgentType,
-        setSelectedAgentType,
-        agentContent,
-        agentContentLoading,
-        agentContentError,
-        agentSaving,
-        codexRuntimeStatus,
-        codexStatusLoading,
-        codexInstalling,
-        codexInstallError,
-        refreshCodexRuntime,
-        installCodexRuntime,
-        saveAgent,
-        deleteAgent,
-    } = useAgentsPane(client, mainView === "agents", agentsConfig.targetCwd, agentsConfig.scope);
     const {
         extensionStatus,
         extensionLoading,
@@ -919,6 +867,18 @@ export default function App() {
                     data-right-open={String(rightPanel.panel !== "none")}
                     style={{ "--right-panel-width": `${rightPanel.width}px` } as CSSProperties}
                 >
+                    <ConfigurationToolsController
+                        {...configurationPageProps}
+                        active={mainView === "tools"}
+                    />
+                    <ConfigurationAgentsController
+                        {...configurationPageProps}
+                        active={mainView === "agents"}
+                    />
+                    <ConfigurationSkillsController
+                        {...configurationPageProps}
+                        active={mainView === "skills"}
+                    />
                     {mainView === "chat" ? (
                         <>
                             {/* Always mounted — collapse is a CSS width
@@ -1128,80 +1088,6 @@ export default function App() {
                                 </SubagentProvider>
                             </FilePreviewOpenerProvider>
                         </>
-                    ) : mainView === "tools" ? (
-                        <div className="configuration-pane">
-                            <ConfigurationScopeBar
-                                variant="runtime"
-                                {...runtimeConfig}
-                                onScopeChange={runtimeConfig.setScope}
-                                onTargetChange={runtimeConfig.setTargetCwd}
-                                targetsLoading={
-                                    conversationMode === "im" &&
-                                    (conversationsLoading ||
-                                        (conversations === null && !conversationsError))
-                                }
-                                targetsError={conversationMode === "im" ? conversationsError : null}
-                                onRetryTargets={() => void refreshConversations()}
-                            />
-                            <div className="configuration-pane-body">
-                                <ToolsPane tools={tools} error={toolsError} />
-                            </div>
-                        </div>
-                    ) : mainView === "agents" ? (
-                        <div className="configuration-pane">
-                            <ConfigurationScopeBar
-                                variant="catalog"
-                                {...agentsConfig}
-                                onScopeChange={agentsConfig.setScope}
-                                onTargetChange={agentsConfig.setTargetCwd}
-                                targetsLoading={
-                                    conversationMode === "im" &&
-                                    (conversationsLoading ||
-                                        (conversations === null && !conversationsError))
-                                }
-                                targetsError={conversationMode === "im" ? conversationsError : null}
-                                onRetryTargets={() => void refreshConversations()}
-                            />
-                            <div className="configuration-pane-body">
-                                <AgentsPane
-                                    key={`${agentsConfig.targetCwd}:${agentsConfig.scope}`}
-                                    agents={agents}
-                                    globalAgentTypes={globalAgentTypes}
-                                    editorScope={
-                                        !agentsConfig.hasTarget
-                                            ? undefined
-                                            : agentsConfig.scope === "global"
-                                              ? "global"
-                                              : agentsConfig.scope === "workspace" &&
-                                                  !agentsConfig.targetCwd?.startsWith(IM_CWD_PREFIX)
-                                                ? "workspace"
-                                                : undefined
-                                    }
-                                    error={agentsError}
-                                    selectedAgentType={
-                                        selectedAgentType ?? agents[0]?.agentType ?? null
-                                    }
-                                    onSelect={setSelectedAgentType}
-                                    content={agentContent}
-                                    contentLoading={agentContentLoading}
-                                    contentError={agentContentError}
-                                    saving={agentSaving}
-                                    hasProjectDir={
-                                        agentsConfig.targetCwd !== undefined &&
-                                        !agentsConfig.targetCwd.startsWith(IM_CWD_PREFIX)
-                                    }
-                                    cwdChoices={agentCwdChoices}
-                                    codexRuntimeStatus={codexRuntimeStatus}
-                                    codexStatusLoading={codexStatusLoading}
-                                    codexInstalling={codexInstalling}
-                                    codexInstallError={codexInstallError}
-                                    onRefreshCodexRuntime={() => void refreshCodexRuntime()}
-                                    onInstallCodex={() => void installCodexRuntime()}
-                                    onSaveAgent={saveAgent}
-                                    onDeleteAgent={deleteAgent}
-                                />
-                            </div>
-                        </div>
                     ) : mainView === "plugins" ? (
                         <PluginsPane
                             status={extensionStatus}
@@ -1347,38 +1233,7 @@ export default function App() {
                                 </div>
                             </div>
                         </div>
-                    ) : (
-                        <div className="configuration-pane">
-                            <ConfigurationScopeBar
-                                variant="catalog"
-                                {...skillsConfig}
-                                onScopeChange={skillsConfig.setScope}
-                                onTargetChange={skillsConfig.setTargetCwd}
-                                targetsLoading={
-                                    conversationMode === "im" &&
-                                    (conversationsLoading ||
-                                        (conversations === null && !conversationsError))
-                                }
-                                targetsError={conversationMode === "im" ? conversationsError : null}
-                                onRetryTargets={() => void refreshConversations()}
-                            />
-                            <div className="configuration-pane-body">
-                                <SkillsPane
-                                    skills={skills}
-                                    totalCount={skillsTotalCount}
-                                    skillsError={skillsError}
-                                    query={skillsQuery}
-                                    onQueryChange={setSkillsQuery}
-                                    diagnostics={diagnostics}
-                                    selectedName={selectedSkillName ?? skills[0]?.name ?? null}
-                                    onSelect={setSelectedSkillName}
-                                    content={skillContent}
-                                    contentLoading={skillContentLoading}
-                                    contentError={skillContentError}
-                                />
-                            </div>
-                        </div>
-                    )}
+                    ) : null}
                     {/* Inline right-side panel (same layer as TaskPanel): mounted
                         across all mainViews so tree/preview state survives view
                         switches. Renders nothing while closed. */}
