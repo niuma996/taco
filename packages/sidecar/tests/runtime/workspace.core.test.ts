@@ -19,6 +19,11 @@ import { LocalMemoryStore } from "../../src/memory/local/store.ts";
 import { buildSystemPrompt } from "../../src/prompts/buildSystemPrompt.ts";
 import { ProviderKeyStore } from "../../src/runtime/models/providerKeyStore.ts";
 import { WorkspaceRuntime, type WorkspaceRuntimeOptions } from "../../src/runtime/workspace.ts";
+import {
+    extensionFileAccessSnapshot,
+    fileAccessOf,
+    restoreExtensionFileAccess,
+} from "../../src/tools/fileAccess.ts";
 import type { TacoTool } from "../../src/tools/index.ts";
 import { createWorkspaceScope } from "../../src/workspace/workspaceScope.ts";
 import { useTempTacoHome } from "../_helpers/tempTacoHome.ts";
@@ -84,6 +89,93 @@ describe("WorkspaceRuntime ↔ extensions integration", () => {
             names.includes("builtin-tool"),
             `expected builtin-tool, got: ${JSON.stringify(names)}`,
         );
+    });
+
+    it("adds extension candidates to the deferred registry with attribution", async () => {
+        const registry = makeRegistry([], []);
+        const api = createExtensionApi(
+            {
+                name: "lazy-fixture",
+                version: "0.0.1",
+                apiVersion: "1",
+                permissions: ["tools"],
+            },
+            registry,
+            silentLogger,
+        );
+        api.registerToolCandidate({
+            name: "extDeferred",
+            summary: "deferred extension tool",
+            loading: "deferred",
+            load: async () => fakeTool("extDeferred"),
+        });
+        api.registerToolCandidate({
+            name: "extAlways",
+            summary: "always-loaded extension tool",
+            loading: "always",
+            load: async () => fakeTool("extAlways"),
+        });
+        const extensions = await activateExtensions(registry, { cwd: tmpDirCore });
+        const ws = new WorkspaceRuntime({
+            providerKeyStore: new ProviderKeyStore({}),
+            cwd: asWorkspaceId(tmpDirCore),
+            tools: [],
+            extensions,
+        });
+
+        assert.deepEqual(
+            ws.toolRegistry.listDeferred().map((candidate) => candidate.name),
+            ["extDeferred"],
+        );
+        assert.deepEqual(
+            ws.toolRegistry.listAlways().map((candidate) => candidate.name),
+            ["extAlways"],
+        );
+        assert.equal(ws.toolRegistry.listCandidates()[0]?.source, "extension");
+        assert.equal(ws.toolRegistry.listCandidates()[0]?.extensionName, "lazy-fixture");
+        assert.equal((await ws.toolRegistry.load("extDeferred"))?.name, "extDeferred");
+    });
+
+    it("installs workspace candidate file access only when the runtime is constructed", async () => {
+        const snapshot = extensionFileAccessSnapshot();
+        try {
+            const registry = makeRegistry([], []);
+            const api = createExtensionApi(
+                {
+                    name: "workspace-file-fixture",
+                    version: "0.0.1",
+                    apiVersion: "1",
+                    permissions: ["tools"],
+                },
+                registry,
+                silentLogger,
+            );
+            api.registerWorkspaceActivator(() => ({
+                toolCandidates: [
+                    {
+                        name: "forged-owner",
+                        candidate: {
+                            name: "workspaceFileCandidate",
+                            summary: "workspace file candidate",
+                            loading: "deferred",
+                            fileAccess: { write: "output" },
+                            load: async () => fakeTool("workspaceFileCandidate"),
+                        },
+                    },
+                ],
+            }));
+            const extensions = await activateExtensions(registry, { cwd: tmpDirCore });
+            assert.equal(fileAccessOf("workspaceFileCandidate"), undefined);
+            new WorkspaceRuntime({
+                providerKeyStore: new ProviderKeyStore({}),
+                cwd: asWorkspaceId(tmpDirCore),
+                tools: [],
+                extensions,
+            });
+            assert.deepEqual(fileAccessOf("workspaceFileCandidate"), { write: "output" });
+        } finally {
+            restoreExtensionFileAccess(snapshot);
+        }
     });
 
     it("extension tool with same name overrides base tool (no duplicate in harness)", async () => {

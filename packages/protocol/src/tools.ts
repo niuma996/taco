@@ -57,10 +57,10 @@ export interface ToolEntry {
      */
     availableInSubagent?: boolean;
     /** Origin of the tool. Set for tools registered via the deferred-tool
-     *  registry (currently MCP), absent for the static workspace/session
+     *  registry, absent for the static workspace/session
      *  surface. Lets the UI distinguish "where this tool came from" without
      *  parsing the `name` prefix. */
-    source?: "builtin" | "mcp";
+    source?: "builtin" | "mcp" | "extension";
     /** Loading mode for deferred-registry tools. "always" candidates are
      *  attached at session start; "deferred" candidates are loaded on demand
      *  via the addTools meta-tool. Set together with `source`. */

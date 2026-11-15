@@ -9,11 +9,11 @@
  */
 
 import { createLogger } from "../lib/logger.ts";
-import type { TacoTool } from "../tools/index.ts";
 import type { ContextHookBuckets, ExtensionRegistry, ToolResultHookBuckets } from "./registry.ts";
 import type {
     ContextHook,
     ExtensionSource,
+    ExtensionToolCandidateWithSource,
     SystemPromptContributor,
     ToolCallHook,
     ToolResultHook,
@@ -30,7 +30,8 @@ const log = createLogger("taco-ext");
  * `ExtensionRegistry`.
  */
 export class WorkspaceExtensionSet {
-    private readonly _toolsWithSource: Array<{ name: string; tool: TacoTool }> = [];
+    private readonly _toolsWithSource: NonNullable<WorkspaceContribution["tools"]> = [];
+    private readonly _toolCandidates: ExtensionToolCandidateWithSource[] = [];
     private readonly _systemPromptContributors: SystemPromptContributor[] = [];
     private readonly _contextHooks: ContextHookBuckets = {
         builtins: [],
@@ -57,6 +58,9 @@ export class WorkspaceExtensionSet {
         if (c.tools) {
             for (const t of c.tools) this._toolsWithSource.push(t);
         }
+        if (c.toolCandidates) {
+            this._toolCandidates.push(...c.toolCandidates);
+        }
         if (c.commandPermissionRules) {
             this._commandPermissionRules.push(...c.commandPermissionRules);
         }
@@ -65,8 +69,12 @@ export class WorkspaceExtensionSet {
         }
     }
 
-    toolsWithSource(): Array<{ name: string; tool: TacoTool }> {
+    toolsWithSource(): NonNullable<WorkspaceContribution["tools"]> {
         return [...this._toolsWithSource];
+    }
+
+    toolCandidates(): ExtensionToolCandidateWithSource[] {
+        return [...this._toolCandidates];
     }
 
     systemPromptContributors(): SystemPromptContributor[] {
@@ -152,6 +160,10 @@ export async function activateExtensions(
         const tws = registry.toolsWithSource();
         if (tws.length > 0) {
             set.addContribution("external", { tools: tws });
+        }
+        const candidates = registry.toolCandidates();
+        if (candidates.length > 0) {
+            set.addContribution("external", { toolCandidates: candidates });
         }
         // context hooks from process-level registry (builtins + external)
         for (const h of registry.contextHooks().builtins) {

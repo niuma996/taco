@@ -427,7 +427,7 @@ The on-disk `taco.json` shape is `TacoGlobalConfigShape` in
 - `customProviders` — third-party OpenAI/Anthropic-compatible endpoints (id must have `custom:` prefix)
 - `mcpServers` — per-server stdio / Streamable HTTP MCP config
 - `channels` — IM channel instances (manifest + channel-specific config)
-- `extensions` / `disabledExtensions` — npm extension allowlist
+- `extensions` / `disabledExtensions` — npm extension allowlist and disable list shared by builtin, npm, and directory-discovered extensions
 - `instructions` — project-context instruction file toggles (CLAUDE.md / AGENTS.md / DESIGN.md)
 
 The **safe view** (`TacoGlobalConfigView`) returned by `settings.get`

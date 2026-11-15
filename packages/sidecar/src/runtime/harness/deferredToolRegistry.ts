@@ -10,9 +10,12 @@
  * This module has no MCP dependency.
  */
 
+import { createLogger } from "../../lib/logger.ts";
 import type { TacoTool } from "../../tools/index.ts";
 
-export type ToolCandidateSource = "builtin" | "mcp";
+const log = createLogger("deferred-tools");
+
+export type ToolCandidateSource = "builtin" | "mcp" | "extension";
 
 export type ToolLoadingMode = "deferred" | "always";
 
@@ -26,6 +29,8 @@ export interface ToolCandidate {
     readonly loading: ToolLoadingMode;
     /** Source for future grouping / troubleshooting in tools.list. */
     readonly source: ToolCandidateSource;
+    /** Contributing extension when source is "extension". */
+    readonly extensionName?: string;
     /** Lazy-load factory — tool object is only instantiated when loaded. */
     load(): Promise<TacoTool>;
 }
@@ -130,5 +135,66 @@ export class DefaultDeferredToolRegistry implements DeferredToolRegistry {
 
     async dispose(): Promise<void> {
         await this.disposeFn?.();
+    }
+}
+
+/** Add static extension candidates without changing the base registry's MCP lifecycle. */
+export class CompositeDeferredToolRegistry implements DeferredToolRegistry {
+    private readonly extensionByName = new Map<string, ToolCandidate>();
+
+    constructor(
+        private readonly base: DeferredToolRegistry,
+        extensionCandidates: readonly ToolCandidate[],
+    ) {
+        const baseNames = new Set(base.listCandidates().map((candidate) => candidate.name));
+        for (const candidate of extensionCandidates) {
+            if (baseNames.has(candidate.name)) {
+                log.warn(
+                    `skipping extension tool candidate "${candidate.name}" from "${candidate.extensionName ?? "unknown"}": a builtin candidate already owns the name`,
+                );
+                continue;
+            }
+            if (this.extensionByName.has(candidate.name)) {
+                log.warn(
+                    `skipping extension tool candidate "${candidate.name}" from "${candidate.extensionName ?? "unknown"}": an earlier extension already owns the name`,
+                );
+                continue;
+            }
+            this.extensionByName.set(candidate.name, candidate);
+        }
+    }
+
+    listCandidates(): readonly ToolCandidate[] {
+        return [...this.base.listCandidates(), ...this.extensionByName.values()];
+    }
+
+    listDeferred(): readonly ToolCandidate[] {
+        return this.listCandidates().filter((candidate) => candidate.loading === "deferred");
+    }
+
+    listAlways(): readonly ToolCandidate[] {
+        return this.listCandidates().filter((candidate) => candidate.loading === "always");
+    }
+
+    async load(name: string): Promise<TacoTool | undefined> {
+        const extension = this.extensionByName.get(name);
+        return extension ? extension.load() : this.base.load(name);
+    }
+
+    async prepare(): Promise<void> {
+        await this.base.prepare?.();
+        for (const candidate of this.base.listCandidates()) {
+            const extension = this.extensionByName.get(candidate.name);
+            if (extension) {
+                log.warn(
+                    `skipping extension tool candidate "${candidate.name}" from "${extension.extensionName ?? "unknown"}": an MCP candidate already owns the name`,
+                );
+                this.extensionByName.delete(candidate.name);
+            }
+        }
+    }
+
+    async dispose(): Promise<void> {
+        await this.base.dispose?.();
     }
 }

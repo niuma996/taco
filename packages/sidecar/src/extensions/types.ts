@@ -18,15 +18,9 @@
 
 import type { ExtensionPermission, ExtensionSource } from "@taco-ai/protocol";
 import type { SystemPromptContributor } from "../prompts/buildSystemPrompt.ts";
-import type {
-    AgentHarnessTool,
-    AgentMessage,
-    ExecutionToolContext,
-    ImageContent,
-    TextContent,
-    Usage,
-} from "../runtime/pi/types.ts";
+import type { AgentMessage, ImageContent, TextContent, Usage } from "../runtime/pi/types.ts";
 import type { TagSpec } from "../tags/types.ts";
+import type { FileAccess } from "../tools/fileAccess.ts";
 import type { TacoTool } from "../tools/index.ts";
 
 // ExtensionPermission / ExtensionSource are owned by @taco-ai/protocol (single
@@ -36,6 +30,9 @@ export type { ExtensionPermission, ExtensionSource } from "@taco-ai/protocol";
 // Re-export the system-prompt contributor shape so the extension contract is
 // complete from this module.
 export type { SystemPromptContributor } from "../prompts/buildSystemPrompt.ts";
+export type { TacoToolContext } from "../tools/context.ts";
+export type { FileAccess } from "../tools/fileAccess.ts";
+export type { TacoTool } from "../tools/index.ts";
 
 /** Supported contract versions. Loader rejects manifests declaring any other value. */
 export type ExtensionApiVersion = "1";
@@ -156,6 +153,23 @@ export interface ExtensionLogger {
     debug(msg: string): void;
 }
 
+export interface ExtensionToolRegistrationOptions {
+    readonly fileAccess?: FileAccess;
+}
+
+export interface ExtensionToolCandidate {
+    readonly name: string;
+    readonly summary: string;
+    readonly loading: "deferred" | "always";
+    readonly fileAccess?: FileAccess;
+    load(): Promise<TacoTool>;
+}
+
+export interface ExtensionToolCandidateWithSource {
+    readonly name: string;
+    readonly candidate: ExtensionToolCandidate;
+}
+
 export interface ExtensionApi {
     readonly manifest: ExtensionManifest;
     readonly logger: ExtensionLogger;
@@ -164,7 +178,9 @@ export interface ExtensionApi {
     registerToolCallInterceptor(hook: ToolCallHook): void;
     /** Transform a tool result after execution; can also terminate the turn. */
     registerToolResultInterceptor(hook: ToolResultHook): void;
-    registerTool(tool: AgentHarnessTool<ExecutionToolContext>): void;
+    registerTool(tool: TacoTool, options?: ExtensionToolRegistrationOptions): void;
+    registerToolCandidate(candidate: ExtensionToolCandidate): void;
+    registerWorkspaceActivator(activator: WorkspaceActivator): void;
     registerSystemPrompt(contributor: SystemPromptContributor): void;
     /** Register a custom tag — flows through the tag system's pin/drop/visibility
      *  pipeline. Requires the `tags` permission in the manifest. */
@@ -177,16 +193,15 @@ export type ExtensionModule = (api: ExtensionApi) => void | Promise<void>;
  * A per-workspace contribution produced by an activator.
  * Any field may be omitted; missing means "no contribution this workspace".
  *
- * `source` defaults to `"builtin"` when the contribution comes from a builtin
- * activator. External activators (when exposed in the future) must set it to
- * `"external"` so the set can preserve hook-ordering invariants
- * (builtins run before external).
+ * Hook ordering is derived from the registering extension's source; extension
+ * authors do not need to provide a source on each contribution.
  */
 export interface WorkspaceContribution {
     contextHooks?: ContextHook[];
     toolCallHooks?: ToolCallHook[];
     toolResultHooks?: ToolResultHook[];
-    tools?: Array<{ name: string; tool: TacoTool }>;
+    tools?: Array<{ name: string; tool: TacoTool; fileAccess?: FileAccess }>;
+    toolCandidates?: ExtensionToolCandidateWithSource[];
     systemPrompt?: SystemPromptContributor;
     /**
      * Shell allow-rules this extension adds for the workspace, merged after the
@@ -199,7 +214,7 @@ export interface WorkspaceContribution {
 }
 
 /**
- * Callback registered at process startup, invoked once per workspace when
+ * Callback registered through `registerWorkspaceActivator`, invoked once per workspace when
  * `activateExtensions` runs. May perform async I/O and decide conditionally
  * based on `ctx.cwd`.
  */

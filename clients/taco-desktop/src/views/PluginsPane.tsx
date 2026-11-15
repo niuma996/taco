@@ -36,6 +36,7 @@ const PERM_LABEL_KEY: Record<ExtensionPermission, string> = {
     tools: "plugins.permTools",
     systemPrompt: "plugins.permSystemPrompt",
     tags: "plugins.permTags",
+    commandPermissions: "plugins.permCommandPermissions",
 };
 
 export function PluginsPane(props: PluginsPaneProps): ReactElement {

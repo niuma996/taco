@@ -1,11 +1,11 @@
 import { strict as assert } from "node:assert";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, afterEach, before, describe, it } from "node:test";
 import { createExtensionApi } from "../../src/extensions/extensionApi.ts";
 import { loadExtensions } from "../../src/extensions/loader.ts";
-import { ExtensionRegistry } from "../../src/extensions/registry.ts";
+import { ExtensionRegistry, registerBuiltinExtensions } from "../../src/extensions/registry.ts";
 import type {
     ContextEvent,
     ContextResult,
@@ -15,6 +15,7 @@ import type {
 import type { AgentHarnessTool, ExecutionToolContext } from "../../src/runtime/pi/types.ts";
 import { tagRegistry } from "../../src/tags/registry.ts";
 import type { TagSpec } from "../../src/tags/types.ts";
+import { fileAccessOf } from "../../src/tools/fileAccess.ts";
 import type { TacoTool } from "../../src/tools/index.ts";
 
 describe("registry", () => {
@@ -121,6 +122,35 @@ describe("registry", () => {
             r.recordDisabled("ext-x");
             r.recordDisabled("ext-y");
             assert.deepEqual(r.report.disabled, ["ext-x", "ext-y"]);
+        });
+
+        it("rolls back builtin registration when its register callback throws", async () => {
+            const r = new ExtensionRegistry();
+            await registerBuiltinExtensions(r, new Set(), [
+                {
+                    name: "@test/builtin-partial",
+                    version: "0.0.1",
+                    register(api) {
+                        api.addToolResultInterceptor("builtin", async () => undefined);
+                        api.addWorkspaceActivator("builtin", "@test/builtin-partial", () => ({
+                            systemPrompt: { append: "PARTIAL" },
+                        }));
+                        api.addExtensionTag("@test/builtin-partial", "builtin_partial", {
+                            name: "builtin_partial",
+                            scope: "user-context",
+                            compression: { kind: "pin" },
+                            tuiVisibility: "hidden",
+                            parser: { kind: "xml-balanced" },
+                            description: "partial",
+                        });
+                        throw new Error("builtin boom");
+                    },
+                },
+            ]);
+            assert.equal(r.toolResultHooks().builtins.length, 0);
+            assert.equal(r.workspaceActivators().length, 0);
+            assert.equal(Object.hasOwn(tagRegistry, "builtin_partial"), false);
+            assert.match(r.report.failed[0]?.reason ?? "", /builtin boom/);
         });
     });
 });
@@ -412,6 +442,13 @@ describe("loader", () => {
         rmSync(tmpDir, { recursive: true, force: true });
     });
 
+    afterEach(() => {
+        const root = process.env.TACO_EXTENSIONS_DIR;
+        if (!root) return;
+        rmSync(root, { recursive: true, force: true });
+        mkdirSync(root, { recursive: true });
+    });
+
     const makeExt = (name: string, body: string) => {
         const dir = join(process.env.TACO_EXTENSIONS_DIR ?? "", name);
         mkdirSync(dir, { recursive: true });
@@ -421,7 +458,17 @@ describe("loader", () => {
                 name,
                 version: "0.0.1",
                 main: "index.js",
-                taco: { apiVersion: "1", permissions: ["context", "tools", "systemPrompt"] },
+                taco: {
+                    apiVersion: "1",
+                    permissions: [
+                        "context",
+                        "toolCall",
+                        "toolResult",
+                        "tools",
+                        "systemPrompt",
+                        "tags",
+                    ],
+                },
             }),
         );
         writeFileSync(join(dir, "index.js"), body);
@@ -493,20 +540,53 @@ describe("loader", () => {
             assert.equal(entry.whenToUse, "always");
         });
 
-        it("skips a directory extension listed in disabledExtensions? (dir extensions are always scanned)", async () => {
-            // Note: disabledExtensions only filters the npm allowlist (extensions field);
-            // directory scanning is always the full set, unaffected by disabledExtensions.
-            // This test pins down that semantic.
+        it("does not import a directory extension listed in disabledExtensions", async () => {
             makeExt(
                 "dir-only",
-                `export default function (taco) { taco.registerSystemPrompt({ append: "DIR" }); }`,
+                `await import("node:fs").then(({ writeFileSync }) => writeFileSync(${JSON.stringify(join(process.env.TACO_EXTENSIONS_DIR ?? "", "disabled-imported"))}, "yes"));
+                 export default function (taco) { taco.registerSystemPrompt({ append: "DIR" }); }`,
             );
             const r = await loadExtensions({ extensions: [], disabledExtensions: ["dir-only"] });
-            // dir-only comes from directory scanning, not the npm extensions allowlist,
-            // so disabledExtensions has no effect on it.
-            assert.ok(r.report.loaded.some((e) => e.name === "dir-only"));
-            // It should not appear in the disabled bucket (disabled only tracks extensions ∩ disabledExtensions).
-            assert.ok(!r.report.disabled.includes("dir-only"));
+            assert.equal(
+                existsSync(join(process.env.TACO_EXTENSIONS_DIR ?? "", "disabled-imported")),
+                false,
+            );
+            assert.ok(!r.report.loaded.some((e) => e.name === "dir-only"));
+            assert.ok(!r.report.failed.some((e) => e.name === "dir-only"));
+            assert.deepEqual(
+                r.report.disabled.filter((name) => name === "dir-only"),
+                ["dir-only"],
+            );
+        });
+
+        it("rolls back every contribution when a factory throws", async () => {
+            makeExt(
+                "partial-ext",
+                `export default function (taco) {
+                    taco.registerSystemPrompt({ append: "PARTIAL" });
+                    taco.registerContextHook(async () => undefined);
+                    taco.registerToolCallInterceptor(async () => undefined);
+                    taco.registerToolResultInterceptor(async () => undefined);
+                    taco.registerTool({ name: "partialTool", description: "partial", parameters: {}, execute: async () => ({ content: [] }) });
+                    taco.registerTool({ name: "partialFileTool", description: "partial", parameters: {}, execute: async () => ({ content: [] }) }, { fileAccess: { reads: [{ key: "path" }] } });
+                    taco.registerToolCandidate({ name: "partialLazyTool", summary: "partial", loading: "deferred", load: async () => ({ name: "partialLazyTool", description: "partial", parameters: {}, execute: async () => ({ content: [] }) }) });
+                    taco.registerWorkspaceActivator(() => ({ systemPrompt: { append: "PARTIAL WORKSPACE" } }));
+                    taco.registerTag({ name: "partial_tag", scope: "user-context", compression: { kind: "pin" }, tuiVisibility: "hidden", parser: { kind: "xml-balanced" }, description: "partial" });
+                    throw new Error("nope");
+                }`,
+            );
+            const r = await loadExtensions({ extensions: [] });
+            assert.ok(r.report.failed.some((f) => f.name === "partial-ext"));
+            assert.ok(!r.report.loaded.some((e) => e.name === "partial-ext"));
+            assert.ok(!r.systemPromptContributors().some((c) => c.append === "PARTIAL"));
+            assert.equal(r.contextHooks().external.length, 0);
+            assert.equal(r.toolCallHooks().length, 0);
+            assert.equal(r.toolResultHooks().external.length, 0);
+            assert.ok(!r.tools().some((tool) => tool.name === "partialTool"));
+            assert.equal(r.toolCandidates().length, 0);
+            assert.ok(!r.workspaceActivators().some((entry) => entry.extName === "partial-ext"));
+            assert.equal(fileAccessOf("partialFileTool"), undefined);
+            assert.equal(Object.hasOwn(tagRegistry, "partial_tag"), false);
         });
 
         it("records an npm-listed extension as disabled when in disabledExtensions", async () => {

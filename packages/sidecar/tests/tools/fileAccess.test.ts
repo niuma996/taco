@@ -1,13 +1,17 @@
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
+import { createExtensionApi } from "../../src/extensions/extensionApi.ts";
+import { ExtensionRegistry } from "../../src/extensions/registry.ts";
 import { NoopPlanPushAdapter } from "../../src/plan/planPushAdapter.ts";
 import { createTaskStore } from "../../src/tasks/createTaskStore.ts";
 import { builtinToolCandidates } from "../../src/tools/builtinCandidates.ts";
 import {
-    FILE_ACCESS_TOOL_NAMES,
+    extensionFileAccessSnapshot,
     fileAccessOf,
+    getFileAccessToolNames,
     isFsToolDenied,
     readPathsOf,
+    restoreExtensionFileAccess,
 } from "../../src/tools/fileAccess.ts";
 import { defaultToolsWithTasks, type TacoTool } from "../../src/tools/index.ts";
 import { TEST_SESSION_ID, testTaskPublisher } from "./_helpers.ts";
@@ -66,7 +70,7 @@ describe("built-in file access declarations", () => {
 
     it("every declared tool exists and every declared key is in its schema", async () => {
         const byName = new Map((await allBuiltinTools()).map((t) => [t.name, t]));
-        for (const name of FILE_ACCESS_TOOL_NAMES) {
+        for (const name of getFileAccessToolNames()) {
             const tool = byName.get(name);
             assert.ok(tool, `${name} is declared but not registered`);
             const keys = new Set(schemaKeys(tool));
@@ -131,5 +135,86 @@ describe("isFsToolDenied", () => {
         assert.equal(isFsToolDenied("read", undefined), false);
         // Prototype keys are not tool names.
         assert.equal(isFsToolDenied("constructor", true), false);
+    });
+
+    it("applies extension file-access declarations to path extraction and IM denial", () => {
+        const snapshot = extensionFileAccessSnapshot();
+        try {
+            const registry = new ExtensionRegistry();
+            const api = createExtensionApi(
+                {
+                    name: "file-ext",
+                    version: "0.0.1",
+                    apiVersion: "1",
+                    permissions: ["tools"],
+                },
+                registry,
+                { info: () => {}, warn: () => {}, error: () => {}, debug: () => {} },
+            );
+            api.registerTool(
+                { name: "extensionConvert", description: "convert" } as unknown as TacoTool,
+                { fileAccess: { reads: [{ key: "inputs", many: true }], write: "output" } },
+            );
+            assert.deepEqual(readPathsOf("extensionConvert", { inputs: ["a", "b"] }), ["a", "b"]);
+            assert.equal(fileAccessOf("extensionConvert")?.write, "output");
+            assert.equal(isFsToolDenied("extensionConvert", true), true);
+        } finally {
+            restoreExtensionFileAccess(snapshot);
+        }
+    });
+
+    it("does not let extension metadata weaken a built-in declaration", () => {
+        const snapshot = extensionFileAccessSnapshot();
+        try {
+            const registry = new ExtensionRegistry();
+            const api = createExtensionApi(
+                {
+                    name: "builtin-shadow",
+                    version: "0.0.1",
+                    apiVersion: "1",
+                    permissions: ["tools"],
+                },
+                registry,
+                { info: () => {}, warn: () => {}, error: () => {}, debug: () => {} },
+            );
+            api.registerTool({ name: "write", description: "shadow" } as unknown as TacoTool, {
+                fileAccess: {},
+            });
+            assert.equal(fileAccessOf("write")?.write, "path");
+        } finally {
+            restoreExtensionFileAccess(snapshot);
+        }
+    });
+
+    it("restores the previous extension declaration when a later registration rolls back", () => {
+        const snapshot = extensionFileAccessSnapshot();
+        try {
+            const registry = new ExtensionRegistry();
+            const logger = { info: () => {}, warn: () => {}, error: () => {}, debug: () => {} };
+            const manifest = {
+                version: "0.0.1",
+                apiVersion: "1" as const,
+                permissions: ["tools" as const],
+            };
+            const first = createExtensionApi(
+                { ...manifest, name: "first-file-ext" },
+                registry,
+                logger,
+            );
+            const second = createExtensionApi(
+                { ...manifest, name: "second-file-ext" },
+                registry,
+                logger,
+            );
+            const tool = { name: "sharedFileTool", description: "shared" } as unknown as TacoTool;
+            first.registerTool(tool, { fileAccess: { reads: [{ key: "oldPath" }] } });
+            const checkpoint = registry.checkpoint();
+            second.registerTool(tool, { fileAccess: { write: "newPath" } });
+            assert.equal(fileAccessOf("sharedFileTool")?.write, "newPath");
+            registry.rollback(checkpoint);
+            assert.deepEqual(fileAccessOf("sharedFileTool"), { reads: [{ key: "oldPath" }] });
+        } finally {
+            restoreExtensionFileAccess(snapshot);
+        }
     });
 });

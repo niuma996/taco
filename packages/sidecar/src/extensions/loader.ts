@@ -28,12 +28,7 @@ const log = createLogger("taco-ext");
 export interface LoadedConfig {
     /** npm package names listed under taco.json's `extensions` field */
     extensions: string[];
-    /** Names to skip (taco.json's `disabledExtensions`). Applies to:
-     *   - `@taco/builtin-output-redaction` (via registerBuiltinExtensions)
-     *   - the npm allowlist (this field).
-     * Directory scan under TACO_EXTENSIONS_DIR / $TACO_HOME/extensions is
-     * NOT affected by `disabledExtensions` by design — see
-     * tests/extensions/loader.test.ts:115-129. */
+    /** Names to skip (taco.json's `disabledExtensions`), across all sources. */
     disabledExtensions?: string[];
 }
 
@@ -271,6 +266,7 @@ async function loadOne(registry: ExtensionRegistry, c: Candidate): Promise<void>
         silentLogger(c.name),
         c.source,
     );
+    const checkpoint = registry.checkpoint();
     try {
         await factory(api);
         // Snapshot any tag names this extension contributed before reporting,
@@ -287,6 +283,7 @@ async function loadOne(registry: ExtensionRegistry, c: Candidate): Promise<void>
         if (tags.length > 0) entry.tags = tags;
         registry.recordLoaded(entry);
     } catch (e) {
+        registry.rollback(checkpoint);
         registry.recordFailed(c.name, `factory threw: ${(e as Error).message}`);
     }
 }
@@ -302,12 +299,12 @@ export async function loadExtensions(config: LoadedConfig): Promise<ExtensionReg
 
     const dirRoot = process.env.TACO_EXTENSIONS_DIR ?? join(tacoHome(), "extensions");
 
-    // disabledExtensions applies uniformly: a builtin or npm name listed in
+    // disabledExtensions applies uniformly: a builtin, directory, or npm name listed in
     // `disabledExtensions` is recorded via recordDisabled and never enters the
     // load pipeline, so it can never end up in failed/unauthorized (disabled
     // and failed are mutually exclusive by construction).
     const actual: string[] = [];
-    for (const name of config.extensions) {
+    for (const name of new Set(config.extensions)) {
         if (disabled.has(name)) {
             registry.recordDisabled(name);
         } else {
@@ -317,7 +314,8 @@ export async function loadExtensions(config: LoadedConfig): Promise<ExtensionReg
 
     const candidates = dedupByName([...candidatesFromDir(dirRoot), ...candidatesFromNpm(actual)]);
     for (const c of candidates) {
-        await loadOne(registry, c);
+        if (disabled.has(c.name)) registry.recordDisabled(c.name);
+        else await loadOne(registry, c);
     }
     return registry;
 }

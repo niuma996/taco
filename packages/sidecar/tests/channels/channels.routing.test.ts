@@ -20,7 +20,7 @@ import { ConversationRouter } from "../../src/channels/conversationRouter.ts";
 import { DefaultChannelContext } from "../../src/channels/ingress.ts";
 import type { ChannelConfig } from "../../src/channels/registry.ts";
 import {
-    IM_FS_TOOL_NAMES,
+    getImFsToolNames,
     IM_SHELL_TOOL_NAME,
     makeImSessionsRoot,
 } from "../../src/channels/virtualWorkspace.ts";
@@ -773,7 +773,7 @@ describe("virtualWorkspace", () => {
                 ...defaultTools({}).map((t) => t.name),
                 ...pdfToolCandidates().map((c) => c.name),
             ]);
-            for (const disabled of IM_FS_TOOL_NAMES) {
+            for (const disabled of getImFsToolNames()) {
                 assert.ok(registered.has(disabled), `disabled tool ${disabled} is not registered`);
             }
             // Guard: non-fs tools must never be in the disabled list (would break IM sessions).
@@ -789,7 +789,7 @@ describe("virtualWorkspace", () => {
                 "pdfFill",
                 "pdfFields",
             ]);
-            for (const disabled of IM_FS_TOOL_NAMES) {
+            for (const disabled of getImFsToolNames()) {
                 assert.ok(fsTools.has(disabled), `${disabled} is not an fs tool`);
             }
             assert.equal(IM_SHELL_TOOL_NAME, "shell");
@@ -809,7 +809,7 @@ describe("virtualWorkspace", () => {
             assert.equal(ws.sessionCwd, scratch);
             assert.equal(ws.workspaceKey, "im://mock-1/u1/c1");
             const names = ws.tools.map((t) => t.name);
-            const disabled = [...IM_FS_TOOL_NAMES, IM_SHELL_TOOL_NAME];
+            const disabled = [...getImFsToolNames(), IM_SHELL_TOOL_NAME];
             for (const fs of disabled) {
                 assert.ok(!names.includes(fs), `expected ${fs} to be disabled`);
             }

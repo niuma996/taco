@@ -1,5 +1,5 @@
 /**
- * Which built-in tools touch the filesystem, and through which arguments.
+ * Which tools touch the filesystem, and through which arguments.
  *
  * The single source for the mutation gate's write/read fences, the IM
  * file-tool deny list, the deferred-tool catalog filter and the deferred
@@ -38,11 +38,35 @@ const BUILTIN_FILE_ACCESS: Readonly<Record<string, FileAccess>> = {
     pdfFields: { reads: [{ key: "input" }] },
 };
 
-/** Names of the built-in tools that read or write files. */
-export const FILE_ACCESS_TOOL_NAMES: readonly string[] = Object.keys(BUILTIN_FILE_ACCESS);
+const EXTENSION_FILE_ACCESS = new Map<string, FileAccess>();
+
+/** Fresh snapshot of built-in and extension tools that read or write files. */
+export function getFileAccessToolNames(): readonly string[] {
+    return [...new Set([...Object.keys(BUILTIN_FILE_ACCESS), ...EXTENSION_FILE_ACCESS.keys()])];
+}
+
+export function registerExtensionFileAccess(
+    toolName: string,
+    access: FileAccess | undefined,
+): void {
+    if (access) EXTENSION_FILE_ACCESS.set(toolName, access);
+    else EXTENSION_FILE_ACCESS.delete(toolName);
+}
+
+export function extensionFileAccessSnapshot(): ReadonlyMap<string, FileAccess> {
+    return new Map(EXTENSION_FILE_ACCESS);
+}
+
+export function restoreExtensionFileAccess(snapshot: ReadonlyMap<string, FileAccess>): void {
+    EXTENSION_FILE_ACCESS.clear();
+    for (const [name, access] of snapshot) EXTENSION_FILE_ACCESS.set(name, access);
+}
 
 export function fileAccessOf(toolName: string): FileAccess | undefined {
-    return Object.hasOwn(BUILTIN_FILE_ACCESS, toolName) ? BUILTIN_FILE_ACCESS[toolName] : undefined;
+    // Core containment and read/write classification are invariants. An extension
+    // may override a built-in tool implementation, but never its safety metadata.
+    if (Object.hasOwn(BUILTIN_FILE_ACCESS, toolName)) return BUILTIN_FILE_ACCESS[toolName];
+    return EXTENSION_FILE_ACCESS.get(toolName);
 }
 
 /**

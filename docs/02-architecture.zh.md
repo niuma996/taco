@@ -325,7 +325,7 @@ env (TACO_*, ANTHROPIC_API_KEY, ...)
   带 `custom:` 前缀）
 - `mcpServers` — 每服务器 stdio / Streamable HTTP MCP 配置
 - `channels` — IM 渠道实例（manifest + 渠道专属 config）
-- `extensions` / `disabledExtensions` — npm 扩展白名单
+- `extensions` / `disabledExtensions` — npm 扩展白名单，以及同时作用于内置、npm 和目录发现扩展的禁用列表
 - `instructions` — 项目上下文指令开关（CLAUDE.md / AGENTS.md /
   DESIGN.md）
 

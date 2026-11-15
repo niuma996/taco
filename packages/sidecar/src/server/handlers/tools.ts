@@ -11,9 +11,12 @@
 
 import type { ToolEntry, ToolsListResult } from "@taco-ai/protocol";
 import { isToolVisibleForAnySubagent } from "../../agents/filterTools.ts";
+import { createLogger } from "../../lib/logger.ts";
 import { addToolsSchema } from "../../tools/addTools.ts";
 import type { TacoTool } from "../../tools/index.ts";
 import { registerMethod } from "../methodRegistry.ts";
+
+const log = createLogger("tools.list");
 
 function toEntry(
     tool: Pick<TacoTool, "name" | "label" | "description" | "parameters">,
@@ -93,20 +96,35 @@ export function registerToolsHandlers(): void {
         const registry = workspace.toolRegistry;
         await registry?.prepare?.();
         const deferredEntries: ToolEntry[] = registry
-            ? await Promise.all(
-                  registry.listCandidates().map(async (candidate) => {
-                      const tool = await candidate.load();
-                      return {
-                          ...toEntry(
-                              tool,
-                              candidate.source === "builtin" ? "builtin" : "mcp",
-                              computeVisible(candidate.name),
-                          ),
-                          source: candidate.source,
-                          loading: candidate.loading,
-                      };
-                  }),
-              )
+            ? (
+                  await Promise.all(
+                      registry
+                          .listCandidates()
+                          .map(async (candidate): Promise<ToolEntry | undefined> => {
+                              try {
+                                  const tool = await candidate.load();
+                                  return {
+                                      ...toEntry(
+                                          tool,
+                                          candidate.source === "builtin"
+                                              ? "builtin"
+                                              : candidate.source === "mcp"
+                                                ? "mcp"
+                                                : "external",
+                                          computeVisible(candidate.name),
+                                      ),
+                                      source: candidate.source,
+                                      loading: candidate.loading,
+                                  };
+                              } catch (error) {
+                                  log.warn(
+                                      `failed to load candidate "${candidate.name}" from ${candidate.source}: ${error instanceof Error ? error.message : String(error)}`,
+                                  );
+                                  return undefined;
+                              }
+                          }),
+                  )
+              ).filter((entry): entry is ToolEntry => entry !== undefined)
             : [];
 
         return { tools: [...builtin, ...external, ...deferredEntries, ...session] };

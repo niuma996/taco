@@ -28,6 +28,12 @@ export type {
     ExtensionModule,
     ExtensionPermission,
     ExtensionSource,
+    ExtensionToolCandidate,
+    ExtensionToolCandidateWithSource,
+    ExtensionToolRegistrationOptions,
+    FileAccess,
+    TacoTool,
+    TacoToolContext,
     ToolCallEvent,
     ToolCallHook,
     ToolCallResult,
@@ -35,4 +41,5 @@ export type {
     ToolResultHook,
     ToolResultPatch,
     WorkspaceActivator,
+    WorkspaceContribution,
 } from "./types.ts";

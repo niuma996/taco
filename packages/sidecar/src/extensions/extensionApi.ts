@@ -8,7 +8,6 @@
  */
 
 import type { SystemPromptContributor } from "../prompts/buildSystemPrompt.ts";
-import type { AgentHarnessTool, ExecutionToolContext } from "../runtime/pi/types.ts";
 import type { TagSpec } from "../tags/types.ts";
 import type { ExtensionRegistry } from "./registry.ts";
 import { EXTERNAL_SOURCE } from "./registry.ts";
@@ -19,8 +18,11 @@ import type {
     ExtensionManifest,
     ExtensionPermission,
     ExtensionSource,
+    ExtensionToolCandidate,
     ToolCallHook,
     ToolResultHook,
+    WorkspaceActivator,
+    WorkspaceContribution,
 } from "./types.ts";
 
 /**
@@ -35,7 +37,21 @@ const PERM_LABELS: Record<ExtensionPermission, string> = {
     tools: "registerTool",
     systemPrompt: "registerSystemPrompt",
     tags: "registerTag",
+    commandPermissions: "workspace commandPermissionRules",
 };
+
+const WORKSPACE_PERMISSIONS: Record<
+    Exclude<keyof WorkspaceContribution, "source">,
+    ExtensionPermission
+> = {
+    contextHooks: "context",
+    toolCallHooks: "toolCall",
+    toolResultHooks: "toolResult",
+    tools: "tools",
+    toolCandidates: "tools",
+    systemPrompt: "systemPrompt",
+    commandPermissionRules: "commandPermissions",
+} as const;
 
 export function createExtensionApi(
     manifest: ExtensionManifest,
@@ -45,13 +61,39 @@ export function createExtensionApi(
 ): ExtensionApi {
     const declared = new Set<ExtensionPermission>(manifest.permissions);
 
-    const check = (perm: ExtensionPermission): boolean => {
+    const check = (perm: ExtensionPermission, method = PERM_LABELS[perm]): boolean => {
         if (declared.has(perm)) return true;
         logger.warn(
-            `extension "${manifest.name}" called ${PERM_LABELS[perm]} without declaring "${perm}" permission; ignored`,
+            `extension "${manifest.name}" called ${method} without declaring "${perm}" permission; ignored`,
         );
         registry.recordUnauthorized(manifest.name, perm);
         return false;
+    };
+
+    const authorizeWorkspaceContribution = (
+        contribution: WorkspaceContribution,
+    ): WorkspaceContribution => {
+        const authorized: WorkspaceContribution = {};
+        for (const key of Object.keys(WORKSPACE_PERMISSIONS) as Array<
+            keyof typeof WORKSPACE_PERMISSIONS
+        >) {
+            if (contribution[key] === undefined) continue;
+            if (!check(WORKSPACE_PERMISSIONS[key], `workspace contribution "${key}"`)) continue;
+            Object.assign(authorized, { [key]: contribution[key] });
+        }
+        if (authorized.tools) {
+            authorized.tools = authorized.tools.map((entry) => ({
+                ...entry,
+                name: manifest.name,
+            }));
+        }
+        if (authorized.toolCandidates) {
+            authorized.toolCandidates = authorized.toolCandidates.map((entry) => ({
+                ...entry,
+                name: manifest.name,
+            }));
+        }
+        return authorized;
     };
 
     return {
@@ -69,7 +111,7 @@ export function createExtensionApi(
             if (!check("toolResult")) return;
             registry.addToolResultInterceptor(source, hook);
         },
-        registerTool(tool: AgentHarnessTool<ExecutionToolContext>): void {
+        registerTool(tool, options): void {
             if (!check("tools")) return;
             const existing = registry.toolsWithSource().find((e) => e.tool.name === tool.name);
             if (existing) {
@@ -77,7 +119,17 @@ export function createExtensionApi(
                     `extension "${manifest.name}" overrode tool "${tool.name}" from extension "${existing.name}"`,
                 );
             }
-            registry.addTool(manifest.name, tool);
+            registry.addTool(manifest.name, tool, options?.fileAccess);
+        },
+        registerToolCandidate(candidate: ExtensionToolCandidate): void {
+            if (!check("tools")) return;
+            registry.addToolCandidate(manifest.name, candidate);
+        },
+        registerWorkspaceActivator(activator: WorkspaceActivator): void {
+            registry.addWorkspaceActivator(source, manifest.name, async (ctx) => {
+                const contribution = await activator(ctx);
+                return contribution ? authorizeWorkspaceContribution(contribution) : undefined;
+            });
         },
         registerSystemPrompt(contributor: SystemPromptContributor): void {
             if (!check("systemPrompt")) return;

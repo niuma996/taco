@@ -8,6 +8,10 @@ starting with `v0.1.0` (the first open-source release).
 
 ## [Unreleased]
 
+### Changed
+
+- Strengthened the extension runtime with atomic rollback, workspace activators, lazy tools, and file-access declarations. `disabledExtensions` now also disables directory-discovered extensions; built-in file-access declarations cannot be overridden, and tool-name collisions or a broken candidate no longer take down a workspace or tool listing. — `sidecar` + `desktop`
+
 ## [0.4.1] — 2026-11-15
 
 A release about cleaning up: workspaces can be removed with a preview of exactly

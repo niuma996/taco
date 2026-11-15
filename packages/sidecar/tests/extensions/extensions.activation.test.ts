@@ -161,6 +161,95 @@ describe("activation", () => {
         });
     });
 
+    describe("activateExtensions — external workspace contributions", () => {
+        it("collects authorized tools, hooks, prompts, command rules, and lazy candidates", async () => {
+            const r = new ExtensionRegistry();
+            const api = createExtensionApi(
+                {
+                    name: "workspace-ext",
+                    version: "0.0.1",
+                    apiVersion: "1",
+                    permissions: [
+                        "context",
+                        "toolCall",
+                        "toolResult",
+                        "tools",
+                        "systemPrompt",
+                        "commandPermissions",
+                    ],
+                },
+                r,
+                silentLogger,
+            );
+            api.registerWorkspaceActivator(async ({ cwd }) => ({
+                contextHooks: [async () => undefined],
+                toolCallHooks: [async () => undefined],
+                toolResultHooks: [async () => undefined],
+                tools: [{ name: "forged-owner", tool: fakeTool(`workspaceTool@${cwd}`) }],
+                toolCandidates: [
+                    {
+                        name: "forged-owner",
+                        candidate: {
+                            name: "workspaceLazyTool",
+                            summary: "lazy workspace tool",
+                            loading: "deferred",
+                            fileAccess: { reads: [{ key: "path" }] },
+                            load: async () => fakeTool("workspaceLazyTool"),
+                        },
+                    },
+                ],
+                systemPrompt: { append: "WORKSPACE" },
+                commandPermissionRules: ["workspace-cli *"],
+            }));
+
+            const set = await activateExtensions(r, { cwd: "/tmp/workspace" });
+            assert.equal(set.contextHooks().external.length, 1);
+            assert.equal(set.toolCallHooks().length, 1);
+            assert.equal(set.toolResultHooks().external.length, 1);
+            assert.equal(set.toolsWithSource()[0]?.tool.name, "workspaceTool@/tmp/workspace");
+            assert.equal(set.toolsWithSource()[0]?.name, "workspace-ext");
+            assert.equal(set.toolCandidates()[0]?.candidate.name, "workspaceLazyTool");
+            assert.equal(set.toolCandidates()[0]?.name, "workspace-ext");
+            assert.equal(set.toolCandidates()[0]?.candidate.fileAccess?.reads?.[0]?.key, "path");
+            assert.equal(set.systemPromptContributors()[0]?.append, "WORKSPACE");
+            assert.deepEqual(set.commandPermissionRules(), ["workspace-cli *"]);
+        });
+
+        it("filters each workspace contribution by its manifest permission", async () => {
+            const r = new ExtensionRegistry();
+            const api = createExtensionApi(
+                {
+                    name: "workspace-tools-only",
+                    version: "0.0.1",
+                    apiVersion: "1",
+                    permissions: ["tools"],
+                },
+                r,
+                silentLogger,
+            );
+            api.registerWorkspaceActivator(() => ({
+                contextHooks: [async () => undefined],
+                tools: [{ name: "workspace-tools-only", tool: fakeTool("allowedTool") }],
+                systemPrompt: { append: "NOT ALLOWED" },
+                commandPermissionRules: ["not-allowed *"],
+            }));
+
+            const set = await activateExtensions(r, { cwd: "/tmp" });
+            assert.deepEqual(
+                set.toolsWithSource().map((entry) => entry.tool.name),
+                ["allowedTool"],
+            );
+            assert.equal(set.contextHooks().external.length, 0);
+            assert.equal(set.systemPromptContributors().length, 0);
+            assert.deepEqual(set.commandPermissionRules(), []);
+            assert.deepEqual(r.report.unauthorized.map((entry) => entry.method).sort(), [
+                "commandPermissions",
+                "context",
+                "systemPrompt",
+            ]);
+        });
+    });
+
     describe("activateExtensions — ordering", () => {
         it("builtin activator systemPrompt contribution appears before process-level external contributors", async () => {
             // Note: git-context builtin no longer contributes to systemPrompt

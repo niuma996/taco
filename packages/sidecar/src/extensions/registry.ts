@@ -9,14 +9,21 @@
  * `addWorkspaceActivator`; `activateExtensions` invokes them per workspace.
  */
 
-import { registerExtensionTag } from "../tags/registry.ts";
+import { registerExtensionTag, tagRegistry, unregisterExtensionTag } from "../tags/registry.ts";
 import type { TagSpec } from "../tags/types.ts";
+import type { FileAccess } from "../tools/fileAccess.ts";
+import {
+    extensionFileAccessSnapshot,
+    registerExtensionFileAccess,
+    restoreExtensionFileAccess,
+} from "../tools/fileAccess.ts";
 import type { TacoTool } from "../tools/index.ts";
 import type { BuiltinManifest, BuiltinRegistryApi } from "./builtinContract.ts";
 import type {
     ContextHook,
     ExtensionPermission,
     ExtensionSource,
+    ExtensionToolCandidateWithSource,
     SystemPromptContributor,
     ToolCallHook,
     ToolResultHook,
@@ -60,11 +67,28 @@ export interface WorkspaceActivatorEntry {
     readonly activator: WorkspaceActivator;
 }
 
+export interface ExtensionRegistryCheckpoint {
+    readonly tools: number;
+    readonly toolCandidates: number;
+    readonly systemPrompt: number;
+    readonly builtinContextHooks: number;
+    readonly externalContextHooks: number;
+    readonly toolCallHooks: number;
+    readonly builtinToolResultHooks: number;
+    readonly externalToolResultHooks: number;
+    readonly workspaceActivators: number;
+    readonly extensionSkillDirs: number;
+    readonly extensionTagIndex: ReadonlyMap<string, ReadonlySet<string>>;
+    readonly tagNames: ReadonlySet<string>;
+    readonly extensionFileAccess: ReadonlyMap<string, FileAccess>;
+}
+
 /** sources that can register a tool or system-prompt contributor today. */
 export const EXTERNAL_SOURCE: ExtensionSource = "external";
 
 export class ExtensionRegistry {
-    private readonly _tools: Array<{ name: string; tool: TacoTool }> = [];
+    private readonly _tools: Array<{ name: string; tool: TacoTool; fileAccess?: FileAccess }> = [];
+    private readonly _toolCandidates: ExtensionToolCandidateWithSource[] = [];
     private readonly _systemPrompt: SystemPromptContributor[] = [];
     private readonly _contextHooks: { builtins: ContextHook[]; external: ContextHook[] } = {
         builtins: [],
@@ -80,13 +104,65 @@ export class ExtensionRegistry {
         "failed" | "unauthorized" | "disabled"
     > = { loaded: [], failed: [], unauthorized: [], disabled: [] };
 
+    checkpoint(): ExtensionRegistryCheckpoint {
+        // Loading is serial and every contribution is append-only. The global
+        // snapshots cover the two registries whose entries live outside this object.
+        return {
+            tools: this._tools.length,
+            toolCandidates: this._toolCandidates.length,
+            systemPrompt: this._systemPrompt.length,
+            builtinContextHooks: this._contextHooks.builtins.length,
+            externalContextHooks: this._contextHooks.external.length,
+            toolCallHooks: this._toolCallHooks.length,
+            builtinToolResultHooks: this._toolResultHooks.builtins.length,
+            externalToolResultHooks: this._toolResultHooks.external.length,
+            workspaceActivators: this._workspaceActivators.length,
+            extensionSkillDirs: this._extensionSkillDirs.length,
+            extensionTagIndex: new Map(
+                [...this._extensionTagIndex].map(([name, tags]) => [name, new Set(tags)]),
+            ),
+            tagNames: new Set(Object.keys(tagRegistry)),
+            extensionFileAccess: extensionFileAccessSnapshot(),
+        };
+    }
+
+    rollback(checkpoint: ExtensionRegistryCheckpoint): void {
+        this._tools.length = checkpoint.tools;
+        this._toolCandidates.length = checkpoint.toolCandidates;
+        this._systemPrompt.length = checkpoint.systemPrompt;
+        this._contextHooks.builtins.length = checkpoint.builtinContextHooks;
+        this._contextHooks.external.length = checkpoint.externalContextHooks;
+        this._toolCallHooks.length = checkpoint.toolCallHooks;
+        this._toolResultHooks.builtins.length = checkpoint.builtinToolResultHooks;
+        this._toolResultHooks.external.length = checkpoint.externalToolResultHooks;
+        this._workspaceActivators.length = checkpoint.workspaceActivators;
+        this._extensionSkillDirs.length = checkpoint.extensionSkillDirs;
+        this._extensionTagIndex.clear();
+        for (const [name, tags] of checkpoint.extensionTagIndex) {
+            this._extensionTagIndex.set(name, new Set(tags));
+        }
+        for (const name of Object.keys(tagRegistry)) {
+            if (!checkpoint.tagNames.has(name)) unregisterExtensionTag(name);
+        }
+        restoreExtensionFileAccess(checkpoint.extensionFileAccess);
+    }
+
     /**
      * Append a tool contributed by extension `name`. The name is retained
      * so downstream consumers (WorkspaceRuntime.dedupOverride) can emit
      * "extension X overrode built-in tool Y" warnings per design §4.3.
      */
-    addTool(name: string, tool: TacoTool): void {
-        this._tools.push({ name, tool });
+    addTool(name: string, tool: TacoTool, fileAccess?: FileAccess): void {
+        this._tools.push({ name, tool, ...(fileAccess ? { fileAccess } : {}) });
+        registerExtensionFileAccess(tool.name, fileAccess);
+    }
+
+    addToolCandidate(
+        name: string,
+        contribution: ExtensionToolCandidateWithSource["candidate"],
+    ): void {
+        this._toolCandidates.push({ name, candidate: contribution });
+        registerExtensionFileAccess(contribution.name, contribution.fileAccess);
     }
 
     addSystemPromptContributor(contributor: SystemPromptContributor): void {
@@ -176,7 +252,7 @@ export class ExtensionRegistry {
      * imported, so we only have its name (no version/permissions/manifest).
      */
     recordDisabled(name: string): void {
-        this._report.disabled.push(name);
+        if (!this._report.disabled.includes(name)) this._report.disabled.push(name);
     }
 
     tools(): TacoTool[] {
@@ -187,8 +263,12 @@ export class ExtensionRegistry {
      * Like {@link tools} but retains the contributing extension's name.
      * Used by WorkspaceRuntime to emit override warnings (design §4.3).
      */
-    toolsWithSource(): Array<{ name: string; tool: TacoTool }> {
+    toolsWithSource(): Array<{ name: string; tool: TacoTool; fileAccess?: FileAccess }> {
         return [...this._tools];
+    }
+
+    toolCandidates(): ExtensionToolCandidateWithSource[] {
+        return [...this._toolCandidates];
     }
 
     systemPromptContributors(): SystemPromptContributor[] {
@@ -261,6 +341,7 @@ export async function registerBuiltinExtensions(
             continue;
         }
 
+        const checkpoint = registry.checkpoint();
         try {
             if (manifest.register) {
                 await manifest.register(builtinApi);
@@ -293,6 +374,7 @@ export async function registerBuiltinExtensions(
                 ...(tags.length > 0 ? { tags } : {}),
             });
         } catch (e) {
+            registry.rollback(checkpoint);
             registry.recordFailed(manifest.name, (e as Error).message);
         }
     }

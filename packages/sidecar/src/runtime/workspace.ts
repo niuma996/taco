@@ -86,14 +86,17 @@ import {
     type TaskSnapshotPublisher,
 } from "../tasks/taskPushAdapter.ts";
 import type { SelfRpcCall, TacoToolContextBase } from "../tools/context.ts";
-import { isFsToolDenied } from "../tools/fileAccess.ts";
+import { isFsToolDenied, registerExtensionFileAccess } from "../tools/fileAccess.ts";
 import { defaultToolsWithTasks, type TacoTool } from "../tools/index.ts";
 import { orderTools, toolNamesKey } from "../tools/toolOrder.ts";
 import type { BackgroundWorkHooks } from "../work/workHooks.ts";
 import { createWorkspaceScope, type WorkspaceScope } from "../workspace/workspaceScope.ts";
 import type { AttachedSession } from "./harness/attachedSession.ts";
 import type { DeferredToolRegistry } from "./harness/deferredToolRegistry.ts";
-import { DefaultDeferredToolRegistry } from "./harness/deferredToolRegistry.ts";
+import {
+    CompositeDeferredToolRegistry,
+    DefaultDeferredToolRegistry,
+} from "./harness/deferredToolRegistry.ts";
 import { resolveLiteModel } from "./models/liteModel.ts";
 import { findModelById } from "./models/modelLookup.ts";
 import {
@@ -572,8 +575,30 @@ export class WorkspaceRuntime extends EventEmitter {
         this.taskAdapter = options.taskPushAdapter ?? new NoopTaskPushAdapter();
         this.planAdapter = options.planPushAdapter ?? new NoopPlanPushAdapter();
 
-        this.toolRegistry =
+        const baseToolRegistry =
             options.toolRegistry ?? new DefaultDeferredToolRegistry({ candidates: [] });
+        // Policy helpers resolve file access process-wide by tool name. Install
+        // declarations only when a real runtime is constructed: activation is also
+        // used by read-only policy queries and must not mutate global policy state.
+        // These declarations are configuration with process lifetime, not resources
+        // owned by an individual workspace; built-in declarations remain immutable.
+        for (const entry of this.extensions?.toolsWithSource() ?? []) {
+            registerExtensionFileAccess(entry.tool.name, entry.fileAccess);
+        }
+        const extensionToolCandidates = (this.extensions?.toolCandidates() ?? []).map(
+            ({ name, candidate }) => ({
+                ...candidate,
+                source: "extension" as const,
+                extensionName: name,
+            }),
+        );
+        for (const candidate of extensionToolCandidates) {
+            registerExtensionFileAccess(candidate.name, candidate.fileAccess);
+        }
+        this.toolRegistry = new CompositeDeferredToolRegistry(
+            baseToolRegistry,
+            extensionToolCandidates,
+        );
         const imPolicy = options.imPolicy ?? (isIm ? DEFAULT_IM_WORKSPACE_POLICY : undefined);
         // Tool assembly re-reads the policy through this thunk rather than
         // closing over the value above, so a policy edited after the workspace

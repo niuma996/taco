@@ -655,7 +655,8 @@
     "permToolResult": "在执行后转换工具结果",
     "permTools": "注册新工具",
     "permSystemPrompt": "向系统提示词追加内容",
-    "permTags": "注册自定义标签"
+    "permTags": "注册自定义标签",
+    "permCommandPermissions": "为工作区提供命令允许规则"
   },
   "channels": {
     "title": "渠道",

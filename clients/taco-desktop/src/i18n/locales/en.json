@@ -655,7 +655,8 @@
     "permToolResult": "Transform tool results after execution",
     "permTools": "Register new tools",
     "permSystemPrompt": "Append/prepend to system prompt",
-    "permTags": "Register custom tags"
+    "permTags": "Register custom tags",
+    "permCommandPermissions": "Contribute workspace command allow rules"
   },
   "channels": {
     "title": "Channels",

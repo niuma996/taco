@@ -5,7 +5,7 @@
  */
 
 import type { ImWorkspacePolicy } from "../channels/imWorkspacePolicy.ts";
-import { IM_FS_TOOL_NAMES, IM_SHELL_TOOL_NAME } from "../channels/virtualWorkspace.ts";
+import { getImFsToolNames, IM_SHELL_TOOL_NAME } from "../channels/virtualWorkspace.ts";
 import { createLogger } from "../lib/logger.ts";
 import type { TacoTool } from "../tools/index.ts";
 
@@ -52,7 +52,7 @@ export function dedupOverride(
 export function filterToolsForImPolicy(tools: TacoTool[], policy: ImWorkspacePolicy): TacoTool[] {
     const drop = new Set<string>();
     if (policy.tools.fsTools === "deny") {
-        for (const name of IM_FS_TOOL_NAMES) drop.add(name);
+        for (const name of getImFsToolNames()) drop.add(name);
     }
     if (policy.tools.shell === "deny") {
         drop.add(IM_SHELL_TOOL_NAME);

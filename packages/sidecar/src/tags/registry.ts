@@ -233,6 +233,11 @@ export function registerExtensionTag(spec: TagSpec): boolean {
     return true;
 }
 
+/** Remove a tag installed by an extension registration that is being rolled back. */
+export function unregisterExtensionTag(name: string): void {
+    if (!BUILTIN_NAMES_SET.has(name)) Reflect.deleteProperty(tagRegistry, name);
+}
+
 /**
  * Eagerly validate the builtin registry.
  *

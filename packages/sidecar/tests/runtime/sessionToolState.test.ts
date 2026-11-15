@@ -5,7 +5,10 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { DefaultDeferredToolRegistry } from "../../src/runtime/harness/deferredToolRegistry.ts";
+import {
+    CompositeDeferredToolRegistry,
+    DefaultDeferredToolRegistry,
+} from "../../src/runtime/harness/deferredToolRegistry.ts";
 import { DefaultSessionToolController } from "../../src/runtime/harness/sessionToolController.ts";
 import { SessionToolState } from "../../src/runtime/harness/sessionToolState.ts";
 import {
@@ -271,6 +274,62 @@ describe("DefaultDeferredToolRegistry.prepare", () => {
         assert.deepEqual(
             registry.listDeferred().map((c) => c.name),
             ["taken", "fresh"],
+        );
+    });
+});
+
+describe("CompositeDeferredToolRegistry", () => {
+    it("keeps builtin and first extension candidates when constructor names collide", () => {
+        const candidate = (
+            name: string,
+            source: "builtin" | "extension",
+            extensionName?: string,
+        ) => ({
+            name,
+            summary: name,
+            loading: "deferred" as const,
+            source,
+            extensionName,
+            load: async () => fakeTool(name),
+        });
+        const base = new DefaultDeferredToolRegistry({
+            candidates: [candidate("shared", "builtin")],
+        });
+        const registry = new CompositeDeferredToolRegistry(base, [
+            candidate("shared", "extension", "shadow-builtin"),
+            candidate("unique", "extension", "first-owner"),
+            candidate("unique", "extension", "second-owner"),
+        ]);
+        assert.deepEqual(
+            registry
+                .listCandidates()
+                .map((entry) => [entry.name, entry.source, entry.extensionName]),
+            [
+                ["shared", "builtin", undefined],
+                ["unique", "extension", "first-owner"],
+            ],
+        );
+    });
+
+    it("keeps the dynamic base candidate and skips an extension collision", async () => {
+        const dynamic = {
+            name: "shared",
+            summary: "shared",
+            loading: "deferred" as const,
+            source: "mcp" as const,
+            load: async () => fakeTool("shared"),
+        };
+        const base = new DefaultDeferredToolRegistry({
+            candidates: [],
+            prepare: async () => [dynamic],
+        });
+        const registry = new CompositeDeferredToolRegistry(base, [
+            { ...dynamic, source: "extension", extensionName: "collision-fixture" },
+        ]);
+        await registry.prepare();
+        assert.deepEqual(
+            registry.listCandidates().map((candidate) => candidate.source),
+            ["mcp"],
         );
     });
 });

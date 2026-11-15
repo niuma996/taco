@@ -64,9 +64,9 @@ export interface TacoGlobalConfigShape {
      */
     extensions?: string[];
     /**
-     * Extension names whitelisted in `extensions` but disabled by the user.
-     * loader: actual = extensions - disabledExtensions. Coexists with
-     * `extensions` rather than replacing it, ensuring zero migration cost.
+     * Extension names disabled by the user across builtin, npm, and directory
+     * discovery. Coexists with `extensions` rather than replacing it, ensuring
+     * zero migration cost.
      */
     disabledExtensions?: string[];
     /**
@@ -455,6 +455,7 @@ export type ExtensionPermission =
     | "toolResult"
     | "tools"
     | "systemPrompt"
-    | "tags";
+    | "tags"
+    | "commandPermissions";
 /** Discriminator used to bucket extension contributions by origin. */
 export type ExtensionSource = "builtin" | "external";
