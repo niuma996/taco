@@ -13,8 +13,10 @@ import {
     type CheckpointsListResult,
     type CheckpointsRestoreResult,
 } from "@taco-ai/protocol";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useCallback, useState } from "react";
 import type { TacoClient } from "../lib/clients/tacoClient.ts";
+import { queryError, refreshQueries, resourceQueryKey } from "../lib/queries/queryClient";
 
 export type RestoreResult = { ok: true; protectionId?: string } | { ok: false; reason: string };
 
@@ -35,48 +37,34 @@ export function useCheckpointsPane(
     /** Failure sink (the notification bell). A clean restore is visible in the pane itself. */
     notify: (msg: string) => void,
 ): UseCheckpointsPaneResult {
-    const [data, setData] = useState<CheckpointsListResult | null>(null);
-    const [loading, setLoading] = useState(false);
-    const [error, setError] = useState<string | null>(null);
-    const [restoringId, setRestoringId] = useState<string | null>(null);
-    // Monotonic per-refresh token: stale responses from an earlier refresh
-    // (e.g. user spam-clicking the button) are discarded so the latest click
-    // always wins, regardless of network ordering.
-    const refreshSeq = useRef(0);
+    const queryClient = useQueryClient();
+    const query = useQuery({
+        queryKey: resourceQueryKey(client, "checkpoints", activeCwd),
+        enabled: active && Boolean(activeCwd),
+        retry: false,
+        queryFn: ({ signal }) => {
+            signal.throwIfAborted();
+            return client.checkpointsList({ workspace: asWorkspaceId(activeCwd as string) });
+        },
+    });
+    const [restoring, setRestoring] = useState<{
+        client: TacoClient;
+        cwd: string;
+        checkpointId: string;
+    } | null>(null);
 
     const refresh = useCallback(() => {
-        if (!activeCwd) return;
-        const seq = ++refreshSeq.current;
-        setLoading(true);
-        setError(null);
-        void client
-            .checkpointsList({
-                workspace: asWorkspaceId(activeCwd),
-            })
-            .then((result) => {
-                if (seq !== refreshSeq.current) return;
-                setData(result);
-            })
-            .catch((e: unknown) => {
-                if (seq !== refreshSeq.current) return;
-                console.error("[useCheckpointsPane] checkpointsList failed:", e);
-                setError(e instanceof Error ? e.message : String(e));
-            })
-            .finally(() => {
-                if (seq !== refreshSeq.current) return;
-                setLoading(false);
+        if (active && activeCwd)
+            void refreshQueries(queryClient, {
+                queryKey: resourceQueryKey(client, "checkpoints", activeCwd),
             });
-    }, [activeCwd, client]);
-
-    useEffect(() => {
-        if (!active || !activeCwd) return;
-        refresh();
-    }, [active, activeCwd, refresh]);
+    }, [active, activeCwd, client, queryClient]);
 
     const restore = useCallback(
         async (checkpointId: string): Promise<RestoreResult> => {
             if (!activeCwd) return { ok: false, reason: "no active workspace" };
-            setRestoringId(checkpointId);
+            const operation = { client, cwd: activeCwd, checkpointId };
+            setRestoring(operation);
             try {
                 const result: CheckpointsRestoreResult = await client.checkpointsRestore({
                     workspace: asWorkspaceId(activeCwd),
@@ -112,12 +100,24 @@ export function useCheckpointsPane(
                 // does not mean nothing changed: the sidecar may have written
                 // some files, or taken the protection snapshot, before failing.
                 // Leaving the pane on pre-restore data would misreport that.
-                refresh();
-                setRestoringId(null);
+                void refreshQueries(queryClient, {
+                    queryKey: resourceQueryKey(client, "checkpoints", operation.cwd),
+                });
+                setRestoring((current) => (current === operation ? null : current));
             }
         },
-        [activeCwd, activeSessionId, client, refresh, notify],
+        [activeCwd, activeSessionId, client, queryClient, notify],
     );
 
-    return { data, loading, error, restoringId, refresh, restore };
+    return {
+        data: query.data ?? null,
+        loading: query.isFetching,
+        error: queryError(query.error)?.message ?? null,
+        restoringId:
+            restoring?.client === client && restoring.cwd === activeCwd
+                ? restoring.checkpointId
+                : null,
+        refresh,
+        restore,
+    };
 }

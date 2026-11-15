@@ -116,7 +116,8 @@ runs `taco install` to register a system-level daemon:
 ## Management query cache
 
 `main.tsx` provides one TanStack Query client. Providers, models, tools, skills,
-plugins, agent catalog/content/runtime, jobs and Work detail reads share this cache. Keys isolate
+plugins, agent catalog/content/runtime, jobs, checkpoints and Work detail reads share
+this cache. Keys isolate
 TacoClient instances, workspace targets, configuration scopes and detail identities.
 UI selection and mutation navigation guards stay in their feature hooks.
 
@@ -131,6 +132,12 @@ configuration saves invalidate provider/model entries across all workspaces.
 Inactive entries fetch when enabled again. Cancelling a query protects cache
 publication; it does not abort an RPC already sent to the sidecar. The cache
 holds no secret reveal or provider connection-test results and is not persisted.
+
+Checkpoint lists are keyed by client and workspace and reuse the root reconnect
+invalidation. Every restore outcome invalidates its originating workspace,
+including failures that may have partially changed files or created a protection
+checkpoint. Restore calls run once; list refresh failures do not change the
+restore outcome. Inactive lists refetch when enabled again.
 
 Job queries share process-level list/detail/history keys between Schedules and
 Memory consolidation settings. Confirmed updates publish the returned Job before
