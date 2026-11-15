@@ -8,34 +8,122 @@ starting with `v0.1.0` (the first open-source release).
 
 ## [Unreleased]
 
+## [0.4.1] — 2026-11-15
+
+A release about cleaning up: workspaces can be removed with a preview of exactly
+what gets deleted, the assistant can read saved memory in full, and the places
+where concurrent work used to collide — subagent startup, scheduled jobs, and
+results that have to survive a crash — hold up better.
+
+### Added
+
+**Workspaces can be removed, with optional cleanup.** Each workspace group gains
+an actions menu offering "remove from list" or "remove and clean Taco data". A
+preview lists exactly which Taco data will be deleted and which is retained, and
+nothing is deleted before you confirm. Project folders, associated directories,
+custom execution directories, work records, schedule definitions and inbox logs
+are always retained.
+
+**IM conversations can be hidden or deleted for good.** A hidden conversation
+keeps its history and routing and comes back with an unread badge when a new
+message arrives. Permanent deletion goes through the same preview, and never
+touches the other conversations in the same channel.
+
 ### Changed
 
-- Memory topics share a versioned YAML codec for active files and archives.
-  Existing unmarked files retain literal values; reading does not migrate them.
-  Canonical UTC timestamps and JSON provenance remain readable by older releases.
-  CAS mutations read only their target file while still checking external edits.
-- Codex communication uses the MCP SDK in an independently bundled bridge, shipped
-  and checked by both npm and portable-runtime builds. Development startup suppresses
-  experimental warnings; cancellation remains distinct from connection closure.
+**Saved memory can be read in full.** Every memory entry handed to the assistant
+carries a scoped read reference, so it can fetch the complete text instead of
+only the summary, and can trace an entry back to the conversation it came from.
+Active and archived topics share a versioned YAML codec; unmarked files keep
+their existing values, and the standard timestamps and sources stay readable by
+older releases.
+
+**Background results survive a crash.** The intent to settle a finished
+background agent is written to disk before the final state is recorded, and a
+restart replays those settlements first. A completion notice that arrives late
+says so explicitly, so the assistant corrects what it reported earlier.
+
+**Codex communication runs through the MCP SDK.** The bridge is packaged
+separately, shipped and verified by both npm and portable-runtime builds, and
+freezes the permissions granted for a run.
+
+**Management panes stay in sync.** Saving provider credentials updates the model
+dropdown and the configured-provider count right away, a saved schedule shows
+its new configuration immediately, schedule history and the Work pane read the
+same data instead of requesting it twice, and panes refresh themselves after the
+sidecar reconnects.
+
+**Code search is more accurate and more robust.** `.gitignore` is honored
+reliably (including on Windows), binary files are skipped, and every match is
+counted. Without ripgrep, files over 2 MiB are skipped and the result states
+that the search was incomplete.
 
 ### Fixed
 
-- Preserve YAML date and numeric provenance identifiers, reject unsupported codec
-  versions, and prevent add/restore from overwriting unreadable existing topics.
-- Close the bridge relay when the SDK transport closes, including oversized input;
-  resolve entry paths correctly through symlinks.
+**Concurrent subagent startup no longer breaks the session list.** A session
+file renamed while the list is being read is retried instead of failing the
+whole listing, and a freshly created child session is no longer dropped by a
+concurrent cache invalidation. A subagent that fails to start is reported as an
+error, with the failing stage, and extensions no longer read a failed call as a
+success.
+
+**A scheduled job no longer runs twice.** A lock is only considered expired
+once the owning process is confirmed gone; a failed probe no longer deletes a
+lock that is still held.
+
+**Configuration patches no longer clear permissions or approved directories.**
+Fields you do not mention keep their current value, and approved directories
+can no longer be changed through a patch.
+
+**Concurrent saves no longer overwrite each other.** IM policy and schedule
+settings are written serially, so editing a schedule while the scheduler updates
+its counters no longer loses data.
+
+**A failed first question leaves no empty session behind.** Rollback counts the
+messages actually on disk, so an empty session is reclaimed quietly while a
+session that already has content is kept.
+
+**Cleanup during shutdown no longer stops at the first failure.** Channels and
+session resources are released one by one, so a single stuck component no longer
+leaves the rest half-open.
+
+**Memory topics that cannot be decoded are left alone.** Dates and numeric
+sources keep their type, an unsupported codec version is rejected instead of
+guessed, and adding or restoring a topic never overwrites an existing file that
+cannot be read.
+
+**The Codex bridge releases its resources.** The relay is closed when the SDK
+transport closes, including on oversized input, and entry paths are resolved
+correctly through symlinks.
+
+### Breaking changes
+
+- Task IDs are now unique within their list: `task-N` became `task-<listID>-N`.
+  Existing task files are rewritten when they are read, but `taskUpdate` must
+  use the exact ID returned by `taskList`.
+
+### Upgrade notes
+
+- Upgrade the desktop and the sidecar together. The desktop replaces an outdated
+  daemon on its own; if you registered the daemon as a system service with
+  `taco install` and run the npm packages separately, upgrade it with
+  `taco upgrade` or restart it — otherwise "remove and clean" reports that it
+  cannot preview the cleanup fully and refuses to delete anything.
+- Clearing the workspace list no longer re-seeds a default workspace on the next
+  start. Reopening the folder restores the workspace and its history.
+- A hidden IM conversation returns to the list only when it receives a new
+  message.
 
 ### Downgrade notes
 
-- Back up `$TACO_HOME/memory` before upgrading and restore the backup before
-  downgrading to a pre-codec release. Older readers include YAML quotes in special
-  names/descriptions (for example `A: B`); writing from the old release can persist
-  the changed values.
-- Early codec files with quoted timestamps and block YAML sources are also unsafe
-  for downgrade: older readers lose provenance, cannot parse quoted archive ages,
-  and silently skip retention cleanup for those archives. This build writes bare
-  canonical timestamps and one-line JSON sources, but does not rewrite existing
-  files on read.
+- Back up `$TACO_HOME/memory` before upgrading, and restore the backup before
+  returning to a release without the memory codec. Older readers keep the YAML
+  quote characters of special names and descriptions (for example `A: B`);
+  writing from the old release can permanently change those values.
+- Early codec files with quoted timestamps and block YAML sources also lose
+  provenance on old readers. Quoted archive ages fail `Date.parse`, so their
+  retention cleanup is silently skipped. New writes avoid this timestamp/source
+  incompatibility; reads do not rewrite existing files.
 
 ## [0.4.0] — 2026-11-14
 
