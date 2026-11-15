@@ -3,7 +3,7 @@
  *
  * Four mutually-exclusive sections sourced from extensions.status: Enabled,
  * Disabled, Failed, Unauthorized. Pure view: data + toggles + restart live in
- * App.tsx; a sidecar restart is required for toggles to take effect.
+ * ConfigurationPluginsController; a sidecar restart is required for toggles to take effect.
  */
 
 import type {

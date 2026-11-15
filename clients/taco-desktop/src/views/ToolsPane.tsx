@@ -3,7 +3,7 @@
  *
  * Left: searchable tool rows with source, subagent, and loading filters.
  * Right: tool metadata and a wrapping, highlighted JSON schema that fills the
- * remaining detail height. Data is passed via props; the parent fetches it.
+ * remaining detail height. ConfigurationToolsController fetches the data.
  */
 
 import rehypeShiki from "@shikijs/rehype";

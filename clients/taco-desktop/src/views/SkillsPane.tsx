@@ -3,7 +3,7 @@
  *
  * Left column: fixed header (title + count + search) above scrollable cards;
  * right column: detail view (name, description, path, markdown content). Pure
- * view — content fetching lives in App.tsx, header/search are shared PaneHeader.
+ * view — content fetching lives in ConfigurationSkillsController; header/search use PaneHeader.
  */
 
 import type { SkillDiagnosticEntry, SkillEntry } from "@taco-ai/protocol";

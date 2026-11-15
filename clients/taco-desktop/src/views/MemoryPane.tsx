@@ -1,7 +1,7 @@
 /**
  * MemoryPane — memory panel view (shown when mainView = 'memory').
  *
- * Pure view: data is held by App.tsx and passed via props (mirrors SkillsPane).
+ * Pure view: data is held by ConfigurationMemoryController and passed via props.
  * Page header: source navigation and consolidation. Left column: a type filter, the global MEMORY.md, live topics grouped by
  * recency, and a collapsed archive. Right column: the selected entry, or the
  * consolidation view the header's sparkle button opens.
@@ -54,10 +54,10 @@ export interface MemoryPaneProps {
     data: MemoryListResult | null;
     loading: boolean;
     error: string | null;
-    /** Defaults to MEMORY_ROOT_ID. After deleting a topic, App.tsx falls back to MEMORY_ROOT_ID. */
+    /** Defaults to MEMORY_ROOT_ID. After deleting a topic, the controller falls back to MEMORY_ROOT_ID. */
     selectedId: string;
     onSelect: (id: string) => void;
-    /** App.tsx issues the RPC and refetches. The component only surfaces conflict results; toast handling stays in App. */
+    /** The controller issues the RPC and refetches. The component only surfaces conflict results; toast handling stays in the controller. */
     onSaveMemory: (
         content: string,
         baseHash: string,
@@ -68,7 +68,7 @@ export interface MemoryPaneProps {
         memoryLayer?: "current" | "workspace" | "managed-global",
     ) => Promise<boolean | undefined>;
     onRefresh: () => void;
-    /** Held by App.tsx to prevent duplicate submits. */
+    /** Held by the controller to prevent duplicate submits. */
     saving: boolean;
     /** Current target identity; changing it resets pane-local source selection. */
     target?: string;

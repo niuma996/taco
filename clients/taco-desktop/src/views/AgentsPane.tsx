@@ -4,7 +4,7 @@
  * Left: list (agentType + source) with a "new agent" action; right: detail
  * (description, whenToUse, rendered systemPrompt) with edit/delete for
  * user agents that live in a directory the editor owns (global or workspace).
- * Data fetching and mutations live in useAgentsPane (App.tsx).
+ * Data fetching and mutations live in useAgentsPane (ConfigurationAgentsController).
  */
 
 import type {

@@ -18,9 +18,10 @@ import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState }
 import { ActivityRail } from "./components/ActivityRail";
 import { ChannelBindDialog } from "./components/ChannelBindDialog";
 import { ChatWorkspaceContext } from "./components/ChatWorkspaceContext";
-import { ConfigurationScopeBar } from "./components/ConfigurationScopeBar";
 import { ConfirmModal } from "./components/ConfirmModal";
 import { ConfigurationAgentsController } from "./components/configuration/ConfigurationAgentsController";
+import { ConfigurationMemoryController } from "./components/configuration/ConfigurationMemoryController";
+import { ConfigurationPluginsController } from "./components/configuration/ConfigurationPluginsController";
 import { ConfigurationSkillsController } from "./components/configuration/ConfigurationSkillsController";
 import { ConfigurationToolsController } from "./components/configuration/ConfigurationToolsController";
 import { FilesDrawer } from "./components/FilesDrawer";
@@ -47,15 +48,12 @@ import { useAppLifecycle } from "./hooks/useAppLifecycle";
 import { AskUserProvider } from "./hooks/useAskUser";
 import { CHANNEL_NAME_WECOM, useChannelsPane } from "./hooks/useChannelsPane";
 import { useCheckpointsPane } from "./hooks/useCheckpointsPane";
-import { useConfigurationScope } from "./hooks/useConfigurationScope";
 import { useConversationActivity } from "./hooks/useConversationActivity";
 import { useConversationDrafts } from "./hooks/useConversationDrafts";
 import { useConversationsPane } from "./hooks/useConversationsPane";
 import { FilePreviewOpenerProvider } from "./hooks/useFilePreviewOpener";
 import { useLlmDump } from "./hooks/useLlmDump";
 import { useManagementQuerySync } from "./hooks/useManagementQuerySync";
-import { useMemoryPane } from "./hooks/useMemoryPane";
-import { usePluginsPane } from "./hooks/usePluginsPane";
 import { useProviders } from "./hooks/useProviders";
 import { useRightPanel } from "./hooks/useRightPanel";
 import { useRightPanelAutoOpen } from "./hooks/useRightPanelAutoOpen";
@@ -85,6 +83,7 @@ import { isOnboardingRequired, type OnboardingStatus } from "./lib/desktopConfig
 import { defaultModelForNewSession, loadGlobalConfig } from "./lib/globalConfig";
 import { onImPolicyChangedEvent } from "./lib/imPolicyEvents.ts";
 import { createLatestRequestGuard } from "./lib/latestRequest";
+import { onMemoryChangedEvent } from "./lib/memoryEvents";
 import { type AppNotification, toastsOnArrival } from "./lib/notifications";
 import { invalidateCatalogQueries } from "./lib/queries/queryClient";
 import { onWorkChangedEvent } from "./lib/workEvents.ts";
@@ -94,8 +93,6 @@ import { ChannelsPane } from "./views/ChannelsPane";
 import { ChatPane } from "./views/ChatPane";
 import { CheckpointsPane } from "./views/CheckpointsPane";
 import { ConversationSidebar } from "./views/ConversationSidebar";
-import { MemoryPane } from "./views/MemoryPane";
-import { PluginsPane } from "./views/PluginsPane";
 import { SettingsPane } from "./views/SettingsPane";
 import { WorkPane } from "./views/WorkPane";
 
@@ -473,8 +470,6 @@ export default function App() {
     // module-scoped emitter (src/lib/imPolicyEvents.ts) rather than a ref —
     // dialogs are mounted deep in ChannelsPane and the ref indirection would
     // still need lifecycle plumbing to wire/unwire the listener.
-    const loadMemoryRef = useRef<(() => void) | null>(null);
-    const memoryTargetRef = useRef<string | undefined>(activeCwd);
 
     const { clearCursors } = useSidecarStream(client, {
         onAction: dispatch,
@@ -496,9 +491,7 @@ export default function App() {
                 void contextInfo.refresh();
             }
         },
-        onMemoryChanged: (cwd) => {
-            if (cwd === memoryTargetRef.current) loadMemoryRef.current?.();
-        },
+        onMemoryChanged: onMemoryChangedEvent,
         // Indirected through a ref: useChannelsPane is declared further down,
         // so naming applyChannelStatus here would read it before init.
         onChannelStatusChanged: (channel) => applyChannelStatusRef.current?.(channel),
@@ -623,23 +616,6 @@ export default function App() {
         conversationsError,
         onRetryTargets: () => void refreshConversations(),
     };
-    const memoryConfig = useConfigurationScope({
-        active: mainView === "memory",
-        mode: conversationMode,
-        activeCwd,
-        workspaces,
-        conversations,
-    });
-    const {
-        extensionStatus,
-        extensionLoading,
-        extensionError,
-        extensionSavingName,
-        extensionPendingRestart,
-        extensionRestarting,
-        toggleExtension,
-        restartForPlugins,
-    } = usePluginsPane(client, mainView === "plugins", activeCwd, restartSidecar);
     const {
         channelsStatus,
         channelsLoading,
@@ -715,29 +691,6 @@ export default function App() {
     const isWeComChannel = (channelId: string): boolean =>
         channelsStatus?.configured.find((c) => c.channelId === channelId)?.name ===
         CHANNEL_NAME_WECOM;
-    const {
-        memoryData,
-        memoryLoading,
-        memoryError,
-        memorySelectedId,
-        setMemorySelectedId,
-        memorySaving,
-        loadMemory,
-        handleSaveMemory,
-        handleDeleteTopic,
-        dreamBusy,
-        handleDreamRun,
-        handleDreamApply,
-        handleDreamDiscard,
-        handleDreamUndo,
-        handleRestoreTopic,
-        handleDreamScheduleToggle,
-        dreamConfig,
-        handleDreamConfigSave,
-    } = useMemoryPane(client, mainView === "memory", memoryConfig.targetCwd, t, pushNotification);
-    loadMemoryRef.current = loadMemory;
-    memoryTargetRef.current = memoryConfig.targetCwd;
-
     const checkpoints = useCheckpointsPane(
         client,
         mainView === "checkpoints" || Boolean(activeSid),
@@ -878,6 +831,17 @@ export default function App() {
                     <ConfigurationSkillsController
                         {...configurationPageProps}
                         active={mainView === "skills"}
+                    />
+                    <ConfigurationMemoryController
+                        {...configurationPageProps}
+                        active={mainView === "memory"}
+                        notify={pushNotification}
+                    />
+                    <ConfigurationPluginsController
+                        active={mainView === "plugins"}
+                        client={client}
+                        activeCwd={activeCwd}
+                        restartSidecar={restartSidecar}
                     />
                     {mainView === "chat" ? (
                         <>
@@ -1088,19 +1052,6 @@ export default function App() {
                                 </SubagentProvider>
                             </FilePreviewOpenerProvider>
                         </>
-                    ) : mainView === "plugins" ? (
-                        <PluginsPane
-                            status={extensionStatus}
-                            loading={extensionLoading}
-                            error={extensionError}
-                            savingName={extensionSavingName}
-                            onToggle={(name, nextDisabled) =>
-                                void toggleExtension(name, nextDisabled)
-                            }
-                            pendingRestart={extensionPendingRestart}
-                            restarting={extensionRestarting}
-                            onRestart={() => void restartForPlugins()}
-                        />
                     ) : mainView === "channels" ? (
                         <ChannelsPane
                             client={client}
@@ -1144,47 +1095,6 @@ export default function App() {
                             overview={workOverview}
                             onOpenSession={openSessionTarget}
                         />
-                    ) : mainView === "memory" ? (
-                        <div className="configuration-pane">
-                            <ConfigurationScopeBar
-                                variant="target"
-                                {...memoryConfig}
-                                onScopeChange={memoryConfig.setScope}
-                                onTargetChange={memoryConfig.setTargetCwd}
-                                targetsLoading={
-                                    conversationMode === "im" &&
-                                    (conversationsLoading ||
-                                        (conversations === null && !conversationsError))
-                                }
-                                targetsError={conversationMode === "im" ? conversationsError : null}
-                                onRetryTargets={() => void refreshConversations()}
-                            />
-                            <div className="configuration-pane-body">
-                                <MemoryPane
-                                    data={memoryData}
-                                    loading={memoryLoading}
-                                    error={memoryError}
-                                    selectedId={memorySelectedId}
-                                    onSelect={setMemorySelectedId}
-                                    onSaveMemory={handleSaveMemory}
-                                    onDeleteTopic={handleDeleteTopic}
-                                    onRefresh={loadMemory}
-                                    saving={memorySaving}
-                                    target={memoryConfig.targetCwd}
-                                    dream={{
-                                        busy: dreamBusy,
-                                        onRun: handleDreamRun,
-                                        onApply: handleDreamApply,
-                                        onDiscard: handleDreamDiscard,
-                                        onUndo: handleDreamUndo,
-                                        onRestoreTopic: handleRestoreTopic,
-                                        onScheduleToggle: handleDreamScheduleToggle,
-                                        dreamConfig,
-                                        onSaveConfig: handleDreamConfigSave,
-                                    }}
-                                />
-                            </div>
-                        </div>
                     ) : mainView === "checkpoints" ? (
                         <CheckpointsPane
                             data={checkpoints.data}
