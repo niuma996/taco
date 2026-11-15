@@ -192,10 +192,8 @@ export function getSessionRecoveryTargets(
     }[] = [];
     for (const [cwd, ws] of Object.entries(workspaces)) {
         const ids = new Set([
-            ...Object.keys(ws.sessionStatesById ?? {}),
+            ...Object.keys(ws.sessionStatesById),
             ...Object.keys(ws.pendingBySessionId),
-            ...Object.keys(ws.sessionInteractions ?? {}),
-            ...Object.keys(ws.childMessagesBySubSessionId),
             ...(cwd === activeCwd && ws.activeSession ? [ws.activeSession] : []),
         ]);
         const waiting = new Set<string>();

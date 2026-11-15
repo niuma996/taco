@@ -27,8 +27,6 @@ import {
     getSessionState,
     hasSessionCache,
     mergeSessionHistory,
-    normalizeSessionStates,
-    projectSessionState,
     type SessionExecution,
     type SessionState,
     type SessionSync,
@@ -65,20 +63,10 @@ export interface WorkspaceState {
     sessions: SessionMeta[];
     activeSession?: string;
     draftId?: string;
-    /** Optional only for callers constructing legacy workspace fixtures. */
-    sessionStatesById?: Record<string, SessionState>;
-    /** Compatibility reads project the active canonical session. */
-    messages: UiMessage[];
-    sessionInteractions?: Record<
-        string,
-        { messages: UiMessage[]; askUserPending: Record<string, true> }
-    >;
+    sessionStatesById: Record<string, SessionState>;
     pendingBySessionId: Record<string, boolean>;
     queuedBySessionId: Record<string, QueuedUiItem[]>;
     subagentSpawned: Record<string, SubagentSpawnedEntry>;
-    childMessagesBySubSessionId: Record<string, UiMessage[]>;
-    childHistoryLoaded: Record<string, UiMessage[]>;
-    askUserPending: Record<string, true>;
     pendingCommandPermissions: Record<string, CommandPermissionRequest>;
     taskSnapshotsBySessionId: Record<
         string,
@@ -89,10 +77,6 @@ export interface WorkspaceState {
         string,
         Record<string, { tasks: TaskItem[]; loadedAt: number }>
     >;
-    agentToolPending: Record<string, true>;
-    backgroundSubagents: Record<string, BackgroundSubagentState>;
-    /** Optional for legacy workspace fixtures; canonical session state always initializes it. */
-    backgroundRunIds?: Record<string, string>;
     listCursor?: { updatedAt: string; id: string };
     listTotal?: number;
     loadingSessionId?: string;
@@ -129,15 +113,9 @@ export function createEmptyWorkspace(cwd: string, active = false): WorkspaceStat
         active,
         activeSession: undefined,
         sessions: [],
-        messages: [],
+        sessionStatesById: {},
         subagentSpawned: {},
-        childMessagesBySubSessionId: {},
-        childHistoryLoaded: {},
-        askUserPending: {},
         pendingCommandPermissions: {},
-        agentToolPending: {},
-        backgroundSubagents: {},
-        backgroundRunIds: {},
         pendingBySessionId: {},
         queuedBySessionId: {},
         taskSnapshotsBySessionId: {},
@@ -448,10 +426,9 @@ function updateWs(
 ): Record<string, WorkspaceState> {
     const existing = state[cwd];
     if (!existing) return state;
-    const normalized = normalizeSessionStates(existing);
-    const next = patch(normalized);
+    const next = patch(existing);
     if (!next) return state;
-    const ws = projectSessionState(enforceSessionCache({ ...normalized, ...next }));
+    const ws = enforceSessionCache({ ...existing, ...next });
     return { ...state, [cwd]: ws };
 }
 
@@ -467,7 +444,7 @@ function patchSession(
             ? (previous.executionRevision ?? 0) + 1
             : (previous.executionRevision ?? 0);
     const lastAccess =
-        Math.max(0, ...Object.values(ws.sessionStatesById ?? {}).map((s) => s.lastAccess)) + 1;
+        Math.max(0, ...Object.values(ws.sessionStatesById).map((s) => s.lastAccess)) + 1;
     return {
         sessionStatesById: {
             ...ws.sessionStatesById,
@@ -649,8 +626,8 @@ function applySessionEvent(
                 receipt?.messageId && (receipt.status === "queued" || receipt.status === "started")
                     ? [
                           ...messages,
-                          ...Object.entries(ws.sessionStatesById ?? {}).flatMap(
-                              ([sessionId, state]) => (sessionId === sid ? [] : state.messages),
+                          ...Object.entries(ws.sessionStatesById).flatMap(([sessionId, state]) =>
+                              sessionId === sid ? [] : state.messages,
                           ),
                       ]
                           .flatMap((m) => (m.kind === "assistant" ? m.tools : []))
@@ -729,7 +706,7 @@ export function workspacesReducer(
             return Object.fromEntries(
                 Object.entries(action.workspaces).map(([cwd, ws]) => [
                     cwd,
-                    projectSessionState(enforceSessionCache(normalizeSessionStates(ws))),
+                    enforceSessionCache(ws),
                 ]),
             );
         case "UPSERT_WORKSPACE":
@@ -742,17 +719,14 @@ export function workspacesReducer(
             const next = { ...state };
             for (const [cwd, ws] of Object.entries(state)) {
                 if (ws.active !== (cwd === action.cwd))
-                    next[cwd] = projectSessionState({
-                        ...normalizeSessionStates(ws),
-                        active: cwd === action.cwd,
-                    });
+                    next[cwd] = { ...ws, active: cwd === action.cwd };
             }
             return next;
         }
         case "SIDECAR_RESTARTED":
             return updateWs(state, action.cwd, (ws) => ({
                 sessionStatesById: Object.fromEntries(
-                    Object.entries(ws.sessionStatesById ?? {}).map(([sid, session]) => [
+                    Object.entries(ws.sessionStatesById).map(([sid, session]) => [
                         sid,
                         {
                             ...updateSessionMessages(
@@ -873,22 +847,17 @@ export function workspacesReducer(
                 const session = getSessionState(ws, action.sid) ?? createSessionState();
                 const sameCurrent =
                     ws.activeSession === action.sid && hasSessionCache(ws, action.sid);
-                // An existing live view without a history request remains authoritative.
-                const preserveLive =
-                    ws.activeSession === action.sid &&
-                    session.historyRequestRevision === undefined &&
-                    session.revision === 0;
                 if (
-                    (sameCurrent || preserveLive) &&
+                    sameCurrent &&
+                    !action.activeSubagentChatRuns?.length &&
                     action.inFlightAgentToolCallIds === undefined &&
                     action.settledBackgroundSubSessionIds === undefined &&
                     action.execution === undefined
                 )
                     return undefined;
-                const restored =
-                    sameCurrent || preserveLive
-                        ? session
-                        : mergeSessionHistory(session, action.messages);
+                const restored = sameCurrent
+                    ? session
+                    : mergeSessionHistory(session, action.messages);
                 const backgroundSubagents = {
                     ...session.backgroundSubagents,
                     ...rebuildBackgroundSubagents(
@@ -897,6 +866,8 @@ export function workspacesReducer(
                         action.settledBackgroundSubSessionIds,
                     ),
                 };
+                for (const [id, value] of Object.entries(session.backgroundSubagents))
+                    if (value !== "running") backgroundSubagents[id] = value;
                 let restoredWithRuns = restored;
                 for (const run of action.activeSubagentChatRuns ?? []) {
                     const next = applyStartedRun(restoredWithRuns, run);
@@ -905,10 +876,9 @@ export function workspacesReducer(
                         backgroundSubagents[run.parentToolCallId] = "running";
                     }
                 }
-                for (const [id, value] of Object.entries(session.backgroundSubagents))
-                    if (value !== "running") backgroundSubagents[id] = value;
                 if (
-                    (sameCurrent || preserveLive) &&
+                    sameCurrent &&
+                    restoredWithRuns === restored &&
                     action.execution === undefined &&
                     sameBackgroundStates(backgroundSubagents, session.backgroundSubagents)
                 )
@@ -990,7 +960,7 @@ export function workspacesReducer(
         case "REMOVE_SESSION":
             return updateWs(state, action.cwd, (ws) => ({
                 sessions: ws.sessions.filter((s) => s.id !== action.sid),
-                sessionStatesById: omitKey(ws.sessionStatesById ?? {}, action.sid),
+                sessionStatesById: omitKey(ws.sessionStatesById, action.sid),
                 ...(ws.activeSession === action.sid ? { activeSession: undefined } : {}),
                 ...(ws.loadingSessionId === action.sid ? { loadingSessionId: undefined } : {}),
                 ...(ws.listCursor?.id === action.sid ? { listCursor: undefined } : {}),
@@ -1111,7 +1081,7 @@ export function workspacesReducer(
             });
         case "SUBAGENT_STARTED":
             return updateWs(state, action.cwd, (ws) => {
-                const candidateIds = Object.keys(ws.sessionStatesById ?? {}).filter((sid) => {
+                const candidateIds = Object.keys(ws.sessionStatesById).filter((sid) => {
                     if (sid === action.parentSessionId) return true;
                     return hasChatRunCard(
                         getSessionState(ws, sid),
@@ -1149,8 +1119,8 @@ export function workspacesReducer(
             return updateWs(state, action.cwd, (ws) => {
                 // A later chatToAgent run can settle under the original spawn's
                 // owner. Without run identity it must not rewrite a terminal run.
-                const matches = Object.keys(ws.sessionStatesById ?? {}).filter((sid) => {
-                    const s = ws.sessionStatesById?.[sid];
+                const matches = Object.keys(ws.sessionStatesById).filter((sid) => {
+                    const s = ws.sessionStatesById[sid];
                     if (action.parentSessionId && sid !== action.parentSessionId) {
                         const hasPeerCard = hasChatRunCard(
                             s,

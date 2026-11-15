@@ -1,7 +1,7 @@
 import { act, cleanup, renderHook } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { useWorkspaceLifecycle } from "../../src/hooks/useWorkspaceLifecycle";
-import { createSessionState, getSessionState } from "../../src/lib/chat/sessionState";
+import { createSessionState } from "../../src/lib/chat/sessionState";
 import {
     createEmptyWorkspace,
     type WorkspaceAction,
@@ -173,8 +173,8 @@ describe("workspace lifecycle isolation", () => {
             await opening;
             expect(h.workspacesRef.current["/w"]?.activeSession).toBeUndefined();
             expect(h.workspacesRef.current["/w"]?.loadingSessionId).toBeUndefined();
-            expect(getSessionState(h.workspacesRef.current["/w"], "A")?.historyLoaded).toBe(true);
-            expect(getSessionState(h.workspacesRef.current["/w"], "A")?.sync).toBe("current");
+            expect(h.workspacesRef.current["/w"]?.sessionStatesById.A?.historyLoaded).toBe(true);
+            expect(h.workspacesRef.current["/w"]?.sessionStatesById.A?.sync).toBe("current");
         } finally {
             unbind();
         }
@@ -251,7 +251,7 @@ describe("workspace lifecycle isolation", () => {
             );
             expect(h.client.sessionHistory).not.toHaveBeenCalled();
             expect(h.workspacesRef.current["/w"]?.draftId).toBe("newer");
-            expect(getSessionState(h.workspacesRef.current["/w"], "A")).toMatchObject({
+            expect(h.workspacesRef.current["/w"]?.sessionStatesById.A).toMatchObject({
                 execution: "idle",
                 operation: null,
                 messages: [{ text: "partial" }],
@@ -310,7 +310,7 @@ describe("workspace lifecycle isolation", () => {
         const ws = h.workspacesRef.current["/w"];
         if (!ws) throw new Error("missing restored workspace");
         expect(ws.activeSession).toBe("B");
-        expect(getSessionState(ws, "A")).toMatchObject({
+        expect(ws.sessionStatesById.A).toMatchObject({
             execution: "running",
             operation: { id: "operation" },
             messages: [{ text: "partial" }],
@@ -343,7 +343,7 @@ describe("workspace lifecycle isolation", () => {
             });
             history.resolve({ entries: [] });
             await opening;
-            expect(getSessionState(h.workspacesRef.current["/w"], "A")?.execution).toBe(expected);
+            expect(h.workspacesRef.current["/w"]?.sessionStatesById.A?.execution).toBe(expected);
             expect(Boolean(h.workspacesRef.current["/w"]?.pendingBySessionId.A)).toBe(
                 expected === "running",
             );
@@ -384,7 +384,7 @@ describe("workspace lifecycle isolation", () => {
         a.resolve({ entries: [] });
         await first;
         expect(h.workspacesRef.current["/w"]?.activeSession).toBe("B");
-        expect(h.workspacesRef.current["/w"]?.sessionStatesById?.A?.historyLoaded).toBe(true);
+        expect(h.workspacesRef.current["/w"]?.sessionStatesById.A?.historyLoaded).toBe(true);
         const installs = h.actions.filter((a) => a.type === "ATTACH");
         expect(installs).toEqual(
             expect.arrayContaining([
@@ -414,7 +414,7 @@ describe("workspace lifecycle isolation", () => {
         await attaching;
         expect(h.workspacesRef.current["/w"]?.activeSession).toBeUndefined();
         expect(h.workspacesRef.current["/w"]?.draftId).toBe("new-draft");
-        expect(h.workspacesRef.current["/w"]?.sessionStatesById?.A?.historyLoaded).toBe(true);
+        expect(h.workspacesRef.current["/w"]?.sessionStatesById.A?.historyLoaded).toBe(true);
     });
 
     it("reuses a complete cache without another attach or history request", async () => {
@@ -432,7 +432,7 @@ describe("workspace lifecycle isolation", () => {
                             sync: "current",
                         },
                     },
-                } as WorkspaceState,
+                },
             },
         );
         await h.result.current.attachSession("/w", "A");
@@ -455,12 +455,12 @@ describe("workspace lifecycle isolation", () => {
                     sessionStatesById: {
                         A: { ...createSessionState(), historyLoaded: true, sync: "current" },
                     },
-                } as WorkspaceState,
+                },
             },
         );
         await h.result.current.attachSession("/w", "A");
         expect(h.client.sessionAttach).toHaveBeenCalledTimes(1);
-        expect(getSessionState(h.workspacesRef.current["/w"], "A")?.execution).toBe("idle");
+        expect(h.workspacesRef.current["/w"]?.sessionStatesById.A?.execution).toBe("idle");
     });
 
     it("keeps a newer TASKS_UPDATED when the attach task pull returns late", async () => {
@@ -584,8 +584,8 @@ describe("workspace lifecycle isolation", () => {
         expect(h.actions).not.toContainEqual(
             expect.objectContaining({ type: "SET_SESSION_SYNC", sync: "incomplete" }),
         );
-        expect(h.workspacesRef.current["/w"]?.sessionStatesById?.A?.execution).toBe("unknown");
-        expect(h.workspacesRef.current["/w"]?.sessionStatesById?.A?.sync).toBe("recovering");
+        expect(h.workspacesRef.current["/w"]?.sessionStatesById.A?.execution).toBe("unknown");
+        expect(h.workspacesRef.current["/w"]?.sessionStatesById.A?.sync).toBe("recovering");
         expect(h.workspacesRef.current["/w"]?.pendingBySessionId.A).toBeUndefined();
     });
 

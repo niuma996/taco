@@ -150,7 +150,7 @@ export function useWorkspaceLifecycle({
         const unsubscribeReady = client.onConnectionReady?.(() => {
             invalidate();
             for (const [cwd, ws] of Object.entries(workspacesRef.current)) {
-                for (const sid of Object.keys(ws.sessionStatesById ?? {}))
+                for (const sid of Object.keys(ws.sessionStatesById))
                     dispatchWs({ type: "SESSION_UNCERTAIN", cwd, sid });
             }
         });

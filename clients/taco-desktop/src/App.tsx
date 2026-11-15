@@ -71,8 +71,9 @@ import { useWorkOverview } from "./hooks/useWorkOverview";
 import { useWorkspaceModels } from "./hooks/useWorkspaceModels";
 import { useWorkspaces } from "./hooks/useWorkspaces";
 import { useT } from "./i18n/useI18n";
+import type { UiMessage } from "./lib/chat/chatUtils";
 import type { ConversationTarget } from "./lib/chat/conversationDrafts";
-import { getSessionState } from "./lib/chat/sessionState";
+import { getSessionState, type SessionState } from "./lib/chat/sessionState";
 import { deriveSubagents, subagentDotState } from "./lib/chat/subagentList";
 import {
     readPersistedSidebarCollapsed,
@@ -100,6 +101,10 @@ import { SettingsPane } from "./views/SettingsPane";
 import { SkillsPane } from "./views/SkillsPane";
 import { ToolsPane } from "./views/ToolsPane";
 import { WorkPane } from "./views/WorkPane";
+
+const EMPTY_MESSAGES: UiMessage[] = [];
+const EMPTY_BACKGROUND_SUBAGENTS: SessionState["backgroundSubagents"] = {};
+const EMPTY_BACKGROUND_RUN_IDS: SessionState["backgroundRunIds"] = {};
 
 export default function App() {
     const [client] = useState(() => new TacoClient());
@@ -192,6 +197,10 @@ export default function App() {
     );
 
     const activeSid = ws?.activeSession;
+    const activeRuntime = activeSid ? getSessionState(ws, activeSid) : undefined;
+    const messages = activeRuntime?.messages ?? EMPTY_MESSAGES;
+    const backgroundSubagents = activeRuntime?.backgroundSubagents ?? EMPTY_BACKGROUND_SUBAGENTS;
+    const backgroundRunIds = activeRuntime?.backgroundRunIds ?? EMPTY_BACKGROUND_RUN_IDS;
     const resolveCommandPermissionIn = useCallback(
         async (
             cwd: string,
@@ -220,9 +229,10 @@ export default function App() {
     // background sessions: Stop stays visible for those, but the composer only
     // switches to steer mode on runInFlight.
     const runInFlight = Boolean(activeSid ? ws?.pendingBySessionId[activeSid] : false);
-    const busy = runInFlight || Object.keys(ws?.agentToolPending ?? {}).length > 0;
+    const busy =
+        runInFlight ||
+        (activeRuntime !== undefined && Object.keys(activeRuntime.agentToolPending).length > 0);
     const liveContextInfo = useSessionContextInfo(client, activeCwd, activeSid);
-    const activeRuntime = activeSid ? getSessionState(ws, activeSid) : undefined;
     const contextInfo = {
         ...liveContextInfo,
         compacting:
@@ -256,13 +266,8 @@ export default function App() {
     // Subagent list for the session-bar awareness dot. Derived here as well as
     // inside SubagentPanel because the dot must render while the panel is shut.
     const subagentEntries = useMemo(
-        () =>
-            deriveSubagents(
-                ws?.messages ?? [],
-                ws?.backgroundSubagents ?? {},
-                ws?.backgroundRunIds ?? {},
-            ),
-        [ws?.messages, ws?.backgroundSubagents, ws?.backgroundRunIds],
+        () => deriveSubagents(messages, backgroundSubagents, backgroundRunIds),
+        [messages, backgroundSubagents, backgroundRunIds],
     );
 
     // Drop the panel's selection when the session or workspace changes: the id
@@ -281,15 +286,17 @@ export default function App() {
     // Stable identities for the SubagentProvider context value. Inline arrows
     // here would be new on every render, invalidating the provider's useMemo
     // and re-rendering every useSubagent() consumer on any workspace update.
-    const childMessages = ws?.childMessagesBySubSessionId;
-    const childHistory = ws?.childHistoryLoaded;
+    const sessionStatesById = ws?.sessionStatesById;
     const liveMessagesFor = useCallback(
-        (subSessionId: string) => childMessages?.[subSessionId] ?? [],
-        [childMessages],
+        (subSessionId: string) => sessionStatesById?.[subSessionId]?.messages ?? EMPTY_MESSAGES,
+        [sessionStatesById],
     );
     const historyMessagesFor = useCallback(
-        (subSessionId: string) => childHistory?.[subSessionId] ?? [],
-        [childHistory],
+        (subSessionId: string) => {
+            const session = sessionStatesById?.[subSessionId];
+            return session?.historyLoaded ? session.messages : EMPTY_MESSAGES;
+        },
+        [sessionStatesById],
     );
     const stableLoadSubagentHistory = useStableCallback(loadSubagentHistory);
     const openInPanel = useCallback(
@@ -1104,9 +1111,9 @@ export default function App() {
                                         TaskPanel in the chat view — both panels live in the
                                         same right-side slot. */}
                                         <SubagentPanel
-                                            messages={ws?.messages ?? []}
-                                            backgroundSubagents={ws?.backgroundSubagents ?? {}}
-                                            backgroundRunIds={ws?.backgroundRunIds ?? {}}
+                                            messages={messages}
+                                            backgroundSubagents={backgroundSubagents}
+                                            backgroundRunIds={backgroundRunIds}
                                             open={rightPanel.panel === "subagents"}
                                             selectedSubSessionId={selectedSubSessionId}
                                             onSelect={setSelectedSubSessionId}

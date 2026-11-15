@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { asSessionId, asWorkspaceId, type ServerPush } from "@taco-ai/protocol";
 import { normalizePushFrame } from "../../../src/hooks/useSidecarStream";
-import { getSessionState } from "../../../src/lib/chat/sessionState";
+import { createSessionState, getSessionState } from "../../../src/lib/chat/sessionState";
 import { deriveSubagents } from "../../../src/lib/chat/subagentList";
 import type { WorkspaceState } from "../../../src/lib/chat/workspaceReducer";
 import {
@@ -28,24 +28,28 @@ const settled = {
 function initial(): Record<string, WorkspaceState> {
     const ws = createEmptyWorkspace("/w");
     ws.activeSession = "parent";
-    ws.messages = [
-        {
-            id: "spawn",
-            kind: "assistant",
-            ts: 1,
-            text: "",
-            thinking: [],
-            tools: [
-                {
-                    id: "spawn-1",
-                    name: "agent",
-                    args: { description: "review" },
-                    status: "ok",
-                    details: { subSessionId: "child", status: "completed" },
-                },
-            ],
-        },
-    ];
+    ws.sessionStatesById.parent = {
+        ...createSessionState(),
+        backgroundSubagents: { "spawn-1": "completed" },
+        messages: [
+            {
+                id: "spawn",
+                kind: "assistant",
+                ts: 1,
+                text: "",
+                thinking: [],
+                tools: [
+                    {
+                        id: "spawn-1",
+                        name: "agent",
+                        args: { description: "review" },
+                        status: "ok",
+                        details: { subSessionId: "child", status: "completed" },
+                    },
+                ],
+            },
+        ],
+    };
     ws.subagentSpawned = {
         "parent:spawn-1": {
             subSessionId: "child",
@@ -53,7 +57,6 @@ function initial(): Record<string, WorkspaceState> {
             parentToolCallId: "spawn-1",
         },
     };
-    ws.backgroundSubagents = { "spawn-1": "completed" };
     return { "/w": ws };
 }
 
@@ -83,7 +86,8 @@ test("started -> old settled -> current settled updates only the existing execut
     const card = parent?.messages[0];
     assert.equal(card?.kind === "assistant" && card.tools[0]?.status, "running");
     assert.equal(
-        before["/w"].messages[0]?.kind === "assistant" && before["/w"].messages[0].tools[0]?.status,
+        before["/w"].sessionStatesById.parent.messages[0]?.kind === "assistant" &&
+            before["/w"].sessionStatesById.parent.messages[0].tools[0]?.status,
         "ok",
     );
 
@@ -142,7 +146,7 @@ test("started stays with its parent across selection and old frames cannot compl
     let state = workspacesReducer(initial(), { type: "SELECT_SESSION", cwd: "/w", sid: "other" });
     state = workspacesReducer(state, started);
     assert.equal(row(state)?.status, "background");
-    assert.deepEqual(state["/w"].backgroundSubagents, {});
+    assert.equal(getSessionState(state["/w"], "other"), undefined);
     assert.equal(
         workspacesReducer(state, { ...settled, parentSessionId: "other", runId: "run-new" }),
         state,
@@ -174,7 +178,7 @@ test("wire started and settled retain run identity through normalization", () =>
 test("attach restores active continuation runs after historical background completion", () => {
     for (const active of [true, false]) {
         const state = initial();
-        const messages = state["/w"].messages;
+        const messages = state["/w"].sessionStatesById.parent.messages;
         state["/w"].activeSession = "other";
         state["/w"].loadingSessionId = "parent";
         const next = workspacesReducer(state, {
@@ -201,6 +205,11 @@ test("attach restores active continuation runs after historical background compl
                 },
             ],
         });
+        assert.equal(
+            getSessionState(next["/w"], "parent")?.backgroundSubagents["spawn-1"],
+            "running",
+            "an authoritative active continuation supersedes the cached terminal spawn outcome",
+        );
         assert.equal(row(next)?.status, "background");
         assert.equal(getSessionState(next["/w"], "parent")?.backgroundRunIds["spawn-1"], "run-new");
         assert.deepEqual(next["/w"].subagentSpawned, state["/w"].subagentSpawned);
@@ -209,6 +218,67 @@ test("attach restores active continuation runs after historical background compl
     }
 });
 
+for (const payload of ["metadata", "signals", "execution"] as const) {
+    test(`attach ${payload} restores a new continuation on a current cache already marked running`, () => {
+        const state = workspacesReducer(initial(), { ...started, runId: "run-old" });
+        state["/w"].sessionStatesById.parent = {
+            ...state["/w"].sessionStatesById.parent,
+            sync: "current",
+            historyLoaded: true,
+        };
+        // Optimistic parent pending remains independent of child continuation metadata.
+        state["/w"].pendingBySessionId = { parent: true, other: true };
+        const before = state["/w"].sessionStatesById.parent;
+        const action: WorkspaceAction = {
+            type: "ATTACH",
+            cwd: "/w",
+            sid: "parent",
+            messages: [],
+            activeSubagentChatRuns: [
+                {
+                    ...owner,
+                    parentSessionId: asSessionId("parent"),
+                    subSessionId: asSessionId("child"),
+                    runId: "run-new",
+                },
+            ],
+            ...(payload === "signals"
+                ? { inFlightAgentToolCallIds: [], settledBackgroundSubSessionIds: [] }
+                : {}),
+            ...(payload === "execution" ? { execution: "idle" } : {}),
+        };
+        const next = workspacesReducer(state, action);
+        const parent = getSessionState(next["/w"], "parent");
+        assert.ok(parent);
+        assert.notEqual(next, state);
+        assert.equal(next["/w"].activeSession, "parent");
+        assert.equal(parent.sync, "current");
+        assert.equal(parent.historyLoaded, true);
+        assert.equal(parent.backgroundRunIds["spawn-1"], "run-new");
+        assert.deepEqual(parent.backgroundSubagents, { "spawn-1": "running" });
+        assert.equal(row(next)?.status, "background");
+        assert.equal(row(next)?.conversationRunId, "run-new");
+        const card = parent.messages[0];
+        assert.equal(card?.kind, "assistant");
+        if (card?.kind !== "assistant") return assert.fail("missing cached spawn card");
+        assert.equal(card.id, before.messages[0].id);
+        assert.equal(card.tools[0].status, "running");
+        assert.equal((card.tools[0].details as { runId: string }).runId, "run-new");
+        assert.equal(parent.execution, payload === "execution" ? "idle" : "unknown");
+        if (payload === "execution") {
+            assert.deepEqual(next["/w"].pendingBySessionId, { other: true });
+        } else {
+            assert.equal(next["/w"].pendingBySessionId, state["/w"].pendingBySessionId);
+            assert.equal(workspacesReducer(next, action), next, "repeated metadata is a no-op");
+        }
+        assert.equal(before.backgroundRunIds["spawn-1"], "run-old");
+        assert.equal(next["/w"].subagentSpawned, state["/w"].subagentSpawned);
+        assert.equal(getSessionState(next["/w"], "child"), undefined);
+        assert.equal(workspacesReducer(next, { ...settled, runId: "run-old" }), next);
+        assert.equal(row(workspacesReducer(next, { ...settled, runId: "run-new" }))?.status, "ok");
+    });
+}
+
 test("authoritative runtime snapshot restores active continuation identity", () => {
     const state = initial();
     const next = workspacesReducer(state, {
@@ -216,7 +286,7 @@ test("authoritative runtime snapshot restores active continuation identity", () 
         cwd: "/w",
         sid: "parent",
         sessionKind: "main",
-        messages: state["/w"].messages,
+        messages: state["/w"].sessionStatesById.parent.messages,
         runtime: {
             operation: null,
             tools: [],
@@ -241,7 +311,7 @@ test("authoritative runtime snapshot restores active continuation identity", () 
 
 test("late queued receipt inherits its already settled continuation without resurrecting it", () => {
     const state = initial();
-    const parent = state["/w"].messages[0];
+    const parent = state["/w"].sessionStatesById.parent.messages[0];
     assert.equal(parent.kind, "assistant");
     if (parent.kind !== "assistant") return;
     parent.tools.push({
@@ -282,7 +352,7 @@ test("late queued receipt inherits its already settled continuation without resu
 
 test("queued message starts by message identity without adopting another message's run", () => {
     const state = initial();
-    const parent = state["/w"].messages[0];
+    const parent = state["/w"].sessionStatesById.parent.messages[0];
     if (parent.kind !== "assistant") return;
     parent.tools.push(
         ...["message-1", "message-2"].map((messageId) => ({

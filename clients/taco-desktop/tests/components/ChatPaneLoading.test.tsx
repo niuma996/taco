@@ -15,8 +15,8 @@ import { afterEach, describe, it, vi } from "vitest";
 import { ToastProvider } from "../../src/components/ToastProvider";
 import * as useI18n from "../../src/i18n/useI18n";
 import type { UiMessage } from "../../src/lib/chat/chatUtils";
-import { createSessionState } from "../../src/lib/chat/sessionState";
-import type { WorkspaceState } from "../../src/lib/chat/workspaceReducer";
+import { createSessionState, type SessionState } from "../../src/lib/chat/sessionState";
+import { createEmptyWorkspace, type WorkspaceState } from "../../src/lib/chat/workspaceReducer";
 import { ChatPane, type ChatPaneProps } from "../../src/views/ChatPane";
 
 vi.spyOn(useI18n, "useT").mockReturnValue({
@@ -47,25 +47,20 @@ vi.mock("../../src/components/settings/ModelMenu", () => ({
 
 afterEach(cleanup);
 
-function workspace(overrides: Partial<WorkspaceState>): WorkspaceState {
+function workspace(
+    overrides: Partial<WorkspaceState>,
+    sessionOverrides: Partial<SessionState> = {},
+): WorkspaceState {
     return {
-        cwd: "/ws",
-        active: true,
-        sessions: [],
-        messages: [{ id: "u1", kind: "user", text: "hello", ts: 1 }],
-        subagentSpawned: {},
-        childMessagesBySubSessionId: {},
-        childHistoryLoaded: {},
-        askUserPending: {},
-        pendingCommandPermissions: {},
-        agentToolPending: {},
-        backgroundSubagents: {},
-        pendingBySessionId: {},
-        queuedBySessionId: {},
-        taskSnapshotsBySessionId: {},
-        planStatesBySessionId: {},
-        historyDetailsBySessionId: {},
+        ...createEmptyWorkspace("/ws", true),
         activeSession: "a",
+        sessionStatesById: {
+            a: {
+                ...createSessionState(),
+                messages: [{ id: "u1", kind: "user", text: "hello", ts: 1 }],
+                ...sessionOverrides,
+            },
+        },
         ...overrides,
     };
 }
@@ -316,19 +311,19 @@ function chatColumn(): HTMLElement {
 
 describe("ChatPane 用户消息导轨", () => {
     it("有用户消息的会话渲染导轨和计数", () => {
-        renderPane(workspace({ messages: conversation(2) }));
+        renderPane(workspace({}, { messages: conversation(2) }));
         assert.equal(screen.getByTestId("user-message-count").textContent, "2");
         assert.ok(screen.getByTestId("user-message-rail"));
     });
 
     it("空会话不渲染导轨", () => {
-        renderPane(workspace({ messages: [] }));
+        renderPane(workspace({}, { messages: [] }));
         assert.equal(screen.queryByTestId("user-message-rail"), null);
         assert.equal(screen.queryByTestId("user-message-count"), null);
     });
 
     it("加载骨架屏时不渲染导轨", async () => {
-        renderPane(workspace({ loadingSessionId: "b", messages: conversation(2) }));
+        renderPane(workspace({ loadingSessionId: "b" }, { messages: conversation(2) }));
         await waitFor(() => assert.ok(document.querySelector(".chat-skeleton")));
         assert.equal(screen.queryByTestId("user-message-rail"), null);
     });
@@ -338,7 +333,7 @@ describe("ChatPane 用户消息导轨", () => {
             .spyOn(Element.prototype, "scrollIntoView")
             .mockImplementation(() => {});
         try {
-            renderPane(workspace({ messages: conversation(30) }));
+            renderPane(workspace({}, { messages: conversation(30) }));
             stubGeometry(chatColumn());
             // The render window dropped the head of the conversation.
             assert.equal(document.querySelectorAll("[data-message-id]").length, 20);
@@ -361,7 +356,7 @@ describe("ChatPane 用户消息导轨", () => {
     });
 
     it("跳转目标被标为高亮行，导轨把它标为当前项", () => {
-        renderPane(workspace({ messages: conversation(2) }));
+        renderPane(workspace({}, { messages: conversation(2) }));
         fireEvent.click(screen.getByRole("button", { name: "message.guideItem 2" }));
         const row = document.querySelector('[data-message-id="u1"]');
         assert.ok(row);

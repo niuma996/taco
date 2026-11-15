@@ -31,28 +31,14 @@ export interface SessionState {
 
 interface SessionWorkspace {
     activeSession?: string;
-    sessionStatesById?: Record<string, SessionState>;
-    messages: UiMessage[];
-    askUserPending: Record<string, true>;
-    agentToolPending: Record<string, true>;
-    backgroundSubagents: Record<string, BackgroundSubagentState>;
-    sessionInteractions?: Record<
-        string,
-        { messages: UiMessage[]; askUserPending: Record<string, true> }
-    >;
-    pendingBySessionId: Record<string, boolean>;
+    sessionStatesById: Record<string, SessionState>;
     queuedBySessionId: Record<string, QueuedUiItem[]>;
     pendingCommandPermissions: Record<string, CommandPermissionRequest>;
-    childMessagesBySubSessionId: Record<string, UiMessage[]>;
-    childHistoryLoaded: Record<string, UiMessage[]>;
 }
 
 export const SESSION_CACHE_MAX_IDLE = 10;
 export const SESSION_CACHE_BYTE_BUDGET = 8 * 1024 * 1024;
 export const SESSION_CACHE_ACTIVE_BYTE_BUDGET = 2 * 1024 * 1024;
-const emptyMessages: UiMessage[] = [];
-const emptyPending: Record<string, true> = {};
-const emptyBackground: Record<string, BackgroundSubagentState> = {};
 const transcriptMessageBytes = new WeakMap<UiMessage, number>();
 const transcriptEncoder = new TextEncoder();
 
@@ -75,128 +61,20 @@ export function createSessionState(): SessionState {
     };
 }
 
-/** Canonical lookup; legacy roots are accepted only until their first reducer transition. */
 export function getSessionState(
-    ws: SessionWorkspace | undefined,
+    ws: Pick<SessionWorkspace, "sessionStatesById"> | undefined,
     sid: string,
 ): SessionState | undefined {
-    if (!ws) return undefined;
-    if (ws.sessionStatesById !== undefined) return ws.sessionStatesById[sid];
-    const interaction = ws.activeSession === sid ? ws : ws.sessionInteractions?.[sid];
-    const child = ws.childMessagesBySubSessionId[sid] ?? ws.childHistoryLoaded[sid];
-    if (!interaction && !child && !(sid in ws.pendingBySessionId)) return undefined;
-    return {
-        ...createSessionState(),
-        ...(interaction
-            ? { messages: interaction.messages, askUserPending: interaction.askUserPending }
-            : {}),
-        ...(ws.activeSession === sid
-            ? { agentToolPending: ws.agentToolPending, backgroundSubagents: ws.backgroundSubagents }
-            : {}),
-        ...(child
-            ? {
-                  messages: child,
-                  kind: "subagent" as const,
-                  historyLoaded: sid in ws.childHistoryLoaded,
-              }
-            : {}),
-        execution:
-            ws.pendingBySessionId[sid] === undefined
-                ? "unknown"
-                : ws.pendingBySessionId[sid]
-                  ? "running"
-                  : "idle",
-    };
+    return ws?.sessionStatesById[sid];
 }
 
 /** A complete transcript can be reused without a history read; execution may still be unknown. */
-export function hasSessionCache(ws: SessionWorkspace | undefined, sid: string): boolean {
+export function hasSessionCache(
+    ws: Pick<SessionWorkspace, "sessionStatesById"> | undefined,
+    sid: string,
+): boolean {
     const session = getSessionState(ws, sid);
     return session?.sync === "current" && !session.truncated;
-}
-
-export function normalizeSessionStates<T extends SessionWorkspace>(ws: T): T {
-    if (ws.sessionStatesById !== undefined) return ws;
-    const ids = new Set([
-        ...Object.keys(ws.sessionInteractions ?? {}),
-        ...Object.keys(ws.pendingBySessionId),
-        ...Object.keys(ws.childMessagesBySubSessionId),
-        ...Object.keys(ws.childHistoryLoaded),
-        ...(ws.activeSession ? [ws.activeSession] : []),
-    ]);
-    let sessions: Record<string, SessionState> = ws.sessionStatesById ?? {};
-    for (const sid of ids) {
-        if (sessions[sid]) continue;
-        const session = getSessionState(ws, sid);
-        if (session)
-            sessions = {
-                ...sessions,
-                [sid]: { ...session, cacheBytes: transcriptBytes(session.messages) },
-            };
-    }
-    return { ...ws, sessionStatesById: sessions };
-}
-
-/** Compatibility properties are reads over canonical state, never separately updated transcripts. */
-export function projectSessionState<T extends SessionWorkspace>(ws: T): T {
-    const projected = { ...ws };
-    const active = () =>
-        projected.activeSession
-            ? projected.sessionStatesById?.[projected.activeSession]
-            : undefined;
-    Object.defineProperties(projected, {
-        messages: {
-            enumerable: true,
-            configurable: true,
-            get: () => active()?.messages ?? emptyMessages,
-        },
-        askUserPending: {
-            enumerable: true,
-            configurable: true,
-            get: () => active()?.askUserPending ?? emptyPending,
-        },
-        agentToolPending: {
-            enumerable: true,
-            configurable: true,
-            get: () => active()?.agentToolPending ?? emptyPending,
-        },
-        backgroundSubagents: {
-            enumerable: true,
-            configurable: true,
-            get: () => active()?.backgroundSubagents ?? emptyBackground,
-        },
-        sessionInteractions: {
-            enumerable: true,
-            configurable: true,
-            get: () =>
-                Object.fromEntries(
-                    Object.entries(projected.sessionStatesById ?? {})
-                        .filter(([sid, s]) => sid !== projected.activeSession && s.kind === "main")
-                        .map(([sid, s]) => [sid, s]),
-                ),
-        },
-        childMessagesBySubSessionId: {
-            enumerable: true,
-            configurable: true,
-            get: () =>
-                Object.fromEntries(
-                    Object.entries(projected.sessionStatesById ?? {})
-                        .filter(([, s]) => s.kind === "subagent")
-                        .map(([sid, s]) => [sid, s.messages]),
-                ),
-        },
-        childHistoryLoaded: {
-            enumerable: true,
-            configurable: true,
-            get: () =>
-                Object.fromEntries(
-                    Object.entries(projected.sessionStatesById ?? {})
-                        .filter(([, s]) => s.kind === "subagent" && s.historyLoaded)
-                        .map(([sid, s]) => [sid, s.messages]),
-                ),
-        },
-    });
-    return projected;
 }
 
 /** Exact JSON UTF-8 size; published messages and their nested data must remain immutable. */
@@ -274,10 +152,10 @@ export function mergeSessionHistory(session: SessionState, history: UiMessage[])
     });
     for (const message of session.messages) {
         const changedSinceRead = (session.messageVersions[messageKey(message)] ?? 0) > 0;
-        const legacyInteraction =
+        const pendingInteraction =
             message.kind === "assistant" &&
             (message.tools ?? []).some((t) => session.askUserPending[t.id]);
-        if (!seen.has(messageKey(message)) && (changedSinceRead || legacyInteraction))
+        if (!seen.has(messageKey(message)) && (changedSinceRead || pendingInteraction))
             messages.push(message);
     }
     const merged = updateSessionMessages(
@@ -327,7 +205,7 @@ export function mergeSessionHistory(session: SessionState, history: UiMessage[])
 }
 
 export function enforceSessionCache<T extends SessionWorkspace>(ws: T): T {
-    let sessions: Record<string, SessionState> = ws.sessionStatesById ?? {};
+    let sessions: Record<string, SessionState> = ws.sessionStatesById;
     const set = (sid: string, s: SessionState | undefined) => {
         if (sessions === ws.sessionStatesById) sessions = { ...sessions };
         if (s) sessions[sid] = s;

@@ -47,12 +47,7 @@ export function useConversationActivity({
     useEffect(() => {
         const changed = new Set<string>();
         for (const ws of Object.values(workspaces)) {
-            const ids = new Set([
-                ...Object.keys(ws.sessionStatesById ?? {}),
-                ...Object.keys(ws.sessionInteractions ?? {}),
-                ...(ws.activeSession ? [ws.activeSession] : []),
-            ]);
-            for (const sid of ids) {
+            for (const sid of Object.keys(ws.sessionStatesById)) {
                 const session = getSessionState(ws, sid);
                 if (!session) continue;
                 const key = conversationActivityKey({ workspace: ws.cwd, sessionId: sid });

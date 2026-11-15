@@ -17,16 +17,12 @@ export interface SubagentContextValue {
     cwd: string;
     loadSubagentHistory: (subSessionId: string) => Promise<void>;
     /**
-     * Reads live UiMessage stream for a child session — from the reducer's
-     * `childMessagesBySubSessionId[subSessionId]`. Written continuously by
-     * CHILD_MESSAGE_EVENT routed by useSidecarStream.
+     * Reads the canonical child transcript, updated by both live events and history pulls.
      */
     liveMessagesFor: (subSessionId: string) => UiMessage[];
     /**
-     * Reads lazily-loaded history for a child session (reducer.childHistoryLoaded).
-     * Filled after `loadSubagentHistory` is called; serves as the fallback to the
-     * live stream when the user opens an agent card mid-session (no more push
-     * events will arrive after detach).
+     * Reads the canonical child transcript once history has loaded.
+     * Returns a stable empty array until history has loaded.
      */
     historyMessagesFor: (subSessionId: string) => UiMessage[];
     /**
@@ -43,8 +39,7 @@ export interface SubagentProviderProps {
     cwd: string;
     loadSubagentHistory: (subSessionId: string) => Promise<void>;
     /**
-     * Provider reads liveMessagesFor from activeWs.childMessagesBySubSessionId.
-     * Changing activeWs updates the value and re-renders children.
+     * Provider reads the canonical child session. Transcript changes update the context.
      */
     liveMessagesFor: (subSessionId: string) => UiMessage[];
     historyMessagesFor: (subSessionId: string) => UiMessage[];

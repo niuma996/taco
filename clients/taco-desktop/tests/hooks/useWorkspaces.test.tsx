@@ -14,6 +14,7 @@ import { afterEach, beforeEach, describe, it, type Mock, vi } from "vitest";
 import { ToastProvider } from "../../src/components/ToastProvider";
 import { useConversationDrafts } from "../../src/hooks/useConversationDrafts";
 import { useWorkspaces } from "../../src/hooks/useWorkspaces";
+import { createSessionState } from "../../src/lib/chat/sessionState";
 import { createEmptyWorkspace, type WorkspaceState } from "../../src/lib/chat/workspaceReducer";
 import type { TacoClient } from "../../src/lib/clients/tacoClient.ts";
 import { SessionPushProcessor } from "../../src/lib/sessionPushProcessor";
@@ -178,25 +179,7 @@ describe("useWorkspacesFirstTurn.test.tsx", () => {
 
     /** A workspace with no active session: the next send takes the create path. */
     function seedEmptyWorkspace(): WorkspaceState {
-        return {
-            cwd: CWD,
-            active: true,
-            sessions: [],
-            activeSession: undefined,
-            messages: [],
-            subagentSpawned: {},
-            childMessagesBySubSessionId: {},
-            childHistoryLoaded: {},
-            askUserPending: {},
-            pendingCommandPermissions: {},
-            agentToolPending: {},
-            backgroundSubagents: {},
-            pendingBySessionId: {},
-            queuedBySessionId: {},
-            taskSnapshotsBySessionId: {},
-            planStatesBySessionId: {},
-            historyDetailsBySessionId: {},
-        };
+        return createEmptyWorkspace(CWD, true);
     }
 
     interface ClientOverrides {
@@ -748,23 +731,10 @@ describe("useWorkspacesSteer.test.tsx", () => {
 
     function seedWorkspace(): WorkspaceState {
         return {
-            cwd: CWD,
-            active: true,
+            ...createEmptyWorkspace(CWD, true),
             sessions: [{ id: SID, createdAt: "2026-01-01T00:00:00Z" }],
             activeSession: SID,
-            messages: [],
-            subagentSpawned: {},
-            childMessagesBySubSessionId: {},
-            childHistoryLoaded: {},
-            askUserPending: {},
-            pendingCommandPermissions: {},
-            agentToolPending: {},
-            backgroundSubagents: {},
-            pendingBySessionId: {},
-            queuedBySessionId: {},
-            taskSnapshotsBySessionId: {},
-            planStatesBySessionId: {},
-            historyDetailsBySessionId: {},
+            sessionStatesById: { [SID]: createSessionState() },
         };
     }
 
@@ -862,11 +832,11 @@ describe("useWorkspacesSteer.test.tsx", () => {
             assert.equal(outcome, "unknown");
             assert.equal(client.sessionPrompt.mock.calls.length, 1);
             assert.equal(
-                result.current.workspaces[CWD]?.sessionStatesById?.[SID]?.execution,
+                result.current.workspaces[CWD]?.sessionStatesById[SID]?.execution,
                 "unknown",
             );
             assert.equal(
-                result.current.workspaces[CWD]?.sessionStatesById?.[SID]?.sync,
+                result.current.workspaces[CWD]?.sessionStatesById[SID]?.sync,
                 "incomplete",
             );
         });
@@ -942,7 +912,7 @@ describe("useWorkspacesSteer.test.tsx", () => {
                 assert.equal(await sending, "unknown");
             });
             assert.equal(
-                result.current.workspaces[CWD]?.sessionStatesById?.[SID]?.execution,
+                result.current.workspaces[CWD]?.sessionStatesById[SID]?.execution,
                 "running",
             );
             assert.equal(result.current.workspaces[CWD]?.pendingBySessionId[SID], true);
@@ -1111,26 +1081,13 @@ describe("useWorkspacesAttach.test.tsx", () => {
 
     function seedWorkspace(): WorkspaceState {
         return {
-            cwd: CWD,
-            active: true,
+            ...createEmptyWorkspace(CWD, true),
             sessions: [
                 { id: SID, createdAt: "2026-01-01T00:00:00Z" },
                 { id: GONE_SID, createdAt: "2026-01-01T00:00:00Z" },
             ],
             activeSession: SID,
-            messages: [],
-            subagentSpawned: {},
-            childMessagesBySubSessionId: {},
-            childHistoryLoaded: {},
-            askUserPending: {},
-            pendingCommandPermissions: {},
-            agentToolPending: {},
-            backgroundSubagents: {},
-            pendingBySessionId: {},
-            queuedBySessionId: {},
-            taskSnapshotsBySessionId: {},
-            planStatesBySessionId: {},
-            historyDetailsBySessionId: {},
+            sessionStatesById: { [SID]: createSessionState() },
         };
     }
 
@@ -1566,12 +1523,16 @@ describe("targeted interaction submissions", () => {
                     "/a": {
                         ...createEmptyWorkspace("/a"),
                         activeSession: "a",
-                        askUserPending: { same: true },
+                        sessionStatesById: {
+                            a: { ...createSessionState(), askUserPending: { same: true } },
+                        },
                     },
                     "/b": {
                         ...createEmptyWorkspace("/b"),
                         activeSession: "b",
-                        askUserPending: { same: true },
+                        sessionStatesById: {
+                            b: { ...createSessionState(), askUserPending: { same: true } },
+                        },
                     },
                 },
             }),
@@ -1598,9 +1559,13 @@ describe("targeted interaction submissions", () => {
             });
         });
         assert.equal(sessionSubmitAnswers.mock.calls.length, 1);
-        assert.deepEqual(result.current.workspaces["/a"]?.askUserPending, { same: true });
+        assert.deepEqual(result.current.workspaces["/a"]?.sessionStatesById.a?.askUserPending, {
+            same: true,
+        });
         await act(async () => reject(new Error("offline")));
-        assert.deepEqual(result.current.workspaces["/a"]?.askUserPending, { same: true });
+        assert.deepEqual(result.current.workspaces["/a"]?.sessionStatesById.a?.askUserPending, {
+            same: true,
+        });
         assert.ok(result.current.notifications[0]?.text.includes("offline"));
         sessionSubmitAnswers.mockImplementation(async () => {});
         await act(async () => {
@@ -1612,8 +1577,10 @@ describe("targeted interaction submissions", () => {
                 answers: { q: "yes" },
             });
         });
-        assert.deepEqual(result.current.workspaces["/a"]?.askUserPending, {});
-        assert.deepEqual(result.current.workspaces["/b"]?.askUserPending, { same: true });
+        assert.deepEqual(result.current.workspaces["/a"]?.sessionStatesById.a?.askUserPending, {});
+        assert.deepEqual(result.current.workspaces["/b"]?.sessionStatesById.b?.askUserPending, {
+            same: true,
+        });
         assert.deepEqual(sessionSubmitAnswers.mock.calls[1], [
             {
                 workspace: "/a",

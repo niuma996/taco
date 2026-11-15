@@ -11,11 +11,7 @@ import { createEmptyWorkspace, type WorkspaceState } from "../../src/lib/chat/wo
 
 const target = { workspace: "/a", sessionId: "same" };
 const key = conversationActivityKey(target);
-function workspace(
-    cwd = "/a",
-    text = "",
-    ts = 200,
-): WorkspaceState & Required<Pick<WorkspaceState, "sessionStatesById">> {
+function workspace(cwd = "/a", text = "", ts = 200): WorkspaceState {
     return {
         ...createEmptyWorkspace(cwd),
         activeSession: "same",
@@ -150,7 +146,7 @@ describe("activity baselines", () => {
         vi.spyOn(Date, "now").mockReturnValue(100);
         const { result, rerender } = renderHook(
             ({ ws }) => useConversationActivity({ workspaces: { "/a": ws }, visibleTarget: null }),
-            { initialProps: { ws: { ...workspace(), sessionStatesById: {} } as WorkspaceState } },
+            { initialProps: { ws: { ...workspace(), sessionStatesById: {} } } },
         );
         const snapshot = workspace("/a", "first snapshot", 200);
         snapshot.sessionStatesById.same.historyLoaded = true;

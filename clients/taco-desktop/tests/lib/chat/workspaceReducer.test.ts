@@ -14,32 +14,31 @@ import { describe, it } from "node:test";
 
 import { asSessionId, asToolCallId, type CommandPermissionRequest } from "@taco-ai/protocol";
 import type { SessionEventLike, UiMessage } from "../../../src/lib/chat/chatUtils";
-import { getSessionState } from "../../../src/lib/chat/sessionState";
 import {
+    createSessionState,
+    getSessionState,
+    type SessionState,
+} from "../../../src/lib/chat/sessionState";
+import {
+    createEmptyWorkspace,
     sortSessionsByUpdatedDesc,
     type WorkspaceState,
     workspacesReducer,
 } from "../../../src/lib/chat/workspaceReducer";
 
-function baseWs(overrides: Partial<WorkspaceState> = {}): WorkspaceState {
+function baseWs(
+    overrides: Partial<WorkspaceState> = {},
+    sessionOverrides: Partial<SessionState> = {},
+): WorkspaceState {
     return {
-        cwd: "/ws",
-        active: true,
-        sessions: [],
-        messages: [],
-        subagentSpawned: {},
-        childMessagesBySubSessionId: {},
-        childHistoryLoaded: {},
-        askUserPending: {},
-        pendingCommandPermissions: {},
-        agentToolPending: {},
-        backgroundSubagents: {},
-        pendingBySessionId: {},
-        queuedBySessionId: {},
-        taskSnapshotsBySessionId: {},
-        planStatesBySessionId: {},
-        historyDetailsBySessionId: {},
+        ...createEmptyWorkspace(overrides.cwd ?? "/ws", true),
         ...overrides,
+        sessionStatesById: {
+            ...(overrides.activeSession
+                ? { [overrides.activeSession]: { ...createSessionState(), ...sessionOverrides } }
+                : {}),
+            ...overrides.sessionStatesById,
+        },
     };
 }
 
@@ -74,10 +73,10 @@ describe("sidecar restart", () => {
                 ],
             },
         ];
-        const state = { "/ws": baseWs({ activeSession: "s1", messages }) };
+        const state = { "/ws": baseWs({ activeSession: "s1" }, { messages }) };
 
         const next = workspacesReducer(state, { type: "SIDECAR_RESTARTED", cwd: "/ws" });
-        const tools = next["/ws"]?.messages[0];
+        const tools = next["/ws"]?.sessionStatesById[next["/ws"]?.activeSession ?? ""]?.messages[0];
         assert.equal(tools?.kind, "assistant");
         if (tools?.kind !== "assistant") return;
         assert.equal(tools.tools[0]?.status, "error");
@@ -88,7 +87,10 @@ describe("sidecar restart", () => {
         });
         assert.equal(tools.tools[1]?.status, "ok");
         assert.equal(tools.tools[2]?.status, "running");
-        assert.equal(state["/ws"]?.messages[0]?.kind, "assistant");
+        assert.equal(
+            state["/ws"]?.sessionStatesById[state["/ws"]?.activeSession ?? ""]?.messages[0]?.kind,
+            "assistant",
+        );
     });
 
     it("also marks running shells in subagent streams as failed", () => {
@@ -110,15 +112,23 @@ describe("sidecar restart", () => {
             },
         ];
         const state = {
-            "/ws": baseWs({
-                activeSession: "s1",
-                messages: [],
-                childMessagesBySubSessionId: { "sub-1": childMessages },
-            }),
+            "/ws": baseWs(
+                {
+                    activeSession: "s1",
+                    sessionStatesById: {
+                        "sub-1": {
+                            ...createSessionState(),
+                            kind: "subagent",
+                            messages: childMessages,
+                        },
+                    },
+                },
+                { messages: [] },
+            ),
         };
 
         const next = workspacesReducer(state, { type: "SIDECAR_RESTARTED", cwd: "/ws" });
-        const updatedChild = next["/ws"]?.childMessagesBySubSessionId["sub-1"]?.[0];
+        const updatedChild = next["/ws"]?.sessionStatesById["sub-1"]?.messages?.[0];
         assert.equal(updatedChild?.kind, "assistant");
         if (updatedChild?.kind !== "assistant") return;
         assert.equal(updatedChild.tools[0]?.status, "error");
@@ -128,7 +138,7 @@ describe("sidecar restart", () => {
             interrupted: false,
         });
         // Original child stream untouched (no mutation).
-        assert.equal(state["/ws"]?.childMessagesBySubSessionId["sub-1"]?.[0]?.kind, "assistant");
+        assert.equal(state["/ws"]?.sessionStatesById["sub-1"]?.messages?.[0]?.kind, "assistant");
     });
 });
 
@@ -213,33 +223,35 @@ describe("workspacesReducer — INIT / SET_ACTIVE", () => {
 describe("workspacesReducer — sessions", () => {
     it("tracks chatToAgent lifecycle by subSessionId and runId", () => {
         const state = {
-            "/ws": baseWs({
-                activeSession: "main-1",
-                messages: [
-                    {
-                        id: "assistant-1",
-                        kind: "assistant",
-                        text: "",
-                        ts: 1,
-                        thinking: [],
-                        tools: [
-                            {
-                                id: "chat-call-1",
-                                name: "chatToAgent",
-                                args: { subSessionId: "sub-1", prompt: "继续检查" },
-                                status: "ok",
-                                details: {
-                                    subSessionId: "sub-1",
-                                    messageId: "msg-1",
-                                    runId: "run-1",
-                                    status: "started",
-                                    effectiveDelivery: "queued",
+            "/ws": baseWs(
+                { activeSession: "main-1" },
+                {
+                    messages: [
+                        {
+                            id: "assistant-1",
+                            kind: "assistant",
+                            text: "",
+                            ts: 1,
+                            thinking: [],
+                            tools: [
+                                {
+                                    id: "chat-call-1",
+                                    name: "chatToAgent",
+                                    args: { subSessionId: "sub-1", prompt: "继续检查" },
+                                    status: "ok",
+                                    details: {
+                                        subSessionId: "sub-1",
+                                        messageId: "msg-1",
+                                        runId: "run-1",
+                                        status: "started",
+                                        effectiveDelivery: "queued",
+                                    },
                                 },
-                            },
-                        ],
-                    },
-                ],
-            }),
+                            ],
+                        },
+                    ],
+                },
+            ),
         };
 
         const started = workspacesReducer(state, {
@@ -251,7 +263,8 @@ describe("workspacesReducer — sessions", () => {
             agentType: "codextest",
             runId: "run-1",
         });
-        const startedTool = started["/ws"]?.messages[0];
+        const startedTool =
+            started["/ws"]?.sessionStatesById[started["/ws"]?.activeSession ?? ""]?.messages[0];
         assert.equal(startedTool?.kind, "assistant");
         if (startedTool?.kind !== "assistant") return;
         assert.equal(startedTool.tools[0]?.status, "running");
@@ -265,7 +278,8 @@ describe("workspacesReducer — sessions", () => {
             outcome: "completed",
             runId: "run-1",
         });
-        const settledTool = settled["/ws"]?.messages[0];
+        const settledTool =
+            settled["/ws"]?.sessionStatesById[settled["/ws"]?.activeSession ?? ""]?.messages[0];
         assert.equal(settledTool?.kind, "assistant");
         if (settledTool?.kind !== "assistant") return;
         assert.equal(settledTool.tools[0]?.status, "ok");
@@ -520,32 +534,36 @@ describe("workspacesReducer — sessions", () => {
 
     it("REMOVE_SESSION clears messages+activeSession when removing the active one", () => {
         const state = {
-            "/ws": baseWs({
-                activeSession: "x",
-                sessions: [{ id: "x", createdAt: "2026-01-01T00:00:00Z" }],
-                messages: [{ id: "m1", kind: "user", text: "hi", ts: 1 } as UiMessage],
-            }),
+            "/ws": baseWs(
+                { activeSession: "x", sessions: [{ id: "x", createdAt: "2026-01-01T00:00:00Z" }] },
+                { messages: [{ id: "m1", kind: "user", text: "hi", ts: 1 } as UiMessage] },
+            ),
         };
         const next = workspacesReducer(state, { type: "REMOVE_SESSION", cwd: "/ws", sid: "x" });
         assert.equal(next["/ws"]?.activeSession, undefined);
-        assert.deepEqual(next["/ws"]?.messages, []);
+        assert.equal(next["/ws"]?.sessionStatesById.x, undefined);
         assert.deepEqual(next["/ws"]?.sessions, []);
     });
 
     it("REMOVE_SESSION keeps activeSession when removing a non-active one", () => {
         const state = {
-            "/ws": baseWs({
-                activeSession: "keep",
-                sessions: [
-                    { id: "keep", createdAt: "2026-02-01T00:00:00Z" },
-                    { id: "drop", createdAt: "2026-01-01T00:00:00Z" },
-                ],
-                messages: [{ id: "m1", kind: "user", text: "hi", ts: 1 } as UiMessage],
-            }),
+            "/ws": baseWs(
+                {
+                    activeSession: "keep",
+                    sessions: [
+                        { id: "keep", createdAt: "2026-02-01T00:00:00Z" },
+                        { id: "drop", createdAt: "2026-01-01T00:00:00Z" },
+                    ],
+                },
+                { messages: [{ id: "m1", kind: "user", text: "hi", ts: 1 } as UiMessage] },
+            ),
         };
         const next = workspacesReducer(state, { type: "REMOVE_SESSION", cwd: "/ws", sid: "drop" });
         assert.equal(next["/ws"]?.activeSession, "keep");
-        assert.equal(next["/ws"]?.messages.length, 1);
+        assert.equal(
+            next["/ws"]?.sessionStatesById[next["/ws"]?.activeSession ?? ""]?.messages.length,
+            1,
+        );
     });
 
     it("REMOVE_SESSION drops the removed sid's pending slot but keeps others", () => {
@@ -580,22 +598,25 @@ describe("workspacesReducer — session loading", () => {
     const newMsgs = [{ id: "n1", kind: "user", text: "new", ts: 2 } as UiMessage];
 
     it("ATTACH_START marks the session loading and keeps the shown one intact", () => {
-        const state = { "/ws": baseWs({ activeSession: "a", messages: oldMsgs }) };
+        const state = { "/ws": baseWs({ activeSession: "a" }, { messages: oldMsgs }) };
         const next = workspacesReducer(state, { type: "ATTACH_START", cwd: "/ws", sid: "b" });
         assert.equal(next["/ws"]?.loadingSessionId, "b");
         assert.equal(next["/ws"]?.activeSession, "a");
-        assert.equal(next["/ws"]?.messages, oldMsgs);
+        assert.equal(
+            next["/ws"]?.sessionStatesById[next["/ws"]?.activeSession ?? ""]?.messages,
+            oldMsgs,
+        );
     });
 
     it("ATTACH_START for the shown session does not show a skeleton", () => {
-        const state = { "/ws": baseWs({ activeSession: "a", messages: oldMsgs }) };
+        const state = { "/ws": baseWs({ activeSession: "a" }, { messages: oldMsgs }) };
         const next = workspacesReducer(state, { type: "ATTACH_START", cwd: "/ws", sid: "a" });
         assert.equal(next, state);
     });
 
     it("ATTACH for the loading session swaps it in and clears the flag", () => {
         const state = {
-            "/ws": baseWs({ activeSession: "a", loadingSessionId: "b", messages: oldMsgs }),
+            "/ws": baseWs({ activeSession: "a", loadingSessionId: "b" }, { messages: oldMsgs }),
         };
         const next = workspacesReducer(state, {
             type: "ATTACH",
@@ -605,7 +626,10 @@ describe("workspacesReducer — session loading", () => {
         });
         assert.equal(next["/ws"]?.activeSession, "b");
         assert.equal(next["/ws"]?.loadingSessionId, undefined);
-        assert.equal(next["/ws"]?.messages, newMsgs);
+        assert.equal(
+            next["/ws"]?.sessionStatesById[next["/ws"]?.activeSession ?? ""]?.messages,
+            newMsgs,
+        );
     });
 
     it("ATTACH applies the authoritative execution state and running marker", () => {
@@ -665,12 +689,15 @@ describe("workspacesReducer — session loading", () => {
         });
         assert.equal(state, settled);
         assert.equal(state["/ws"]?.activeSession, "c");
-        assert.equal(state["/ws"]?.messages, newMsgs);
+        assert.equal(
+            state["/ws"]?.sessionStatesById[state["/ws"]?.activeSession ?? ""]?.messages,
+            newMsgs,
+        );
     });
 
     it("re-clicking the shown session while another loads cancels the load", () => {
         let state: Record<string, WorkspaceState> = {
-            "/ws": baseWs({ activeSession: "a", messages: oldMsgs }),
+            "/ws": baseWs({ activeSession: "a" }, { messages: oldMsgs }),
         };
         state = workspacesReducer(state, { type: "ATTACH_START", cwd: "/ws", sid: "b" });
         state = workspacesReducer(state, { type: "ATTACH_START", cwd: "/ws", sid: "a" });
@@ -682,17 +709,23 @@ describe("workspacesReducer — session loading", () => {
             messages: newMsgs,
         });
         assert.equal(state["/ws"]?.activeSession, "a");
-        assert.equal(state["/ws"]?.messages, oldMsgs);
+        assert.equal(
+            state["/ws"]?.sessionStatesById[state["/ws"]?.activeSession ?? ""]?.messages,
+            oldMsgs,
+        );
     });
 
     it("ATTACH_FAILED falls back to the shown session", () => {
         const state = {
-            "/ws": baseWs({ activeSession: "a", loadingSessionId: "b", messages: oldMsgs }),
+            "/ws": baseWs({ activeSession: "a", loadingSessionId: "b" }, { messages: oldMsgs }),
         };
         const next = workspacesReducer(state, { type: "ATTACH_FAILED", cwd: "/ws", sid: "b" });
         assert.equal(next["/ws"]?.loadingSessionId, undefined);
         assert.equal(next["/ws"]?.activeSession, "a");
-        assert.equal(next["/ws"]?.messages, oldMsgs);
+        assert.equal(
+            next["/ws"]?.sessionStatesById[next["/ws"]?.activeSession ?? ""]?.messages,
+            oldMsgs,
+        );
     });
 
     it("ATTACH_FAILED for a superseded open leaves the newer load alone", () => {
@@ -754,7 +787,10 @@ describe("workspacesReducer — guards", () => {
             sid: "b",
             msg: { id: "s", kind: "system", text: "x", ts: 1 } as UiMessage,
         });
-        assert.equal(next["/ws"]?.messages, state["/ws"]?.messages);
+        assert.equal(
+            next["/ws"]?.sessionStatesById[next["/ws"]?.activeSession ?? ""]?.messages,
+            state["/ws"]?.sessionStatesById[state["/ws"]?.activeSession ?? ""]?.messages,
+        );
         assert.equal(next["/ws"]?.sessionStatesById?.b?.messages[0]?.text, "x");
     });
 
@@ -762,10 +798,10 @@ describe("workspacesReducer — guards", () => {
         // Regression: stream events from background session a must not bleed into
         // the shared messages of the actively displayed session b.
         const state = {
-            "/ws": baseWs({
-                activeSession: "b",
-                messages: [{ id: "m1", kind: "user", text: "b-msg", ts: 1 } as UiMessage],
-            }),
+            "/ws": baseWs(
+                { activeSession: "b" },
+                { messages: [{ id: "m1", kind: "user", text: "b-msg", ts: 1 } as UiMessage] },
+            ),
         };
         const next = workspacesReducer(state, {
             type: "APPLY_EVENT",
@@ -775,9 +811,15 @@ describe("workspacesReducer — guards", () => {
             now: 2,
             ev: { type: "message_start", message: { role: "assistant", timestamp: 2 } },
         });
-        assert.equal(next["/ws"]?.messages, state["/ws"]?.messages);
-        assert.equal(next["/ws"]?.sessionInteractions?.a?.messages.length, 1);
-        assert.equal(next["/ws"]?.messages.length, 1);
+        assert.equal(
+            next["/ws"]?.sessionStatesById[next["/ws"]?.activeSession ?? ""]?.messages,
+            state["/ws"]?.sessionStatesById[state["/ws"]?.activeSession ?? ""]?.messages,
+        );
+        assert.equal(next["/ws"]?.sessionStatesById.a?.messages.length, 1);
+        assert.equal(
+            next["/ws"]?.sessionStatesById[next["/ws"]?.activeSession ?? ""]?.messages.length,
+            1,
+        );
     });
 
     it("APPLY_EVENT applies when sid matches activeSession", () => {
@@ -790,7 +832,10 @@ describe("workspacesReducer — guards", () => {
             now: 2,
             ev: { type: "message_start", message: { role: "assistant", timestamp: 2 } },
         });
-        assert.equal(next["/ws"]?.messages.length, 1);
+        assert.equal(
+            next["/ws"]?.sessionStatesById[next["/ws"]?.activeSession ?? ""]?.messages.length,
+            1,
+        );
     });
 });
 
@@ -808,7 +853,10 @@ describe("workspacesReducer — APPEND_ASSISTANT_FINAL", () => {
             sid: "s1",
             reply: { role: "assistant", content: [], timestamp: 1 } as never,
         });
-        assert.equal(next["/ws"]?.messages, state["/ws"]?.messages);
+        assert.equal(
+            next["/ws"]?.sessionStatesById[next["/ws"]?.activeSession ?? ""]?.messages,
+            state["/ws"]?.sessionStatesById[state["/ws"]?.activeSession ?? ""]?.messages,
+        );
         assert.equal(next["/ws"]?.pendingBySessionId.s1, false);
     });
 
@@ -826,7 +874,8 @@ describe("workspacesReducer — APPEND_ASSISTANT_FINAL", () => {
                 timestamp: 12345,
             } as never,
         });
-        const msgs = next["/ws"]?.messages ?? [];
+        const msgs =
+            next["/ws"]?.sessionStatesById[next["/ws"]?.activeSession ?? ""]?.messages ?? [];
         assert.equal(msgs.length, 1);
         assert.equal(msgs[0]?.kind, "system");
         assert.match((msgs[0] as Extract<UiMessage, { kind: "system" }>).text, /API key missing/);
@@ -835,19 +884,21 @@ describe("workspacesReducer — APPEND_ASSISTANT_FINAL", () => {
 
     it("overwrites the pre-created live bubble instead of appending", () => {
         const state = {
-            "/ws": baseWs({
-                activeSession: "s1",
-                messages: [
-                    {
-                        id: "live-asst-999",
-                        kind: "assistant",
-                        text: "",
-                        ts: 1,
-                        tools: [],
-                        thinking: [],
-                    } as UiMessage,
-                ],
-            }),
+            "/ws": baseWs(
+                { activeSession: "s1" },
+                {
+                    messages: [
+                        {
+                            id: "live-asst-999",
+                            kind: "assistant",
+                            text: "",
+                            ts: 1,
+                            tools: [],
+                            thinking: [],
+                        } as UiMessage,
+                    ],
+                },
+            ),
         };
         const next = workspacesReducer(state, {
             type: "APPEND_ASSISTANT_FINAL",
@@ -859,7 +910,8 @@ describe("workspacesReducer — APPEND_ASSISTANT_FINAL", () => {
                 timestamp: 999,
             } as never,
         });
-        const msgs = next["/ws"]?.messages ?? [];
+        const msgs =
+            next["/ws"]?.sessionStatesById[next["/ws"]?.activeSession ?? ""]?.messages ?? [];
         assert.equal(msgs.length, 1);
         assert.equal((msgs[0] as Extract<UiMessage, { kind: "assistant" }>).text, "done");
         // Input state must not be mutated: the original bubble text must still be empty.
@@ -867,7 +919,10 @@ describe("workspacesReducer — APPEND_ASSISTANT_FINAL", () => {
         // otherwise the input is contaminated (reducer is impure; StrictMode's double-call
         // and future same-kind bugs would both be caught by this assertion).
         assert.equal(
-            (state["/ws"]?.messages[0] as Extract<UiMessage, { kind: "assistant" }>).text,
+            (
+                state["/ws"]?.sessionStatesById[state["/ws"]?.activeSession ?? ""]
+                    ?.messages[0] as Extract<UiMessage, { kind: "assistant" }>
+            ).text,
             "",
         );
     });
@@ -890,10 +945,10 @@ describe("subagent actions", () => {
 
     it("does not attribute an unidentified later run to an already settled spawn", () => {
         const state = {
-            "/ws": baseWs({
-                activeSession: "main-1",
-                backgroundSubagents: { "tc-1": "completed" },
-            }),
+            "/ws": baseWs(
+                { activeSession: "main-1" },
+                { backgroundSubagents: { "tc-1": "completed" } },
+            ),
         };
         const next = workspacesReducer(state, {
             type: "SUBAGENT_SETTLED",
@@ -909,10 +964,10 @@ describe("subagent actions", () => {
         for (const parentSessionId of [undefined, "main-1"]) {
             const state = workspacesReducer(
                 {
-                    "/ws": baseWs({
-                        activeSession: "main-1",
-                        backgroundSubagents: { "tc-bg": "running" },
-                    }),
+                    "/ws": baseWs(
+                        { activeSession: "main-1" },
+                        { backgroundSubagents: { "tc-bg": "running" } },
+                    ),
                 },
                 { type: "SELECT_SESSION", cwd: "/ws", sid: "other" },
             );
@@ -926,7 +981,7 @@ describe("subagent actions", () => {
             assert.deepEqual(getSessionState(next["/ws"], "main-1")?.backgroundSubagents, {
                 "tc-bg": "aborted",
             });
-            assert.deepEqual(next["/ws"]?.backgroundSubagents, {});
+            assert.equal(next["/ws"]?.sessionStatesById.other, undefined);
             assert.deepEqual(next["/ws"]?.subagentSpawned, {});
         }
     });
@@ -934,27 +989,29 @@ describe("subagent actions", () => {
     for (const status of ["queued", "started", "completed", "error", "aborted"] as const) {
         it(`chatToAgent ${status} does not mark the parent busy or create background execution`, () => {
             const state = {
-                "/ws": baseWs({
-                    activeSession: "main-1",
-                    backgroundSubagents: { "tc-bg": "running" },
-                    messages: [
-                        {
-                            id: "send-call",
-                            kind: "assistant",
-                            ts: 1,
-                            text: "",
-                            thinking: [],
-                            tools: [
-                                {
-                                    id: "send-1",
-                                    name: "chatToAgent",
-                                    args: { subSessionId: "sub-1", prompt: "continue" },
-                                    status: "running",
-                                },
-                            ],
-                        },
-                    ],
-                }),
+                "/ws": baseWs(
+                    { activeSession: "main-1" },
+                    {
+                        backgroundSubagents: { "tc-bg": "running" },
+                        messages: [
+                            {
+                                id: "send-call",
+                                kind: "assistant",
+                                ts: 1,
+                                text: "",
+                                thinking: [],
+                                tools: [
+                                    {
+                                        id: "send-1",
+                                        name: "chatToAgent",
+                                        args: { subSessionId: "sub-1", prompt: "continue" },
+                                        status: "running",
+                                    },
+                                ],
+                            },
+                        ],
+                    },
+                ),
             };
             const next = workspacesReducer(state, {
                 type: "APPLY_EVENT",
@@ -978,10 +1035,18 @@ describe("subagent actions", () => {
                     },
                 },
             });
-            assert.deepEqual(next["/ws"]?.backgroundSubagents, { "tc-bg": "running" });
-            assert.deepEqual(next["/ws"]?.agentToolPending, {});
+            assert.deepEqual(
+                next["/ws"]?.sessionStatesById[next["/ws"]?.activeSession ?? ""]
+                    ?.backgroundSubagents,
+                { "tc-bg": "running" },
+            );
+            assert.deepEqual(
+                next["/ws"]?.sessionStatesById[next["/ws"]?.activeSession ?? ""]?.agentToolPending,
+                {},
+            );
             assert.deepEqual(next["/ws"]?.subagentSpawned, {});
-            const message = next["/ws"]?.messages[0];
+            const message =
+                next["/ws"]?.sessionStatesById[next["/ws"]?.activeSession ?? ""]?.messages[0];
             if (message?.kind !== "assistant") return assert.fail("missing send call");
             assert.equal(message.tools[0]?.status, status === "error" ? "error" : "ok");
             assert.equal((message.tools[0]?.details as { status: string }).status, status);
@@ -1022,9 +1087,15 @@ describe("subagent actions", () => {
                 settledBackgroundSubSessionIds: ["sub-1"],
             },
         );
-        assert.deepEqual(next["/ws"]?.backgroundSubagents, {});
+        assert.deepEqual(
+            next["/ws"]?.sessionStatesById[next["/ws"]?.activeSession ?? ""]?.backgroundSubagents,
+            {},
+        );
         assert.deepEqual(next["/ws"]?.subagentSpawned, {});
-        assert.deepEqual(next["/ws"]?.agentToolPending, {});
+        assert.deepEqual(
+            next["/ws"]?.sessionStatesById[next["/ws"]?.activeSession ?? ""]?.agentToolPending,
+            {},
+        );
     });
 
     // agentToolPending gates the send/stop button. Only an `agent` tool ending
@@ -1044,20 +1115,25 @@ describe("subagent actions", () => {
 
     it("clears agentToolPending when an agent tool ends with an error", () => {
         const state = {
-            "/ws": baseWs({
-                activeSession: "main-1",
-                agentToolPending: { "tc-1": true },
-                subagentSpawned: {
-                    "main-1:tc-1": {
-                        subSessionId: "sub-1",
-                        agentType: "explorer",
-                        parentToolCallId: "tc-1",
+            "/ws": baseWs(
+                {
+                    activeSession: "main-1",
+                    subagentSpawned: {
+                        "main-1:tc-1": {
+                            subSessionId: "sub-1",
+                            agentType: "explorer",
+                            parentToolCallId: "tc-1",
+                        },
                     },
                 },
-            }),
+                { agentToolPending: { "tc-1": true } },
+            ),
         };
         const next = workspacesReducer(state, toolEndEvent("tc-1", "agent", true));
-        assert.deepEqual(next["/ws"]?.agentToolPending, {});
+        assert.deepEqual(
+            next["/ws"]?.sessionStatesById[next["/ws"]?.activeSession ?? ""]?.agentToolPending,
+            {},
+        );
     });
 
     // A background spawn's tool_end is a launch receipt, so the SUBAGENT_SPAWNED
@@ -1082,7 +1158,11 @@ describe("subagent actions", () => {
             { "/ws": baseWs({ activeSession: "main-1" }) },
             launched,
         );
-        assert.deepEqual(afterLaunch["/ws"]?.backgroundSubagents, { "tc-bg": "running" });
+        assert.deepEqual(
+            afterLaunch["/ws"]?.sessionStatesById[afterLaunch["/ws"]?.activeSession ?? ""]
+                ?.backgroundSubagents,
+            { "tc-bg": "running" },
+        );
 
         // subagent.spawned lands after the receipt, not before.
         const afterSpawn = workspacesReducer(afterLaunch, {
@@ -1094,7 +1174,8 @@ describe("subagent actions", () => {
             agentType: "explorer",
         });
         assert.deepEqual(
-            afterSpawn["/ws"]?.agentToolPending,
+            afterSpawn["/ws"]?.sessionStatesById[afterSpawn["/ws"]?.activeSession ?? ""]
+                ?.agentToolPending,
             {},
             "a background child must not make the parent look busy",
         );
@@ -1107,8 +1188,16 @@ describe("subagent actions", () => {
         });
         // Retained, not deleted: the panel still has to render this child, and
         // its tool call has reported `ok` since launch.
-        assert.deepEqual(afterSettle["/ws"]?.backgroundSubagents, { "tc-bg": "completed" });
-        assert.deepEqual(afterSettle["/ws"]?.agentToolPending, {});
+        assert.deepEqual(
+            afterSettle["/ws"]?.sessionStatesById[afterSettle["/ws"]?.activeSession ?? ""]
+                ?.backgroundSubagents,
+            { "tc-bg": "completed" },
+        );
+        assert.deepEqual(
+            afterSettle["/ws"]?.sessionStatesById[afterSettle["/ws"]?.activeSession ?? ""]
+                ?.agentToolPending,
+            {},
+        );
     });
 
     // The synchronous path is unchanged: its tool_end carries no "launched"
@@ -1125,7 +1214,11 @@ describe("subagent actions", () => {
                 agentType: "explorer",
             },
         );
-        assert.deepEqual(afterSpawn["/ws"]?.agentToolPending, { "tc-sync": true });
+        assert.deepEqual(
+            afterSpawn["/ws"]?.sessionStatesById[afterSpawn["/ws"]?.activeSession ?? ""]
+                ?.agentToolPending,
+            { "tc-sync": true },
+        );
     });
 
     // backgroundSubagents is in-memory, so history replay has to rebuild it.
@@ -1164,33 +1257,39 @@ describe("subagent actions", () => {
                 settledBackgroundSubSessionIds: ["sub-done"],
             },
         );
-        assert.deepEqual(next["/ws"]?.backgroundSubagents, {
-            "tc-live": "running",
-            "tc-done": "completed",
-            // Neither live nor settled: the process that ran it exited mid-run,
-            // so it must not read as complete.
-            "tc-killed": "error",
-        });
+        assert.deepEqual(
+            next["/ws"]?.sessionStatesById[next["/ws"]?.activeSession ?? ""]?.backgroundSubagents,
+            {
+                "tc-live": "running",
+                "tc-done": "completed",
+                // Neither live nor settled: the process that ran it exited mid-run,
+                // so it must not read as complete.
+                "tc-killed": "error",
+            },
+        );
     });
 
     it("clears agentToolPending when a skill-spawned subagent ends", () => {
         const state = {
-            "/ws": baseWs({
-                activeSession: "main-1",
-                agentToolPending: { "tc-2": true },
-                // skill subagents emit subagent.spawned with the skill tool's
-                // toolCallId, so the toolName on end is "skill", not "agent".
-                subagentSpawned: {
-                    "main-1:tc-2": {
-                        subSessionId: "sub-2",
-                        agentType: "researcher",
-                        parentToolCallId: "tc-2",
+            "/ws": baseWs(
+                {
+                    activeSession: "main-1",
+                    subagentSpawned: {
+                        "main-1:tc-2": {
+                            subSessionId: "sub-2",
+                            agentType: "researcher",
+                            parentToolCallId: "tc-2",
+                        },
                     },
                 },
-            }),
+                { agentToolPending: { "tc-2": true } },
+            ),
         };
         const next = workspacesReducer(state, toolEndEvent("tc-2", "skill", false));
-        assert.deepEqual(next["/ws"]?.agentToolPending, {});
+        assert.deepEqual(
+            next["/ws"]?.sessionStatesById[next["/ws"]?.activeSession ?? ""]?.agentToolPending,
+            {},
+        );
     });
 
     it("SUBAGENT_SPAWNED adds entry keyed by parentSessionId+parentToolCallId", () => {
@@ -1217,22 +1316,24 @@ describe("subagent actions", () => {
         // tool_end, so it renders "spawning…" for the whole run even
         // though the child stream is already accumulating.
         const state = {
-            "/ws": baseWs({
-                activeSession: "main-1",
-                messages: [
-                    {
-                        id: "assistant-1",
-                        kind: "assistant",
-                        text: "",
-                        ts: 1,
-                        thinking: [],
-                        tools: [
-                            { id: "other-tc", name: "shell", args: {}, status: "running" },
-                            { id: "tc-1", name: "agent", args: {}, status: "running" },
-                        ],
-                    },
-                ] as UiMessage[],
-            }),
+            "/ws": baseWs(
+                { activeSession: "main-1" },
+                {
+                    messages: [
+                        {
+                            id: "assistant-1",
+                            kind: "assistant",
+                            text: "",
+                            ts: 1,
+                            thinking: [],
+                            tools: [
+                                { id: "other-tc", name: "shell", args: {}, status: "running" },
+                                { id: "tc-1", name: "agent", args: {}, status: "running" },
+                            ],
+                        },
+                    ] as UiMessage[],
+                },
+            ),
         };
         const next = workspacesReducer(state, {
             type: "SUBAGENT_SPAWNED",
@@ -1242,15 +1343,20 @@ describe("subagent actions", () => {
             subSessionId: "sub-1",
             agentType: "explorer",
         });
-        const tools = (next["/ws"]?.messages[0] as Extract<UiMessage, { kind: "assistant" }>).tools;
+        const tools = (
+            next["/ws"]?.sessionStatesById[next["/ws"]?.activeSession ?? ""]
+                ?.messages[0] as Extract<UiMessage, { kind: "assistant" }>
+        ).tools;
         assert.deepEqual(tools[1]?.details, {
             subSessionId: "sub-1",
             agentType: "explorer",
         });
         // Sibling tools and the input state are untouched.
         assert.equal(tools[0]?.details, undefined);
-        const prevTools = (state["/ws"]?.messages[0] as Extract<UiMessage, { kind: "assistant" }>)
-            .tools;
+        const prevTools = (
+            state["/ws"]?.sessionStatesById[state["/ws"]?.activeSession ?? ""]
+                ?.messages[0] as Extract<UiMessage, { kind: "assistant" }>
+        ).tools;
         assert.equal(prevTools[1]?.details, undefined);
     });
 
@@ -1283,20 +1389,24 @@ describe("subagent actions", () => {
         assert.equal(Object.keys(next["/ws"]?.subagentSpawned ?? {}).length, 1);
     });
 
-    it("CHILD_MESSAGE_EVENT appends to childMessagesBySubSessionId", () => {
+    it("CHILD_MESSAGE_EVENT appends to the canonical child transcript", () => {
         const state = {
             "/ws": baseWs({
-                childMessagesBySubSessionId: {
-                    "sub-1": [
-                        {
-                            id: "live-asst-1",
-                            kind: "assistant",
-                            text: "",
-                            ts: 1,
-                            tools: [],
-                            thinking: [],
-                        } as UiMessage,
-                    ],
+                sessionStatesById: {
+                    "sub-1": {
+                        ...createSessionState(),
+                        kind: "subagent",
+                        messages: [
+                            {
+                                id: "live-asst-1",
+                                kind: "assistant",
+                                text: "",
+                                ts: 1,
+                                tools: [],
+                                thinking: [],
+                            } as UiMessage,
+                        ],
+                    },
                 },
             }),
         };
@@ -1308,7 +1418,7 @@ describe("subagent actions", () => {
             now: 2,
             ev: { type: "message_start", message: { role: "assistant", timestamp: 2 } },
         });
-        assert.equal(next["/ws"]?.childMessagesBySubSessionId["sub-1"]?.length, 2);
+        assert.equal(next["/ws"]?.sessionStatesById["sub-1"]?.messages?.length, 2);
     });
 
     it("CHILD_MESSAGE_EVENT creates new subSession bucket if missing", () => {
@@ -1321,10 +1431,10 @@ describe("subagent actions", () => {
             now: 5,
             ev: { type: "message_start", message: { role: "assistant", timestamp: 5 } },
         });
-        assert.equal(next["/ws"]?.childMessagesBySubSessionId["sub-new"]?.length, 1);
+        assert.equal(next["/ws"]?.sessionStatesById["sub-new"]?.messages?.length, 1);
     });
 
-    it("LOAD_SUBAGENT_HISTORY sets childHistoryLoaded", () => {
+    it("LOAD_SUBAGENT_HISTORY loads the canonical child history", () => {
         const state = { "/ws": baseWs() };
         const history = [{ id: "h1", kind: "user", text: "hi", ts: 1 } as UiMessage];
         const next = workspacesReducer(state, {
@@ -1333,16 +1443,20 @@ describe("subagent actions", () => {
             subSessionId: "sub-1",
             messages: history,
         });
-        assert.deepEqual(next["/ws"]?.childHistoryLoaded["sub-1"], history);
+        assert.deepEqual(next["/ws"]?.sessionStatesById["sub-1"]?.messages, history);
+        assert.equal(next["/ws"]?.sessionStatesById["sub-1"]?.historyLoaded, true);
+        assert.equal(next["/ws"]?.sessionStatesById["sub-1"]?.kind, "subagent");
     });
 
     it("RESTORE_SESSION_SNAPSHOT updates the active main session without switching views", () => {
         const state = {
-            "/ws": baseWs({
-                activeSession: "main-1",
-                messages: [{ id: "stale", kind: "user", text: "old", ts: 1 } as UiMessage],
-                askUserPending: { "old-tool": true },
-            }),
+            "/ws": baseWs(
+                { activeSession: "main-1" },
+                {
+                    messages: [{ id: "stale", kind: "user", text: "old", ts: 1 } as UiMessage],
+                    askUserPending: { "old-tool": true },
+                },
+            ),
         };
         const messages = [{ id: "fresh", kind: "assistant", text: "new", ts: 2 } as UiMessage];
 
@@ -1356,11 +1470,17 @@ describe("subagent actions", () => {
         });
 
         assert.equal(next["/ws"]?.activeSession, "main-1");
-        assert.deepEqual(next["/ws"]?.messages, messages);
-        assert.deepEqual(next["/ws"]?.askUserPending, { "fresh-tool": true });
+        assert.deepEqual(
+            next["/ws"]?.sessionStatesById[next["/ws"]?.activeSession ?? ""]?.messages,
+            messages,
+        );
+        assert.deepEqual(
+            next["/ws"]?.sessionStatesById[next["/ws"]?.activeSession ?? ""]?.askUserPending,
+            { "fresh-tool": true },
+        );
     });
 
-    it("RESTORE_SESSION_SNAPSHOT keeps a session known to be running marked as running", () => {
+    it("RESTORE_SESSION_SNAPSHOT preserves optimistic pending without inferring execution", () => {
         // Re-attaching to a chat whose turn is still in flight (a subagent that
         // takes minutes) must not flip the stop button back on.
         const state = {
@@ -1380,6 +1500,8 @@ describe("subagent actions", () => {
         });
 
         assert.equal(next["/ws"]?.pendingBySessionId["main-1"], true);
+        assert.equal(next["/ws"]?.pendingBySessionId, state["/ws"].pendingBySessionId);
+        assert.equal(getSessionState(next["/ws"], "main-1")?.execution, "unknown");
     });
 
     it("RESTORE_SESSION_SNAPSHOT keeps an unknown execution state unknown", () => {
@@ -1448,10 +1570,19 @@ describe("subagent actions", () => {
         const state = {
             "/ws": baseWs({
                 activeSession: "main-1",
-                childMessagesBySubSessionId: {
-                    "sub-1": [
-                        { id: "partial", kind: "assistant", text: "partial", ts: 1 } as UiMessage,
-                    ],
+                sessionStatesById: {
+                    "sub-1": {
+                        ...createSessionState(),
+                        kind: "subagent",
+                        messages: [
+                            {
+                                id: "partial",
+                                kind: "assistant",
+                                text: "partial",
+                                ts: 1,
+                            } as UiMessage,
+                        ],
+                    },
                 },
             }),
         };
@@ -1468,25 +1599,32 @@ describe("subagent actions", () => {
         });
 
         assert.equal(next["/ws"]?.activeSession, "main-1");
-        assert.deepEqual(next["/ws"]?.childMessagesBySubSessionId["sub-1"], messages);
-        assert.deepEqual(next["/ws"]?.childHistoryLoaded["sub-1"], messages);
+        assert.deepEqual(next["/ws"]?.sessionStatesById["sub-1"]?.messages, messages);
+        assert.equal(next["/ws"]?.sessionStatesById["sub-1"]?.historyLoaded, true);
     });
 
     it("ATTACH preserves subagent state when same session", () => {
         const state = {
-            "/ws": baseWs({
-                activeSession: "main-1",
-                subagentSpawned: {
-                    "main-1:tc-1": {
-                        subSessionId: "sub-1",
-                        agentType: "explorer",
-                        parentToolCallId: "tc-1",
+            "/ws": baseWs(
+                {
+                    activeSession: "main-1",
+                    subagentSpawned: {
+                        "main-1:tc-1": {
+                            subSessionId: "sub-1",
+                            agentType: "explorer",
+                            parentToolCallId: "tc-1",
+                        },
+                    },
+                    sessionStatesById: {
+                        "sub-1": {
+                            ...createSessionState(),
+                            kind: "subagent",
+                            messages: [{ id: "m1", kind: "user", text: "x", ts: 1 } as UiMessage],
+                        },
                     },
                 },
-                childMessagesBySubSessionId: {
-                    "sub-1": [{ id: "m1", kind: "user", text: "x", ts: 1 } as UiMessage],
-                },
-            }),
+                { sync: "current" },
+            ),
         };
         const next = workspacesReducer(state, {
             type: "ATTACH",
@@ -1501,7 +1639,7 @@ describe("subagent actions", () => {
             agentType: "explorer",
             parentToolCallId: "tc-1",
         });
-        assert.equal(next["/ws"]?.childMessagesBySubSessionId["sub-1"]?.length, 1);
+        assert.equal(next["/ws"]?.sessionStatesById["sub-1"]?.messages?.length, 1);
     });
 
     it("ATTACH same session refreshes background state from fresh signals", () => {
@@ -1526,10 +1664,13 @@ describe("subagent actions", () => {
             },
         ];
         const state = {
-            "/ws": baseWs({
-                activeSession: "main-1",
-                backgroundSubagents: { "tc-stale": "running", "tc-err": "error" },
-            }),
+            "/ws": baseWs(
+                { activeSession: "main-1" },
+                {
+                    sync: "current",
+                    backgroundSubagents: { "tc-stale": "running", "tc-err": "error" },
+                },
+            ),
         };
         const next = workspacesReducer(state, {
             type: "ATTACH",
@@ -1539,15 +1680,21 @@ describe("subagent actions", () => {
             inFlightAgentToolCallIds: [],
             settledBackgroundSubSessionIds: ["sub-stale", "sub-err"],
         });
-        assert.deepEqual(next["/ws"]?.backgroundSubagents, {
-            "tc-stale": "completed",
-            // A recorded terminal outcome wins: SUBAGENT_SETTLED knew the real
-            // outcome, while the rebuild can only say "completed" for any
-            // settled child.
-            "tc-err": "error",
-        });
+        assert.deepEqual(
+            next["/ws"]?.sessionStatesById[next["/ws"]?.activeSession ?? ""]?.backgroundSubagents,
+            {
+                "tc-stale": "completed",
+                // A recorded terminal outcome wins: SUBAGENT_SETTLED knew the real
+                // outcome, while the rebuild can only say "completed" for any
+                // settled child.
+                "tc-err": "error",
+            },
+        );
         // Messages are not replaced on a same-session re-attach.
-        assert.deepEqual(next["/ws"]?.messages, []);
+        assert.deepEqual(
+            next["/ws"]?.sessionStatesById[next["/ws"]?.activeSession ?? ""]?.messages,
+            [],
+        );
     });
 
     it("ATTACH retains independently cached child streams and parent relations", () => {
@@ -1561,11 +1708,16 @@ describe("subagent actions", () => {
                         parentToolCallId: "tc-1",
                     },
                 },
-                childMessagesBySubSessionId: {
-                    "sub-1": [{ id: "m1", kind: "user", text: "x", ts: 1 } as UiMessage],
-                },
-                childHistoryLoaded: { "sub-1": [] },
                 loadingSessionId: "main-2",
+                sessionStatesById: {
+                    "sub-1": {
+                        ...createSessionState(),
+                        kind: "subagent",
+                        messages: [{ id: "m1", kind: "user", text: "x", ts: 1 } as UiMessage],
+                        historyLoaded: true,
+                        sync: "current",
+                    },
+                },
             }),
         };
         const next = workspacesReducer(state, {
@@ -1576,8 +1728,8 @@ describe("subagent actions", () => {
         });
         assert.equal(next["/ws"]?.activeSession, "main-2");
         assert.equal(next["/ws"]?.subagentSpawned["main-1:tc-1"]?.subSessionId, "sub-1");
-        assert.equal(next["/ws"]?.childMessagesBySubSessionId["sub-1"]?.length, 1);
-        assert.equal(next["/ws"]?.childHistoryLoaded["sub-1"]?.length, 1);
+        assert.equal(next["/ws"]?.sessionStatesById["sub-1"]?.messages?.length, 1);
+        assert.equal(next["/ws"]?.sessionStatesById["sub-1"]?.historyLoaded, true);
     });
 });
 
@@ -1606,15 +1758,23 @@ describe("workspacesReducer — askUser pending lifecycle", () => {
     it("waiting=true writes askUserPending[toolCallId] = true", () => {
         const state = { "/ws": baseWs({ activeSession: "s1" }) };
         const next = workspacesReducer(state, askUserEvent("tc-1", true));
-        assert.equal(next["/ws"]?.askUserPending["tc-1"], true);
+        assert.equal(
+            next["/ws"]?.sessionStatesById[next["/ws"]?.activeSession ?? ""]?.askUserPending[
+                "tc-1"
+            ],
+            true,
+        );
     });
 
     it("waiting=false on a tracked toolCallId removes the pending entry", () => {
         const state = {
-            "/ws": baseWs({ activeSession: "s1", askUserPending: { "tc-1": true } }),
+            "/ws": baseWs({ activeSession: "s1" }, { askUserPending: { "tc-1": true } }),
         };
         const next = workspacesReducer(state, askUserEvent("tc-1", false));
-        assert.deepEqual(next["/ws"]?.askUserPending, {});
+        assert.deepEqual(
+            next["/ws"]?.sessionStatesById[next["/ws"]?.activeSession ?? ""]?.askUserPending,
+            {},
+        );
     });
 
     it("does not mutate the action.ev object across APPLY_EVENT", () => {
@@ -1650,7 +1810,7 @@ describe("workspacesReducer — askUser pending lifecycle", () => {
 
     it("ASKUSER_ANSWERED with cwd removes pending for that toolCallId", () => {
         const state = {
-            "/ws": baseWs({ activeSession: "s1", askUserPending: { "tc-1": true } }),
+            "/ws": baseWs({ activeSession: "s1" }, { askUserPending: { "tc-1": true } }),
         };
         const next = workspacesReducer(state, {
             type: "ASKUSER_ANSWERED",
@@ -1658,13 +1818,16 @@ describe("workspacesReducer — askUser pending lifecycle", () => {
             toolCallId: "tc-1",
             answers: { q1: "opt-a" },
         });
-        assert.deepEqual(next["/ws"]?.askUserPending, {});
+        assert.deepEqual(
+            next["/ws"]?.sessionStatesById[next["/ws"]?.activeSession ?? ""]?.askUserPending,
+            {},
+        );
     });
 
     it("ASKUSER_ANSWERED only clears pending in the addressed workspace", () => {
         const state = {
-            "/a": baseWs({ cwd: "/a", activeSession: "s1", askUserPending: { "tc-1": true } }),
-            "/b": baseWs({ cwd: "/b", activeSession: "s2", askUserPending: { "tc-1": true } }),
+            "/a": baseWs({ cwd: "/a", activeSession: "s1" }, { askUserPending: { "tc-1": true } }),
+            "/b": baseWs({ cwd: "/b", activeSession: "s2" }, { askUserPending: { "tc-1": true } }),
         };
         const next = workspacesReducer(state, {
             type: "ASKUSER_ANSWERED",
@@ -1672,15 +1835,21 @@ describe("workspacesReducer — askUser pending lifecycle", () => {
             toolCallId: "tc-1",
             answers: { q1: "opt-a" },
         });
-        assert.deepEqual(next["/a"]?.askUserPending, {});
+        assert.deepEqual(
+            next["/a"]?.sessionStatesById[next["/a"]?.activeSession ?? ""]?.askUserPending,
+            {},
+        );
         // A same-id pending elsewhere must survive: the reducer no longer scans,
         // so it can never clear the wrong workspace's card.
-        assert.deepEqual(next["/b"]?.askUserPending, { "tc-1": true });
+        assert.deepEqual(
+            next["/b"]?.sessionStatesById[next["/b"]?.activeSession ?? ""]?.askUserPending,
+            { "tc-1": true },
+        );
     });
 
     it("ASKUSER_ANSWERED on unknown toolCallId leaves state unchanged", () => {
         const state = {
-            "/ws": baseWs({ activeSession: "s1", askUserPending: { "tc-1": true } }),
+            "/ws": baseWs({ activeSession: "s1" }, { askUserPending: { "tc-1": true } }),
         };
         const next = workspacesReducer(state, {
             type: "ASKUSER_ANSWERED",
@@ -1688,7 +1857,10 @@ describe("workspacesReducer — askUser pending lifecycle", () => {
             toolCallId: "tc-doesnt-exist",
             answers: {},
         });
-        assert.deepEqual(next["/ws"]?.askUserPending, { "tc-1": true });
+        assert.deepEqual(
+            next["/ws"]?.sessionStatesById[next["/ws"]?.activeSession ?? ""]?.askUserPending,
+            { "tc-1": true },
+        );
     });
 });
 
@@ -1732,10 +1904,10 @@ describe("workspacesReducer — command permission pending lifecycle", () => {
 
     it("records the request when the requesting session is not the active one", () => {
         const state = {
-            "/ws": baseWs({
-                activeSession: "s-other",
-                messages: assistantWithAgentCard("tc-root"),
-            }),
+            "/ws": baseWs(
+                { activeSession: "s-other" },
+                { messages: assistantWithAgentCard("tc-root") },
+            ),
         };
         const next = workspacesReducer(state, {
             type: "COMMAND_PERMISSION_REQUESTED",
@@ -1745,12 +1917,18 @@ describe("workspacesReducer — command permission pending lifecycle", () => {
         });
         assert.equal(next["/ws"]?.pendingCommandPermissions["req-1"]?.command, "rm -rf build");
         // That session's card isn't on screen, so there is nothing to patch.
-        assert.equal(toolById(next["/ws"]?.messages, "tc-root").details, undefined);
+        assert.equal(
+            toolById(
+                next["/ws"]?.sessionStatesById[next["/ws"]?.activeSession ?? ""]?.messages,
+                "tc-root",
+            ).details,
+            undefined,
+        );
     });
 
     it("also patches the card when the requesting session is on screen", () => {
         const state = {
-            "/ws": baseWs({ activeSession: "s1", messages: assistantWithAgentCard("tc-root") }),
+            "/ws": baseWs({ activeSession: "s1" }, { messages: assistantWithAgentCard("tc-root") }),
         };
         const next = workspacesReducer(state, {
             type: "COMMAND_PERMISSION_REQUESTED",
@@ -1759,9 +1937,10 @@ describe("workspacesReducer — command permission pending lifecycle", () => {
             request: permissionRequest({ displayToolCallId: asToolCallId("tc-root") }),
         });
         assert.ok(next["/ws"]?.pendingCommandPermissions["req-1"]);
-        const details = toolById(next["/ws"]?.messages, "tc-root").details as
-            | { commandPermission?: CommandPermissionRequest }
-            | undefined;
+        const details = toolById(
+            next["/ws"]?.sessionStatesById[next["/ws"]?.activeSession ?? ""]?.messages,
+            "tc-root",
+        ).details as { commandPermission?: CommandPermissionRequest } | undefined;
         assert.equal(details?.commandPermission?.requestId, "req-1");
     });
 
@@ -2009,6 +2188,8 @@ describe("workspacesReducer — per-session pending", () => {
         });
         assert.equal(next["/ws"]?.pendingBySessionId.s1, true);
         assert.equal(next["/ws"]?.pendingBySessionId.s2, true);
+        assert.equal(next["/ws"]?.pendingBySessionId, state["/ws"].pendingBySessionId);
+        assert.equal(getSessionState(next["/ws"], "s1")?.execution, "unknown");
     });
 
     it("SET_PENDING clears pending for background session by its own sid, without affecting active session", () => {
@@ -2093,10 +2274,10 @@ describe("workspacesReducer — run events drive pending", () => {
         // so run events must apply even when the sid is not activeSession (e.g.
         // an IM-channel turn running while the user views another chat).
         let state: Record<string, WorkspaceState> = {
-            "/ws": baseWs({
-                activeSession: "active",
-                messages: [{ id: "m1", kind: "user", text: "keep", ts: 1 } as UiMessage],
-            }),
+            "/ws": baseWs(
+                { activeSession: "active" },
+                { messages: [{ id: "m1", kind: "user", text: "keep", ts: 1 } as UiMessage] },
+            ),
         };
         state = workspacesReducer(state, {
             type: "APPLY_EVENT",
@@ -2107,7 +2288,11 @@ describe("workspacesReducer — run events drive pending", () => {
             ev: { type: "run_start" } as SessionEventLike,
         });
         assert.equal(state["/ws"]?.pendingBySessionId.bg, true);
-        assert.equal(state["/ws"]?.messages.length, 1, "messages untouched for background sid");
+        assert.equal(
+            state["/ws"]?.sessionStatesById[state["/ws"]?.activeSession ?? ""]?.messages.length,
+            1,
+            "messages untouched for background sid",
+        );
         state = workspacesReducer(state, {
             type: "APPLY_EVENT",
             cwd: "/ws",
@@ -2312,10 +2497,10 @@ describe("workspacesReducer — steering queue", () => {
         // Otherwise queued rows accumulate while a session runs in the
         // background and are stale when the user switches back.
         const state = {
-            "/ws": baseWs({
-                activeSession: "active",
-                messages: [{ id: "m1", kind: "user", text: "keep", ts: 1 } as UiMessage],
-            }),
+            "/ws": baseWs(
+                { activeSession: "active" },
+                { messages: [{ id: "m1", kind: "user", text: "keep", ts: 1 } as UiMessage] },
+            ),
         };
         const next = workspacesReducer(state, {
             type: "APPLY_EVENT",
@@ -2327,6 +2512,10 @@ describe("workspacesReducer — steering queue", () => {
         });
         assert.equal(next["/ws"]?.queuedBySessionId.bg?.length, 1);
         assert.equal(next["/ws"]?.queuedBySessionId.bg?.[0]?.id, "e1");
-        assert.equal(next["/ws"]?.messages.length, 1, "messages untouched for background sid");
+        assert.equal(
+            next["/ws"]?.sessionStatesById[next["/ws"]?.activeSession ?? ""]?.messages.length,
+            1,
+            "messages untouched for background sid",
+        );
     });
 });

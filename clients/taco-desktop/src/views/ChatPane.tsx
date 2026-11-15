@@ -286,7 +286,7 @@ export function ChatPane(props: ChatPaneProps) {
     // steer stays one click away. Compaction always shows Stop — the textarea
     // is locked then, so typed text can't be cleared to reveal it.
     const showStop = !loadingSession && (compacting || (busy && !canSend));
-    const messages = ws?.messages ?? EMPTY_MESSAGES;
+    const messages = session?.messages ?? EMPTY_MESSAGES;
     // Fresh chat (no messages yet) — covers both a brand-new session and one
     // that was just created via "New chat" but never prompted.
     const isEmptyChat = messages.length === 0;

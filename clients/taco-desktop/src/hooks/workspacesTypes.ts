@@ -162,7 +162,7 @@ export interface UseWorkspacesApi {
     // ── subagent ──
     /**
      * Lazily load a child session's history (called when user first expands the agent card).
-     * Writes to `childHistoryLoaded[subSessionId]` via reducer; UI renders immediately.
+     * Merges into the canonical child session via reducer; UI renders immediately.
      */
     loadSubagentHistory: (subSessionId: string) => Promise<void>;
     /**

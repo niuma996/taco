@@ -8,7 +8,7 @@ import {
     collectPendingPermissions,
     PendingApprovalsPanel,
 } from "../../src/components/PendingApprovalsPanel";
-import type { WorkspaceState } from "../../src/lib/chat/workspaceReducer";
+import { createEmptyWorkspace, type WorkspaceState } from "../../src/lib/chat/workspaceReducer";
 
 vi.mock("react-i18next", () => ({
     useTranslation: vi.fn(() => ({
@@ -42,10 +42,10 @@ function workspace(
     sessions: { id: string; name?: string }[] = [],
 ): WorkspaceState {
     return {
-        cwd,
-        sessions,
+        ...createEmptyWorkspace(cwd),
+        sessions: sessions.map((session) => ({ ...session, createdAt: "2026-01-01T00:00:00Z" })),
         pendingCommandPermissions: Object.fromEntries(pending.map((r) => [r.requestId, r])),
-    } as unknown as WorkspaceState;
+    };
 }
 
 describe("PendingApprovalsPanel", () => {

@@ -1,7 +1,7 @@
 /**
  * Subagent list derivation — the right-side panel's list is derived from the
  * session's message stream, never stored. Switching sessions or workspaces
- * therefore needs no cleanup: the list follows `ws.messages` automatically.
+ * therefore needs no cleanup: the list follows the selected session transcript.
  *
  * Derivation is per-item fault tolerant on purpose. A single malformed tool
  * call must not blank out the whole panel, so every item is parsed inside a

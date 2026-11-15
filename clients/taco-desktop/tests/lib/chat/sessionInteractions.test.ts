@@ -1,9 +1,11 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
 import type { UiMessage } from "../../../src/lib/chat/chatUtils";
+import { createSessionState } from "../../../src/lib/chat/sessionState";
 import {
     createEmptyWorkspace,
     type WorkspaceAction,
+    type WorkspaceState,
     workspacesReducer,
 } from "../../../src/lib/chat/workspaceReducer";
 
@@ -50,7 +52,10 @@ test("background main-session interactions survive switching and answers remain 
     state = workspacesReducer(state, waiting("b")) as typeof state;
     state = workspacesReducer(state, { type: "ATTACH_START", cwd: "/w", sid: "b" }) as typeof state;
     state = workspacesReducer(state, attach("b")) as typeof state;
-    assert.deepEqual(state["/w"].askUserPending, { same: true });
+    assert.deepEqual(
+        state["/w"].sessionStatesById[state["/w"].activeSession ?? ""]?.askUserPending,
+        { same: true },
+    );
     state = workspacesReducer(state, {
         type: "ASKUSER_ANSWERED",
         cwd: "/w",
@@ -58,11 +63,19 @@ test("background main-session interactions survive switching and answers remain 
         toolCallId: "same",
         answers: { a: "yes" },
     }) as typeof state;
-    assert.deepEqual(state["/w"].askUserPending, { same: true });
+    assert.deepEqual(
+        state["/w"].sessionStatesById[state["/w"].activeSession ?? ""]?.askUserPending,
+        { same: true },
+    );
     state = workspacesReducer(state, { type: "ATTACH_START", cwd: "/w", sid: "a" }) as typeof state;
     state = workspacesReducer(state, attach("a")) as typeof state;
-    assert.deepEqual(state["/w"].askUserPending, {});
-    const message = state["/w"].messages.find((m) => m.kind === "assistant");
+    assert.deepEqual(
+        state["/w"].sessionStatesById[state["/w"].activeSession ?? ""]?.askUserPending,
+        {},
+    );
+    const message = state["/w"].sessionStatesById[state["/w"].activeSession ?? ""]?.messages.find(
+        (m) => m.kind === "assistant",
+    );
     assert.deepEqual(message?.kind === "assistant" && message.tools[0]?.details, {
         waiting: true,
         questions: [{ question: "a" }],
@@ -89,21 +102,23 @@ test("restart retires permission details on parent, child stream, and loaded chi
             ],
         },
     ];
-    const state = {
+    const state: Record<string, WorkspaceState> = {
         "/w": {
             ...createEmptyWorkspace("/w"),
             activeSession: "a",
-            messages,
-            childMessagesBySubSessionId: { child: messages },
-            childHistoryLoaded: { child: messages },
+            sessionStatesById: {
+                a: { ...createSessionState(), messages },
+                child: { ...createSessionState(), kind: "subagent", messages, historyLoaded: true },
+                streaming: { ...createSessionState(), kind: "subagent", messages },
+            },
         },
     };
     const ws = workspacesReducer(state, { type: "SIDECAR_RESTARTED", cwd: "/w" })["/w"];
     assert.ok(ws);
     for (const list of [
-        ws.messages,
-        ws.childMessagesBySubSessionId.child ?? [],
-        ws.childHistoryLoaded.child ?? [],
+        ws.sessionStatesById.a.messages,
+        ws.sessionStatesById.child.messages,
+        ws.sessionStatesById.streaming.messages,
     ]) {
         const m = list[0];
         assert.equal(
@@ -145,8 +160,12 @@ test("fresh answered history cannot be made waiting again by an older session ca
             ...createEmptyWorkspace("/w"),
             activeSession: "b",
             loadingSessionId: "a",
-            sessionInteractions: {
-                a: { messages: questionMessages(true), askUserPending: { same: true as const } },
+            sessionStatesById: {
+                a: {
+                    ...createSessionState(),
+                    messages: questionMessages(true),
+                    askUserPending: { same: true as const },
+                },
             },
         },
     };
@@ -157,8 +176,8 @@ test("fresh answered history cannot be made waiting again by an older session ca
         messages: questionMessages(false, { q: "yes" }),
         pendingAskUserIds: [],
     })["/w"];
-    assert.deepEqual(ws?.askUserPending, {});
-    const m = ws?.messages[0];
+    assert.deepEqual(ws?.sessionStatesById.a?.askUserPending, {});
+    const m = ws?.sessionStatesById.a?.messages[0];
     assert.equal(
         m?.kind === "assistant" && (m.tools[0]?.details as { waiting: boolean }).waiting,
         false,
@@ -171,8 +190,12 @@ test("a waiting tool arriving after the history read survives attach", () => {
             ...createEmptyWorkspace("/w"),
             activeSession: "b",
             loadingSessionId: "a",
-            sessionInteractions: {
-                a: { messages: questionMessages(true), askUserPending: { same: true as const } },
+            sessionStatesById: {
+                a: {
+                    ...createSessionState(),
+                    messages: questionMessages(true),
+                    askUserPending: { same: true as const },
+                },
             },
         },
     };
@@ -183,9 +206,11 @@ test("a waiting tool arriving after the history read survives attach", () => {
         messages: [{ kind: "user", id: "old", ts: 0, text: "before waiting" }],
         pendingAskUserIds: [],
     })["/w"];
-    assert.deepEqual(ws?.askUserPending, { same: true });
+    assert.deepEqual(ws?.sessionStatesById.a?.askUserPending, { same: true });
     assert.equal(
-        ws?.messages.some((m) => m.kind === "assistant" && m.tools.some((t) => t.id === "same")),
+        ws?.sessionStatesById.a?.messages.some(
+            (m) => m.kind === "assistant" && m.tools.some((t) => t.id === "same"),
+        ),
         true,
     );
 });
@@ -203,7 +228,7 @@ test("canonical sessions keep identical ids isolated by workspace and preserve a
         suppressedThinking: false,
         ev: { type: "message_end", message: { role: "user", timestamp: 1, content: "one" } },
     }) as typeof state;
-    const messages = state["/w"].messages;
+    const messages = state["/w"].sessionStatesById[state["/w"].activeSession ?? ""]?.messages;
     state = workspacesReducer(state, {
         type: "APPLY_EVENT",
         cwd: "/other",
@@ -212,10 +237,11 @@ test("canonical sessions keep identical ids isolated by workspace and preserve a
         suppressedThinking: false,
         ev: { type: "message_end", message: { role: "user", timestamp: 2, content: "two" } },
     }) as typeof state;
-    assert.equal(state["/w"].messages, messages);
-    const canonical = (
-        state["/w"] as unknown as { sessionStatesById?: Record<string, { messages: UiMessage[] }> }
-    ).sessionStatesById;
+    assert.equal(
+        state["/w"].sessionStatesById[state["/w"].activeSession ?? ""]?.messages,
+        messages,
+    );
+    const canonical = state["/w"].sessionStatesById;
     assert.equal(canonical?.same?.messages, messages);
 });
 
@@ -237,7 +263,9 @@ test("late attach history retains live non-interactive messages", () => {
         messages: [{ kind: "user", id: "history", ts: 1, text: "old" }],
     }) as typeof state;
     assert.deepEqual(
-        state["/w"].messages.map((m) => m.kind === "user" && m.text),
+        state["/w"].sessionStatesById[state["/w"].activeSession ?? ""]?.messages.map(
+            (m) => m.kind === "user" && m.text,
+        ),
         ["old", "live"],
     );
 });
@@ -251,12 +279,14 @@ test("restart clears operational state instead of retaining a running pending fl
             queuedBySessionId: {
                 a: [{ id: "q", text: "do not rerun", kind: "nextRun" as const, optimistic: true }],
             },
-            askUserPending: { same: true as const },
+            sessionStatesById: {
+                a: { ...createSessionState(), askUserPending: { same: true as const } },
+            },
         },
     };
     const ws = workspacesReducer(state, { type: "SIDECAR_RESTARTED", cwd: "/w" })["/w"];
     assert.ok(ws);
     assert.deepEqual(ws.pendingBySessionId, {});
     assert.deepEqual(ws.queuedBySessionId, {});
-    assert.deepEqual(ws.askUserPending, {});
+    assert.deepEqual(ws.sessionStatesById.a.askUserPending, {});
 });

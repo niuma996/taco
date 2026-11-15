@@ -5,12 +5,13 @@ import {
     buildChannelConversationItems,
     buildWorkspaceGroups,
 } from "../../src/lib/chat/conversationGroups";
+import { createEmptyWorkspace } from "../../src/lib/chat/workspaceReducer";
 
 describe("conversation navigation models", () => {
     it("preserves the persisted workspace order independently of session activity", () => {
         const groups = buildWorkspaceGroups({
             "/repo/two": {
-                cwd: "/repo/two",
+                ...createEmptyWorkspace("/repo/two"),
                 sessions: [
                     {
                         id: "two-1",
@@ -18,10 +19,9 @@ describe("conversation navigation models", () => {
                         updatedAt: "2026-01-01",
                     },
                 ],
-                pendingBySessionId: {},
             },
             "/repo/one": {
-                cwd: "/repo/one",
+                ...createEmptyWorkspace("/repo/one"),
                 sessions: [
                     {
                         id: "one-1",
@@ -29,9 +29,8 @@ describe("conversation navigation models", () => {
                         updatedAt: "2026-02-01",
                     },
                 ],
-                pendingBySessionId: {},
             },
-        } as never);
+        });
 
         assert.deepEqual(
             groups.map((group) => group.key),

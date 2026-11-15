@@ -6,6 +6,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { UseSessionSearchResult } from "../../src/hooks/useSessionSearch";
 import * as useI18n from "../../src/i18n/useI18n";
+import { createEmptyWorkspace } from "../../src/lib/chat/workspaceReducer";
 import { Sidebar } from "../../src/views/Sidebar";
 import "../../src/styles.css";
 
@@ -39,13 +40,12 @@ describe("Sidebar session actions", () => {
         const onDelete = vi.fn();
         render(
             <Sidebar
-                ws={
-                    {
-                        sessions: [{ id: "session-1", name: "Session", createdAt: 0 }],
-                        activeSession: null,
-                        pendingBySessionId: {},
-                    } as never
-                }
+                ws={{
+                    ...createEmptyWorkspace("/repo"),
+                    sessions: [
+                        { id: "session-1", name: "Session", createdAt: "1970-01-01T00:00:00Z" },
+                    ],
+                }}
                 onAttach={() => {}}
                 onDelete={onDelete}
                 onRename={onRename}
@@ -87,16 +87,13 @@ describe("Sidebar session actions", () => {
     it("moves focus between session rows with arrow keys", async () => {
         render(
             <Sidebar
-                ws={
-                    {
-                        sessions: [
-                            { id: "session-1", name: "First", createdAt: 0 },
-                            { id: "session-2", name: "Second", createdAt: 0 },
-                        ],
-                        activeSession: null,
-                        pendingBySessionId: {},
-                    } as never
-                }
+                ws={{
+                    ...createEmptyWorkspace("/repo"),
+                    sessions: [
+                        { id: "session-1", name: "First", createdAt: "1970-01-01T00:00:00Z" },
+                        { id: "session-2", name: "Second", createdAt: "1970-01-01T00:00:00Z" },
+                    ],
+                }}
                 onAttach={() => {}}
                 onDelete={() => {}}
                 onRename={() => {}}
@@ -122,13 +119,12 @@ describe("Sidebar session actions", () => {
         const onNewSession = vi.fn();
         render(
             <Sidebar
-                ws={
-                    {
-                        sessions: [{ id: "session-1", name: "Session", createdAt: 0 }],
-                        activeSession: null,
-                        pendingBySessionId: {},
-                    } as never
-                }
+                ws={{
+                    ...createEmptyWorkspace("/repo"),
+                    sessions: [
+                        { id: "session-1", name: "Session", createdAt: "1970-01-01T00:00:00Z" },
+                    ],
+                }}
                 onAttach={() => {}}
                 onDelete={() => {}}
                 onRename={() => {}}
@@ -146,13 +142,12 @@ describe("Sidebar session actions", () => {
     it("shows the server's matches instead of the loaded sessions while searching", () => {
         render(
             <Sidebar
-                ws={
-                    {
-                        sessions: [{ id: "session-1", name: "Loaded", createdAt: 0 }],
-                        activeSession: null,
-                        pendingBySessionId: {},
-                    } as never
-                }
+                ws={{
+                    ...createEmptyWorkspace("/repo"),
+                    sessions: [
+                        { id: "session-1", name: "Loaded", createdAt: "1970-01-01T00:00:00Z" },
+                    ],
+                }}
                 onAttach={() => {}}
                 onDelete={() => {}}
                 onRename={() => {}}
@@ -177,13 +172,12 @@ describe("Sidebar session actions", () => {
     it("keeps the search field visible when remounted with an active query", () => {
         render(
             <Sidebar
-                ws={
-                    {
-                        sessions: [{ id: "session-1", name: "Loaded", createdAt: 0 }],
-                        activeSession: null,
-                        pendingBySessionId: {},
-                    } as never
-                }
+                ws={{
+                    ...createEmptyWorkspace("/repo"),
+                    sessions: [
+                        { id: "session-1", name: "Loaded", createdAt: "1970-01-01T00:00:00Z" },
+                    ],
+                }}
                 onAttach={() => {}}
                 onDelete={() => {}}
                 onRename={() => {}}
@@ -268,13 +262,12 @@ describe("Sidebar session actions", () => {
         const loadMore = vi.fn();
         render(
             <Sidebar
-                ws={
-                    {
-                        sessions: [{ id: "session-1", name: "Loaded", createdAt: 0 }],
-                        activeSession: null,
-                        pendingBySessionId: {},
-                    } as never
-                }
+                ws={{
+                    ...createEmptyWorkspace("/repo"),
+                    sessions: [
+                        { id: "session-1", name: "Loaded", createdAt: "1970-01-01T00:00:00Z" },
+                    ],
+                }}
                 onAttach={() => {}}
                 onDelete={() => {}}
                 onRename={() => {}}

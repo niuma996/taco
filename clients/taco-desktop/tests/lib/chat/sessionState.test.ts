@@ -20,6 +20,50 @@ type State = Record<string, WorkspaceState>;
 const initial = (): State => ({ "/w": createEmptyWorkspace("/w") });
 const user = (text: string, ts = 1): UiMessage => ({ id: `m-${ts}`, kind: "user", text, ts });
 
+test("workspace creation and transitions expose only canonical session state", () => {
+    const ws = createEmptyWorkspace("/w");
+    assert.deepEqual(ws.sessionStatesById, {});
+    const state = cached(initial(), "a");
+    for (const workspace of [ws, state["/w"]]) {
+        for (const field of [
+            "messages",
+            "askUserPending",
+            "agentToolPending",
+            "backgroundSubagents",
+            "backgroundRunIds",
+            "sessionInteractions",
+            "childMessagesBySubSessionId",
+            "childHistoryLoaded",
+        ]) {
+            assert.equal(Object.hasOwn(workspace, field), false, field);
+        }
+    }
+});
+
+for (const includeMetadata of [false, true]) {
+    test(`active uncached session installs history at revision zero (metadata: ${includeMetadata})`, () => {
+        let state = reduce(
+            initial(),
+            { type: "SELECT_SESSION", cwd: "/w", sid: "a" },
+            { type: "SET_SESSION_EXECUTION", cwd: "/w", sid: "a", execution: "idle" },
+            { type: "ATTACH_START", cwd: "/w", sid: "a" },
+        );
+        state = reduce(state, {
+            type: "ATTACH",
+            cwd: "/w",
+            sid: "a",
+            messages: [user("history")],
+            ...(includeMetadata
+                ? { execution: "idle" as const, inFlightAgentToolCallIds: [] }
+                : {}),
+        });
+        const session = getSessionState(state["/w"], "a");
+        assert.equal(session?.messages[0]?.text, "history");
+        assert.equal(session?.historyLoaded, true);
+        assert.equal(session?.sync, "current");
+    });
+}
+
 test("history reconciliation drops pending ids absent from the merged transcript", () => {
     const session = {
         ...createSessionState(),
@@ -102,19 +146,21 @@ test("UPSERT_WORKSPACE is additive and preserves every existing reference", () =
     assert.ok(next["/other"]);
 });
 
-test("cached switching projects the exact canonical arrays and preserves other session references", () => {
+test("cached switching retains the exact canonical arrays and preserves other session references", () => {
     let state = cached(cached(initial(), "a"), "b");
     const a = getSessionState(state["/w"], "a");
     assert.ok(a);
     state = reduce(state, { type: "ATTACH_START", cwd: "/w", sid: "a" });
     assert.equal(state["/w"]?.activeSession, "a");
-    assert.equal(state["/w"]?.messages, a.messages);
+    assert.equal(getSessionState(state["/w"], "a")?.messages, a.messages);
     assert.equal(hasSessionCache(state["/w"], "a"), true);
     const active = getSessionState(state["/w"], "a");
     state = reduce(state, { type: "APPEND_USER", cwd: "/w", sid: "b", msg: user("background", 2) });
     assert.equal(getSessionState(state["/w"], "a"), active);
-    assert.equal(state["/w"]?.messages, a.messages);
-    assert.equal(Object.getOwnPropertyDescriptor(state["/w"], "messages")?.set, undefined);
+    assert.equal(getSessionState(state["/w"], "a")?.messages, a.messages);
+    const workspace = state["/w"];
+    assert.ok(workspace);
+    assert.equal(Object.hasOwn(workspace, "messages"), false);
 });
 
 test("idle transcript LRU retains ten and evicted pending slots do not resurrect caches", () => {
@@ -237,9 +283,9 @@ test("child streams arriving before spawn keep their identity while parents swit
     );
     assert.equal(getSessionState(state["/w"], "child")?.messages.length, 1);
     assert.deepEqual(getSessionState(state["/w"], "a")?.agentToolPending, { same: true });
-    assert.deepEqual(state["/w"]?.agentToolPending, {});
+    assert.deepEqual(getSessionState(state["/w"], "b")?.agentToolPending, {});
     state = reduce(state, { type: "ATTACH_START", cwd: "/w", sid: "a" });
-    assert.deepEqual(state["/w"]?.agentToolPending, { same: true });
+    assert.deepEqual(getSessionState(state["/w"], "a")?.agentToolPending, { same: true });
     assert.equal(state["/w"]?.subagentSpawned["a:same"]?.subSessionId, "child");
 });
 
@@ -283,7 +329,7 @@ test("draft identity survives unrelated events and created background sessions",
         sid: "background",
         msg: user("owned"),
     });
-    assert.deepEqual(state["/w"]?.messages, []);
+    assert.equal(state["/w"]?.activeSession, undefined);
     assert.equal(getSessionState(state["/w"], "background")?.messages.length, 1);
 });
 
@@ -460,7 +506,7 @@ test("same-session attach after daemon replacement actually installs fresh histo
         { type: "ATTACH_START", cwd: "/w", sid: "a" },
         { type: "ATTACH", cwd: "/w", sid: "a", messages: [user("fresh")] },
     );
-    assert.equal(state["/w"]?.messages[0]?.text, "fresh");
+    assert.equal(getSessionState(state["/w"], "a")?.messages[0]?.text, "fresh");
     assert.equal(getSessionState(state["/w"], "a")?.execution, "unknown");
 });
 
@@ -522,7 +568,7 @@ test("recovery restores full tool details rather than certifying a trimmed tool 
     );
 });
 
-test("INIT accepts frozen canonical input without rewriting its projections", () => {
+test("INIT accepts frozen canonical input without rewriting session state", () => {
     const state = cached(initial(), "a");
     const ws = state["/w"];
     assert.ok(ws);

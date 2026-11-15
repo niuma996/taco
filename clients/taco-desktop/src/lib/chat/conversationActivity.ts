@@ -1,5 +1,6 @@
 import type { SessionTarget } from "@taco-ai/protocol";
 import type { UiMessage } from "./chatUtils";
+import { getSessionState } from "./sessionState";
 import type { WorkspaceState } from "./workspaceReducer";
 
 export function conversationActivityKey(target: SessionTarget): string {
@@ -8,14 +9,8 @@ export function conversationActivityKey(target: SessionTarget): string {
 
 /** Canonical runtime state is authoritative; approvals can be displayed on a parent chat. */
 export function getConversationActivity(ws: WorkspaceState | undefined, sid: string) {
-    const session = ws?.sessionStatesById?.[sid];
-    const interaction =
-        ws?.sessionStatesById === undefined
-            ? ws?.activeSession === sid
-                ? ws
-                : ws?.sessionInteractions?.[sid]
-            : undefined;
-    const messages = session?.messages ?? interaction?.messages ?? [];
+    const session = getSessionState(ws, sid);
+    const messages = session?.messages ?? [];
     const latestVisible = [...messages]
         .reverse()
         .find((message) => message.kind === "system" || message.kind !== "tool");
@@ -26,7 +21,7 @@ export function getConversationActivity(ws: WorkspaceState | undefined, sid: str
               Object.values(session.backgroundSubagents).includes("running")
             : Boolean(ws?.pendingBySessionId[sid]),
         waiting: Boolean(
-            Object.keys(session?.askUserPending ?? interaction?.askUserPending ?? {}).length > 0 ||
+            (session !== undefined && Object.keys(session.askUserPending).length > 0) ||
                 Object.values(ws?.pendingCommandPermissions ?? {}).some(
                     (request) => request.sessionId === sid || request.displaySessionId === sid,
                 ),
