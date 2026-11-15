@@ -1,10 +1,13 @@
 /**
- * WorkspaceModeTabs — segmented switch in front of the workspace picker and
- * the chat navigation column. It filters the visible targets without opening
- * a workspace or conversation by itself.
+ * WorkspaceModeTabs — the workspace / channel-chat switch in the topbar.
+ *
+ * Plain-text segments on an equal-width grid plus a single accent underline
+ * that slides between them. Every segment gets the same line length (one
+ * column), so the line never changes size — it only travels — and a third
+ * segment later needs no change to the switch itself.
  */
 
-import type { KeyboardEvent } from "react";
+import type { CSSProperties, KeyboardEvent } from "react";
 import { useT } from "../i18n/useI18n";
 
 export type WorkspaceMode = "workspace" | "im";
@@ -20,6 +23,10 @@ export function WorkspaceModeTabs({ mode, onModeChange }: WorkspaceModeTabsProps
         { value: "workspace", label: t("workspaceMode.workspace") },
         { value: "im", label: t("workspaceMode.im") },
     ];
+    const activeIndex = Math.max(
+        0,
+        tabs.findIndex((tab) => tab.value === mode),
+    );
 
     // Arrow keys move between the two segments, as a radio group does.
     const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
@@ -34,6 +41,14 @@ export function WorkspaceModeTabs({ mode, onModeChange }: WorkspaceModeTabsProps
             role="radiogroup"
             aria-label={t("workspaceMode.label")}
             onKeyDown={onKeyDown}
+            // The underline's length and travel are pure CSS: one column wide,
+            // moved by the active index.
+            style={
+                {
+                    "--tab-count": tabs.length,
+                    "--tab-index": activeIndex,
+                } as CSSProperties
+            }
         >
             {tabs.map(({ value, label }) => {
                 const active = value === mode;
@@ -54,6 +69,7 @@ export function WorkspaceModeTabs({ mode, onModeChange }: WorkspaceModeTabsProps
                     </button>
                 );
             })}
+            <span className="workspace-mode-tabs__underline" aria-hidden="true" />
         </div>
     );
 }

@@ -44,9 +44,13 @@ header.topbar {
 /* Windows / Linux: custom min/max/close is position:fixed at the window's
    right edge (3 × 46px = 138px). Extra padding keeps TopbarQuickActions
    from sitting under those buttons. macOS uses native overlay traffic
-   lights on the left, so the topbar's right edge is already clear. */
+   lights on the left, so the topbar's right edge is already clear.
+   No leading inset either: only macOS draws traffic lights, so the
+   topbar's content starts flush at the icon rail's right edge — aligned
+   with the main area below instead of indented past it. */
 :root:not([data-platform="macos"]) header.topbar {
     padding-right: 146px; /* 138px controls + 8px gap */
+    padding-left: 0;
 }
 
 /* Drag region in the topbar (header + drag-spacer via data-tauri-drag-region) enables window
@@ -167,22 +171,21 @@ header.topbar .topbar-picker-group {
     min-width: 0;
 }
 
-/* Directory / IM switch in front of the picker: a pill track whose active
-   segment is raised onto a solid surface. */
+/* Directory / IM switch in the topbar: plain text segments on an equal-width
+   grid plus one accent underline that slides between them. No track, no
+   border — the underline is the only chrome, so the bar stays flat. */
 .workspace-mode-tabs {
-    /* Grid with two 1fr columns: in an auto-width container both tracks size
-       to the widest label, so the two segments stay equal width in any
-       language. */
+    --tab-gap: var(--space-3);
+    position: relative;
+    /* Grid with equal columns: in an auto-width container every column sizes
+       to the widest label, so both segments — and the underline — are the same
+       length in any language. */
     display: inline-grid;
     grid-auto-flow: column;
     grid-auto-columns: 1fr;
     align-items: center;
+    gap: var(--tab-gap);
     flex: 0 0 auto;
-    gap: var(--space-0-5);
-    padding: var(--space-0-5);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    background: var(--surface-tint);
     -webkit-app-region: no-drag;
 }
 
@@ -190,9 +193,9 @@ header.topbar .topbar-picker-group {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    /* Text segment: width follows the label instead of the old icon square. */
+    /* Height keeps a 24px-tall click target; the column sets the width. */
     height: var(--composer-control-height);
-    padding: 0 0.55rem;
+    padding: 0;
     border: 0;
     border-radius: var(--radius-xs);
     font-size: var(--text-sm);
@@ -200,21 +203,32 @@ header.topbar .topbar-picker-group {
     background: transparent;
     color: var(--fg-dim);
     cursor: pointer;
-    transition:
-        background-color var(--motion-duration-fast) var(--motion-ease-standard),
-        color var(--motion-duration-fast) var(--motion-ease-standard),
-        box-shadow var(--motion-duration-fast) var(--motion-ease-standard);
+    transition: color var(--motion-duration-fast) var(--motion-ease-standard);
 }
 
 .workspace-mode-tab:hover:not(.workspace-mode-tab--active) {
-    background: var(--hover-overlay);
     color: var(--fg);
 }
 
+/* Active segment is the neutral bright tone — the accent stays on the
+   underline, so the bar carries colour in exactly one place. */
 .workspace-mode-tab--active {
-    background: var(--segment-active-bg);
     color: var(--fg);
-    box-shadow: 0 1px 2px var(--shadow-color);
+}
+
+/* The sliding underline: one column wide (so its length never changes) and
+   moved by the active index, with the grid gap added to the travel. */
+.workspace-mode-tabs__underline {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    width: calc((100% - (var(--tab-count) - 1) * var(--tab-gap)) / var(--tab-count));
+    height: 2px;
+    border-radius: var(--radius-pill);
+    background: var(--accent);
+    pointer-events: none;
+    transform: translateX(calc(var(--tab-index) * (100% + var(--tab-gap))));
+    transition: transform var(--motion-duration-base) var(--motion-ease-out);
 }
 
 .workspace-mode-tab:focus-visible {
