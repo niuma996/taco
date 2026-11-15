@@ -1,21 +1,7 @@
-/**
- * ScheduleFormDialog — add/edit a single scheduled job in a Radix Dialog.
- *
- * Owns its own draft state so opening the modal always starts from a
- * clean slate (or the existing job's values when `existing` is given).
- * Validation lives in `validateDraft` — `canSubmit` and `handleSubmit`
- * both call into it so a missing / wrong-shape check shows up the same
- * way in the disabled-button state and the inline error.
- *
- * Wider than the base `.ui-modal` (see `.schedules-modal` in settings.css)
- * so the cron expression, JSON args, and the action row sit on a
- * comfortable single column. The inline form that lived at the bottom
- * of SchedulesTab was getting squeezed by the 720px content cap and the
- * tables stacking underneath it; a dialog keeps the list scannable.
- */
-
-import type { Job, JobScheduleSpec, SessionStrategy } from "@taco-ai/protocol";
-import { useCallback, useEffect, useId, useMemo, useState } from "react";
+/** Schedule-specific RHF form; each opening and existing-job replacement gets a fresh instance. */
+import type { Job, JobScheduleSpec } from "@taco-ai/protocol";
+import { useEffect, useId, useRef, useState } from "react";
+import { Controller, useForm, useWatch } from "react-hook-form";
 import { useT } from "../../i18n/useI18n.ts";
 import { Button } from "../ui/Button.tsx";
 import { FormField } from "../ui/FormField.tsx";
@@ -24,59 +10,26 @@ import { Select } from "../ui/Select.tsx";
 import { Switch } from "../ui/Switch.tsx";
 import { Textarea } from "../ui/Textarea.tsx";
 import { TextInput } from "../ui/TextInput.tsx";
+import {
+    isImArgs,
+    type ScheduleDraft,
+    type ScheduleSubmit,
+    scheduleDefaults,
+    scheduleResolver,
+    scheduleSubmit,
+} from "./scheduleFormValues";
 
-export interface ScheduleDraft {
-    name: string;
-    schedule: JobScheduleSpec;
-    command: string;
-    argsJson: string;
-    enabled: boolean;
-    run_on_startup: boolean;
-    sessionStrategy: SessionStrategy;
-    /** Raw text of the max-runs field. Held as a string because TextInput is
-     *  controlled and "" has to mean "unlimited" (not 0). */
-    maxRunsInput: string;
-}
-
-export interface ScheduleSubmit {
-    name: string;
-    schedule: JobScheduleSpec;
-    command: string;
-    args: Record<string, unknown>;
-    enabled: boolean;
-    run_on_startup: boolean;
-    sessionStrategy: SessionStrategy;
-    /** Parsed from `maxRunsInput`; omitted entirely when the field is empty. */
-    max_runs?: number;
-}
+export type { ScheduleSubmit } from "./scheduleFormValues";
 
 export interface ScheduleFormDialogProps {
     open: boolean;
-    /** When provided, the dialog edits this job; otherwise it creates a new one. */
     existing?: Job;
-    /** Disables both action buttons while the parent's RPC is in flight. */
     saving?: boolean;
-    /** Parent-owned error message (e.g. daemon rejection). Rendered inside
-     *  the dialog so the user sees it next to the form, not as a banner
-     *  that disappears on the next list refresh. */
+    /** Parent-owned RPC error, retained alongside the draft for retry. */
     errorMessage?: string | null;
-    onSave: (draft: ScheduleSubmit) => void;
+    onSave: (draft: ScheduleSubmit) => void | Promise<void>;
     onCancel: () => void;
 }
-
-const EMPTY_DRAFT: ScheduleDraft = {
-    name: "",
-    schedule: { kind: "interval", ms: 60_000 },
-    command: "agent.invoke",
-    // Empty by default so the placeholder ("{}") is what the user sees;
-    // a prefilled "{}" looked like example content and confused users
-    // about whether they needed to overwrite it (see #7 in the review).
-    argsJson: "",
-    enabled: true,
-    run_on_startup: false,
-    sessionStrategy: "pin",
-    maxRunsInput: "",
-};
 
 const SCHEDULE_KIND_OPTIONS = [
     { value: "interval", label: "interval" },
@@ -91,208 +44,73 @@ const SESSION_STRATEGY_OPTIONS = [
 
 const ARGS_PLACEHOLDER = '{\n  "workspace": "/path/to/repo",\n  "prompt": "…"\n}';
 
-function draftFromJob(job: Job): ScheduleDraft {
-    return {
-        name: job.name,
-        schedule: job.schedule,
-        command: job.command,
-        argsJson: JSON.stringify(job.args, null, 2),
-        enabled: job.enabled,
-        run_on_startup: job.run_on_startup,
-        sessionStrategy: job.sessionStrategy ?? "pin",
-        // Absent cap renders as an empty field, not a "0" that a later save
-        // would persist as a bogus unlimited-but-written cap.
-        maxRunsInput: job.max_runs != null ? String(job.max_runs) : "",
-    };
-}
-
-/** "" → undefined (unlimited); otherwise the parsed cap. `validateDraft`
- *  has already rejected anything that isn't a positive integer, so a NaN
- *  cannot reach here. */
-function parseMaxRuns(raw: string): number | undefined {
-    const trimmed = raw.trim();
-    return trimmed === "" ? undefined : Number.parseInt(trimmed, 10);
-}
-
-/** Single source of truth for "is this draft ready to submit?". Both
- *  `canSubmit` (button disabled state) and `handleSubmit` (gate on
- *  submit click) call into here so the user can't bypass the gate by
- *  clicking faster than React renders, and the inline errors shown
- *  under each field stay consistent with the gating rules. */
-type DraftError =
-    | { field: "name"; message: string }
-    | { field: "intervalMs"; message: string }
-    | { field: "cronExpr"; message: string }
-    | { field: "argsJson"; message: string }
-    | { field: "maxRuns"; message: string };
-
-function validateDraft(draft: ScheduleDraft): {
-    ok: boolean;
-    args?: Record<string, unknown>;
-    errors: DraftError[];
-} {
-    const errors: DraftError[] = [];
-    // Empty name is a blocking error but not surfaced inline — the
-    // Name input's placeholder + disabled submit button is enough
-    // signal. Adding a red error message under the field duplicates
-    // the placeholder hint without adding information.
-    const nameOk = draft.name.trim().length > 0;
-    if (draft.schedule.kind === "interval" && draft.schedule.ms <= 0) {
-        errors.push({ field: "intervalMs", message: "Interval must be a positive integer." });
-    }
-    if (draft.schedule.kind === "cron" && !draft.schedule.expr.trim()) {
-        errors.push({ field: "cronExpr", message: "Cron expression must not be empty." });
-    }
-    // Empty = unlimited, which is valid. Anything else must be a positive
-    // integer: a 0 or a fraction would make the server's `run_count >=
-    // max_runs` comparison retire the job at the wrong moment.
-    // Leading zeros are rejected too — `<input type="number">` doesn't strip
-    // them, so "01" would otherwise round-trip to `max_runs: 1` silently
-    // and confuse the user about what they actually saved.
-    const maxRuns = draft.maxRunsInput.trim();
-    if (
-        maxRuns !== "" &&
-        !(/^\d+$/.test(maxRuns) && !/^0\d+$/.test(maxRuns) && Number.parseInt(maxRuns, 10) >= 1)
-    ) {
-        errors.push({ field: "maxRuns", message: "Max runs must be a positive integer or empty." });
-    }
-    let args: Record<string, unknown> | undefined;
-    try {
-        const parsed = JSON.parse(draft.argsJson) as unknown;
-        if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-            errors.push({
-                field: "argsJson",
-                message: "Args must be a JSON object, not an array or primitive.",
-            });
-        } else {
-            args = parsed as Record<string, unknown>;
-        }
-    } catch {
-        errors.push({ field: "argsJson", message: "JSON parse failed — check braces and quotes." });
-    }
-    return { ok: nameOk && errors.length === 0, args, errors };
-}
-
 export function ScheduleFormDialog(props: ScheduleFormDialogProps) {
+    const [identity, setIdentity] = useState({ existing: props.existing, version: 0 });
+    if (identity.existing !== props.existing) {
+        setIdentity({ existing: props.existing, version: identity.version + 1 });
+    }
+    // Unmount on close and remount on job replacement so old RHF promises
+    // cannot release a new form's lock or overwrite its submitting state.
+    return props.open ? <ScheduleForm key={identity.version} {...props} /> : null;
+}
+
+function ScheduleForm(props: ScheduleFormDialogProps) {
     const { t } = useT();
-    const { open, existing, saving, errorMessage, onSave, onCancel } = props;
+    const { open, existing, errorMessage, onSave, onCancel } = props;
     const isEdit = existing !== undefined;
     const isBuiltinDream = existing?.builtin === true && existing.command === "memory.dream";
-
     const enabledId = useId();
     const runOnStartupId = useId();
-
-    const [draft, setDraft] = useState<ScheduleDraft>(EMPTY_DRAFT);
-
-    // Sync the draft whenever the dialog opens so closing & reopening
-    // for a different job doesn't carry the previous job's values.
+    const {
+        register,
+        control,
+        handleSubmit,
+        setValue,
+        trigger,
+        formState: { errors, isValid, isSubmitting },
+    } = useForm<ScheduleDraft>({
+        defaultValues: scheduleDefaults(existing),
+        resolver: scheduleResolver,
+        mode: "onChange",
+    });
+    const scheduleKind = useWatch({ control, name: "scheduleKind" });
+    const argsJson = useWatch({ control, name: "argsJson" });
+    const isImWorkspace = isImArgs(argsJson);
+    const saving = props.saving || isSubmitting;
+    const submitting = useRef(false);
+    const active = useRef(true);
     useEffect(() => {
-        if (!open) return;
-        setDraft(existing ? draftFromJob(existing) : EMPTY_DRAFT);
-    }, [open, existing]);
+        active.current = true;
+        // Errors are live even for the initial empty JSON draft.
+        void trigger();
+        return () => {
+            active.current = false;
+        };
+    }, [trigger]);
 
-    // Channel jobs (im:// workspace) only support sessionStrategy="reuse"
-    // server-side — JobsController rejects anything else. Detect the
-    // workspace from the args draft so the form can lock the strategy
-    // picker instead of letting the user save a guaranteed failure.
-    // Disabled Radix Select already prevents changes; we keep the full
-    // option list visible so the user can read the available values.
-    const isImWorkspace = useMemo(() => {
+    const save = async () => {
+        if (props.saving || submitting.current || !active.current) return;
+        submitting.current = true;
         try {
-            const parsed = JSON.parse(draft.argsJson) as { workspace?: unknown };
-            return typeof parsed?.workspace === "string" && parsed.workspace.startsWith("im://");
+            await handleSubmit(async (values) => {
+                // Validation yields; the dialog may have closed or changed jobs.
+                if (active.current) await onSave(scheduleSubmit(values));
+            })();
         } catch {
-            return false;
+            // The parent displays RPC errors and preserves this draft for retry.
+        } finally {
+            submitting.current = false;
         }
-    }, [draft.argsJson]);
+    };
 
-    const effectiveStrategy: SessionStrategy = isImWorkspace ? "reuse" : draft.sessionStrategy;
-
-    const updateScheduleKind = useCallback((kind: JobScheduleSpec["kind"]) => {
-        setDraft((prev) => {
-            if (prev.schedule.kind === kind) return prev;
-            if (kind === "cron") {
-                return { ...prev, schedule: { kind: "cron", expr: "*/5 * * * *" } };
-            }
-            return { ...prev, schedule: { kind: "interval", ms: 60_000 } };
-        });
-    }, []);
-
-    const updateCronExpr = useCallback((expr: string) => {
-        setDraft((prev) => {
-            if (prev.schedule.kind !== "cron") return prev;
-            return { ...prev, schedule: { ...prev.schedule, expr } };
-        });
-    }, []);
-
-    const updateCronTz = useCallback((tz: string) => {
-        setDraft((prev) => {
-            if (prev.schedule.kind !== "cron") return prev;
-            return { ...prev, schedule: { ...prev.schedule, tz: tz || undefined } };
-        });
-    }, []);
-
-    const updateIntervalMs = useCallback((raw: string) => {
-        const ms = Number.parseInt(raw, 10) || 0;
-        setDraft((prev) => {
-            if (prev.schedule.kind !== "interval") return prev;
-            return { ...prev, schedule: { ...prev.schedule, ms } };
-        });
-    }, []);
-
-    const setStrategy = useCallback((next: SessionStrategy) => {
-        setDraft((prev) => ({ ...prev, sessionStrategy: next }));
-    }, []);
-
-    const validation = useMemo(() => validateDraft(draft), [draft]);
-    const canSubmit = validation.ok;
-
-    const handleSubmit = useCallback(() => {
-        if (!validation.ok || validation.args === undefined) {
-            // The button is disabled when validation fails, so this
-            // branch only fires if the user reaches it programmatically
-            // (e.g. Enter in a field). Re-validate and bail — the
-            // inline errors are already on screen.
-            return;
-        }
-        const maxRuns = parseMaxRuns(draft.maxRunsInput);
-        onSave({
-            name: draft.name.trim(),
-            schedule: draft.schedule,
-            command: draft.command.trim() || "agent.invoke",
-            args: validation.args,
-            enabled: draft.enabled,
-            run_on_startup: draft.run_on_startup,
-            sessionStrategy: effectiveStrategy,
-            // Spread in only when set: an untouched field must not carry the
-            // key at all, so the submitted shape says "unlimited" by absence
-            // rather than by a literal undefined.
-            ...(maxRuns === undefined ? {} : { max_runs: maxRuns }),
-        });
-    }, [draft, effectiveStrategy, onSave, validation]);
-
-    const errorFor = useCallback(
-        (field: DraftError["field"]): string | undefined => {
-            const match = validation.errors.find((e) => e.field === field);
-            if (!match) return undefined;
-            // Localise the message keys so the dialog errors follow
-            // the same translation pipeline as the rest of the form.
-            if (field === "argsJson") {
-                if (match.message.startsWith("JSON parse")) {
-                    return t(
-                        "schedules.errorArgsJson",
-                        "JSON parse failed — check braces and quotes.",
-                    );
-                }
-                return t(
-                    "schedules.errorArgsNotObject",
-                    "args must be a JSON object, not an array or primitive.",
-                );
-            }
-            return match.message;
-        },
-        [t, validation.errors],
-    );
+    const updateScheduleKind = (kind: JobScheduleSpec["kind"]) => {
+        if (kind === scheduleKind) return;
+        setValue("intervalMs", "60000");
+        setValue("cronExpr", "*/5 * * * *");
+        setValue("cronTz", "");
+        setValue("scheduleKind", kind, { shouldDirty: true });
+        void trigger();
+    };
 
     return (
         <Modal
@@ -320,11 +138,7 @@ export function ScheduleFormDialog(props: ScheduleFormDialogProps) {
                     <Button variant="ghost" onClick={onCancel} disabled={saving}>
                         {t("schedules.actionCancel", "Cancel")}
                     </Button>
-                    <Button
-                        variant="primary"
-                        disabled={!canSubmit || saving}
-                        onClick={handleSubmit}
-                    >
+                    <Button variant="primary" disabled={!isValid || saving} onClick={save}>
                         {isEdit
                             ? t("schedules.actionSave", "Save")
                             : t("schedules.actionCreate", "Create")}
@@ -336,22 +150,27 @@ export function ScheduleFormDialog(props: ScheduleFormDialogProps) {
                 <TextInput
                     id="schedules-form-name"
                     type="text"
-                    value={draft.name}
+                    {...register("name")}
                     disabled={isBuiltinDream}
-                    onChange={(e) => setDraft({ ...draft, name: e.target.value })}
                 />
             </FormField>
 
-            <FormField label={t("schedules.fieldScheduleKind", "Kind")}>
-                <Select
-                    value={draft.schedule.kind}
-                    onValueChange={(v) => updateScheduleKind(v as JobScheduleSpec["kind"])}
-                    options={SCHEDULE_KIND_OPTIONS}
-                    label={t("schedules.fieldScheduleKind", "Kind")}
-                />
-            </FormField>
+            <Controller
+                control={control}
+                name="scheduleKind"
+                render={({ field }) => (
+                    <FormField label={t("schedules.fieldScheduleKind", "Kind")}>
+                        <Select
+                            value={field.value}
+                            onValueChange={(v) => updateScheduleKind(v as JobScheduleSpec["kind"])}
+                            options={SCHEDULE_KIND_OPTIONS}
+                            label={t("schedules.fieldScheduleKind", "Kind")}
+                        />
+                    </FormField>
+                )}
+            />
 
-            {draft.schedule.kind === "interval" ? (
+            {scheduleKind === "interval" ? (
                 <FormField
                     label={t("schedules.fieldIntervalMs", "Interval (ms)")}
                     hint={t(
@@ -359,7 +178,7 @@ export function ScheduleFormDialog(props: ScheduleFormDialogProps) {
                         "Trigger interval in milliseconds. Must be a positive integer.",
                     )}
                     error={
-                        errorFor("intervalMs")
+                        errors.intervalMs
                             ? t(
                                   "schedules.errorIntervalMs",
                                   "Interval (ms) must be a positive integer.",
@@ -371,8 +190,7 @@ export function ScheduleFormDialog(props: ScheduleFormDialogProps) {
                         id="schedules-form-interval-ms"
                         type="number"
                         min={1}
-                        value={String(draft.schedule.ms)}
-                        onChange={(e) => updateIntervalMs(e.target.value)}
+                        {...register("intervalMs")}
                     />
                 </FormField>
             ) : (
@@ -384,7 +202,7 @@ export function ScheduleFormDialog(props: ScheduleFormDialogProps) {
                             "Standard 5-field cron expression, e.g. 30 22 * * *.",
                         )}
                         error={
-                            errorFor("cronExpr")
+                            errors.cronExpr
                                 ? t("schedules.errorCronExpr", "Cron expression must not be empty.")
                                 : undefined
                         }
@@ -392,8 +210,7 @@ export function ScheduleFormDialog(props: ScheduleFormDialogProps) {
                         <TextInput
                             id="schedules-form-cron-expr"
                             type="text"
-                            value={draft.schedule.kind === "cron" ? draft.schedule.expr : ""}
-                            onChange={(e) => updateCronExpr(e.target.value)}
+                            {...register("cronExpr")}
                         />
                     </FormField>
                     <FormField
@@ -406,8 +223,7 @@ export function ScheduleFormDialog(props: ScheduleFormDialogProps) {
                         <TextInput
                             id="schedules-form-cron-tz"
                             type="text"
-                            value={draft.schedule.kind === "cron" ? (draft.schedule.tz ?? "") : ""}
-                            onChange={(e) => updateCronTz(e.target.value)}
+                            {...register("cronTz")}
                         />
                     </FormField>
                 </>
@@ -417,46 +233,50 @@ export function ScheduleFormDialog(props: ScheduleFormDialogProps) {
                 <TextInput
                     id="schedules-form-command"
                     type="text"
-                    value={draft.command}
+                    {...register("command")}
                     disabled={isBuiltinDream}
-                    onChange={(e) => setDraft({ ...draft, command: e.target.value })}
                 />
             </FormField>
 
             <FormField
                 label={t("schedules.fieldArgs", "Args (JSON object)")}
-                error={errorFor("argsJson")}
+                error={errors.argsJson?.message ? t(errors.argsJson.message) : undefined}
             >
                 <Textarea
                     id="schedules-form-args"
                     rows={4}
-                    value={draft.argsJson}
+                    {...register("argsJson")}
                     placeholder={ARGS_PLACEHOLDER}
                     disabled={isBuiltinDream}
-                    onChange={(e) => setDraft({ ...draft, argsJson: e.target.value })}
                 />
             </FormField>
 
             {!isBuiltinDream ? (
-                <FormField
-                    label={t("schedules.fieldSessionStrategy", "Session strategy")}
-                    hint={
-                        isImWorkspace
-                            ? t(
-                                  "schedules.sessionStrategyImHint",
-                                  "im:// workspaces can only reuse the current session; the server rejects other strategies.",
-                              )
-                            : undefined
-                    }
-                >
-                    <Select
-                        value={effectiveStrategy}
-                        onValueChange={(v) => setStrategy(v as SessionStrategy)}
-                        options={SESSION_STRATEGY_OPTIONS}
-                        disabled={isImWorkspace}
-                        label={t("schedules.fieldSessionStrategy", "Session strategy")}
-                    />
-                </FormField>
+                <Controller
+                    control={control}
+                    name="sessionStrategy"
+                    render={({ field }) => (
+                        <FormField
+                            label={t("schedules.fieldSessionStrategy", "Session strategy")}
+                            hint={
+                                isImWorkspace
+                                    ? t(
+                                          "schedules.sessionStrategyImHint",
+                                          "im:// workspaces can only reuse the current session; the server rejects other strategies.",
+                                      )
+                                    : undefined
+                            }
+                        >
+                            <Select
+                                value={isImWorkspace ? "reuse" : field.value}
+                                onValueChange={field.onChange}
+                                options={SESSION_STRATEGY_OPTIONS}
+                                disabled={isImWorkspace}
+                                label={t("schedules.fieldSessionStrategy", "Session strategy")}
+                            />
+                        </FormField>
+                    )}
+                />
             ) : null}
 
             {!isBuiltinDream ? (
@@ -467,7 +287,7 @@ export function ScheduleFormDialog(props: ScheduleFormDialogProps) {
                         "The job disables itself after this many successful runs (its record is kept). Leave empty for unlimited; set 1 for a one-shot task.",
                     )}
                     error={
-                        errorFor("maxRuns")
+                        errors.maxRunsInput
                             ? t(
                                   "schedules.errorMaxRuns",
                                   "Max runs must be a positive integer, or empty for unlimited.",
@@ -479,29 +299,42 @@ export function ScheduleFormDialog(props: ScheduleFormDialogProps) {
                         id="schedules-form-max-runs"
                         type="number"
                         min={1}
-                        value={draft.maxRunsInput}
-                        onChange={(e) => setDraft({ ...draft, maxRunsInput: e.target.value })}
+                        {...register("maxRunsInput")}
                     />
                 </FormField>
             ) : null}
 
             <div className="schedules-modal-toggles">
                 <label className="schedules-modal-toggle" htmlFor={enabledId}>
-                    <Switch
-                        id={enabledId}
-                        checked={draft.enabled}
-                        onChange={(next) => setDraft({ ...draft, enabled: next })}
-                        label={t("schedules.fieldEnabled", "Enabled")}
+                    <Controller
+                        control={control}
+                        name="enabled"
+                        render={({ field }) => (
+                            <Switch
+                                id={enabledId}
+                                checked={field.value}
+                                onChange={field.onChange}
+                                onBlur={field.onBlur}
+                                label={t("schedules.fieldEnabled", "Enabled")}
+                            />
+                        )}
                     />
                     <span>{t("schedules.fieldEnabled", "Enabled")}</span>
                 </label>
                 {!isBuiltinDream ? (
                     <label className="schedules-modal-toggle" htmlFor={runOnStartupId}>
-                        <Switch
-                            id={runOnStartupId}
-                            checked={draft.run_on_startup}
-                            onChange={(next) => setDraft({ ...draft, run_on_startup: next })}
-                            label={t("schedules.fieldRunOnStartup", "Run on startup")}
+                        <Controller
+                            control={control}
+                            name="run_on_startup"
+                            render={({ field }) => (
+                                <Switch
+                                    id={runOnStartupId}
+                                    checked={field.value}
+                                    onChange={field.onChange}
+                                    onBlur={field.onBlur}
+                                    label={t("schedules.fieldRunOnStartup", "Run on startup")}
+                                />
+                            )}
                         />
                         <span>{t("schedules.fieldRunOnStartup", "Run on startup")}</span>
                     </label>

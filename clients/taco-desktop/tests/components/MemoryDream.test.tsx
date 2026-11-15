@@ -1,5 +1,5 @@
 import type { MemoryListResult, MemoryTopicEntry } from "@taco-ai/protocol";
-import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MemoryDreamPanel } from "../../src/components/memory/MemoryDreamPanel";
@@ -312,6 +312,135 @@ describe("MemoryPane dream controls", () => {
         expect(screen.getByRole("button", { name: "memory.dream.saveSettings" })).toHaveProperty(
             "disabled",
             false,
+        );
+    });
+
+    it.each([
+        ["memory.dream.minHours", "", "1", "720"],
+        ["memory.dream.minHours", "0", "1", "720"],
+        ["memory.dream.minHours", "1.5", "1", "720"],
+        ["memory.dream.minHours", "721", "1", "720"],
+        ["memory.dream.staleDays", "6", "7", "3650"],
+        ["memory.dream.staleDaysDurable", "3651", "7", "3650"],
+    ])("blocks invalid %s=%s without sending a config", async (name, value) => {
+        const dream = actions();
+        renderPane(dream);
+        await userEvent.click(screen.getByRole("button", { name: "memory.dream.settings" }));
+        const input = screen.getByRole("spinbutton", { name });
+        fireEvent.change(input, { target: { value } });
+        const save = screen.getByRole("button", { name: "memory.dream.saveSettings" });
+        await waitFor(() => expect(save).toHaveProperty("disabled", true));
+        expect(input.getAttribute("aria-invalid")).toBe("true");
+        await userEvent.click(save);
+        expect(dream.onSaveConfig).not.toHaveBeenCalled();
+    });
+
+    it.each([
+        [1, 7, 7],
+        [720, 3650, 3650],
+    ])(
+        "saves inclusive integer boundaries %s/%s/%s",
+        async (minHours, staleDays, staleDaysDurable) => {
+            const dream = actions();
+            renderPane(dream);
+            await userEvent.click(screen.getByRole("button", { name: "memory.dream.settings" }));
+            for (const [name, value] of Object.entries({ minHours, staleDays, staleDaysDurable })) {
+                fireEvent.change(screen.getByLabelText(`memory.dream.${name}`), {
+                    target: { value: String(value) },
+                });
+            }
+            const save = screen.getByRole("button", { name: "memory.dream.saveSettings" });
+            await waitFor(() => expect(save).toHaveProperty("disabled", false));
+            await userEvent.click(save);
+            await waitFor(() =>
+                expect(dream.onSaveConfig).toHaveBeenCalledWith({
+                    ...dream.dreamConfig,
+                    minHours,
+                    staleDays,
+                    staleDaysDurable,
+                }),
+            );
+        },
+    );
+
+    it("prevents same-batch duplicate settings saves and permits retry", async () => {
+        const dream = actions();
+        let finish = (_saved: boolean) => {};
+        dream.onSaveConfig.mockImplementationOnce(
+            () =>
+                new Promise<boolean>((resolve) => {
+                    finish = resolve;
+                }),
+        );
+        renderPane(dream);
+        await userEvent.click(screen.getByRole("button", { name: "memory.dream.settings" }));
+        const save = screen.getByRole("button", { name: "memory.dream.saveSettings" });
+        await waitFor(() => expect(save).toHaveProperty("disabled", false));
+        await act(async () => {
+            fireEvent.click(save);
+            fireEvent.click(save);
+        });
+        const calls = dream.onSaveConfig.mock.calls.length;
+        await act(async () => finish(false));
+        expect(calls).toBe(1);
+        await userEvent.click(screen.getByRole("button", { name: "memory.dream.saveSettings" }));
+        await waitFor(() => expect(dream.onSaveConfig).toHaveBeenCalledTimes(2));
+    });
+
+    it("keeps settings locked when refreshed config arrives during a pending save", async () => {
+        const dream = actions();
+        let finish = (_saved: boolean) => {};
+        dream.onSaveConfig.mockImplementationOnce(
+            () =>
+                new Promise<boolean>((resolve) => {
+                    finish = resolve;
+                }),
+        );
+        const { rerender } = render(<MemoryDreamPanel {...dream} onClose={() => {}} />);
+        await userEvent.click(screen.getByRole("button", { name: "memory.dream.settings" }));
+        await userEvent.click(screen.getByRole("button", { name: "memory.dream.saveSettings" }));
+        await screen.findByRole("button", { name: "app.saving" });
+        rerender(
+            <MemoryDreamPanel
+                {...dream}
+                dreamConfig={{ ...dream.dreamConfig, minHours: 72 }}
+                onClose={() => {}}
+            />,
+        );
+        const locked = (screen.getByLabelText("memory.dream.minHours") as HTMLInputElement)
+            .disabled;
+        await act(async () => finish(false));
+        expect(locked).toBe(true);
+        await waitFor(() =>
+            expect(screen.getByLabelText("memory.dream.minHours")).toHaveProperty("value", "72"),
+        );
+        await waitFor(() =>
+            expect(
+                screen.getByRole("button", { name: "memory.dream.saveSettings" }),
+            ).toHaveProperty("disabled", false),
+        );
+    });
+
+    it("preserves the draft while collapsed and resets when the config changes", async () => {
+        const dream = actions();
+        const { rerender } = render(<MemoryDreamPanel {...dream} onClose={() => {}} />);
+        const toggle = screen.getByRole("button", { name: "memory.dream.settings" });
+        await userEvent.click(toggle);
+        fireEvent.change(screen.getByLabelText("memory.dream.minHours"), {
+            target: { value: "48" },
+        });
+        await userEvent.click(toggle);
+        await userEvent.click(toggle);
+        expect(screen.getByLabelText("memory.dream.minHours")).toHaveProperty("value", "48");
+        rerender(
+            <MemoryDreamPanel
+                {...dream}
+                dreamConfig={{ ...dream.dreamConfig, minHours: 72 }}
+                onClose={() => {}}
+            />,
+        );
+        await waitFor(() =>
+            expect(screen.getByLabelText("memory.dream.minHours")).toHaveProperty("value", "72"),
         );
     });
 

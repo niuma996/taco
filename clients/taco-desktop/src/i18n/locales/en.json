@@ -895,6 +895,7 @@
       "archiveRetention7": "7 days",
       "archiveRetention30": "30 days",
       "archiveRetention90": "90 days",
+      "invalidNumber": "Enter a whole number from {{min}} to {{max}}.",
       "saveSettings": "Save",
       "scheduleUnavailable": "The daemon does not provide scheduled jobs",
       "run": "Consolidate now",

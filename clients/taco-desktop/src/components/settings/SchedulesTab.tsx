@@ -14,7 +14,7 @@
 import type { Job } from "@taco-ai/protocol";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { History, LoaderCircle, Pencil, Play, Plus, Trash, TriangleAlert } from "lucide-react";
-import { type ReactElement, useCallback, useMemo, useState } from "react";
+import { type ReactElement, useCallback, useMemo, useRef, useState } from "react";
 import { useNow } from "../../hooks/useNow.ts";
 import { useT, useUiLanguage } from "../../i18n/useI18n.ts";
 import { createJobsClient } from "../../lib/clients/jobsClient.ts";
@@ -85,6 +85,7 @@ export function SchedulesTab({ client, onOpenSession }: SchedulesTabProps) {
      *  fields it pre-fills. Closed by default so the table is the only
      *  thing on screen. */
     const [dialog, setDialog] = useState<DialogMode>(EMPTY_DIALOG_MODE);
+    const dialogGeneration = useRef(0);
     /** Job id whose Run Now click is currently in flight. The button text
      *  flips to "running…" while this is set so the click registers visibly
      *  — without this the only feedback is a history entry that lands
@@ -103,6 +104,7 @@ export function SchedulesTab({ client, onOpenSession }: SchedulesTabProps) {
     );
 
     const openCreate = useCallback(() => {
+        dialogGeneration.current++;
         // Clear the global actionError so the prior failure doesn't
         // show up under a new dialog via the sticky banner — the
         // dialog's own `lastError` carries per-instance errors instead.
@@ -112,6 +114,7 @@ export function SchedulesTab({ client, onOpenSession }: SchedulesTabProps) {
 
     const openEdit = useCallback(
         (job: Job) => {
+            dialogGeneration.current++;
             jobs.setActionError(null);
             setDialog({ kind: "edit", job, lastError: null });
         },
@@ -119,12 +122,14 @@ export function SchedulesTab({ client, onOpenSession }: SchedulesTabProps) {
     );
 
     const closeDialog = useCallback(() => {
+        dialogGeneration.current++;
         setDialog(EMPTY_DIALOG_MODE);
     }, []);
 
     const handleSave = useCallback(
         (mode: DialogMode, submit: ScheduleSubmit) => {
             if (mode.kind === "closed") return;
+            const generation = dialogGeneration.current;
             // Clear any prior per-dialog error before re-attempting —
             // the rejection handler below re-stamps it on failure.
             setDialog((prev) => (prev.kind === "closed" ? prev : { ...prev, lastError: null }));
@@ -143,12 +148,13 @@ export function SchedulesTab({ client, onOpenSession }: SchedulesTabProps) {
                           ...(mode.job.builtin ? { builtin: true } : {}),
                       })
                     : jobs.create(submit);
-            void rpc
+            return rpc
                 .then(() => {
-                    setDialog(EMPTY_DIALOG_MODE);
+                    if (dialogGeneration.current === generation) setDialog(EMPTY_DIALOG_MODE);
                     void jobs.refresh();
                 })
                 .catch((err: unknown) => {
+                    if (dialogGeneration.current !== generation) return;
                     const message = err instanceof Error ? err.message : String(err);
                     // Pin the error to THIS dialog instance, not the
                     // global hook — otherwise closing and reopening

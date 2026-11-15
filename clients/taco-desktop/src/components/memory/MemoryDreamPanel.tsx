@@ -15,18 +15,16 @@ import type {
     MemoryTopicEntry,
 } from "@taco-ai/protocol";
 import { LoaderCircle, Settings2, Sparkles, X } from "lucide-react";
-import { useEffect, useId, useState } from "react";
+import { useState } from "react";
 import type { DreamBusy, MemoryDreamConfig } from "../../hooks/useMemoryPane";
 import { useNow } from "../../hooks/useNow";
 import { useT, useUiLanguage } from "../../i18n/useI18n";
 import { formatRelativeTime } from "../../lib/relativeTime";
 import { AssistantMarkdown } from "../AssistantMarkdown";
 import { Button } from "../ui/Button";
-import { FormField } from "../ui/FormField";
 import { IconButton } from "../ui/IconButton";
-import { Select } from "../ui/Select";
 import { Switch } from "../ui/Switch";
-import { TextInput } from "../ui/TextInput";
+import { DreamSettings } from "./DreamSettings";
 
 /** Dream actions; a `false` result means it failed and was already notified. */
 export interface MemoryDreamActions {
@@ -141,116 +139,6 @@ function ActionGroup({
                     names={names}
                 />
             ))}
-        </div>
-    );
-}
-
-function DreamSettings({
-    config,
-    onSave,
-    open,
-    onSaved,
-}: {
-    config: MemoryDreamConfig;
-    onSave: MemoryDreamActions["onSaveConfig"];
-    open: boolean;
-    onSaved: () => void;
-}) {
-    const { t } = useT();
-    const cleanupId = useId();
-    const [draft, setDraft] = useState(config);
-    const [saving, setSaving] = useState(false);
-    const [saveFailed, setSaveFailed] = useState(false);
-    useEffect(() => setDraft(config), [config]);
-
-    const save = async () => {
-        if (saving) return;
-        setSaving(true);
-        setSaveFailed(false);
-        try {
-            if (await onSave(draft)) onSaved();
-            else setSaveFailed(true);
-        } catch {
-            setSaveFailed(true);
-        } finally {
-            setSaving(false);
-        }
-    };
-    return (
-        <div className="memory-dream-settings" hidden={!open} aria-busy={saving}>
-            <FormField label={t("memory.dream.minHours")} className="memory-dream-settings-field">
-                <TextInput
-                    type="number"
-                    min={1}
-                    max={720}
-                    value={draft.minHours}
-                    disabled={saving}
-                    onChange={(e) => setDraft({ ...draft, minHours: Number(e.target.value) })}
-                />
-            </FormField>
-            <FormField label={t("memory.dream.staleDays")} className="memory-dream-settings-field">
-                <TextInput
-                    type="number"
-                    min={7}
-                    max={3650}
-                    value={draft.staleDays}
-                    disabled={saving}
-                    onChange={(e) => setDraft({ ...draft, staleDays: Number(e.target.value) })}
-                />
-            </FormField>
-            <FormField
-                label={t("memory.dream.staleDaysDurable")}
-                className="memory-dream-settings-field"
-            >
-                <TextInput
-                    type="number"
-                    min={7}
-                    max={3650}
-                    value={draft.staleDaysDurable}
-                    disabled={saving}
-                    onChange={(e) =>
-                        setDraft({ ...draft, staleDaysDurable: Number(e.target.value) })
-                    }
-                />
-            </FormField>
-            <div className="memory-dream-settings-check">
-                <Switch
-                    id={cleanupId}
-                    labelledBy={`${cleanupId}-label`}
-                    checked={draft.archiveCleanupEnabled}
-                    disabled={saving}
-                    onChange={(enabled) => setDraft({ ...draft, archiveCleanupEnabled: enabled })}
-                />
-                <label id={`${cleanupId}-label`} htmlFor={cleanupId}>
-                    {t("memory.dream.archiveCleanup")}
-                </label>
-            </div>
-            <FormField
-                label={t("memory.dream.archiveRetention")}
-                className="memory-dream-settings-field"
-            >
-                <Select
-                    value={String(draft.archiveRetentionDays)}
-                    disabled={saving || !draft.archiveCleanupEnabled}
-                    onValueChange={(value) =>
-                        setDraft({
-                            ...draft,
-                            archiveRetentionDays: Number(value) as 7 | 30 | 90,
-                        })
-                    }
-                    options={[
-                        { value: "7", label: t("memory.dream.archiveRetention7") },
-                        { value: "30", label: t("memory.dream.archiveRetention30") },
-                        { value: "90", label: t("memory.dream.archiveRetention90") },
-                    ]}
-                />
-            </FormField>
-            <div className="memory-dream-settings-actions">
-                {saveFailed ? <span role="alert">{t("memory.dream.error.settings")}</span> : null}
-                <Button size="sm" variant="primary" disabled={saving} onClick={save}>
-                    {saving ? t("app.saving") : t("memory.dream.saveSettings")}
-                </Button>
-            </div>
         </div>
     );
 }

@@ -7,7 +7,9 @@ import { queryWrapper } from "../../helpers/queryWrapper";
 
 import type { Job } from "@taco-ai/protocol";
 import {
+    act,
     cleanup,
+    fireEvent,
     render as renderWithoutQueries,
     screen,
     waitFor,
@@ -102,12 +104,13 @@ async function openAddDialog(user: ReturnType<typeof userEvent.setup>) {
 async function fillValidCreateDraft(user: ReturnType<typeof userEvent.setup>, name: string) {
     await user.type(screen.getByLabelText("schedules.fieldName"), name);
     const argsTextarea = screen.getByLabelText("schedules.fieldArgs") as HTMLTextAreaElement;
-    const nativeSetter = Object.getOwnPropertyDescriptor(
-        window.HTMLTextAreaElement.prototype,
-        "value",
-    )?.set;
-    nativeSetter?.call(argsTextarea, "{}");
-    argsTextarea.dispatchEvent(new Event("input", { bubbles: true }));
+    fireEvent.change(argsTextarea, { target: { value: "{}" } });
+    await waitFor(() => {
+        expect(screen.getByRole("button", { name: "schedules.actionCreate" })).toHaveProperty(
+            "disabled",
+            false,
+        );
+    });
 }
 
 describe("SchedulesTab — listError vs actionError separation", () => {
@@ -442,6 +445,102 @@ describe("SchedulesTab — modal add / edit flow", () => {
         expect("history" in submitted.job).toBe(false);
     });
 
+    it.each(["create", "update"] as const)(
+        "keeps %s busy through the RPC and retains the draft after failure for retry",
+        async (method) => {
+            let reject!: (error: Error) => void;
+            const pending = new Promise<unknown>((_, no) => {
+                reject = no;
+            });
+            const saveSpy = vi
+                .fn()
+                .mockImplementationOnce(() => pending)
+                .mockImplementation(({ job }: Record<string, unknown>) => Promise.resolve({ job }));
+            const client = makeClient({
+                list: () =>
+                    Promise.resolve({ jobs: method === "update" ? [sampleJob("row-x")] : [] }),
+                [method]: saveSpy,
+            });
+            const user = userEvent.setup({ delay: null });
+            render(<SchedulesTab client={client} onOpenSession={noop} />);
+            if (method === "create") {
+                await openAddDialog(user);
+                await fillValidCreateDraft(user, "Retry draft");
+            } else {
+                await user.click(
+                    await screen.findByRole("button", { name: "schedules.actionEdit" }),
+                );
+                await user.clear(screen.getByLabelText("schedules.fieldName"));
+                await user.type(screen.getByLabelText("schedules.fieldName"), "Retry draft");
+            }
+            const button = screen.getByRole("button", {
+                name: method === "create" ? "schedules.actionCreate" : "schedules.actionSave",
+            });
+            await waitFor(() => expect(button).toHaveProperty("disabled", false));
+            act(() => {
+                button.click();
+                button.click();
+            });
+            await waitFor(() => expect(saveSpy).toHaveBeenCalledTimes(1));
+            expect(button).toHaveProperty("disabled", true);
+            expect(screen.getByRole("button", { name: "schedules.actionCancel" })).toHaveProperty(
+                "disabled",
+                true,
+            );
+            await act(async () => reject(new Error("daemon rejected")));
+            expect(await screen.findByRole("alert")).toHaveProperty(
+                "textContent",
+                "daemon rejected",
+            );
+            expect(screen.getByLabelText("schedules.fieldName")).toHaveProperty(
+                "value",
+                "Retry draft",
+            );
+            await waitFor(() => expect(button).toHaveProperty("disabled", false));
+            await user.click(button);
+            await waitFor(() => expect(saveSpy).toHaveBeenCalledTimes(2));
+            const submitted = saveSpy.mock.calls[1]?.[0] as { job: { name: string } };
+            expect(submitted.job.name).toBe("Retry draft");
+            await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+        },
+    );
+
+    it.each(["resolve", "reject"] as const)(
+        "does not apply an old %s result to a reopened dialog",
+        async (outcome) => {
+            let resolve = (_value: unknown) => {};
+            let reject = (_reason: Error) => {};
+            const create = vi.fn(
+                () =>
+                    new Promise((yes, no) => {
+                        resolve = yes;
+                        reject = no;
+                    }),
+            );
+            const client = makeClient({ create });
+            const user = userEvent.setup({ delay: null });
+            render(<SchedulesTab client={client} onOpenSession={noop} />);
+            await openAddDialog(user);
+            await fillValidCreateDraft(user, "Old draft");
+            await user.click(screen.getByRole("button", { name: "schedules.actionCreate" }));
+            await waitFor(() => expect(create).toHaveBeenCalledTimes(1));
+            await user.keyboard("{Escape}");
+            await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+            await openAddDialog(user);
+            await fillValidCreateDraft(user, "New draft");
+            await act(async () => {
+                if (outcome === "resolve") resolve({ job: sampleJob("saved") });
+                else reject(new Error("old failure"));
+            });
+            expect(screen.getByRole("dialog")).toBeTruthy();
+            expect(screen.getByLabelText("schedules.fieldName")).toHaveProperty(
+                "value",
+                "New draft",
+            );
+            expect(screen.queryByText("old failure")).toBeNull();
+        },
+    );
+
     it("cancel button closes the dialog without invoking any RPC", async () => {
         const createSpy = vi.fn(() => Promise.resolve({ job: {} }));
         const client = makeClient({
@@ -483,12 +582,7 @@ describe("SchedulesTab — modal add / edit flow", () => {
         const argsInput = screen.getByLabelText("schedules.fieldArgs") as HTMLTextAreaElement;
         // fireEvent.change bypasses user-event's keyboard parser (which
         // treats `{}` as a descriptor).
-        const nativeSetter = Object.getOwnPropertyDescriptor(
-            window.HTMLTextAreaElement.prototype,
-            "value",
-        )?.set;
-        nativeSetter?.call(argsInput, "{");
-        argsInput.dispatchEvent(new Event("input", { bubbles: true }));
+        fireEvent.change(argsInput, { target: { value: "{" } });
 
         await waitFor(() => {
             // Either localised message is acceptable depending on
