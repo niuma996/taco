@@ -240,7 +240,19 @@ function ScheduleForm(props: ScheduleFormDialogProps) {
 
             <FormField
                 label={t("schedules.fieldArgs", "Args (JSON object)")}
-                error={errors.argsJson?.message ? t(errors.argsJson.message) : undefined}
+                error={
+                    errors.argsJson?.type === "notObject"
+                        ? t(
+                              "schedules.errorArgsNotObject",
+                              "args must be a JSON object, not an array or primitive.",
+                          )
+                        : errors.argsJson?.type === "invalidJson"
+                          ? t(
+                                "schedules.errorArgsJson",
+                                "JSON parse failed — check braces and quotes.",
+                            )
+                          : undefined
+                }
             >
                 <Textarea
                     id="schedules-form-args"

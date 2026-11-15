@@ -97,7 +97,13 @@ export function McpServerForm(props: McpServerFormProps) {
         >
             <FormField
                 label={t("settings.mcpServerId")}
-                error={errors.id?.message ? t(errors.id.message) : undefined}
+                error={
+                    errors.id?.type === "duplicate"
+                        ? t("settings.mcpServerIdClash")
+                        : errors.id?.type === "pattern"
+                          ? t("settings.mcpServerIdInvalid")
+                          : undefined
+                }
             >
                 <TextInput
                     type="text"
@@ -180,7 +186,11 @@ export function McpServerForm(props: McpServerFormProps) {
                 <>
                     <FormField
                         label={t("settings.mcpServerUrl")}
-                        error={errors.url?.message ? t(errors.url.message) : undefined}
+                        error={
+                            errors.url?.type === "validate"
+                                ? t("settings.mcpServerUrlInvalid")
+                                : undefined
+                        }
                     >
                         <TextInput
                             type="text"

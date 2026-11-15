@@ -41,10 +41,8 @@ export function mcpServerResolver(
         const errors: FieldErrors<McpServerDraft> = {};
         const id = values.id.trim();
         if (!id) errors.id = { type: "required" };
-        else if (!/^[a-zA-Z0-9_-]+$/.test(id))
-            errors.id = { type: "pattern", message: "settings.mcpServerIdInvalid" };
-        else if (!isEdit && existingIds.includes(id))
-            errors.id = { type: "duplicate", message: "settings.mcpServerIdClash" };
+        else if (!/^[a-zA-Z0-9_-]+$/.test(id)) errors.id = { type: "pattern" };
+        else if (!isEdit && existingIds.includes(id)) errors.id = { type: "duplicate" };
         if (values.transport === "stdio") {
             if (!values.command.trim()) errors.command = { type: "required" };
         } else if (!values.url.trim()) errors.url = { type: "required" };
@@ -53,7 +51,7 @@ export function mcpServerResolver(
                 if (!["http:", "https:"].includes(new URL(values.url.trim()).protocol))
                     throw new Error("protocol");
             } catch {
-                errors.url = { type: "validate", message: "settings.mcpServerUrlInvalid" };
+                errors.url = { type: "validate" };
             }
         }
         const timeout = Number.parseInt(values.timeoutMs, 10);

@@ -35,6 +35,7 @@ export function DreamSettings({
         register,
         control,
         reset,
+        trigger,
         handleSubmit,
         formState: { errors, isValid, isSubmitting },
     } = useForm<MemoryDreamConfig>({ defaultValues: config, mode: "onChange" });
@@ -45,7 +46,12 @@ export function DreamSettings({
         if (isSubmitting || appliedConfig.current === config) return;
         appliedConfig.current = config;
         reset(config);
-    }, [config, reset, isSubmitting]);
+        void trigger();
+    }, [config, reset, trigger, isSubmitting]);
+    useEffect(() => {
+        // A stored value can already be out of range: surface the error without a keystroke.
+        void trigger();
+    }, [trigger]);
 
     const save = async () => {
         if (submitting.current) return;

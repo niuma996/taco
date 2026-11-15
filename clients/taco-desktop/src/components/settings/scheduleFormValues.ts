@@ -57,25 +57,25 @@ export const scheduleResolver: Resolver<ScheduleDraft> = (values) => {
     if (!values.name.trim()) errors.name = { type: "required" };
     // Keep the scheduler form's existing parseInt conversion, including truncation.
     if (values.scheduleKind === "interval" && (Number.parseInt(values.intervalMs, 10) || 0) <= 0) {
-        errors.intervalMs = { type: "validate", message: "schedules.errorIntervalMs" };
+        errors.intervalMs = { type: "validate" };
     }
     if (values.scheduleKind === "cron" && !values.cronExpr.trim()) {
-        errors.cronExpr = { type: "required", message: "schedules.errorCronExpr" };
+        errors.cronExpr = { type: "required" };
     }
     const maxRuns = values.maxRunsInput.trim();
     if (
         maxRuns !== "" &&
         !(/^\d+$/.test(maxRuns) && !/^0\d+$/.test(maxRuns) && Number.parseInt(maxRuns, 10) >= 1)
     ) {
-        errors.maxRunsInput = { type: "validate", message: "schedules.errorMaxRuns" };
+        errors.maxRunsInput = { type: "validate" };
     }
     try {
         const args: unknown = JSON.parse(values.argsJson);
         if (typeof args !== "object" || args === null || Array.isArray(args)) {
-            errors.argsJson = { type: "validate", message: "schedules.errorArgsNotObject" };
+            errors.argsJson = { type: "notObject" };
         }
     } catch {
-        errors.argsJson = { type: "validate", message: "schedules.errorArgsJson" };
+        errors.argsJson = { type: "invalidJson" };
     }
     return Object.keys(errors).length ? { values: {}, errors } : { values, errors: {} };
 };
