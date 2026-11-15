@@ -4,7 +4,7 @@
  * SubagentSpawnContext is the narrow interface WorkspaceRuntime injects into the agent tool.
  */
 
-import type { SessionId } from "@taco-ai/protocol";
+import type { AgentToolDetails, SessionId } from "@taco-ai/protocol";
 import type { AgentHarnessToolUpdateCallback } from "../runtime/pi/types.ts";
 
 /**
@@ -190,6 +190,7 @@ export interface SubagentSpawnContext {
         isError: boolean;
         /** A deliberate interruption; distinct from a failed run. */
         aborted?: boolean;
+        failurePhase?: Extract<AgentToolDetails, { status: "error" }>["failurePhase"];
         /** Echoes the effective `background` mode so the tool layer knows which `AgentToolDetails` variant to report. */
         background?: boolean;
         /**

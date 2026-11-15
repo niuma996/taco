@@ -33,6 +33,7 @@ import type { CheckpointStore } from "../../checkpoints/store.ts";
 import type { ResolvedCompaction } from "../../config/config.ts";
 import type { WorkspaceExtensionSet } from "../../extensions/index.ts";
 import { harnessContext } from "../../lib/harnessContext.ts";
+import { createLogger } from "../../lib/logger.ts";
 import type { MemoryStore } from "../../memory/index.ts";
 import type {
     PlanWriteApprovalDecision,
@@ -51,7 +52,7 @@ import type { TacoTool } from "../../tools/index.ts";
 import { AttachedSession } from "../harness/attachedSession.ts";
 import type { DeferredToolRegistry } from "../harness/deferredToolRegistry.ts";
 import type { LiteScenario } from "../models/liteModel.ts";
-import type { NodeExecutionEnv } from "../pi/node.ts";
+import { FileError, type NodeExecutionEnv } from "../pi/node.ts";
 import type {
     AgentHarnessResources,
     AgentHarnessStreamOptions,
@@ -71,6 +72,21 @@ import { resolveSessionByPrefix, SessionNotFoundError } from "./sessionLookup.ts
 import { readLegacyFactsFromPath, readSessionMetadataFromDisk } from "./sessionMetadataReader.ts";
 import { buildSessionTaskState, type SessionTaskState } from "./sessionTaskState.ts";
 import { type TitleSource, writeTitleSource } from "./sessionTitleSource.ts";
+
+const log = createLogger("sidecar.sessionRegistry");
+
+/** Only a vanished child file is transient; a missing directory is still an error. */
+function isVanishedSessionFile(error: unknown): boolean {
+    const seen = new Set<unknown>();
+    while (error instanceof Error && !seen.has(error)) {
+        seen.add(error);
+        if (error instanceof FileError) {
+            return error.code === "not_found" && /\.jsonl(?:\.tmp)?$/.test(error.path ?? "");
+        }
+        error = error.cause;
+    }
+    return false;
+}
 
 /** `attach()` per-call override parameters — same shape as WorkspaceRuntime.AttachOptions */
 export interface AttachOptions {
@@ -306,6 +322,9 @@ export class SessionRegistry extends EventEmitter {
     /** cwd → workspace metadata cache, based on list for this cwd */
     private _metadataCache: JsonlSessionMetadata[] | null = null;
 
+    /** Own successful creates already know their path; sibling cache invalidation must not lose it. */
+    private readonly createdMetadata = new Map<SessionId, JsonlSessionMetadata>();
+
     /**
      * sessionId → user-defined title (last name value written).
      * Same lifecycle as _metadataCache: create/delete go through
@@ -486,7 +505,14 @@ export class SessionRegistry extends EventEmitter {
     async listSessions(): Promise<JsonlSessionMetadata[]> {
         if (!this._metadataCache) {
             try {
-                const list = await this.repo.list({ cwd: this.sessionCwd }, harnessContext);
+                let list: JsonlSessionMetadata[];
+                try {
+                    list = await this.repo.list({ cwd: this.sessionCwd }, harnessContext);
+                } catch (error) {
+                    if (!isVanishedSessionFile(error)) throw error;
+                    log.debug("retrying session list after a file disappeared", error);
+                    list = await this.repo.list({ cwd: this.sessionCwd }, harnessContext);
+                }
                 // Empty result is not cached: repo.list silently skips unparseable .jsonl files (invalid_session),
                 // and sidecar restart / fs-not-ready transient jitter may return an empty batch.
                 // If an empty array were cached, _metadataCache would become truthy and never refetch,
@@ -498,7 +524,7 @@ export class SessionRegistry extends EventEmitter {
                 return list;
             } catch (e) {
                 const errMsg = e instanceof Error ? e.message : String(e);
-                throw new Error(`failed to list sessions: ${errMsg}`);
+                throw new Error(`failed to list sessions: ${errMsg}`, { cause: e });
             }
         }
         return this._metadataCache;
@@ -515,6 +541,14 @@ export class SessionRegistry extends EventEmitter {
 
     /** Get an existing session instance by id. */
     async openSession(sessionId: SessionId): Promise<JsonlSessionMetadata> {
+        const known = this.createdMetadata.get(sessionId);
+        if (known) {
+            const info = await this.env.fileInfo(known.path, harnessContext);
+            if (info.ok) return { ...known, modifiedAt: info.value.mtimeMs };
+            if (info.error.code !== "not_found") throw info.error;
+            this.createdMetadata.delete(sessionId);
+            this._metadataCache = null;
+        }
         let resolution = resolveSessionByPrefix(await this.listSessions(), sessionId);
         if (resolution.kind === "not_found") {
             // A miss is only proof of absence against a fresh, non-empty read:
@@ -556,14 +590,17 @@ export class SessionRegistry extends EventEmitter {
                 { id, cwd: this.sessionCwd, parentSessionId },
                 harnessContext,
             );
+            let metadata: JsonlSessionMetadata;
             try {
                 await writeFacts(session);
-                return session.metadata;
+                metadata = session.metadata;
             } finally {
                 // The handle owns pi's slot; a failed facts write must not
                 // leave it open for the rest of the process.
                 await session.close(harnessContext);
             }
+            this.createdMetadata.set(id, metadata);
+            return metadata;
         });
         this.invalidateListCache();
         return metadata;
@@ -580,6 +617,7 @@ export class SessionRegistry extends EventEmitter {
             const { activityAt, messageCount } = await readSessionMetadataFromDisk(meta.path);
             if (activityAt !== undefined || messageCount > 0) return false;
             await this.repo.delete(meta, harnessContext);
+            this.createdMetadata.delete(asSessionId(meta.id));
             this.invalidateListCache();
             return true;
         });
@@ -1161,6 +1199,7 @@ export class SessionRegistry extends EventEmitter {
             await this.detachLocked(sessionId);
             const meta = await this.openSession(sessionId);
             await this.repo.delete(meta, harnessContext);
+            this.createdMetadata.delete(asSessionId(meta.id));
         });
         this.invalidateListCache();
         this.emit("session.deleted", { sessionId });
@@ -1227,6 +1266,7 @@ export class SessionRegistry extends EventEmitter {
         await disposeInOrder([
             ...[...this.attached.keys()].map((sessionId) => () => this.detach(sessionId)),
             () => {
+                this.createdMetadata.clear();
                 this.removeAllListeners();
             },
         ]);

@@ -3,6 +3,7 @@ import type { AttachedSession } from "../../harness/attachedSession.ts";
 import type { SessionRegistry } from "../../session/sessionRegistry.ts";
 import { type ChildAttachDeps, prepareChildAttach } from "../childAttach.ts";
 import { runAttachedSubagent } from "../subagentRunner.ts";
+import { subagentStartupFailure } from "../subagentStartupFailure.ts";
 import type { AgentEngine, EngineRunRequest } from "./types.ts";
 
 interface StandardEngineDeps {
@@ -22,19 +23,24 @@ export function createStandardEngine(deps: StandardEngineDeps): AgentEngine {
             const childDepth = args.childDepth;
             if (childDepth === undefined)
                 throw new Error("executeSubagentSession: childDepth must be provided by caller");
-            const prepared = await prepareChildAttach(deps.childAttachDeps(), {
-                sessionId: args.childSessionId,
-                agentType: args.agentType,
-                childDepth,
-                allowedTools: args.tools,
-                toolPolicy: args.toolPolicy,
-                rolePrompt: args.rolePrompt,
-                fewShots: args.fewShots,
-                forkedContext: args.forkedContext,
-                modelIdentity: args.model
-                    ? `${args.model.provider}/${args.model.id}`
-                    : deps.defaultModelIdentity(),
-            });
+            let prepared: Awaited<ReturnType<typeof prepareChildAttach>>;
+            try {
+                prepared = await prepareChildAttach(deps.childAttachDeps(), {
+                    sessionId: args.childSessionId,
+                    agentType: args.agentType,
+                    childDepth,
+                    allowedTools: args.tools,
+                    toolPolicy: args.toolPolicy,
+                    rolePrompt: args.rolePrompt,
+                    fewShots: args.fewShots,
+                    forkedContext: args.forkedContext,
+                    modelIdentity: args.model
+                        ? `${args.model.provider}/${args.model.id}`
+                        : deps.defaultModelIdentity(),
+                });
+            } catch (error) {
+                return subagentStartupFailure(args, "prepare_attach", error);
+            }
             let attached: AttachedSession;
             try {
                 attached = await deps.registry.attachChild(
@@ -50,11 +56,7 @@ export function createStandardEngine(deps: StandardEngineDeps): AgentEngine {
                     prepared.systemPrompt,
                 );
             } catch (error) {
-                return {
-                    subSessionId: args.childSessionId,
-                    isError: true,
-                    resultText: error instanceof Error ? error.message : String(error),
-                };
+                return subagentStartupFailure(args, "attach", error);
             }
             return runAttachedSubagent({
                 subSessionId: args.childSessionId,

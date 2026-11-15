@@ -5,7 +5,7 @@
 
 import { strict as assert } from "node:assert";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { appendFile } from "node:fs/promises";
+import { appendFile, utimes } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
@@ -14,7 +14,7 @@ import { asSessionId, type WorkspaceId } from "@taco-ai/protocol";
 import { agentToolPolicy } from "../../src/agents/filterTools.ts";
 import { harnessContext } from "../../src/lib/harnessContext.ts";
 import { AttachedSession } from "../../src/runtime/harness/attachedSession.ts";
-import { NodeExecutionEnv } from "../../src/runtime/pi/node.ts";
+import { FileError, NodeExecutionEnv } from "../../src/runtime/pi/node.ts";
 import { JsonlSessionRepo, uuidv7 } from "../../src/runtime/pi/values.ts";
 import { readSessionFacts, writeSessionFacts } from "../../src/runtime/session/sessionFacts.ts";
 import { SessionNotFoundError } from "../../src/runtime/session/sessionLookup.ts";
@@ -104,6 +104,110 @@ describe("SessionRegistry", () => {
         const sr = makeRegistry();
         const list = await sr.listSessions();
         assert.equal(list.length, 0);
+    });
+
+    it("reads concurrently created sessions without listing unrelated sessions", async (t) => {
+        const sr = makeRegistry();
+        const ids = Array.from({ length: 4 }, () => asSessionId(uuidv7()));
+        await Promise.all(ids.map((id) => sr.createSession(id, undefined, async () => {})));
+        const listing = t.mock.method(repo, "list", async () => {
+            throw new Error("unrelated directory is unavailable");
+        });
+        const read = await Promise.all(
+            ids.map((id) => sr.withSession(id, async (s) => s.metadata.id)),
+        );
+        assert.deepEqual(read, ids);
+        assert.equal(listing.mock.callCount(), 0);
+    });
+
+    it("retries a disappearing session header once without caching an empty list", async (t) => {
+        const sr = makeRegistry();
+        await seedSession(repo, uuidv7());
+        const list = repo.list.bind(repo);
+        let calls = 0;
+        t.mock.method(repo, "list", async (...args: Parameters<typeof repo.list>) => {
+            if (++calls === 1) {
+                throw new Error("header disappeared", {
+                    cause: new FileError(
+                        "not_found",
+                        "removed during scan",
+                        join(sessionsRoot, "child.jsonl"),
+                    ),
+                });
+            }
+            return list(...args);
+        });
+        assert.equal((await sr.listSessions()).length, 1);
+        assert.equal((await sr.listSessions()).length, 1);
+        assert.equal(calls, 2);
+    });
+
+    it("preserves the cause and bounds retries when a header remains unavailable", async (t) => {
+        const sr = makeRegistry();
+        const failure = new Error("header disappeared", {
+            cause: new FileError(
+                "not_found",
+                "removed during scan",
+                join(sessionsRoot, "child.jsonl"),
+            ),
+        });
+        const listing = t.mock.method(repo, "list", async () => {
+            throw failure;
+        });
+        await assert.rejects(
+            sr.listSessions(),
+            (error: unknown) => error instanceof Error && error.cause === failure,
+        );
+        assert.equal(listing.mock.callCount(), 2);
+    });
+
+    it("does not retry directory absence or permission failures", async (t) => {
+        for (const failure of [
+            new FileError("not_found", "directory gone", sessionsRoot),
+            new FileError("permission_denied", "access denied", join(sessionsRoot, "child.jsonl")),
+        ]) {
+            const sr = makeRegistry();
+            const listing = t.mock.method(repo, "list", async () => {
+                throw failure;
+            });
+            await assert.rejects(
+                sr.listSessions(),
+                (error: unknown) => error instanceof Error && error.cause === failure,
+            );
+            assert.equal(listing.mock.callCount(), 1);
+            listing.mock.restore();
+        }
+    });
+
+    it("forgets created paths on deletion and rollback", async () => {
+        const sr = makeRegistry();
+        const removed = asSessionId(uuidv7());
+        const rolledBack = asSessionId(uuidv7());
+        await sr.createSession(removed, undefined, async () => {});
+        await sr.createSession(rolledBack, undefined, async () => {});
+        await sr.deleteSession(removed);
+        assert.equal(await sr.deleteEmptySession(rolledBack), true);
+        await assert.rejects(sr.openSession(removed), /session not found/);
+        await assert.rejects(sr.openSession(rolledBack), /session not found/);
+    });
+
+    it("forgets the full created id when deleted through a unique prefix", async () => {
+        const sr = makeRegistry();
+        const id = asSessionId(uuidv7());
+        await sr.createSession(id, undefined, async () => {});
+        await sr.deleteSession(asSessionId(id.slice(0, 12)));
+        await assert.rejects(sr.openSession(id), /session not found/);
+    });
+
+    it("refreshes known-path modification time and drops externally removed paths", async () => {
+        const sr = makeRegistry();
+        const id = asSessionId(uuidv7());
+        const metadata = await sr.createSession(id, undefined, async () => {});
+        const modifiedAt = new Date("2026-11-15T01:00:00Z");
+        await utimes(metadata.path, modifiedAt, modifiedAt);
+        assert.equal((await sr.openSession(id)).modifiedAt, modifiedAt.getTime());
+        rmSync(metadata.path);
+        await assert.rejects(sr.openSession(id), /session not found/);
     });
 
     it("listSessions caches — second call does not hit repo again", async () => {

@@ -598,6 +598,26 @@ export async function wireHarnessHooks(
         );
     }
 
+    // pi's AgentToolResult does not declare isError; a normally returned
+    // agent failure therefore reaches after_tool as a successful execution.
+    // Bridge the agent's details contract through the explicit patch channel
+    // before extensions run, so their patches retain the final say.
+    disposers.push(
+        harness.hooks.on("after_tool", (event) => {
+            if (event.toolName !== "agent") return undefined;
+            const details = event.details;
+            if (
+                details !== null &&
+                typeof details === "object" &&
+                !Array.isArray(details) &&
+                (details.status === "error" || details.status === "aborted")
+            ) {
+                return { isError: true };
+            }
+            return undefined;
+        }),
+    );
+
     const extToolResultHooks = opts.extensionToolResultHooks ?? { builtins: [], external: [] };
     for (const hook of extToolResultHooks.builtins) {
         disposers.push(onToolResult(wrapHook(hook, "tool_result:builtin")));

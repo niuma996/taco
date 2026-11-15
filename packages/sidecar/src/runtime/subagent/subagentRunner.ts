@@ -11,7 +11,7 @@
  * session reads.
  */
 
-import type { SessionId, SubagentProgressDetails } from "@taco-ai/protocol";
+import type { AgentToolDetails, SessionId, SubagentProgressDetails } from "@taco-ai/protocol";
 import type { SubagentProgressSink } from "../../agents/types.ts";
 import type { SubagentBudgetState } from "../../tags/subagentBudget.ts";
 import type { AttachedSession } from "../harness/attachedSession.ts";
@@ -84,6 +84,7 @@ export interface SubagentRunResult {
     subSessionId: SessionId;
     resultText: string;
     isError: boolean;
+    failurePhase?: Extract<AgentToolDetails, { status: "error" }>["failurePhase"];
     aborted?: boolean;
     partial?: boolean;
     waiting?: WaitingInteraction;

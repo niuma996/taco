@@ -411,7 +411,13 @@ export type AgentToolDetails =
     | { status: "completed"; subSessionId?: SessionId; agentType: string }
     | { status: "launched"; subSessionId: SessionId; agentType: string }
     | { status: "aborted"; subSessionId: SessionId; agentType: string }
-    | { status: "error"; agentType: string };
+    | {
+          status: "error";
+          agentType: string;
+          subSessionId?: SessionId;
+          /** Startup failed before this attempt submitted a prompt to the child. */
+          failurePhase?: "create_session" | "prepare_attach" | "attach";
+      };
 
 /**
  * Shape of the `details` field on a subagent tool's **live progress** update

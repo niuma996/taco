@@ -28,6 +28,7 @@ import type {
 } from "./subagentCoordination.ts";
 import type { SubagentRunLifecycle } from "./subagentRunLifecycle.ts";
 import type { SubagentRunResult } from "./subagentRunner.ts";
+import { subagentStartupFailure } from "./subagentStartupFailure.ts";
 import type { SubagentSessionArgs } from "./subagentTypes.ts";
 
 export interface SubagentSpawnCoordinatorOptions {
@@ -130,23 +131,27 @@ export class SubagentSpawnCoordinator {
         //    registry's per-id slot so a reader holding the id from a
         //    background launch receipt cannot race the create handle.
         const childSessionId = args.childSessionId ?? uuidv7();
-        await this.sessionRegistry.createSession(
-            asSessionId(childSessionId),
-            args.parentSessionId,
-            async (session) => {
-                await writeSessionFacts(session, {
-                    kind: "subagent",
-                    agentType: args.agentType,
-                    parentSessionId: args.parentSessionId,
-                    parentToolCallId: args.parentToolCallId,
-                    depth: childDepth,
-                    ...(args.runtime !== undefined ? { runtime: args.runtime } : {}),
-                    ...(args.forkedContext !== undefined
-                        ? { forkedContext: args.forkedContext }
-                        : {}),
-                });
-            },
-        );
+        try {
+            await this.sessionRegistry.createSession(
+                asSessionId(childSessionId),
+                args.parentSessionId,
+                async (session) => {
+                    await writeSessionFacts(session, {
+                        kind: "subagent",
+                        agentType: args.agentType,
+                        parentSessionId: args.parentSessionId,
+                        parentToolCallId: args.parentToolCallId,
+                        depth: childDepth,
+                        ...(args.runtime !== undefined ? { runtime: args.runtime } : {}),
+                        ...(args.forkedContext !== undefined
+                            ? { forkedContext: args.forkedContext }
+                            : {}),
+                    });
+                },
+            );
+        } catch (error) {
+            return subagentStartupFailure(args, "create_session", error);
+        }
 
         // A claude-code child never attaches, so the push layer cannot read
         // its kind from the attached map. Register it here — before the first
@@ -186,6 +191,7 @@ export class SubagentSpawnCoordinator {
         subSessionId?: SessionId;
         resultText: string;
         isError: boolean;
+        failurePhase?: SubagentRunResult["failurePhase"];
         background?: boolean;
         resultPath?: string;
     }> {

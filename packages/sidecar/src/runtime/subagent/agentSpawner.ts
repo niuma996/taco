@@ -472,6 +472,7 @@ export class AgentSpawner extends EventEmitter {
         resultText: string;
         isError: boolean;
         aborted?: boolean;
+        failurePhase?: SubagentRunResult["failurePhase"];
         background?: boolean;
         /** Set only for a launched background spawn; see `SubagentSpawnContext`. */
         resultPath?: string;

@@ -199,6 +199,32 @@ describe("agent tool", () => {
         });
     });
 
+    it("reports a background launch failure with its retained child session id", async () => {
+        const tool = createAgentTool(
+            {
+                spawn: async () => ({
+                    subSessionId: asSessionId("sub-bg-failed"),
+                    resultText: "attach failed",
+                    isError: true,
+                    background: true,
+                }),
+                abortSubagent: () => ({ stopped: false }),
+            },
+            [{ agentType: "explorer" }],
+        );
+        const res = await invokeTool(
+            tool,
+            { subagent_type: "explorer", description: "x", prompt: "y", background: true },
+            { env: mockEnv },
+        );
+        assert.equal(res.isError, true);
+        assert.deepEqual(res.details, {
+            status: "error",
+            subSessionId: "sub-bg-failed",
+            agentType: "explorer",
+        });
+    });
+
     it("reports a background launch failure without a session id", async () => {
         const ctx: SubagentSpawnContext = {
             async spawn() {
@@ -229,6 +255,49 @@ describe("agent tool", () => {
         const text = res.content.map((c) => (c.type === "text" ? c.text : "")).join("");
         assert.ok(text.startsWith("failed to launch background subagent:"));
     });
+
+    for (const background of [false, true]) {
+        for (const failurePhase of ["create_session", "prepare_attach", "attach"] as const) {
+            it(`forwards ${failurePhase} details for a ${background ? "background" : "synchronous"} failure`, async () => {
+                const subSessionId =
+                    failurePhase === "create_session" ? undefined : asSessionId("kept-child");
+                const resultText = `Startup failed during ${failurePhase}; inspect retained history.`;
+                const tool = createAgentTool(
+                    {
+                        spawn: async () => ({
+                            ...(subSessionId ? { subSessionId } : {}),
+                            resultText,
+                            isError: true,
+                            background,
+                            failurePhase,
+                        }),
+                        abortSubagent: () => ({ stopped: false }),
+                    },
+                    [],
+                );
+                const result = await invokeTool(
+                    tool,
+                    { subagent_type: "reviewer", description: "x", prompt: "y", background },
+                    { env: mockEnv },
+                );
+                assert.equal(result.isError, true);
+                assert.deepEqual(result.details, {
+                    status: "error",
+                    agentType: "reviewer",
+                    ...(subSessionId ? { subSessionId } : {}),
+                    failurePhase,
+                });
+                assert.deepEqual(result.content, [
+                    {
+                        type: "text",
+                        text: background
+                            ? `failed to launch background subagent: ${resultText}`
+                            : `subagent error: ${resultText}${subSessionId ? `\n\n[subagent session: ${subSessionId}]` : ""}`,
+                    },
+                ]);
+            });
+        }
+    }
 
     it("keeps a frozen description that does not embed the type catalog", () => {
         const withTypes = createAgentTool(stubCtx(), [
