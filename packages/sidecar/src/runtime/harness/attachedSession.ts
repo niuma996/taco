@@ -518,16 +518,6 @@ export class AttachedSession extends EventEmitter {
                 storedConfig?.value.activeToolNames ?? [],
             );
 
-            // Always candidates are part of the session-start contract: failure is fatal.
-            // A refused candidate is skipped, not fatal — `alwaysLoaded` MCP
-            // tools are configured workspace-wide, but a subagent's profile
-            // still bounds what it may hold.
-            const alwaysCandidates = loadableCandidates(args.toolRegistry.listAlways(), controller);
-            const alwaysTools = await Promise.all(alwaysCandidates.map((c) => c.load()));
-            const alwaysToolMap = new Map(
-                alwaysTools.map((t, i) => [alwaysCandidates[i].name, t] as [string, TacoTool]),
-            );
-
             // `addTools` is only worth installing when something is loadable.
             // A read-only profile with no deferred tools in its whitelist would
             // otherwise hold a tool whose every call is refused.
@@ -538,6 +528,44 @@ export class AttachedSession extends EventEmitter {
             const includeAddTools =
                 args.toolLoadPolicy === undefined || loadableDeferred.length > 0;
             const addTools = createAddToolsTool(controller);
+
+            // Always candidates are part of the session-start contract: a
+            // builtin/MCP candidate's failure is fatal. A refused candidate is
+            // skipped, not fatal — `alwaysLoaded` MCP tools are configured
+            // workspace-wide, but a subagent's profile still bounds what it may
+            // hold.
+            const alwaysCandidates = loadableCandidates(args.toolRegistry.listAlways(), controller);
+            // An extension candidate may not take the whole attach down with
+            // it. A name colliding with the resident set is dropped before it
+            // trips the harness's duplicate-name validation (deferred
+            // candidates need no guard — addTools skips defined names), and a
+            // failed load is skipped with a warning, the same treatment
+            // restoreTools gives deferred candidates.
+            const residentNames = new Set(args.tools.map((tool) => tool.name));
+            if (includeAddTools) residentNames.add(addTools.name);
+            for (const tool of restored) residentNames.add(tool.name);
+            const alwaysEntries = await Promise.all(
+                alwaysCandidates.map(async (candidate) => {
+                    if (residentNames.has(candidate.name)) {
+                        log.warn(
+                            `skipping always tool candidate "${candidate.name}" from "${candidate.extensionName ?? "unknown"}": a resident tool already owns the name`,
+                        );
+                        return undefined;
+                    }
+                    if (candidate.source !== "extension") {
+                        return [candidate.name, await candidate.load()] as const;
+                    }
+                    try {
+                        return [candidate.name, await candidate.load()] as const;
+                    } catch (error) {
+                        log.warn(
+                            `skipping always tool candidate "${candidate.name}" from "${candidate.extensionName ?? "unknown"}": ${error instanceof Error ? error.message : String(error)}`,
+                        );
+                        return undefined;
+                    }
+                }),
+            );
+            const alwaysToolMap = new Map(alwaysEntries.filter((entry) => entry !== undefined));
             initialTools = [
                 ...args.tools,
                 ...(includeAddTools ? [addTools] : []),

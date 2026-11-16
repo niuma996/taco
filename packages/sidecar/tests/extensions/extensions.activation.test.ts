@@ -392,6 +392,48 @@ describe("activation", () => {
             ]);
         });
 
+        it("clears a session-stage failure record once a later activation succeeds", async () => {
+            const r = new ExtensionRegistry();
+            let shouldFail = true;
+            const api = createExtensionApi(
+                {
+                    name: "flaky-session",
+                    version: "0.0.1",
+                    apiVersion: "1",
+                    permissions: ["lifecycle"],
+                },
+                r,
+                silentLogger,
+            );
+            api.registerSessionActivator(() => {
+                if (shouldFail) throw new Error("session boom");
+                return { disposers: [] };
+            });
+            const workspace = await activateExtensions(r, { cwd: "/tmp" });
+            const ctx = {
+                cwd: "/tmp",
+                sessionId: "s1",
+                sessionKind: "main" as const,
+                isIm: false,
+                config: {},
+            };
+            await workspace.activateSession(ctx);
+            assert.equal(
+                r.report.failed.filter((e) => e.name === "flaky-session" && e.stage === "session")
+                    .length,
+                1,
+                "the failed activation must be recorded",
+            );
+            shouldFail = false;
+            await workspace.activateSession({ ...ctx, sessionId: "s2" });
+            assert.equal(
+                r.report.failed.filter((e) => e.name === "flaky-session" && e.stage === "session")
+                    .length,
+                0,
+                "a later success must lift the session-stage failure",
+            );
+        });
+
         it("delivers each workspace activator's frozen configuration to its run-end hooks", async () => {
             const registry = new ExtensionRegistry();
             const values: unknown[] = [];

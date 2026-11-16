@@ -56,6 +56,15 @@ const TAG_GUIDANCE =
 
 /** How many recent commits to inject. */
 const COMMIT_LIMIT = 5;
+/**
+ * Per-command ceilings, sized so the context hook's worst case fits the
+ * HOOK_TIMEOUT_MS (2s) budget: probe, log and status run in parallel, so the
+ * worst total is the slowest single command, not their sum. execFile's own
+ * timeout is what SIGTERMs a stuck git child.
+ */
+const PROBE_TIMEOUT_MS = 800;
+const LOG_TIMEOUT_MS = 1500;
+const STATUS_TIMEOUT_MS = 1500;
 /** `--stat` line cap (number of files shown per commit). */
 const STAT_FILE_LIMIT = 8;
 /** `--stat` total line width; wide enough that typical repo paths aren't elided. */
@@ -79,7 +88,7 @@ interface GitProbeResult {
 async function probeGit(cwd: string): Promise<GitProbeResult> {
     try {
         await execFileAsync("git", ["-C", cwd, "rev-parse", "--is-inside-work-tree"], {
-            timeout: 2000,
+            timeout: PROBE_TIMEOUT_MS,
             env: scrubbedProcessEnv(),
             ...HIDDEN_WINDOWS_SPAWN,
         });
@@ -115,7 +124,7 @@ async function readRecentCommits(cwd: string, n: number): Promise<Commit[]> {
             "--stat-graph-width=10",
         ],
         {
-            timeout: 5000,
+            timeout: LOG_TIMEOUT_MS,
             maxBuffer: 256 * 1024,
             env: scrubbedProcessEnv(),
             ...HIDDEN_WINDOWS_SPAWN,
@@ -180,7 +189,7 @@ interface UncommittedFiles {
 export async function readUncommittedFiles(cwd: string): Promise<UncommittedFiles> {
     const run = (args: string[]): Promise<{ code: number; stdout: string }> =>
         execFileAsync("git", ["-C", cwd, ...UNQUOTED_PATHS, ...args], {
-            timeout: 3000,
+            timeout: STATUS_TIMEOUT_MS,
             maxBuffer: 64 * 1024,
             env: scrubbedProcessEnv(),
             ...HIDDEN_WINDOWS_SPAWN,
@@ -245,11 +254,14 @@ export function buildGitContextHook(
     config: Readonly<Record<string, unknown>> = {},
 ): ContextHook {
     return async (event: ContextEvent): Promise<ContextResult | undefined> => {
-        if (!(await probeGit(cwd)).ok) return undefined;
         const commitLimit = (config.commitLimit as number | undefined) ?? COMMIT_LIMIT;
         const fileLimit = (config.fileLimit as number | undefined) ?? 50;
-        // An unborn branch has no log, but its untracked files are still useful.
-        const [commits, uncommittedFiles] = await Promise.all([
+        // Probe and reads run in parallel so the hook stays inside its budget;
+        // on a non-git directory every command fails fast and the probe verdict
+        // below discards their output.
+        const [probe, commits, uncommittedFiles] = await Promise.all([
+            probeGit(cwd),
+            // An unborn branch has no log, but its untracked files are still useful.
             config.includeCommits === false || commitLimit === 0
                 ? Promise.resolve([])
                 : readRecentCommits(cwd, commitLimit).catch(() => []),
@@ -257,6 +269,7 @@ export function buildGitContextHook(
                 ? Promise.resolve({ staged: [], unstaged: [], untracked: [] })
                 : readUncommittedFiles(cwd),
         ]);
+        if (!probe.ok) return undefined;
         const gitAttrs = { source: "workspace", n: String(commits.length) };
         const commitsTag =
             commits.length > 0 ? tagWrap(TAG_NAME, formatCommits(commits), gitAttrs) : undefined;

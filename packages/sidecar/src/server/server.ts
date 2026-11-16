@@ -1317,6 +1317,10 @@ export class SidecarServer implements ServerRpcSurface {
             // process: every caller of ensureWorkspace sees the same error
             // and can retry.
             await (ws ? ws.dispose() : mcpLease.release()).catch(() => undefined);
+            // The ctor never ran: ws.dispose() (which would release the
+            // workspace activators' disposers) is unavailable, so the
+            // extension set acquired in loadWorkspaceAssets is released here.
+            if (!ws) await extensions?.dispose().catch(() => undefined);
             throw err;
         }
 

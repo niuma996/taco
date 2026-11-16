@@ -230,6 +230,9 @@ export class WorkspaceExtensionSet {
                 const extensionCtx = { ...ctx, config: entry.config ?? Object.freeze({}) };
                 const contribution = await entry.activator(extensionCtx);
                 if (contribution) set.addContribution(entry.extName, contribution, extensionCtx);
+                // A successful run lifts the extension's earlier session-stage
+                // failure; workspace/global stage records keep their semantics.
+                this.registry?.clearFailed(entry.extName, "session");
             } catch (error) {
                 this.registry?.recordFailed(
                     entry.extName,

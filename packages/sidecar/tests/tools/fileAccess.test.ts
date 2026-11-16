@@ -217,4 +217,28 @@ describe("isFsToolDenied", () => {
             restoreExtensionFileAccess(snapshot);
         }
     });
+
+    it("keeps a declaration when another extension registers the same name without fileAccess", () => {
+        const snapshot = extensionFileAccessSnapshot();
+        try {
+            const registry = new ExtensionRegistry();
+            const logger = { info: () => {}, warn: () => {}, error: () => {}, debug: () => {} };
+            const manifest = {
+                version: "0.0.1",
+                apiVersion: "1" as const,
+                permissions: ["tools" as const],
+            };
+            const owner = createExtensionApi({ ...manifest, name: "owner-ext" }, registry, logger);
+            const other = createExtensionApi({ ...manifest, name: "other-ext" }, registry, logger);
+            const tool = { name: "declaredTool", description: "shared" } as unknown as TacoTool;
+            owner.registerTool(tool, { fileAccess: { write: "output" } });
+            other.registerTool(tool);
+            assert.deepEqual(fileAccessOf("declaredTool"), { write: "output" });
+            // The owner itself may still withdraw its own declaration.
+            owner.registerTool(tool);
+            assert.equal(fileAccessOf("declaredTool"), undefined);
+        } finally {
+            restoreExtensionFileAccess(snapshot);
+        }
+    });
 });

@@ -583,7 +583,7 @@ export class WorkspaceRuntime extends EventEmitter {
         // These declarations are configuration with process lifetime, not resources
         // owned by an individual workspace; built-in declarations remain immutable.
         for (const entry of this.extensions?.toolsWithSource() ?? []) {
-            registerExtensionFileAccess(entry.tool.name, entry.fileAccess);
+            registerExtensionFileAccess(entry.tool.name, entry.fileAccess, entry.name);
         }
         const extensionToolCandidates = (this.extensions?.toolCandidates() ?? []).map(
             ({ name, candidate }) => ({
@@ -593,7 +593,11 @@ export class WorkspaceRuntime extends EventEmitter {
             }),
         );
         for (const candidate of extensionToolCandidates) {
-            registerExtensionFileAccess(candidate.name, candidate.fileAccess);
+            registerExtensionFileAccess(
+                candidate.name,
+                candidate.fileAccess,
+                candidate.extensionName,
+            );
         }
         this.toolRegistry = new CompositeDeferredToolRegistry(
             baseToolRegistry,

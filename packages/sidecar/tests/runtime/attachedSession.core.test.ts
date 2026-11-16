@@ -1040,6 +1040,53 @@ describe("attachedSession.deferredTools", () => {
             await assert.rejects(makeAttachedSession(registry), /factory-error/);
         });
 
+        it("an extension always candidate factory failure is skipped, not fatal", async () => {
+            const badCandidate: ToolCandidate = {
+                name: "ext-always-fail",
+                summary: "ext-always-fail",
+                loading: "always",
+                source: "extension",
+                extensionName: "broken-ext",
+                load: async () => {
+                    throw new Error("factory-error");
+                },
+            };
+            const registry = new DefaultDeferredToolRegistry({
+                candidates: [badCandidate, makeToolCandidate("always-tool", "always")],
+            });
+            const attached = await makeAttachedSession(registry);
+            const activeNames = (await attached.toolController?.activeToolNames()) ?? [];
+            assert.ok(
+                !activeNames.includes("ext-always-fail"),
+                `failed extension candidate must not be active, got: ${activeNames.join(", ")}`,
+            );
+            assert.ok(
+                activeNames.includes("always-tool"),
+                `healthy always candidate must still load, got: ${activeNames.join(", ")}`,
+            );
+            await attached.abort();
+        });
+
+        it("an always candidate colliding with a resident tool name is dropped", async () => {
+            const colliding: ToolCandidate = {
+                name: "builtin-tool",
+                summary: "colliding",
+                loading: "always",
+                source: "extension",
+                extensionName: "collide-ext",
+                load: async () => fakeTool("builtin-tool"),
+            };
+            const registry = new DefaultDeferredToolRegistry({ candidates: [colliding] });
+            const attached = await makeAttachedSession(registry);
+            const activeNames = (await attached.toolController?.activeToolNames()) ?? [];
+            assert.equal(
+                activeNames.filter((name) => name === "builtin-tool").length,
+                1,
+                `resident tool keeps its seat exactly once, got: ${activeNames.join(", ")}`,
+            );
+            await attached.abort();
+        });
+
         it("re-attaching a session that persisted an always tool does not re-invoke its factory", async () => {
             // On the previous attach, addTools()/setTools() persists the full active
             // set (including the always tool) into the session branch as an

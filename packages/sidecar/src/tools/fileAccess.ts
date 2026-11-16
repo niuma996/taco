@@ -38,7 +38,13 @@ const BUILTIN_FILE_ACCESS: Readonly<Record<string, FileAccess>> = {
     pdfFields: { reads: [{ key: "input" }] },
 };
 
-const EXTENSION_FILE_ACCESS = new Map<string, FileAccess>();
+/** A declaration plus the extension that registered it, when known. */
+export interface ExtensionFileAccessEntry {
+    readonly access: FileAccess;
+    readonly owner?: string;
+}
+
+const EXTENSION_FILE_ACCESS = new Map<string, ExtensionFileAccessEntry>();
 
 /** Fresh snapshot of built-in and extension tools that read or write files. */
 export function getFileAccessToolNames(): readonly string[] {
@@ -48,25 +54,40 @@ export function getFileAccessToolNames(): readonly string[] {
 export function registerExtensionFileAccess(
     toolName: string,
     access: FileAccess | undefined,
+    owner?: string,
 ): void {
-    if (access) EXTENSION_FILE_ACCESS.set(toolName, access);
-    else EXTENSION_FILE_ACCESS.delete(toolName);
+    if (access) {
+        EXTENSION_FILE_ACCESS.set(toolName, {
+            access,
+            ...(owner !== undefined ? { owner } : {}),
+        });
+        return;
+    }
+    const existing = EXTENSION_FILE_ACCESS.get(toolName);
+    // Only the owner may withdraw a declaration: a same-named registration
+    // without fileAccess from another extension must not delete safety
+    // metadata it did not create. Untracked ownership keeps the declaration.
+    if (existing !== undefined && owner !== undefined && existing.owner === owner) {
+        EXTENSION_FILE_ACCESS.delete(toolName);
+    }
 }
 
-export function extensionFileAccessSnapshot(): ReadonlyMap<string, FileAccess> {
+export function extensionFileAccessSnapshot(): ReadonlyMap<string, ExtensionFileAccessEntry> {
     return new Map(EXTENSION_FILE_ACCESS);
 }
 
-export function restoreExtensionFileAccess(snapshot: ReadonlyMap<string, FileAccess>): void {
+export function restoreExtensionFileAccess(
+    snapshot: ReadonlyMap<string, ExtensionFileAccessEntry>,
+): void {
     EXTENSION_FILE_ACCESS.clear();
-    for (const [name, access] of snapshot) EXTENSION_FILE_ACCESS.set(name, access);
+    for (const [name, entry] of snapshot) EXTENSION_FILE_ACCESS.set(name, entry);
 }
 
 export function fileAccessOf(toolName: string): FileAccess | undefined {
     // Core containment and read/write classification are invariants. An extension
     // may override a built-in tool implementation, but never its safety metadata.
     if (Object.hasOwn(BUILTIN_FILE_ACCESS, toolName)) return BUILTIN_FILE_ACCESS[toolName];
-    return EXTENSION_FILE_ACCESS.get(toolName);
+    return EXTENSION_FILE_ACCESS.get(toolName)?.access;
 }
 
 /**

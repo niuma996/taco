@@ -30,7 +30,18 @@ function configFor(
 }
 function view(registry: ExtensionRegistry | undefined, name: string): ExtensionConfigResult {
     const schema = schemaFor(registry, name);
-    const current = configFor(readGlobalConfig().extensionConfig, name);
+    let current: Record<string, unknown>;
+    try {
+        current = configFor(readGlobalConfig().extensionConfig, name);
+    } catch {
+        // A corrupt taco.json must surface as a structured RPC error, not an
+        // opaque internal one. Error details may embed file contents; never
+        // echo the raw error.
+        throw new RpcHandlerError(
+            ErrorCodes.InvalidValue,
+            "Global configuration file could not be parsed; fix taco.json and retry",
+        );
+    }
     const values: Record<string, ExtensionConfigValue> = Object.create(null);
     const configuredSecrets: string[] = [];
     for (const field of extensionConfigFields(schema)) {
@@ -63,9 +74,17 @@ export function registerExtensionConfigHandlers(): void {
     registerMethod("extensionConfigUpdate", false, async ({ server, params }) => {
         const schema = schemaFor(server.extensionRegistry, params.name);
         const fields = new Map(extensionConfigFields(schema).map((field) => [field.key, field]));
-        for (const key of [...Object.keys(params.values), ...(params.unset ?? [])]) {
+        for (const key of Object.keys(params.values)) {
             const field = fields.get(key);
             if (!field || field.readOnly)
+                throw new RpcHandlerError(ErrorCodes.InvalidValue, `Field is not editable: ${key}`);
+        }
+        for (const key of params.unset ?? []) {
+            // A key the schema no longer declares is a stale leftover from an
+            // older version; unsetting it is the only way back to a config
+            // that passes whole-object validation. Declared readOnly fields
+            // stay protected.
+            if (fields.get(key)?.readOnly)
                 throw new RpcHandlerError(ErrorCodes.InvalidValue, `Field is not editable: ${key}`);
         }
         try {

@@ -11,6 +11,7 @@ import { manifest as redactionManifest } from "../../src/extensions/builtin/outp
 import { manifest as projectManifest } from "../../src/extensions/builtin/projectManifests/index.ts";
 import type { BuiltinManifest } from "../../src/extensions/builtinContract.ts";
 import { ExtensionRegistry, registerBuiltinExtensions } from "../../src/extensions/registry.ts";
+import { WorkspaceExtensionDiagnostics } from "../../src/extensions/workspaceDiagnostics.ts";
 import { toToolCallPush } from "../../src/server/push.ts";
 
 const dirs: string[] = [];
@@ -142,7 +143,10 @@ describe("builtin adoption", () => {
         assert.equal(registry.extensionSkillDirs().length, 0);
         assert.deepEqual(set.commandPermissionRules(), ["officecli *"]);
     });
-    it("reports workspace activation independently and refreshes conditional state", async () => {
+    it("reports workspace activation independently and refreshes conditional state", async (t) => {
+        // Probe verdicts are cached for PROBE_CACHE_TTL_MS; advance the clock
+        // past the TTL so the second report re-probes after git init.
+        t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
         const registry = new ExtensionRegistry();
         await registerBuiltinExtensions(registry, new Set(), [
             gitManifest,
@@ -165,6 +169,7 @@ describe("builtin adoption", () => {
         );
         git(cwd, "init", "--initial-branch=main");
         writeFileSync(join(cwd, "Cargo.toml"), "[package]\n");
+        t.mock.timers.tick(6_000);
         const after = await workspace.activationReport();
         assert.equal(after.find((e) => e.name === gitManifest.name)?.state, "active");
         assert.equal(
@@ -246,6 +251,24 @@ it("isolates diagnostic probe failures and preserves other extensions", async ()
     assert.equal(result.find((entry) => entry.name === "broken")?.state, "failed");
     assert.equal(result.find((entry) => entry.name === "broken")?.reason, "probe failed");
     assert.equal(result.find((entry) => entry.name === "healthy")?.state, "active");
+});
+
+it("caches diagnostic probe verdicts briefly so polling does not re-run them", async (t) => {
+    t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
+    const diagnostics = new WorkspaceExtensionDiagnostics();
+    let runs = 0;
+    diagnostics.record("probed", {
+        activationStatus: () => {
+            runs += 1;
+            return { active: true };
+        },
+    });
+    await diagnostics.report();
+    await diagnostics.report();
+    assert.equal(runs, 1, "a poll within the TTL reuses the verdict");
+    t.mock.timers.tick(6_000);
+    await diagnostics.report();
+    assert.equal(runs, 2, "a poll past the TTL probes again");
 });
 
 it("rolls back skill registration summaries after a failed builtin factory", async () => {

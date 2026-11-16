@@ -1,6 +1,16 @@
 import type { ExtensionContributionSummary, ExtensionWorkspaceStatus } from "@taco-ai/protocol";
 import type { WorkspaceContribution } from "./types.ts";
 
+type Probe = NonNullable<WorkspaceContribution["activationStatus"]>;
+type ProbeResult = Awaited<ReturnType<Probe>>;
+
+/**
+ * How long a probe verdict is reused. The plugin panel polls extensionsStatus;
+ * without a cache every poll re-spawns the probes' git / glob child processes.
+ * Keyed per workspace (this class is workspace-scoped) and per probe.
+ */
+const PROBE_CACHE_TTL_MS = 5_000;
+
 export function emptyContributions(): ExtensionContributionSummary {
     return {
         tools: [],
@@ -27,6 +37,7 @@ interface Activation {
 /** Scope-owned observations; never re-run activators or retain workspace state globally. */
 export class WorkspaceExtensionDiagnostics {
     private readonly entries = new Map<string, Activation[]>();
+    private readonly probeCache = new Map<Probe, { at: number; task: Promise<ProbeResult> }>();
 
     add(name: string, activation: Activation): void {
         const entries = this.entries.get(name) ?? [];
@@ -59,6 +70,15 @@ export class WorkspaceExtensionDiagnostics {
         });
     }
 
+    /** Probe verdicts are cached for PROBE_CACHE_TTL_MS; concurrent polls share one run. */
+    private probeCached(probe: Probe): Promise<ProbeResult> {
+        const hit = this.probeCache.get(probe);
+        if (hit && Date.now() - hit.at < PROBE_CACHE_TTL_MS) return hit.task;
+        const task = Promise.resolve().then(() => probe());
+        this.probeCache.set(probe, { at: Date.now(), task });
+        return task;
+    }
+
     async report(): Promise<ExtensionWorkspaceStatus[]> {
         return Promise.all(
             [...this.entries].map(async ([name, activations]) => {
@@ -72,7 +92,9 @@ export class WorkspaceExtensionDiagnostics {
                         continue;
                     }
                     try {
-                        const status = await activation.probe?.();
+                        const status = activation.probe
+                            ? await this.probeCached(activation.probe)
+                            : undefined;
                         if (status && !status.active) {
                             reason ??= status.reason;
                             continue;

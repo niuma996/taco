@@ -12,7 +12,7 @@
 import type { ExtensionContributionSummary, ExtensionDisabledEntry } from "@taco-ai/protocol";
 import { registerExtensionTag, tagRegistry, unregisterExtensionTag } from "../tags/registry.ts";
 import type { TagSpec } from "../tags/types.ts";
-import type { FileAccess } from "../tools/fileAccess.ts";
+import type { ExtensionFileAccessEntry, FileAccess } from "../tools/fileAccess.ts";
 import {
     extensionFileAccessSnapshot,
     registerExtensionFileAccess,
@@ -107,7 +107,7 @@ export interface ExtensionRegistryCheckpoint {
     readonly extensionSkillDirs: number;
     readonly extensionTagIndex: ReadonlyMap<string, ReadonlySet<string>>;
     readonly tagNames: ReadonlySet<string>;
-    readonly extensionFileAccess: ReadonlyMap<string, FileAccess>;
+    readonly extensionFileAccess: ReadonlyMap<string, ExtensionFileAccessEntry>;
     readonly contributions: ReadonlyMap<string, ExtensionContributionSummary>;
 }
 
@@ -256,7 +256,7 @@ export class ExtensionRegistry {
      */
     addTool(name: string, tool: TacoTool, fileAccess?: FileAccess): void {
         this._tools.push({ name, tool, ...(fileAccess ? { fileAccess } : {}) });
-        registerExtensionFileAccess(tool.name, fileAccess);
+        registerExtensionFileAccess(tool.name, fileAccess, name);
         ExtensionRegistry.addName(this.contribution(name).tools, tool.name);
     }
 
@@ -265,7 +265,7 @@ export class ExtensionRegistry {
         contribution: ExtensionToolCandidateWithSource["candidate"],
     ): void {
         this._toolCandidates.push({ name, candidate: contribution });
-        registerExtensionFileAccess(contribution.name, contribution.fileAccess);
+        registerExtensionFileAccess(contribution.name, contribution.fileAccess, name);
         ExtensionRegistry.addName(this.contribution(name).deferredTools, contribution.name);
     }
 
@@ -376,6 +376,17 @@ export class ExtensionRegistry {
             }
         }
         this._report.failed.push({ name, reason, stage });
+    }
+
+    /**
+     * Drop a recorded failure for `name` at `stage`. Called when a later
+     * attempt at that stage succeeds, so a transient failure does not pin the
+     * extension as failed for the process's lifetime.
+     */
+    clearFailed(name: string, stage: "load" | "workspace" | "session"): void {
+        this._report.failed = this._report.failed.filter(
+            (entry) => !(entry.name === name && (entry.stage ?? "load") === stage),
+        );
     }
 
     recordUnauthorized(name: string, method: ExtensionPermission): void {
