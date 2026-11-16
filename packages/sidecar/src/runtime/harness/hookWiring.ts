@@ -11,7 +11,6 @@
 
 import type { InstructionsConfig, SupportedLocale } from "@taco-ai/protocol";
 import type { CheckpointManager } from "../../checkpoints/manager.ts";
-import { redactString } from "../../extensions/builtin/outputRedaction/index.ts";
 import type {
     ContextEvent,
     ContextHookBuckets,
@@ -26,6 +25,7 @@ import type {
 import { withDeadline } from "../../lib/async.ts";
 import { harnessContext } from "../../lib/harnessContext.ts";
 import { createLogger } from "../../lib/logger.ts";
+import { redactString } from "../../lib/secretRedaction.ts";
 import type { MemoryStore } from "../../memory/index.ts";
 import { buildMemoryContextHook } from "../../memory/memoryTag.ts";
 import { createMutationGateHook, type PlanWriteApprover } from "../../permissions/mutationGate.ts";
@@ -655,7 +655,7 @@ export async function wireHarnessHooks(
     // the desktop unescapes on display.
     //
     // Safety: even with debug on, logs must not leak raw API keys — reuse
-    // `outputRedaction.redactString` to scrub before fold.
+    // `secretRedaction.redactString` to scrub before fold.
     if (process.env.TACO_DEBUG_LLM_PAYLOAD) {
         disposers.push(
             harness.hooks.on("before_payload", (event) => {

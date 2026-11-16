@@ -89,4 +89,70 @@ describe("PluginsPane", () => {
         fireEvent.click(toggle);
         expect(screen.queryByText("convertDocument")).toBeNull();
     });
+    it("distinguishes inactive workspace hooks and shows bundled skills and command rules", () => {
+        const base = {
+            tools: [],
+            deferredTools: [],
+            tags: [],
+            contextHooks: 0,
+            toolCallHooks: 0,
+            toolResultHooks: 0,
+            systemPrompts: 0,
+            workspaceActivators: 1,
+            sessionActivators: 0,
+        };
+        const status: ExtensionsStatusResult = {
+            loaded: [
+                {
+                    name: "office",
+                    version: "1",
+                    source: "builtin",
+                    permissions: [],
+                    contributions: { ...base, skillDirs: ["extensions/office/skills"] },
+                },
+            ],
+            disabled: [],
+            disabledEntries: [],
+            failed: [],
+            unauthorized: [],
+            pendingRestart: {
+                loadedButDisabled: [],
+                disabledButEnabled: [],
+                failed: [],
+                configuration: [],
+            },
+            workspace: {
+                cwd: "/a",
+                entries: [
+                    {
+                        name: "office",
+                        state: "active",
+                        contributions: {
+                            ...base,
+                            workspaceActivators: 0,
+                            commandPermissionRules: ["officecli *"],
+                        },
+                    },
+                ],
+            },
+        };
+        render(
+            <PluginsPane
+                status={status}
+                loading={false}
+                error={null}
+                savingName={null}
+                onToggle={() => {}}
+                pendingRestart={false}
+                restarting={false}
+                onRestart={() => {}}
+            />,
+        );
+        expect(screen.getByText("plugins.capabilitySkills")).toBeTruthy();
+        expect(screen.getByText("plugins.capabilityCommandRules")).toBeTruthy();
+        expect(screen.getByText("plugins.activationActive")).toBeTruthy();
+        fireEvent.click(screen.getByRole("button", { name: "plugins.showRegistrations" }));
+        expect(screen.getByText("officecli *")).toBeTruthy();
+        expect(screen.getByText("extensions/office/skills")).toBeTruthy();
+    });
 });

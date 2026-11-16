@@ -331,6 +331,33 @@ env (TACO_*, ANTHROPIC_API_KEY, ...)
 
 扩展的完成事件携带所属扩展的冻结配置。会话清理先停止新事件，等待在途监听器，再按注册反序调用 disposer。每个作用域共用五秒的异步清理等待预算；超时回调可继续在后台执行，剩余 disposer 仍会被调用。同进程内无法中断同步阻塞代码。诊断中的贡献数为进程级注册数，工作区／会话激活器还可能按条件返回额外 Hook。待重启状态由启动时的启用状态、npm 白名单及配置与当前保存值的差异计算。
 
+内置插件与目录／npm 插件共用配置校验和冻结规则。在 `taco.json` 的 `extensionConfig` 下设置，重启后台服务后生效：
+
+```json
+{
+  "extensionConfig": {
+    "@taco/builtin-git-context": {
+      "commitLimit": 5,
+      "fileLimit": 50,
+      "includeCommits": true,
+      "includeWorkingTree": true
+    },
+    "@taco/builtin-officecli": {
+      "bundledSkill": true,
+      "autoApprove": false
+    }
+  }
+}
+```
+
+Git 默认注入五条提交，并在已暂存／未暂存／未跟踪三组中各展示最多五十个文件名。`commitLimit` 范围为 0–50，`0` 表示关闭提交历史；`fileLimit` 范围为 1–200。两个注入开关默认均为 `true`。OfficeCLI 的 `bundledSkill` 和 `autoApprove` 默认也均为 `true`，分别控制内置技能和内存中的 `officecli *` 放行规则；整个插件禁用时两者都移除。项目清单和输出脱敏目前只接受空配置对象。配置无效会在注册前隔离该插件。
+
+Git 和项目清单在每次构建上下文时重新读取，支持工作区打开后初始化仓库、新增或删除清单文件。不使用文件监听器或进程级探测缓存。尚无提交的仓库即使读取提交历史失败，也不会丢失工作区变更。项目清单追加到上下文，保留原始消息前缀。
+
+`extensions.status` 保留无参数的进程级报告，可选传入 `{ "workspace": "<workspace-id>" }` 查询已有运行时，不创建工作区或重新执行激活器。工作区诊断区分生效、未生效（非 Git、无项目清单、IM 排除或配置关闭）和失败状态；进程级注册与工作区实际 Hook、技能及命令规则分开展示。条件状态探测只读，响应仍不包含插件配置值。
+
+输出脱敏插件开关控制发给模型的工具结果。核心工具参数／权限事件、运行时快照和调试载荷继续通过公共脱敏模块处理，不随插件关闭。
+
 **safe view**：`settings.get` / `settings.write` 返回的是
 `TacoGlobalConfigView`，跨 IPC 边界前剥离所有秘密字段：
 

@@ -1,4 +1,5 @@
-import type { ExtensionsStatusResult } from "@taco-ai/protocol";
+import { asWorkspaceId, type ExtensionsStatusResult } from "@taco-ai/protocol";
+import { RpcRemoteError } from "@taco-ai/shared";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import type { TacoClient } from "../lib/clients/tacoClient.ts";
@@ -25,14 +26,25 @@ export function usePluginsPane(
     restartSidecar: () => Promise<void>,
 ): UsePluginsPaneResult {
     const queryClient = useQueryClient();
-    const queryKey = resourceQueryKey(client, "plugins");
+    const queryKey = resourceQueryKey(client, "plugins", activeCwd);
+    const allPluginsKey = resourceQueryKey(client, "plugins");
     const status = useQuery({
         retry: false,
         queryKey,
         enabled: active && Boolean(activeCwd),
-        queryFn: ({ signal }) => {
+        queryFn: async ({ signal }) => {
             signal.throwIfAborted();
-            return client.extensionsStatus();
+            try {
+                return await client.extensionsStatus({
+                    workspace: activeCwd ? asWorkspaceId(activeCwd) : undefined,
+                });
+            } catch (error) {
+                if (error instanceof RpcRemoteError && error.code === "invalid_params") {
+                    signal.throwIfAborted();
+                    return client.extensionsStatus();
+                }
+                throw error;
+            }
         },
     });
     const [extensionSavingName, setExtensionSavingName] = useState<string | null>(null);
@@ -51,7 +63,7 @@ export function usePluginsPane(
                 : current.filter((n) => n !== name);
             const result = await client.settingsWrite({ global: { disabledExtensions: next } });
             applyGlobalConfig(result.global);
-            await refreshQueries(queryClient, { queryKey });
+            await refreshQueries(queryClient, { queryKey: allPluginsKey });
         } catch (e) {
             failWith(e);
         } finally {
@@ -64,7 +76,7 @@ export function usePluginsPane(
         setExtensionRestarting(true);
         try {
             await restartSidecar();
-            await refreshQueries(queryClient, { queryKey });
+            await refreshQueries(queryClient, { queryKey: allPluginsKey });
         } catch (e) {
             failWith(e);
         } finally {

@@ -243,6 +243,10 @@ export interface WorkspaceContribution {
      * same string syntax as taco.json (`officecli *`, `git status`).
      */
     commandPermissionRules?: string[];
+    /** Optional read-only probe for conditional capabilities; must not allocate resources. */
+    activationStatus?: () =>
+        | { active: boolean; reason?: string }
+        | Promise<{ active: boolean; reason?: string }>;
     source?: ExtensionSource;
 }
 

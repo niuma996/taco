@@ -1,4 +1,5 @@
 import type { ExtensionsStatusResult, SkillEntry, SkillsListParams } from "@taco-ai/protocol";
+import { RpcRemoteError } from "@taco-ai/shared";
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { usePluginsPane } from "../../src/hooks/usePluginsPane";
@@ -80,7 +81,7 @@ describe("management queries", () => {
         });
     });
 
-    it("shares process-wide plugin status across workspace readers", async () => {
+    it("keeps plugin activation queries scoped to their workspace", async () => {
         const status: ExtensionsStatusResult = {
             loaded: [],
             disabled: [],
@@ -100,8 +101,25 @@ describe("management queries", () => {
         renderHook(() => usePluginsPane(client, true, "/a", async () => {}), options);
         const two = renderHook(() => usePluginsPane(client, true, "/b", async () => {}), options);
         await waitFor(() => expect(two.result.current.extensionStatus).toEqual(status));
-        expect(extensionsStatus).toHaveBeenCalledTimes(1);
+        expect(extensionsStatus).toHaveBeenCalledTimes(2);
+        expect(extensionsStatus).toHaveBeenCalledWith({ workspace: "/a" });
+        expect(extensionsStatus).toHaveBeenCalledWith({ workspace: "/b" });
     });
+    it("falls back to process diagnostics from a sidecar rejecting workspace params", async () => {
+        const status = { loaded: [], disabled: [], failed: [], unauthorized: [] };
+        const extensionsStatus = vi
+            .fn()
+            .mockRejectedValueOnce(new RpcRemoteError("invalid_params", "unknown workspace field"))
+            .mockResolvedValue(status);
+        const client = { extensionsStatus } as unknown as TacoClient;
+        const view = renderHook(
+            () => usePluginsPane(client, true, "/a", async () => {}),
+            queryWrapper(),
+        );
+        await waitFor(() => expect(view.result.current.extensionStatus).toEqual(status));
+        expect(extensionsStatus).toHaveBeenLastCalledWith();
+    });
+
     it("does not require restart for an unchanged failed plugin", async () => {
         const status: ExtensionsStatusResult = {
             loaded: [],
@@ -202,7 +220,7 @@ describe("management queries", () => {
         await waitFor(() => expect(view.result.current.extensionStatus).toEqual(initial));
         await act(async () => view.result.current.toggleExtension("demo", true));
         expect(view.result.current.extensionError).toBe("disk full");
-        expect(options.queryClient.getQueryData(resourceQueryKey(client, "plugins"))).toEqual(
+        expect(options.queryClient.getQueryData(resourceQueryKey(client, "plugins", "/a"))).toEqual(
             initial,
         );
         expect(view.result.current.extensionPendingRestart).toBe(false);

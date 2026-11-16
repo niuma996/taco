@@ -157,6 +157,10 @@ export interface ExtensionStatusEntry {
 
 /** Registrations made at process startup; activator contributions vary by scope. */
 export interface ExtensionContributionSummary {
+    /** Bundled skill directories contributed by the loaded extension. */
+    skillDirs?: string[];
+    /** Command rules contributed in the queried workspace. */
+    commandPermissionRules?: string[];
     tools: string[];
     deferredTools: string[];
     tags: string[];
@@ -188,7 +192,17 @@ export interface ExtensionPendingRestart {
     configuration: string[];
 }
 
+/** Actual contributions in one existing workspace, separate from startup registrations. */
+export interface ExtensionWorkspaceStatus {
+    name: string;
+    state: "active" | "inactive" | "failed";
+    reason?: string;
+    contributions: ExtensionContributionSummary;
+}
+
 export interface ExtensionsStatusResult {
+    /** Absent when no workspace was requested or its runtime is not open. */
+    workspace?: { cwd: string; entries: ExtensionWorkspaceStatus[] };
     loaded: ExtensionStatusEntry[];
     failed: Array<{
         name: string;

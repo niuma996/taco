@@ -5,7 +5,12 @@
  */
 
 import type { TagSpec } from "../tags/types.ts";
-import type { ExtensionSource, ToolResultHook, WorkspaceActivator } from "./types.ts";
+import type {
+    ExtensionSource,
+    SessionActivator,
+    ToolResultHook,
+    WorkspaceActivator,
+} from "./types.ts";
 
 /**
  * Minimal registry API surface exposed to builtin register functions.
@@ -15,6 +20,12 @@ import type { ExtensionSource, ToolResultHook, WorkspaceActivator } from "./type
  * double-recorded (once by itself, once by the dispatcher's try/catch).
  */
 export interface BuiltinRegistryApi {
+    readonly config: Readonly<Record<string, unknown>>;
+    addSessionActivator(
+        source: ExtensionSource,
+        extName: string,
+        activator: SessionActivator,
+    ): void;
     addExtensionTag(extName: string, name: string, spec: TagSpec): boolean;
     addWorkspaceActivator(
         source: ExtensionSource,
@@ -38,6 +49,7 @@ export interface BuiltinManifest {
     readonly description?: string;
     /** Usage guidance for the extensions.status report. */
     readonly whenToUse?: string;
+    readonly configSchema?: Record<string, unknown>;
     /**
      * Process-level registration callback.
      * Called once at startup if the builtin is not disabled.
@@ -49,7 +61,9 @@ export interface BuiltinManifest {
      * Called once at startup to obtain an activator; the activator itself is
      * invoked once per workspace by `activateExtensions`.
      */
-    readonly activator?: () => WorkspaceActivator | Promise<WorkspaceActivator>;
+    readonly activator?: (
+        config: Readonly<Record<string, unknown>>,
+    ) => WorkspaceActivator | Promise<WorkspaceActivator>;
     /**
      * Skill directories this extension ships, each a path relative to
      * `resourceRoot()` (e.g. "extensions/builtin/officeCli/skills"). Appended
@@ -57,5 +71,7 @@ export interface BuiltinManifest {
      * so disabling the extension removes its bundled skills along with the rest
      * of its contributions. Omitting this means the extension ships no skills.
      */
-    readonly skillDirs?: readonly string[];
+    readonly skillDirs?:
+        | readonly string[]
+        | ((config: Readonly<Record<string, unknown>>) => readonly string[]);
 }

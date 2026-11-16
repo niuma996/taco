@@ -618,6 +618,10 @@ export class SidecarServer implements ServerRpcSurface {
         registerBuiltinMethods();
     }
 
+    workspaceExtensions(cwd: string): Readonly<WorkspaceExtensionSet> | undefined {
+        return this.workspaces.get(asWorkspaceId(cwd))?.extensions;
+    }
+
     /** For method handlers / tests — list cwd of currently active workspaces */
     workspaceIds(): WorkspaceId[] {
         return this.workspaces.keys();
@@ -1779,10 +1783,14 @@ export class SidecarServer implements ServerRpcSurface {
             cwd: join(makeImSessionsRoot(tacoHome(), channelId), "scratch"),
             isIm: true,
         });
-        return {
-            allow: Array.from(new Set([...allow, ...extensions.commandPermissionRules()])),
-            deny,
-        };
+        try {
+            return {
+                allow: Array.from(new Set([...allow, ...extensions.commandPermissionRules()])),
+                deny,
+            };
+        } finally {
+            await extensions.dispose();
+        }
     }
 
     /** IM workspace policy control surface consumed by the `imPolicy.*` handlers. */

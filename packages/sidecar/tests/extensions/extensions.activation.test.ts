@@ -94,16 +94,16 @@ describe("activation", () => {
             assert.equal(set.contextHooks().builtins.length, 0);
         });
 
-        it("builtin git-context activator is skipped on a non-git workspace", async () => {
+        it("conditional hooks remain installed on a non-git workspace", async () => {
             const set = await activateExtensions(registry, { cwd: nonGitDir });
-            assert.equal(set.contextHooks().builtins.length, 0);
+            assert.equal(set.contextHooks().builtins.length, 2);
             assert.equal(set.systemPromptContributors().length, 0);
         });
 
         it("builtin git-context activator contributes on a git workspace", async () => {
             const set = await activateExtensions(registry, { cwd: gitDir });
             // git-context contributes contextHooks (no systemPrompt — guidance is inlined in the tag).
-            assert.equal(set.contextHooks().builtins.length, 1);
+            assert.equal(set.contextHooks().builtins.length, 2);
             assert.equal(set.systemPromptContributors().length, 0);
         });
 
@@ -112,8 +112,8 @@ describe("activation", () => {
                 activateExtensions(registry, { cwd: gitDir }),
                 activateExtensions(registry, { cwd: nonGitDir }),
             ]);
-            assert.equal(setA.contextHooks().builtins.length, 1);
-            assert.equal(setB.contextHooks().builtins.length, 0);
+            assert.equal(setA.contextHooks().builtins.length, 2);
+            assert.equal(setB.contextHooks().builtins.length, 2);
         });
 
         it("process-level builtin tool_result hooks reach the workspace set", async () => {
@@ -131,7 +131,7 @@ describe("activation", () => {
             const disabled = new Set(["@taco/builtin-git-context"]);
             await registerBuiltinExtensions(registry, disabled, BUILTIN_EXTENSIONS);
             const set = await activateExtensions(registry, { cwd: gitDir });
-            assert.equal(set.contextHooks().builtins.length, 0);
+            assert.equal(set.contextHooks().builtins.length, 1);
             assert.equal(set.systemPromptContributors().length, 0);
         });
     });
@@ -940,10 +940,11 @@ describe("gitContext", () => {
     });
 
     describe("builtin git-context extension — activator", () => {
-        it("returns undefined when cwd is not a git repo", async () => {
+        it("keeps a conditional hook when cwd is not yet a git repo", async () => {
             const activator = buildGitContextActivator();
             const result = await activator({ cwd: nonGitDir, config: {} });
-            assert.equal(result, undefined);
+            assert.ok(result?.contextHooks);
+            assert.equal((await result?.activationStatus?.())?.active, false);
         });
 
         it("returns {contextHooks} (no systemPrompt) when cwd is a git repo", async () => {
@@ -965,7 +966,7 @@ describe("officeCli", () => {
 
     describe("officeCli extension — activator", () => {
         it("contributes the officecli allow-rule for any cwd", async () => {
-            const activator = await officeCliManifest.activator?.();
+            const activator = await officeCliManifest.activator?.({});
             assert.ok(activator, "manifest must declare an activator");
             const contribution = await activator({ cwd: "/nonexistent", config: {} });
             assert.deepEqual(contribution?.commandPermissionRules, [OFFICECLI_RULE]);
@@ -1041,7 +1042,12 @@ describe("officeCli", () => {
         }
 
         it("declares the skill dir relative to resourceRoot()", () => {
-            assert.deepEqual(officeCliManifest.skillDirs, [SKILL_DIR]);
+            assert.deepEqual(
+                typeof officeCliManifest.skillDirs === "function"
+                    ? officeCliManifest.skillDirs({})
+                    : officeCliManifest.skillDirs,
+                [SKILL_DIR],
+            );
         });
 
         it("enabled: the bundled skill is scanned from the extension dir", async () => {
@@ -1176,10 +1182,11 @@ describe("projectManifests", () => {
             }
         });
 
-        it("returns undefined when no manifest matches", async () => {
+        it("keeps a conditional hook before manifests exist", async () => {
             const activator = buildProjectManifestsActivator();
             const result = await activator({ cwd: empty, config: {} });
-            assert.equal(result, undefined);
+            assert.ok(result?.contextHooks);
+            assert.equal((await result?.activationStatus?.())?.active, false);
         });
 
         it("returns contextHooks when a single manifest matches", async () => {
@@ -1279,13 +1286,13 @@ describe("projectManifests", () => {
             }
         });
 
-        it("prepends a <project_manifests> tag with inline guidance", async () => {
+        it("appends a <project_manifests> tag without changing the original message prefix", async () => {
             const hook = buildProjectManifestsHook(withManifest);
             const result = await hook({ messages: makeMessages() } as ContextEvent);
             assert.ok(result, "hook must inject on package.json workspace");
             const messages = result?.messages ?? [];
-            assert.ok(messages.length >= 2, "tag prepended + original message");
-            const first = messages[0] as { content: Array<{ text?: string }> };
+            assert.ok(messages.length >= 2, "tag appended + original message");
+            const first = messages.at(-1) as { content: Array<{ text?: string }> };
             const tagText = first.content[0]?.text ?? "";
             assert.match(tagText, /<project_manifests source="workspace">/);
             assert.match(tagText, /package\.json/);

@@ -8,6 +8,7 @@
  *   `extensions → runtime → extensions` cycle.
  */
 
+import type { ExtensionWorkspaceStatus } from "@taco-ai/protocol";
 import { createLogger } from "../lib/logger.ts";
 import type {
     ContextHookBuckets,
@@ -29,6 +30,8 @@ import type {
     ToolResultHook,
     WorkspaceContribution,
 } from "./types.ts";
+
+import { WorkspaceExtensionDiagnostics } from "./workspaceDiagnostics.ts";
 
 const log = createLogger("taco-ext");
 
@@ -159,7 +162,28 @@ export class WorkspaceExtensionSet {
     private readonly _disposers: OwnedDisposer[] = [];
     private readonly disposal: { promise?: Promise<void> } = {};
 
-    constructor(private readonly registry?: ExtensionRegistry) {}
+    private readonly diagnostics = new WorkspaceExtensionDiagnostics();
+
+    constructor(private readonly registry?: ExtensionRegistry) {
+        for (const entry of registry?.report.loaded ?? []) {
+            this.diagnostics.add(entry.name, {
+                contributions: { ...entry.contributions, workspaceActivators: 0 },
+            });
+        }
+    }
+
+    recordActivation(
+        name: string,
+        contribution?: WorkspaceContribution,
+        failure?: string,
+        reason?: string,
+    ): void {
+        this.diagnostics.record(name, contribution, failure, reason);
+    }
+
+    activationReport(): Promise<ExtensionWorkspaceStatus[]> {
+        return this.diagnostics.report();
+    }
 
     addContribution(
         source: ExtensionSource,
@@ -291,13 +315,20 @@ export async function activateExtensions(
                     ctx.isIm &&
                     (entry.extName === "@taco/builtin-git-context" ||
                         entry.extName === "@taco/builtin-project-manifest")
-                )
+                ) {
+                    set.recordActivation(entry.extName, undefined, undefined, "imWorkspace");
                     continue;
-                const result = await entry.activator({ ...ctx, config: {} });
+                }
+                const result = await entry.activator({
+                    ...ctx,
+                    config: entry.config ?? Object.freeze({}),
+                });
+                set.recordActivation(entry.extName, result);
                 if (result !== undefined) {
                     set.addContribution(entry.source, result, entry.extName, entry.config);
                 }
             } catch (e) {
+                set.recordActivation(entry.extName, undefined, (e as Error).message);
                 registry.recordFailed(
                     entry.extName,
                     `workspace activation: ${(e as Error).message}`,

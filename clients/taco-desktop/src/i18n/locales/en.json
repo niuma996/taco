@@ -682,7 +682,20 @@
     "registrationToolResult": "Tool result hooks",
     "registrationPrompt": "Prompt contributors",
     "registrationWorkspace": "Workspace activators",
-    "registrationSession": "Session activators"
+    "registrationSession": "Session activators",
+    "capabilitySkills": "Bundled skills",
+    "capabilityCommandRules": "Command permissions",
+    "registrationSkills": "Skill directories",
+    "registrationCommandRules": "Command allow rules",
+    "activationActive": "Active here",
+    "activationInactive": "Not active here",
+    "activationFailed": "Activation failed",
+    "workspaceContributions": "Contributions in this workspace",
+    "inactiveNotGit": "This workspace is not a Git repository or Git is unavailable.",
+    "inactiveNoManifests": "No supported project manifest was detected.",
+    "inactiveIm": "Workspace context is excluded from IM conversations.",
+    "inactiveConfiguration": "These capabilities are turned off in the plugin configuration.",
+    "activationReason": "{{reason}}"
   },
   "channels": {
     "title": "Channels",

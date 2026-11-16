@@ -19,7 +19,7 @@ import {
     type ToolCallUpdateParams,
     type WorkspaceId,
 } from "@taco-ai/protocol";
-import { redactUnknown } from "../extensions/builtin/outputRedaction/index.ts";
+import { redactUnknown } from "../lib/secretRedaction.ts";
 
 /**
  * Scrub tool-call `args` before pushing to the desktop UI.

@@ -24,13 +24,8 @@ import { isAbsolute, join, relative } from "node:path";
 import fg from "fast-glob";
 import ignore from "ignore";
 import type { ContextEvent, ContextResult } from "../../../extensions/types.ts";
-import type { AgentMessage } from "../../../runtime/pi/types.ts";
-import {
-    createUserMessage,
-    escapeTagText,
-    prefixTagSource,
-    tagWrap,
-} from "../../../tags/builder.ts";
+import { appendUserTag } from "../../../tags/appendUserTag.ts";
+import { escapeTagText, tagWrap } from "../../../tags/builder.ts";
 import type { TagSpec } from "../../../tags/types.ts";
 import { MANIFEST_SAFE_DEFAULT_IGNORES } from "../../../tools/safeDefaults.ts";
 import type { BuiltinManifest } from "../../builtinContract.ts";
@@ -124,7 +119,7 @@ function gitignoreMatcher(cwd: string): ReturnType<typeof ignore> {
 }
 
 /**
- * Probe `cwd` once for matching root manifests. Returns filenames relative to
+ * Probe `cwd` for matching root manifests. Returns filenames relative to
  * `cwd`, sorted alphabetically, with duplicates removed (e.g. `*.csproj` might
  * match both the project file and its shared props file; we surface both
  * because both are useful).
@@ -167,38 +162,34 @@ function formatManifests(filenames: ReadonlyArray<string>): string {
 /**
  * Context hook factory bound to a specific `cwd`.
  *
- * Probes on first invocation and caches the result per-cwd. Returns `undefined`
- * when no manifest is detected (the activator already short-circuits IM
- * workspaces, so this hook only ever runs in the local-channel path).
+ * Re-detects manifests per context build so newly created or removed files
+ * are reflected without reopening the workspace.
  */
 export function buildProjectManifestsHook(cwd: string): ContextHook {
-    let probed = false;
-    let manifests: ReadonlyArray<string> = [];
-
     return async (event: ContextEvent): Promise<ContextResult | undefined> => {
-        if (!probed) {
-            manifests = await detectManifests(cwd);
-            probed = true;
-        }
+        const manifests = await detectManifests(cwd);
         if (manifests.length === 0) return undefined;
-
-        const tag: AgentMessage = createUserMessage(
-            prefixTagSource(
-                tagWrap(TAG_NAME, formatManifests(manifests), { source: "workspace" }),
-                "external-data",
-            ),
+        appendUserTag(
+            event.messages,
+            tagWrap(TAG_NAME, formatManifests(manifests), { source: "workspace" }),
+            "external-data",
         );
-        return { messages: [tag, ...event.messages] };
+        return { messages: event.messages };
     };
 }
 
-/** Workspace activator — runs the probe async, returns hooks if anything matched. */
+/** Install a conditional hook even before the project has any manifests. */
 export function buildProjectManifestsActivator(): WorkspaceActivator {
-    return async (ctx) => {
-        const manifests = await detectManifests(ctx.cwd);
-        if (manifests.length === 0) return undefined;
-        return { contextHooks: [buildProjectManifestsHook(ctx.cwd)] };
-    };
+    return (ctx) => ({
+        contextHooks: [buildProjectManifestsHook(ctx.cwd)],
+        activationStatus: async () => {
+            const files = await detectManifests(ctx.cwd);
+            return {
+                active: files.length > 0,
+                reason: files.length > 0 ? undefined : "noProjectManifests",
+            };
+        },
+    });
 }
 
 /** Get the tag spec — exposed so the loader can register it. */
@@ -209,11 +200,12 @@ export function getProjectManifestsTagSpec(): TagSpec {
 /** Builtin manifest — self-describes metadata, tag spec, and workspace activator. */
 export const manifest: BuiltinManifest = {
     name: BUILTIN_NAME,
-    version: "0.1.0",
+    version: "0.2.0",
     description:
         "Injects a hidden <project_manifests> tag listing detected root-level manifest filenames (package.json, Cargo.toml, etc.) so the model can recognize the language stack and package manager. Survives compaction. Silently no-ops when no manifest is detected. Always disabled on IM/third-party channels (see extensions/activation.ts).",
+    configSchema: { type: "object", additionalProperties: false },
     whenToUse:
-        "Built-in. Disable via `disabledExtensions` in ~/.taco/taco.json if you don't want manifest filenames surfaced.",
+        "Use to recognize project languages and package managers, including manifests created during the session. Only filenames are shared with the model.",
     register: (registry) => {
         registry.addExtensionTag(BUILTIN_NAME, TAG_SPEC.name, TAG_SPEC);
     },

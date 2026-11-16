@@ -20,6 +20,7 @@ import {
 } from "../tools/fileAccess.ts";
 import type { TacoTool } from "../tools/index.ts";
 import type { BuiltinManifest, BuiltinRegistryApi } from "./builtinContract.ts";
+import { resolveExtensionConfig } from "./configuration.ts";
 import type {
     ContextHook,
     ExtensionPermission,
@@ -171,6 +172,7 @@ export class ExtensionRegistry {
                         tools: [...value.tools],
                         deferredTools: [...value.deferredTools],
                         tags: [...value.tags],
+                        ...(value.skillDirs ? { skillDirs: [...value.skillDirs] } : {}),
                     },
                 ]),
             ),
@@ -316,8 +318,11 @@ export class ExtensionRegistry {
      * them — so their bundled skills are absent from the scan entirely rather
      * than filtered out by name.
      */
-    addExtensionSkillDirs(dirs: readonly string[]): void {
+    addExtensionSkillDirs(dirs: readonly string[], name = "unknown"): void {
         this._extensionSkillDirs.push(...dirs);
+        this.contribution(name).skillDirs = [
+            ...new Set([...(this.contribution(name).skillDirs ?? []), ...dirs]),
+        ];
     }
 
     /**
@@ -464,6 +469,7 @@ export async function registerBuiltinExtensions(
     registry: ExtensionRegistry,
     disabledExtensions: ReadonlySet<string> = new Set(),
     manifests: readonly BuiltinManifest[] = [],
+    extensionConfig: Record<string, unknown> = {},
 ): Promise<void> {
     // Narrowed view handed to `manifest.register` — deliberately excludes
     // recordLoaded/recordFailed so a builtin cannot double-record itself;
@@ -475,19 +481,29 @@ export async function registerBuiltinExtensions(
                 source: "builtin",
                 description: manifest.description,
                 whenToUse: manifest.whenToUse,
+                configSchema: manifest.configSchema,
             });
             continue;
         }
 
         const checkpoint = registry.checkpoint();
-        const builtinApi: BuiltinRegistryApi = {
-            addExtensionTag: (extName, name, spec) => registry.addExtensionTag(extName, name, spec),
-            addWorkspaceActivator: (source, extName, activator) =>
-                registry.addWorkspaceActivator(source, extName, activator),
-            addToolResultInterceptor: (source, hook) =>
-                registry.addToolResultInterceptor(source, hook, manifest.name),
-        };
         try {
+            const config = resolveExtensionConfig(
+                manifest.name,
+                extensionConfig,
+                manifest.configSchema,
+            );
+            const builtinApi: BuiltinRegistryApi = {
+                config,
+                addSessionActivator: (source, extName, activator) =>
+                    registry.addSessionActivator(source, extName, activator, config),
+                addExtensionTag: (extName, name, spec) =>
+                    registry.addExtensionTag(extName, name, spec),
+                addWorkspaceActivator: (source, extName, activator) =>
+                    registry.addWorkspaceActivator(source, extName, activator, config),
+                addToolResultInterceptor: (source, hook) =>
+                    registry.addToolResultInterceptor(source, hook, manifest.name),
+            };
             if (manifest.register) {
                 await manifest.register(builtinApi);
             }
@@ -496,7 +512,8 @@ export async function registerBuiltinExtensions(
                 registry.addWorkspaceActivator(
                     "builtin",
                     manifest.name,
-                    await manifest.activator(),
+                    await manifest.activator(config),
+                    config,
                 );
             }
 
@@ -506,7 +523,11 @@ export async function registerBuiltinExtensions(
             //   - a throwing register/activator lands the entry in `failed`
             //     only, never both `loaded` and `failed`
             if (manifest.skillDirs) {
-                registry.addExtensionSkillDirs(manifest.skillDirs);
+                const dirs =
+                    typeof manifest.skillDirs === "function"
+                        ? manifest.skillDirs(config)
+                        : manifest.skillDirs;
+                registry.addExtensionSkillDirs(dirs, manifest.name);
             }
             const tags = registry.extensionTagsFor(manifest.name);
             registry.recordLoaded({
@@ -514,6 +535,7 @@ export async function registerBuiltinExtensions(
                 version: manifest.version,
                 source: "builtin",
                 permissions: [],
+                configSchema: manifest.configSchema,
                 description: manifest.description,
                 whenToUse: manifest.whenToUse,
                 ...(tags.length > 0 ? { tags } : {}),

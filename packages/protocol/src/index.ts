@@ -305,6 +305,7 @@ export type {
     ExtensionStatusEntry,
     ExtensionsStatusParams,
     ExtensionsStatusResult,
+    ExtensionWorkspaceStatus,
     McpCreateConfigParams,
     McpDeleteConfigParams,
     McpDeleteConfigResult,

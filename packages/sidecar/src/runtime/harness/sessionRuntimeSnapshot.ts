@@ -1,7 +1,7 @@
 /** Wire projection of a source lane watch, without a second runtime cache. */
 import type { SessionRuntimeSnapshot } from "@taco-ai/protocol";
 import { viewUserContent } from "../../attachments/userMessageView.ts";
-import { redactUnknown } from "../../extensions/builtin/outputRedaction/index.ts";
+import { redactUnknown } from "../../lib/secretRedaction.ts";
 import type { AttachedSession } from "./attachedSession.ts";
 
 type LaneSnapshot = Awaited<ReturnType<AttachedSession["watchSnapshot"]>>["snapshot"];

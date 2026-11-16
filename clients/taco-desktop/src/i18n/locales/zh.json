@@ -682,7 +682,20 @@
     "registrationToolResult": "工具结果处理",
     "registrationPrompt": "提示词补充",
     "registrationWorkspace": "工作区加载入口",
-    "registrationSession": "会话加载入口"
+    "registrationSession": "会话加载入口",
+    "capabilitySkills": "内置技能",
+    "capabilityCommandRules": "命令权限",
+    "registrationSkills": "技能目录",
+    "registrationCommandRules": "命令放行规则",
+    "activationActive": "当前工作区生效",
+    "activationInactive": "当前工作区未生效",
+    "activationFailed": "工作区激活失败",
+    "workspaceContributions": "当前工作区实际贡献",
+    "inactiveNotGit": "当前工作区不是 Git 仓库，或 Git 不可用。",
+    "inactiveNoManifests": "尚未检测到支持的项目清单。",
+    "inactiveIm": "IM 会话不提供此工作区上下文。",
+    "inactiveConfiguration": "插件配置已关闭这些能力。",
+    "activationReason": "{{reason}}"
   },
   "channels": {
     "title": "渠道",

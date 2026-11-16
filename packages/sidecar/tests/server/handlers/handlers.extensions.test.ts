@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { before, beforeEach, describe, it } from "node:test";
 import type { ExtensionsStatusResult } from "@taco-ai/protocol";
 import { saveGlobalConfig } from "../../../src/config/config.ts";
+import { activateExtensions } from "../../../src/extensions/activation.ts";
 import { ExtensionRegistry } from "../../../src/extensions/registry.ts";
 import { registerExtensionsHandlers } from "../../../src/server/handlers/extensions.ts";
 import { toView } from "../../../src/server/handlers/settings.ts";
@@ -119,5 +120,32 @@ describe("extensions.status", () => {
         assert.equal(result.failed[0]?.reason, "import failed");
         assert.ok(Object.values(result.pendingRestart).every((names) => names.length === 0));
         writeFileSync(join(home, "taco.json"), "{}");
+    });
+    it("returns activation state only for the requested existing workspace", async () => {
+        const registry = new ExtensionRegistry();
+        registry.recordLoaded({ name: "test", version: "1", source: "external", permissions: [] });
+        registry.addWorkspaceActivator("external", "test", () => ({
+            commandPermissionRules: ["example *"],
+        }));
+        const extensions = await activateExtensions(registry, { cwd: home });
+        const server = {
+            extensionRegistry: registry,
+            workspaceExtensions: (cwd: string) => (cwd === home ? extensions : undefined),
+        };
+        const result = await callMethod<ExtensionsStatusResult>("extensions.status", {
+            server,
+            params: { workspace: home },
+        });
+        assert.equal(result.workspace?.entries[0]?.state, "active");
+        assert.deepEqual(result.workspace?.entries[0]?.contributions.commandPermissionRules, [
+            "example *",
+        ]);
+        const absent = await callMethod<ExtensionsStatusResult>("extensions.status", {
+            server,
+            params: { workspace: home + "/absent" },
+        });
+        assert.equal(absent.workspace, undefined);
+        const global = await callMethod<ExtensionsStatusResult>("extensions.status", { server });
+        assert.equal(global.workspace, undefined);
     });
 });

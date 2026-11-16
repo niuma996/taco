@@ -432,6 +432,33 @@ The on-disk `taco.json` shape is `TacoGlobalConfigShape` in
 
 Extension run-end events carry the owning extension's frozen configuration. Session disposal stops new events, drains listeners, then calls disposers in reverse registration order. Each scope has a shared five-second asynchronous cleanup budget; timed-out callbacks can continue in the background and remaining disposers are still invoked. Synchronous blocking code cannot be interrupted in-process. Extension diagnostics show process-level registration counts; workspace/session activators can contribute additional hooks conditionally. Pending-restart diagnostics compare startup enablement, npm allowlist membership, and configuration with the saved values.
 
+Built-in extensions use the same configuration validation and frozen values as directory/npm extensions. Configure them under `extensionConfig` in `taco.json`, then restart the background service:
+
+```json
+{
+  "extensionConfig": {
+    "@taco/builtin-git-context": {
+      "commitLimit": 5,
+      "fileLimit": 50,
+      "includeCommits": true,
+      "includeWorkingTree": true
+    },
+    "@taco/builtin-officecli": {
+      "bundledSkill": true,
+      "autoApprove": false
+    }
+  }
+}
+```
+
+Git defaults are five commits and up to fifty filenames per staged/unstaged/untracked group. `commitLimit` accepts 0–50 (`0` disables commit history), and `fileLimit` accepts 1–200. Both injection switches default to `true`. OfficeCLI's `bundledSkill` and `autoApprove` both default to `true`; they independently control the bundled skill and the in-memory `officecli *` allow-rule. Disabling the entire extension removes both contributions. Project manifests and output redaction currently accept an empty configuration object only. Invalid values isolate the affected plugin before registration.
+
+Git and project manifests are re-read on each context build, including repositories initialized and manifest files created after workspace opening. No file watchers or process-wide probe caches are used. Git's commit-log failure does not suppress working-tree data on an unborn branch. Manifest context is appended to preserve the original message prefix.
+
+`extensions.status` retains the no-params process report and optionally accepts `{ "workspace": "<workspace-id>" }`. Workspace diagnostics inspect an already-open runtime and never create a workspace or re-run activators. They distinguish active, inactive (non-Git, no manifests, IM exclusion, or disabled capabilities), and failed states, and separate startup registrations from actual workspace hooks, skills and command rules. Conditional status probes are read-only. Plugin configuration values remain excluded from the response.
+
+Output redaction's plugin switch controls tool results sent to the model. Core tool-argument/permission-event, runtime-snapshot and debug-payload redaction use the shared secret-redaction library independently of that switch.
+
 The **safe view** (`TacoGlobalConfigView`) returned by `settings.get`
 strips every secret-bearing field before it crosses the IPC boundary:
 API keys become `MaskedKey`, and `mcpServers[i].{env,headers,command,args,url,cwd}`

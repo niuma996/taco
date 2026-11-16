@@ -9,6 +9,7 @@
 
 import type { SystemPromptContributor } from "../prompts/buildSystemPrompt.ts";
 import type { TagSpec } from "../tags/types.ts";
+import { freezeExtensionConfig } from "./configuration.ts";
 import type { ExtensionRegistry } from "./registry.ts";
 import { EXTERNAL_SOURCE } from "./registry.ts";
 import type {
@@ -54,6 +55,7 @@ const WORKSPACE_PERMISSIONS: Record<
     commandPermissionRules: "commandPermissions",
     sessionActivators: "lifecycle",
     disposers: "lifecycle",
+    activationStatus: "context",
 } as const;
 
 export function createExtensionApi(
@@ -64,7 +66,7 @@ export function createExtensionApi(
     config: Readonly<Record<string, unknown>> = {},
 ): ExtensionApi {
     const declared = new Set<ExtensionPermission>(manifest.permissions);
-    const frozenConfig = deepFreeze(structuredClone(config));
+    const frozenConfig = freezeExtensionConfig(structuredClone(config));
 
     const check = (perm: ExtensionPermission, method = PERM_LABELS[perm]): boolean => {
         if (declared.has(perm)) return true;
@@ -174,11 +176,4 @@ export function createExtensionApi(
             }
         },
     };
-}
-
-function deepFreeze<T>(value: T, seen = new WeakSet<object>()): T {
-    if (!value || typeof value !== "object" || seen.has(value)) return value;
-    seen.add(value);
-    for (const child of Object.values(value)) deepFreeze(child, seen);
-    return Object.freeze(value);
 }

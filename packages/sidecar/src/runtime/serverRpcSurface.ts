@@ -29,7 +29,7 @@ import type {
     WorkspaceCleanupResult,
     WorkspaceId,
 } from "@taco-ai/protocol";
-import type { ExtensionRegistry } from "../extensions/index.ts";
+import type { ExtensionRegistry, WorkspaceExtensionSet } from "../extensions/index.ts";
 import type { Actor, Job, JobHistoryEntry, JobRunResult } from "../scheduler/types.ts";
 import type { WorkControl } from "../work/workService.ts";
 import type { QueuedWatch } from "./harness/queuedWatch.ts";
@@ -153,6 +153,8 @@ export interface ServerRpcSurface {
      */
     hydrateSessionEvents(workspace: WorkspaceId, sessionId: SessionId): Promise<void>;
     readonly extensionRegistry?: ExtensionRegistry;
+    /** Inspect existing extensions without creating a workspace. */
+    workspaceExtensions?(cwd: string): Readonly<WorkspaceExtensionSet> | undefined;
     /**
      * Process-level API key store. The `settings.write` handler calls `update()` to trigger hot reload —
      * pi's `Models` reads keys lazily via CredentialStore.read per provider id,

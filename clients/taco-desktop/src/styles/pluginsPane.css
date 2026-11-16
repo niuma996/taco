@@ -190,3 +190,11 @@
     grid-auto-rows: 1fr;
     align-items: stretch;
 }
+
+.plugins-activation {
+    color: var(--fg-dim);
+    font-size: var(--text-2xs);
+}
+.plugins-activation--failed {
+    color: var(--danger);
+}

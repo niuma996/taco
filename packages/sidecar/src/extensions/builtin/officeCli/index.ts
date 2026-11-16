@@ -32,22 +32,38 @@ const OFFICECLI_RULE = "officecli *";
 const SKILL_DIR = "extensions/builtin/officeCli/skills";
 
 /**
- * Always contributes the allow-rule — officecli operates only on files the
- * user names, so gating on workspace state (as git-context does) would add a
- * probe with no decision to make.
+ * The command allow-rule follows the independent autoApprove setting.
  */
 export function buildOfficeCliActivator(): WorkspaceActivator {
-    return (): WorkspaceContribution => ({ commandPermissionRules: [OFFICECLI_RULE] });
+    return (ctx): WorkspaceContribution => ({
+        commandPermissionRules: ctx.config.autoApprove === false ? [] : [OFFICECLI_RULE],
+    });
 }
 
 /** Builtin manifest — contributes the officecli shell allow-rule per workspace. */
 export const manifest: BuiltinManifest = {
     name: BUILTIN_NAME,
-    version: "0.1.0",
+    version: "0.2.0",
     description:
-        "Allow-lists `officecli` shell invocations so the bundled officecli skill can create and edit .docx/.xlsx/.pptx without a permission prompt per command.",
+        "Provides the bundled OfficeCLI skill and optional command auto-approval for creating and editing .docx/.xlsx/.pptx files.",
     whenToUse:
-        "Built-in. Disable via `disabledExtensions` in ~/.taco/taco.json to restore a permission prompt for every officecli command and drop the bundled officecli skill.",
+        "Use for Office document workflows. Bundled skill and command auto-approval can be configured independently.",
     activator: buildOfficeCliActivator,
-    skillDirs: [SKILL_DIR],
+    configSchema: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+            bundledSkill: {
+                type: "boolean",
+                default: true,
+                description: "Include the bundled OfficeCLI skill.",
+            },
+            autoApprove: {
+                type: "boolean",
+                default: true,
+                description: "Allow officecli commands without per-command approval.",
+            },
+        },
+    },
+    skillDirs: (config) => (config.bundledSkill === false ? [] : [SKILL_DIR]),
 };

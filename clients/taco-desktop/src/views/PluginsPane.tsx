@@ -10,6 +10,7 @@ import type {
     ExtensionPermission,
     ExtensionStatusEntry,
     ExtensionsStatusResult,
+    ExtensionWorkspaceStatus,
 } from "@taco-ai/protocol";
 import type { ReactElement } from "react";
 import { ContentHeader } from "../components/ContentHeader";
@@ -82,6 +83,9 @@ export function PluginsPane(props: PluginsPaneProps): ReactElement {
                             <EnabledCard
                                 key={e.name}
                                 entry={e}
+                                activation={status.workspace?.entries.find(
+                                    (item) => item.name === e.name,
+                                )}
                                 saving={savingName === e.name}
                                 onDisable={() => onToggle(e.name, true)}
                                 permLabel={(p) => t(PERM_LABEL_KEY[p])}
@@ -217,13 +221,14 @@ function DisabledCard(props: {
 
 function EnabledCard(props: {
     entry: ExtensionStatusEntry;
+    activation?: ExtensionWorkspaceStatus;
     saving: boolean;
     onDisable: () => void;
     pendingDisable: boolean;
     permLabel: (p: ExtensionPermission) => string;
     t: ReturnType<typeof useT>["t"];
 }): ReactElement {
-    const { entry, saving, onDisable, pendingDisable, permLabel, t } = props;
+    const { entry, activation, saving, onDisable, pendingDisable, permLabel, t } = props;
     const isBuiltin = entry.source === "builtin";
     return (
         <div className="pane-card">
@@ -281,7 +286,7 @@ function EnabledCard(props: {
                     ))}
                 </div>
             )}
-            <PluginContributions entry={entry} t={t} />
+            <PluginContributions entry={entry} activation={activation} t={t} />
         </div>
     );
 }

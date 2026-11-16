@@ -9,7 +9,7 @@ import type { ExtensionRegistry } from "../../extensions/registry.ts";
 import { registerMethod } from "../methodRegistry.ts";
 
 export function registerExtensionsHandlers(): void {
-    registerMethod("extensionsStatus", false, async ({ server }) => {
+    registerMethod("extensionsStatus", false, async ({ server, params }) => {
         const registry = server.extensionRegistry;
         if (!registry) {
             const empty: ExtensionsStatusResult = {
@@ -28,7 +28,13 @@ export function registerExtensionsHandlers(): void {
             return empty;
         }
         const r = registry.report;
+        const scope = params?.workspace
+            ? server.workspaceExtensions?.(params.workspace)
+            : undefined;
         return {
+            ...(scope && params?.workspace
+                ? { workspace: { cwd: params.workspace, entries: await scope.activationReport() } }
+                : {}),
             loaded: r.loaded.map((e) => ({
                 name: e.name,
                 version: e.version,

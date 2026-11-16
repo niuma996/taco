@@ -76,42 +76,16 @@ interface GitProbeResult {
     readonly reason?: string;
 }
 
-/**
- * Multi-entry probe cache keyed by cwd.
- * Each entry is cached for `CACHE_MS` to avoid hammering on every LLM call.
- * Bounded to `CACHE_MAX_SIZE` to prevent monotonic growth in long-running
- * processes with many distinct workspaces.
- */
-const _probeCache = new Map<string, { ok: boolean; reason?: string; at: number }>();
-const CACHE_MS = 30_000;
-const CACHE_MAX_SIZE = 64;
-
-function setProbeCache(cwd: string, value: { ok: boolean; reason?: string; at: number }): void {
-    if (_probeCache.size >= CACHE_MAX_SIZE && !_probeCache.has(cwd)) {
-        const oldest = _probeCache.keys().next().value;
-        if (oldest !== undefined) {
-            _probeCache.delete(oldest);
-        }
-    }
-    _probeCache.set(cwd, value);
-}
-
 async function probeGit(cwd: string): Promise<GitProbeResult> {
-    const cached = _probeCache.get(cwd);
-    if (cached && Date.now() - cached.at < CACHE_MS) {
-        return { ok: cached.ok, reason: cached.reason };
-    }
     try {
         await execFileAsync("git", ["-C", cwd, "rev-parse", "--is-inside-work-tree"], {
             timeout: 2000,
             env: scrubbedProcessEnv(),
             ...HIDDEN_WINDOWS_SPAWN,
         });
-        setProbeCache(cwd, { ok: true, at: Date.now() });
         return { ok: true };
     } catch (e) {
         const reason = (e as Error).message ?? String(e);
-        setProbeCache(cwd, { ok: false, reason, at: Date.now() });
         return { ok: false, reason };
     }
 }
@@ -237,7 +211,7 @@ export async function readUncommittedFiles(cwd: string): Promise<UncommittedFile
     };
 }
 
-function formatUncommittedFiles(files: UncommittedFiles): string | undefined {
+function formatUncommittedFiles(files: UncommittedFiles, limit: number): string | undefined {
     const { staged, unstaged, untracked } = files;
     const total = staged.length + unstaged.length + untracked.length;
     if (total === 0) return undefined;
@@ -245,18 +219,18 @@ function formatUncommittedFiles(files: UncommittedFiles): string | undefined {
     const lines: string[] = [];
     if (staged.length > 0) {
         lines.push(`${staged.length} file${staged.length === 1 ? "" : "s"} staged:`);
-        for (const f of staged.slice(0, 50)) lines.push(`  ${f}`);
-        if (staged.length > 50) lines.push(`  ... and ${staged.length - 50} more`);
+        for (const f of staged.slice(0, limit)) lines.push(`  ${f}`);
+        if (staged.length > limit) lines.push(`  ... and ${staged.length - limit} more`);
     }
     if (unstaged.length > 0) {
         lines.push(`${unstaged.length} unstaged modification${unstaged.length === 1 ? "" : "s"}:`);
-        for (const f of unstaged.slice(0, 50)) lines.push(`  ${f}`);
-        if (unstaged.length > 50) lines.push(`  ... and ${unstaged.length - 50} more`);
+        for (const f of unstaged.slice(0, limit)) lines.push(`  ${f}`);
+        if (unstaged.length > limit) lines.push(`  ... and ${unstaged.length - limit} more`);
     }
     if (untracked.length > 0) {
         lines.push(`${untracked.length} untracked file${untracked.length === 1 ? "" : "s"}:`);
-        for (const f of untracked.slice(0, 50)) lines.push(`  ${f}`);
-        if (untracked.length > 50) lines.push(`  ... and ${untracked.length - 50} more`);
+        for (const f of untracked.slice(0, limit)) lines.push(`  ${f}`);
+        if (untracked.length > limit) lines.push(`  ... and ${untracked.length - limit} more`);
     }
     return lines.join("\n");
 }
@@ -264,33 +238,29 @@ function formatUncommittedFiles(files: UncommittedFiles): string | undefined {
 /**
  * Context hook factory bound to a specific `cwd`.
  *
- * Lazily probes whether `cwd` is a git repo on first invocation and caches
- * the result per-cwd.  Returns `undefined` when cwd is unset or git is unavailable.
+ * Re-probes on every context build so repositories initialized mid-session work.
  */
-export function buildGitContextHook(cwd: string): ContextHook {
-    let probed = false;
-    let probeResult: GitProbeResult | undefined;
-
+export function buildGitContextHook(
+    cwd: string,
+    config: Readonly<Record<string, unknown>> = {},
+): ContextHook {
     return async (event: ContextEvent): Promise<ContextResult | undefined> => {
-        if (!probed) {
-            probeResult = await probeGit(cwd);
-            probed = true;
-        }
-        if (!probeResult?.ok) return undefined;
-
-        let commits: Commit[];
-        try {
-            commits = await readRecentCommits(cwd, COMMIT_LIMIT);
-        } catch {
-            // git command failed at runtime (race, corrupt repo, etc.) — silently skip
-            return undefined;
-        }
-
-        const uncommittedFiles = await readUncommittedFiles(cwd);
+        if (!(await probeGit(cwd)).ok) return undefined;
+        const commitLimit = (config.commitLimit as number | undefined) ?? COMMIT_LIMIT;
+        const fileLimit = (config.fileLimit as number | undefined) ?? 50;
+        // An unborn branch has no log, but its untracked files are still useful.
+        const [commits, uncommittedFiles] = await Promise.all([
+            config.includeCommits === false || commitLimit === 0
+                ? Promise.resolve([])
+                : readRecentCommits(cwd, commitLimit).catch(() => []),
+            config.includeWorkingTree === false
+                ? Promise.resolve({ staged: [], unstaged: [], untracked: [] })
+                : readUncommittedFiles(cwd),
+        ]);
         const gitAttrs = { source: "workspace", n: String(commits.length) };
         const commitsTag =
             commits.length > 0 ? tagWrap(TAG_NAME, formatCommits(commits), gitAttrs) : undefined;
-        const uncommittedText = formatUncommittedFiles(uncommittedFiles);
+        const uncommittedText = formatUncommittedFiles(uncommittedFiles, fileLimit);
         const uncommittedTag = uncommittedText
             ? tagWrap(WORKING_TREE_TAG_NAME, escapeTagText(uncommittedText), {
                   source: "workspace",
@@ -329,27 +299,43 @@ export function getWorkingTreeChangesTagSpec(): TagSpec {
 /**
  * Workspace activator for git-context.
  *
- * Probes `ctx.cwd` asynchronously; if it is a git repo returns a context hook
- * bound to that cwd plus the system-prompt guidance.  If not a git repo (or git
- * is unavailable) returns `undefined` — no contribution for this workspace.
+ * Installs a conditional hook; repository availability can change after startup.
  */
 export function buildGitContextActivator(): WorkspaceActivator {
-    return async (ctx) => {
-        const probe = await probeGit(ctx.cwd);
-        if (!probe.ok) return undefined;
-        const hook = buildGitContextHook(ctx.cwd);
-        return { contextHooks: [hook] };
+    return (ctx) => {
+        if (
+            (ctx.config.includeCommits === false || ctx.config.commitLimit === 0) &&
+            ctx.config.includeWorkingTree === false
+        )
+            return { activationStatus: () => ({ active: false, reason: "configurationDisabled" }) };
+        return {
+            contextHooks: [buildGitContextHook(ctx.cwd, ctx.config)],
+            activationStatus: async () => {
+                const result = await probeGit(ctx.cwd);
+                return { active: result.ok, reason: result.ok ? undefined : "notGitRepository" };
+            },
+        };
     };
 }
 
 /** Builtin manifest — self-describes metadata, tag spec, and workspace activator. */
 export const manifest: BuiltinManifest = {
     name: BUILTIN_NAME,
-    version: "0.1.1",
+    version: "0.2.0",
     description:
         "Injects <recent_git_commits> (last N commits: hash, subject, author, date, --stat) and <working_tree_changes> (staged, unstaged, untracked files) as hidden tags with inline usage guidance. Silently no-ops on non-git repos or when git is unavailable.",
     whenToUse:
-        "Built-in. Disable via `disabledExtensions` in ~/.taco/taco.json if you don't want git context surfaced to the model.",
+        "Use for repository tasks that benefit from recent commits and uncommitted changes. Git state is refreshed on each context build.",
+    configSchema: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+            commitLimit: { type: "integer", minimum: 0, maximum: 50, default: 5 },
+            fileLimit: { type: "integer", minimum: 1, maximum: 200, default: 50 },
+            includeCommits: { type: "boolean", default: true },
+            includeWorkingTree: { type: "boolean", default: true },
+        },
+    },
     register: (registry) => {
         registry.addExtensionTag(BUILTIN_NAME, TAG_SPEC.name, TAG_SPEC);
         registry.addExtensionTag(BUILTIN_NAME, WORKING_TREE_TAG_SPEC.name, WORKING_TREE_TAG_SPEC);

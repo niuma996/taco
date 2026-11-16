@@ -81,8 +81,11 @@ export const commandPermissionResolveSchema = Type.Object({
     scope: Type.Union([Type.Literal("once"), Type.Literal("session"), Type.Literal("global")]),
 });
 
-/** `extensions.status` takes no arguments; the client sends no `params`. */
-export const extensionsStatusSchema = noParamsSchema;
+/** Optional workspace selects diagnostics from an already-open runtime. */
+export const extensionsStatusSchema = Type.Union([
+    Type.Undefined(),
+    Type.Object({ workspace: Type.Optional(workspace) }, { additionalProperties: false }),
+]);
 
 /**
  * The MCP server id becomes a tool-name prefix, so it is constrained to the

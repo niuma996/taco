@@ -846,7 +846,7 @@ describe("integration", () => {
             assert.ok(builtin);
             // Each builtin versions independently: a sidecar release must not drag
             // the extension's reported version along with it.
-            assert.equal(builtin.version, "0.1.0");
+            assert.equal(builtin.version, "0.2.0");
         });
 
         it("output-redaction hook redacts API keys from tool output", async () => {

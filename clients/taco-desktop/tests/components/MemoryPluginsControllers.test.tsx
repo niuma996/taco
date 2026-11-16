@@ -1,4 +1,4 @@
-import type { MemoryListResult } from "@taco-ai/protocol";
+import type { ExtensionsStatusResult, MemoryListResult } from "@taco-ai/protocol";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ConfigurationMemoryController } from "../../src/components/configuration/ConfigurationMemoryController";
@@ -88,15 +88,37 @@ describe("memory and plugins controllers", () => {
                     finishRestart = resolve;
                 }),
         );
-        const extensionsStatus = vi.fn(async () => ({
-            loaded: [],
-            disabled: [],
-            failed: [],
-            unauthorized: [],
-        }));
-        const settingsWrite = vi.fn(async () => ({
-            global: { disabledExtensions: ["demo"] },
-        }));
+        const extensionsStatus = vi.fn(
+            async (): Promise<ExtensionsStatusResult> => ({
+                loaded: [],
+                disabled: [],
+                disabledEntries: [],
+                failed: [],
+                unauthorized: [],
+                pendingRestart: {
+                    loadedButDisabled: [],
+                    disabledButEnabled: [],
+                    failed: [],
+                    configuration: [],
+                },
+            }),
+        );
+        const settingsWrite = vi.fn(async () => {
+            extensionsStatus.mockResolvedValue({
+                loaded: [],
+                disabled: [],
+                disabledEntries: [],
+                failed: [],
+                unauthorized: [],
+                pendingRestart: {
+                    loadedButDisabled: ["demo"],
+                    disabledButEnabled: [],
+                    failed: [],
+                    configuration: ["demo"],
+                },
+            });
+            return { global: { disabledExtensions: ["demo"] } };
+        });
         const client = { extensionsStatus, settingsWrite } as unknown as TacoClient;
         const props = { active: true, client, activeCwd: "/repo-a", restartSidecar };
         const view = render(<ConfigurationPluginsController {...props} />, {
@@ -117,6 +139,19 @@ describe("memory and plugins controllers", () => {
         fireEvent.click(screen.getByRole("button", { name: "restart-plugins" }));
         await waitFor(() => expect(restartSidecar).toHaveBeenCalledTimes(1));
         view.rerender(<ConfigurationPluginsController {...props} active={false} />);
+        extensionsStatus.mockResolvedValue({
+            loaded: [],
+            disabled: [],
+            disabledEntries: [],
+            failed: [],
+            unauthorized: [],
+            pendingRestart: {
+                loadedButDisabled: [],
+                disabledButEnabled: [],
+                failed: [],
+                configuration: [],
+            },
+        });
         finishRestart();
         view.rerender(<ConfigurationPluginsController {...props} />);
         await waitFor(() =>

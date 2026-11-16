@@ -10,12 +10,11 @@ import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import type { TSchema } from "typebox";
-import { Value } from "typebox/value";
 import { tacoHome } from "../config/config.ts";
 import { createLogger } from "../lib/logger.ts";
 import { extensionRequireRoot } from "../runtime/runtimeResources.ts";
 import { BUILTIN_EXTENSIONS } from "./builtin/manifest.ts";
+import { resolveExtensionConfig } from "./configuration.ts";
 import { createExtensionApi } from "./extensionApi.ts";
 import { ExtensionRegistry, registerBuiltinExtensions } from "./registry.ts";
 import type {
@@ -270,31 +269,12 @@ async function loadOne(
         registry.recordFailed(c.name, c.invalidReason ?? "unknown");
         return;
     }
-    const configValue =
-        (Object.hasOwn(extensionConfig, c.name) ? extensionConfig[c.name] : undefined) ?? {};
-    if (!configValue || typeof configValue !== "object" || Array.isArray(configValue)) {
-        registry.recordFailed(c.name, "invalid extension config: expected object");
+    let config: Readonly<Record<string, unknown>>;
+    try {
+        config = resolveExtensionConfig(c.name, extensionConfig, c.configSchema);
+    } catch (error) {
+        registry.recordFailed(c.name, (error as Error).message);
         return;
-    }
-    const config = configValue as Record<string, unknown>;
-    if (c.configSchema) {
-        try {
-            const errors = [...Value.Errors(c.configSchema as TSchema, config)];
-            if (errors.length > 0) {
-                const detail = errors
-                    .slice(0, 3)
-                    .map((error) => `${error.instancePath || "/"}: ${error.message}`)
-                    .join("; ");
-                registry.recordFailed(c.name, `invalid extension config: ${detail}`);
-                return;
-            }
-        } catch (error) {
-            registry.recordFailed(
-                c.name,
-                `invalid configSchema: ${error instanceof Error ? error.message : String(error)}`,
-            );
-            return;
-        }
     }
     let mod: { default?: ExtensionModule } & Record<string, unknown>;
     try {
@@ -350,7 +330,7 @@ export async function loadExtensions(config: LoadedConfig): Promise<ExtensionReg
     // extensions if needed.
     const disabled = new Set(config.disabledExtensions ?? []);
     registry.captureConfiguration(disabled, config.extensionConfig ?? {}, config.extensions);
-    await registerBuiltinExtensions(registry, disabled, BUILTIN_EXTENSIONS);
+    await registerBuiltinExtensions(registry, disabled, BUILTIN_EXTENSIONS, config.extensionConfig);
 
     const dirRoot = process.env.TACO_EXTENSIONS_DIR ?? join(tacoHome(), "extensions");
 
