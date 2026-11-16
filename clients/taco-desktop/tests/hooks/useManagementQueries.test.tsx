@@ -225,6 +225,31 @@ describe("management queries", () => {
         );
         expect(view.result.current.extensionPendingRestart).toBe(false);
     });
+
+    it("flags restart locally after a toggle when the sidecar omits pendingRestart", async () => {
+        applyGlobalConfig({ disabledExtensions: [] });
+        // Sidecars predating the pendingRestart field omit it from the response.
+        const initial: Omit<ExtensionsStatusResult, "pendingRestart"> = {
+            loaded: [],
+            disabled: [],
+            disabledEntries: [],
+            failed: [],
+            unauthorized: [],
+        };
+        const extensionsStatus = vi.fn(async () => initial);
+        const settingsWrite = vi.fn(async () => ({ global: { disabledExtensions: ["demo"] } }));
+        const restart = vi.fn(async () => {});
+        const client = { extensionsStatus, settingsWrite } as unknown as TacoClient;
+        const view = renderHook(() => usePluginsPane(client, true, "/a", restart), queryWrapper());
+        await waitFor(() => expect(view.result.current.extensionStatus).toEqual(initial));
+        expect(view.result.current.extensionPendingRestart).toBe(false);
+        await act(async () => view.result.current.toggleExtension("demo", true));
+        expect(view.result.current.extensionPendingRestart).toBe(true);
+        expect(view.result.current.extensionStatus?.pendingRestart).toBeUndefined();
+        await act(async () => view.result.current.restartForPlugins());
+        expect(restart).toHaveBeenCalledTimes(1);
+        expect(view.result.current.extensionPendingRestart).toBe(false);
+    });
     it("reports a non-Error catalog rejection instead of an empty error banner", async () => {
         const client = {
             toolsList: vi.fn().mockRejectedValue("catalog unavailable"),

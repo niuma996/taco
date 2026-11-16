@@ -6,11 +6,10 @@
  * remaining detail height. ConfigurationToolsController fetches the data.
  */
 
-import rehypeShiki from "@shikijs/rehype";
 import type { ToolEntry } from "@taco-ai/protocol";
 import { type KeyboardEvent, useMemo, useState } from "react";
-import { MarkdownHooks as ReactMarkdown } from "react-markdown";
 
+import { HighlightedCode } from "../components/HighlightedCode";
 import { PaneHeader } from "../components/PaneHeader";
 import { useT } from "../i18n/useI18n";
 
@@ -290,23 +289,10 @@ export function ToolsPane({ tools, error }: ToolsPaneProps) {
                                     {t("tools.schemaLabel")}
                                 </div>
                                 <div className="tools-detail-schema tools-detail-schema--fill md-code-block">
-                                    <ReactMarkdown
-                                        rehypePlugins={[
-                                            [
-                                                rehypeShiki,
-                                                {
-                                                    themes: {
-                                                        light: "material-theme-lighter",
-                                                        dark: "material-theme-ocean",
-                                                    },
-                                                    defaultColor: false,
-                                                },
-                                            ],
-                                        ]}
-                                        fallback={null}
-                                    >
-                                        {`\`\`\`json\n${JSON.stringify(selectedTool.inputSchema, null, 2)}\n\`\`\``}
-                                    </ReactMarkdown>
+                                    <HighlightedCode
+                                        code={JSON.stringify(selectedTool.inputSchema, null, 2)}
+                                        lang="json"
+                                    />
                                 </div>
                             </>
                         ) : (

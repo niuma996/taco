@@ -581,7 +581,7 @@ export function ConversationSidebar(props: ConversationSidebarProps) {
                                               )}
                                           </div>
                                       )}
-                                      {props.onRemoveWorkspace && (
+                                      {isExpanded && props.onRemoveWorkspace && (
                                           <DropdownMenu.Root>
                                               <DropdownMenu.Trigger asChild>
                                                   <IconButton

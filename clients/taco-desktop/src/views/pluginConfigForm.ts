@@ -49,7 +49,14 @@ export function pluginConfigPatch(
             unset.push(field.key);
             continue;
         }
-        if (field.secret && raw === "") continue;
+        if (field.secret && raw === "") {
+            // Untouched secrets never reach here (gated by `edited` above), so an
+            // empty required secret is an explicit clear, not "keep the stored value".
+            if (field.required) {
+                errors[field.key] = "plugins.configInvalid";
+            }
+            continue;
+        }
         let value: ExtensionConfigValue;
         if (field.schema.enum) {
             const option = (field.schema.enum as ExtensionConfigValue[]).find(

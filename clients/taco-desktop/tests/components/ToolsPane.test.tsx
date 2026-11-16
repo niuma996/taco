@@ -1,4 +1,5 @@
 import { strict as assert } from "node:assert";
+import { readFileSync } from "node:fs";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, it, vi } from "vitest";
 import { ToolsPane } from "../../src/views/ToolsPane";
@@ -62,5 +63,16 @@ describe("ToolsPane", () => {
                 .getAttribute("aria-checked"),
             "true",
         );
+    });
+
+    it("highlights the schema through the shared highlighter, not the full grammar bundle", () => {
+        const source = readFileSync("src/views/ToolsPane.tsx", "utf8");
+        // `@shikijs/rehype`'s default export builds its singleton with every
+        // bundled grammar (~350 lazily imported chunks). One failed dynamic
+        // import then takes the whole pane down with "Importing a module
+        // script failed". The schema must go through the shared highlighter.
+        assert.equal(source.includes('from "@shikijs/rehype"'), false);
+        assert.equal(source.includes("react-markdown"), false);
+        assert.ok(source.includes("HighlightedCode"));
     });
 });

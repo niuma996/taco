@@ -4,12 +4,15 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { TacoClient } from "../../src/lib/clients/tacoClient";
 import { PluginSettingsDialog } from "../../src/views/PluginSettingsDialog";
 
-vi.mock("react-i18next", () => ({
-    useTranslation: () => ({ t: (key: string) => key, i18n: { language: "zh-CN" } }),
-}));
+vi.mock("react-i18next", () => {
+    // One stable t identity per language — the dialog's load effect depends on it.
+    const t = (key: string) => key;
+    return { useTranslation: () => ({ t, i18n: { language: "zh-CN" } }) };
+});
 const result: ExtensionConfigResult = {
     schema: {
         type: "object",
+        required: ["token"],
         properties: {
             enabled: {
                 type: "boolean",
@@ -27,22 +30,31 @@ const result: ExtensionConfigResult = {
             label: { type: "string", title: "Label" },
             token: { type: "string", title: "Token", writeOnly: true },
             mode: { type: "string", enum: ["one", "two"], title: "Mode" },
+            secretMode: {
+                type: "string",
+                enum: ["one", "two"],
+                title: "Secret Mode",
+                writeOnly: true,
+            },
             nested: { type: "object" },
         },
     },
     values: { enabled: false, limit: 2, label: "current" },
-    configuredSecrets: ["token"],
+    configuredSecrets: ["token", "secretMode"],
     pendingRestart: false,
 };
-function mount(update = vi.fn(async () => ({ ...result, pendingRestart: true }))) {
+function mount(
+    update = vi.fn(async () => ({ ...result, pendingRestart: true })),
+    getResult: ExtensionConfigResult = result,
+) {
     const client = {
-        extensionConfigGet: vi.fn(async () => result),
+        extensionConfigGet: vi.fn(async () => getResult),
         extensionConfigUpdate: update,
     } as unknown as TacoClient;
     const close = vi.fn();
     render(
         <PluginSettingsDialog
-            entry={{ name: "example", configSchema: result.schema }}
+            entry={{ name: "example", configSchema: getResult.schema }}
             onClose={close}
             client={client}
             onSaved={async () => {}}
@@ -73,6 +85,58 @@ describe("PluginSettingsDialog", () => {
             }),
         );
         expect(screen.getByText("plugins.configSaved")).toBeTruthy();
+    });
+    it("shows a localized message and logs the detail when configuration fails to load", async () => {
+        const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+        const client = {
+            extensionConfigGet: vi.fn().mockRejectedValue(new Error("connection refused")),
+        } as unknown as TacoClient;
+        render(
+            <PluginSettingsDialog
+                entry={{ name: "example", configSchema: result.schema }}
+                onClose={vi.fn()}
+                client={client}
+                onSaved={async () => {}}
+            />,
+        );
+        await screen.findByText("plugins.configLoadFailed");
+        expect(screen.queryByText("connection refused")).toBeNull();
+        expect(consoleError).toHaveBeenCalledWith(
+            "[taco] extensionConfigGet failed",
+            expect.any(Error),
+        );
+        consoleError.mockRestore();
+    });
+    it("shows the stored-secret hint for a configured write-only enum field", async () => {
+        mount();
+        const secret = await screen.findByRole("combobox", { name: "Secret Mode" });
+        expect(secret.textContent).toContain("plugins.configSecretStored");
+        expect(screen.getByRole("combobox", { name: "Mode" }).textContent).toContain(
+            "plugins.configUnset",
+        );
+    });
+    it("marks pending and saved feedback with distinct state classes", async () => {
+        const pending: ExtensionConfigResult = { ...result, pendingRestart: true };
+        mount(
+            vi.fn(async () => pending),
+            pending,
+        );
+        const hint = await screen.findByText("plugins.configPending");
+        expect(hint.className).toContain("plugins-config-feedback--pending");
+        const limit = await screen.findByRole("spinbutton", { name: "提交数量" });
+        fireEvent.change(limit, { target: { value: "4" } });
+        fireEvent.click(screen.getByRole("button", { name: "plugins.saveConfig" }));
+        const saved = await screen.findByText("plugins.configSaved");
+        expect(saved.className).toContain("plugins-config-feedback--success");
+    });
+    it("rejects a required secret the user explicitly cleared", async () => {
+        const { update } = mount();
+        const token = await screen.findByLabelText("Token");
+        fireEvent.change(token, { target: { value: "typed" } });
+        fireEvent.change(token, { target: { value: "" } });
+        fireEvent.click(screen.getByRole("button", { name: "plugins.saveConfig" }));
+        await screen.findByText("plugins.configInvalid");
+        expect(update).not.toHaveBeenCalled();
     });
     it("blocks invalid numeric input and preserves the draft after a server error", async () => {
         const update = vi.fn().mockRejectedValue(new Error("Could not save"));

@@ -614,12 +614,12 @@ describe("conversation row activity", () => {
 
 describe("workspace removal menus", () => {
     it.each([false, true])(
-        "offers removal and cleanup even with a collapsed local group (cleanup: %s)",
+        "offers removal and cleanup on the expanded workspace row (cleanup: %s)",
         async (clean) => {
-            const input = props({ expandedWorkspaces: [] });
+            const input = props();
             render(<Sidebar {...input} />);
             const user = userEvent.setup();
-            const group = screen.getByRole("region", { name: "two" });
+            const group = screen.getByRole("region", { name: "one" });
             const menu = within(group).getByRole("button", {
                 name: "workspaceRemoval.moreActions",
             });
@@ -631,13 +631,22 @@ describe("workspace removal menus", () => {
                 }),
             );
             expect(input.onRemoveWorkspace).toHaveBeenCalledWith({
-                cwd: "/repo/two",
+                cwd: "/repo/one",
                 cleanup: clean,
             });
             expect(input.onOpenSession).not.toHaveBeenCalled();
             expect(input.onLoadWorkspace).not.toHaveBeenCalled();
         },
     );
+
+    it("hides the removal menu while the workspace group is collapsed", () => {
+        const input = props({ expandedWorkspaces: [] });
+        render(<Sidebar {...input} />);
+        const group = screen.getByRole("region", { name: "two" });
+        expect(
+            within(group).queryByRole("button", { name: "workspaceRemoval.moreActions" }),
+        ).toBeNull();
+    });
 
     it("temporarily removes an IM conversation without deleting or navigating", async () => {
         const input = props({ mode: "im" });

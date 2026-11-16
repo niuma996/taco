@@ -49,6 +49,9 @@ export function usePluginsPane(
     });
     const [extensionSavingName, setExtensionSavingName] = useState<string | null>(null);
     const [extensionRestarting, setExtensionRestarting] = useState(false);
+    // Fallback for sidecars predating the pendingRestart status field: their
+    // response omits it, so a successful toggle flags the restart locally.
+    const [localPendingRestart, setLocalPendingRestart] = useState(false);
     const { error: extensionError, fail: failWith, clearError } = useAutoClearError();
 
     // Toggle an extension's disabled state. Writes disabledExtensions to taco.json,
@@ -63,6 +66,7 @@ export function usePluginsPane(
                 : current.filter((n) => n !== name);
             const result = await client.settingsWrite({ global: { disabledExtensions: next } });
             applyGlobalConfig(result.global);
+            setLocalPendingRestart(true);
             await refreshQueries(queryClient, { queryKey: allPluginsKey });
         } catch (e) {
             failWith(e);
@@ -76,6 +80,7 @@ export function usePluginsPane(
         setExtensionRestarting(true);
         try {
             await restartSidecar();
+            setLocalPendingRestart(false);
             await refreshQueries(queryClient, { queryKey: allPluginsKey });
         } catch (e) {
             failWith(e);
@@ -89,9 +94,10 @@ export function usePluginsPane(
         extensionLoading: status.isFetching,
         extensionError: extensionError ?? queryError(status.error)?.message ?? null,
         extensionSavingName,
-        extensionPendingRestart: Object.values(status.data?.pendingRestart ?? {}).some(
-            (names) => names.length > 0,
-        ),
+        extensionPendingRestart:
+            status.data?.pendingRestart === undefined
+                ? localPendingRestart
+                : Object.values(status.data.pendingRestart).some((names) => names.length > 0),
         extensionRestarting,
         toggleExtension,
         restartForPlugins,

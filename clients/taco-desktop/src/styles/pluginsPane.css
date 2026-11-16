@@ -256,8 +256,13 @@
     margin-top: var(--space-4);
 }
 .plugins-config-feedback {
-    color: var(--accent);
     font-size: var(--text-xs);
+}
+.plugins-config-feedback--success {
+    color: var(--success);
+}
+.plugins-config-feedback--pending {
+    color: var(--accent-fg);
 }
 .plugins-config-error {
     color: var(--danger);

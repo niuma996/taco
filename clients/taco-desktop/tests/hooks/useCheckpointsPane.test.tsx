@@ -155,6 +155,33 @@ describe("Checkpoints queries", () => {
         act(() => h.result.current.refresh());
         await waitFor(() => expect(h.result.current.error).toBeNull());
     });
+
+    it("clears the previous error while a manual refresh is in flight", async () => {
+        const h = setup();
+        await waitFor(() => expect(h.result.current.data).toEqual(list("/a")));
+        h.checkpointsList.mockRejectedValueOnce("read unavailable");
+        act(() => h.result.current.refresh());
+        await waitFor(() => expect(h.result.current.error).toBe("read unavailable"));
+        const pending = deferred<CheckpointsListResult>();
+        h.checkpointsList.mockReturnValueOnce(pending.promise);
+        act(() => h.result.current.refresh());
+        await waitFor(() => expect(h.result.current.loading).toBe(true));
+        expect(h.result.current.error).toBeNull();
+        await act(async () => pending.resolve(list("/b")));
+        await waitFor(() => expect(h.result.current.data).toEqual(list("/b")));
+        expect(h.result.current.error).toBeNull();
+    });
+
+    it("surfaces the new failure when a manual refresh fails again", async () => {
+        const h = setup();
+        await waitFor(() => expect(h.result.current.data).toEqual(list("/a")));
+        h.checkpointsList.mockRejectedValueOnce("read unavailable");
+        act(() => h.result.current.refresh());
+        await waitFor(() => expect(h.result.current.error).toBe("read unavailable"));
+        h.checkpointsList.mockRejectedValueOnce("still unavailable");
+        act(() => h.result.current.refresh());
+        await waitFor(() => expect(h.result.current.error).toBe("still unavailable"));
+    });
 });
 
 describe("Checkpoints restore", () => {

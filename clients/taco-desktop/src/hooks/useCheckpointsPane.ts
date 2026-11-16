@@ -112,7 +112,9 @@ export function useCheckpointsPane(
     return {
         data: query.data ?? null,
         loading: query.isFetching,
-        error: queryError(query.error)?.message ?? null,
+        // A fetch in flight clears the previous failure (the old setError(null)
+        // on refresh): a settled query re-exposes its error once the fetch ends.
+        error: query.isFetching ? null : (queryError(query.error)?.message ?? null),
         restoringId:
             restoring?.client === client && restoring.cwd === activeCwd
                 ? restoring.checkpointId

@@ -67,7 +67,11 @@ export function PluginConfigFields({
                                     : `value:${String(value)}`
                             }
                             disabled={readonly}
-                            placeholder={t("plugins.configUnset")}
+                            placeholder={
+                                field.secret && result.configuredSecrets.includes(field.key)
+                                    ? t("plugins.configSecretStored")
+                                    : t("plugins.configUnset")
+                            }
                             options={enumValues.map((option, index) => ({
                                 value: `value:${String(option)}`,
                                 label: names?.[index] ?? String(option),

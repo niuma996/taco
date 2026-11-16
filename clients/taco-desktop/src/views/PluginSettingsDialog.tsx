@@ -53,13 +53,15 @@ export function PluginSettingsDialog({
                 setConfig(result);
                 setDraft(initialPluginDraft(extensionConfigFields(result.schema), result));
             })
-            .catch((error) => {
-                if (current) setError(error instanceof Error ? error.message : String(error));
+            .catch((error: unknown) => {
+                if (!current) return;
+                console.error("[taco] extensionConfigGet failed", error);
+                setError(t("plugins.configLoadFailed"));
             });
         return () => {
             current = false;
         };
-    }, [client, entry.name, entry.configSchema]);
+    }, [client, entry.name, entry.configSchema, t]);
     const change = (key: string, value: string | boolean) => {
         setDraft((previous) => ({ ...previous, [key]: value }));
         setEdited((previous) => new Set(previous).add(key));
@@ -170,7 +172,14 @@ export function PluginSettingsDialog({
                         </p>
                     )}
                     {(saved || config?.pendingRestart) && (
-                        <p role="status" className="plugins-config-feedback">
+                        <p
+                            role="status"
+                            className={
+                                saved
+                                    ? "plugins-config-feedback plugins-config-feedback--success"
+                                    : "plugins-config-feedback plugins-config-feedback--pending"
+                            }
+                        >
                             {t(saved ? "plugins.configSaved" : "plugins.configPending")}
                         </p>
                     )}
