@@ -31,7 +31,7 @@ import type {
 import { sessionAttachmentsDir } from "../../attachments/attachmentStore.ts";
 import type { CheckpointStore } from "../../checkpoints/store.ts";
 import type { ResolvedCompaction } from "../../config/config.ts";
-import type { WorkspaceExtensionSet } from "../../extensions/index.ts";
+import type { SessionExtensionSet, WorkspaceExtensionSet } from "../../extensions/index.ts";
 import { harnessContext } from "../../lib/harnessContext.ts";
 import { createLogger } from "../../lib/logger.ts";
 import type { MemoryStore } from "../../memory/index.ts";
@@ -1092,12 +1092,20 @@ export class SessionRegistry extends EventEmitter {
 
             const session = await this.openPersistedSession(sessionId);
             let attached: AttachedSession;
+            let extensionSession: SessionExtensionSet | undefined;
             try {
                 const facts = await readSessionFacts(session);
                 const sessionKind: "main" | "subagent" =
                     facts.kind === "subagent" ? "subagent" : "main";
                 const refreshToolset = this.refreshToolset;
                 const requestPlanWriteApproval = this.requestPlanWriteApproval;
+                extensionSession = await this.extensions?.activateSession({
+                    cwd: this.env.cwd,
+                    sessionId,
+                    sessionKind,
+                    isIm: this.isIm === true,
+                    config: {},
+                });
                 attached = await AttachedSession.create({
                     session,
                     models: this.models,
@@ -1112,6 +1120,7 @@ export class SessionRegistry extends EventEmitter {
                     extensionContextHooks: this.extensions?.contextHooks(),
                     extensionToolCallHooks: this.extensions?.toolCallHooks(),
                     extensionToolResultHooks: this.extensions?.toolResultHooks(),
+                    extensionSession,
                     defaultUiLocale: this.defaultUiLocale,
                     getSkills: () => this.skills,
                     memoryStore: this.memoryStore,
@@ -1156,6 +1165,7 @@ export class SessionRegistry extends EventEmitter {
                         Promise.resolve(false),
                 });
             } catch (error) {
+                await extensionSession?.dispose();
                 // The handle owns pi's slot until it closes. A failed attach
                 // that left it open would make every later read and attach of
                 // this id fail with "Session is already open".

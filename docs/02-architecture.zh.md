@@ -325,9 +325,11 @@ env (TACO_*, ANTHROPIC_API_KEY, ...)
   带 `custom:` 前缀）
 - `mcpServers` — 每服务器 stdio / Streamable HTTP MCP 配置
 - `channels` — IM 渠道实例（manifest + 渠道专属 config）
-- `extensions` / `disabledExtensions` — npm 扩展白名单，以及同时作用于内置、npm 和目录发现扩展的禁用列表
+- `extensions` / `disabledExtensions` / `extensionConfig` — npm 扩展白名单、作用于所有来源的禁用列表，以及按插件 manifest 的 `taco.configSchema` 校验的独立配置（只校验，不填充 schema 默认值；配置值不会进入安全 RPC 视图）
 - `instructions` — 项目上下文指令开关（CLAUDE.md / AGENTS.md /
   DESIGN.md）
+
+扩展的完成事件携带所属扩展的冻结配置。会话清理先停止新事件，等待在途监听器，再按注册反序调用 disposer。每个作用域共用五秒的异步清理等待预算；超时回调可继续在后台执行，剩余 disposer 仍会被调用。同进程内无法中断同步阻塞代码。诊断中的贡献数为进程级注册数，工作区／会话激活器还可能按条件返回额外 Hook。待重启状态由启动时的启用状态、npm 白名单及配置与当前保存值的差异计算。
 
 **safe view**：`settings.get` / `settings.write` 返回的是
 `TacoGlobalConfigView`，跨 IPC 边界前剥离所有秘密字段：

@@ -656,7 +656,15 @@
     "permTools": "注册新工具",
     "permSystemPrompt": "向系统提示词追加内容",
     "permTags": "注册自定义标签",
-    "permCommandPermissions": "为工作区提供命令允许规则"
+    "permCommandPermissions": "为工作区提供命令允许规则",
+    "permLifecycle": "使用工作区/会话生命周期与完成事件",
+    "pendingDisable": "重启后禁用",
+    "pendingEnable": "重启后启用",
+    "pendingLoad": "重启后加载",
+    "configSchema": "配置 Schema",
+    "contributionTools": "工具：{{items}}",
+    "contributionDeferredTools": "惰性工具：{{items}}",
+    "contributionLifecycle": "进程级注册 — Hook：上下文：{{context}}，调用前：{{toolCall}}，结果：{{toolResult}}，提示词：{{prompt}}；激活器——工作区：{{workspace}}，会话：{{session}}。激活器实际贡献因工作区／会话而异。"
   },
   "channels": {
     "title": "渠道",

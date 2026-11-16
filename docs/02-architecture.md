@@ -427,8 +427,10 @@ The on-disk `taco.json` shape is `TacoGlobalConfigShape` in
 - `customProviders` — third-party OpenAI/Anthropic-compatible endpoints (id must have `custom:` prefix)
 - `mcpServers` — per-server stdio / Streamable HTTP MCP config
 - `channels` — IM channel instances (manifest + channel-specific config)
-- `extensions` / `disabledExtensions` — npm extension allowlist and disable list shared by builtin, npm, and directory-discovered extensions
+- `extensions` / `disabledExtensions` / `extensionConfig` — npm extension allowlist, a disable list shared by all extension sources, and per-extension values validated by each manifest's `taco.configSchema` (validation only: schema defaults are not applied; values stay out of safe RPC views)
 - `instructions` — project-context instruction file toggles (CLAUDE.md / AGENTS.md / DESIGN.md)
+
+Extension run-end events carry the owning extension's frozen configuration. Session disposal stops new events, drains listeners, then calls disposers in reverse registration order. Each scope has a shared five-second asynchronous cleanup budget; timed-out callbacks can continue in the background and remaining disposers are still invoked. Synchronous blocking code cannot be interrupted in-process. Extension diagnostics show process-level registration counts; workspace/session activators can contribute additional hooks conditionally. Pending-restart diagnostics compare startup enablement, npm allowlist membership, and configuration with the saved values.
 
 The **safe view** (`TacoGlobalConfigView`) returned by `settings.get`
 strips every secret-bearing field before it crosses the IPC boundary:

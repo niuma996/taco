@@ -27,6 +27,7 @@ import { CheckpointManager } from "../../checkpoints/manager.ts";
 import type { CheckpointStore } from "../../checkpoints/store.ts";
 import type { ResolvedCompaction } from "../../config/config.ts";
 import { tacoHome } from "../../config/tacoHome.ts";
+import type { SessionExtensionSet } from "../../extensions/activation.ts";
 import type {
     ContextHookBuckets,
     ToolCallHook,
@@ -148,6 +149,7 @@ export interface AttachedSessionOptions {
      *  the pipeline so external hooks can post-process (or further redact)
      *  the already-builtin-scrubbed output. See design §6.4. */
     extensionToolResultHooks?: ToolResultHookBuckets;
+    extensionSession?: SessionExtensionSet;
     /**
      * UI locale fallback, usually from WorkspaceRuntime config. Read by the hook
      * when prompt/steer carries no explicit uiLocale. See replyLanguage.ts.
@@ -328,6 +330,7 @@ export class AttachedSession extends EventEmitter {
      */
     private thinkingLevel: ThinkingLevel;
     private unsubscribe?: () => Promise<void>;
+    private extensionSession?: SessionExtensionSet;
     /**
      * In-flight recovery of operations interrupted by a previous process.
      *
@@ -755,6 +758,7 @@ export class AttachedSession extends EventEmitter {
         );
         attachedCell.current = attached;
         attached.agentToolState = toolState;
+        attached.extensionSession = args.extensionSession;
         attached.subagentBudgetThunk = args.getSubagentBudget;
         attached.systemPromptCell = systemPromptCell;
         // Per-turn toolset convergence. Assigned here rather than threaded
@@ -933,6 +937,7 @@ export class AttachedSession extends EventEmitter {
             getCheckpoints: () => attached.checkpoints,
             getExtractor: () => attached.memoryExtractor,
             getTitleSummarizer: () => attached.titleSummarizer,
+            onRunEnd: (status) => args.extensionSession?.notifyRunEnd(status),
             usageTracker: topicDir
                 ? createTopicUsageTracker({ topicDir, cwd: args.env.cwd })
                 : undefined,
@@ -1254,6 +1259,14 @@ export class AttachedSession extends EventEmitter {
         } catch (error) {
             log.debug(
                 "unsubscribe during dispose failed:",
+                error instanceof Error ? error.message : String(error),
+            );
+        }
+        try {
+            await this.extensionSession?.dispose();
+        } catch (error) {
+            log.debug(
+                "extension session dispose failed:",
                 error instanceof Error ? error.message : String(error),
             );
         }

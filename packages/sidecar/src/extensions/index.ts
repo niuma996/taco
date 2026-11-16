@@ -6,7 +6,7 @@
  * a deliberate API surface decision.
  */
 
-export { activateExtensions, WorkspaceExtensionSet } from "./activation.ts";
+export { activateExtensions, SessionExtensionSet, WorkspaceExtensionSet } from "./activation.ts";
 export { createExtensionApi } from "./extensionApi.ts";
 export type { LoadedConfig } from "./loader.ts";
 export { loadExtensions } from "./loader.ts";
@@ -23,6 +23,7 @@ export type {
     ContextResult,
     ExtensionApi,
     ExtensionApiVersion,
+    ExtensionDisposer,
     ExtensionLogger,
     ExtensionManifest,
     ExtensionModule,
@@ -32,6 +33,11 @@ export type {
     ExtensionToolCandidateWithSource,
     ExtensionToolRegistrationOptions,
     FileAccess,
+    SessionActivator,
+    SessionActivatorContext,
+    SessionContribution,
+    SessionRunEndEvent,
+    SessionRunEndHook,
     TacoTool,
     TacoToolContext,
     ToolCallEvent,

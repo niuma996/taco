@@ -109,6 +109,7 @@ async function resolveDeps(): Promise<ResolvedDeps> {
     const extensionRegistry = await loadExtensions({
         extensions: cfg.extensions ?? [],
         disabledExtensions: cfg.disabledExtensions ?? [],
+        extensionConfig: cfg.extensionConfig,
     });
     const sessionsRoot = defaultSessionsRoot(cfg.sessionsRoot);
     if (!existsSync(sessionsRoot)) {

@@ -1,7 +1,7 @@
 /**
  * PluginsPane — full-screen view for ActivityRail's "Plugins" entry.
  *
- * Four mutually-exclusive sections sourced from extensions.status: Enabled,
+ * Runtime diagnostics sourced from extensions.status: Enabled,
  * Disabled, Failed, Unauthorized. Pure view: data + toggles + restart live in
  * ConfigurationPluginsController; a sidecar restart is required for toggles to take effect.
  */
@@ -37,6 +37,7 @@ const PERM_LABEL_KEY: Record<ExtensionPermission, string> = {
     systemPrompt: "plugins.permSystemPrompt",
     tags: "plugins.permTags",
     commandPermissions: "plugins.permCommandPermissions",
+    lifecycle: "plugins.permLifecycle",
 };
 
 export function PluginsPane(props: PluginsPaneProps): ReactElement {
@@ -84,6 +85,10 @@ export function PluginsPane(props: PluginsPaneProps): ReactElement {
                                 onDisable={() => onToggle(e.name, true)}
                                 permLabel={(p) => t(PERM_LABEL_KEY[p])}
                                 t={t}
+                                pendingDisable={
+                                    status.pendingRestart?.loadedButDisabled?.includes(e.name) ??
+                                    false
+                                }
                             />
                         ))}
                     </PluginSection>
@@ -97,6 +102,11 @@ export function PluginsPane(props: PluginsPaneProps): ReactElement {
                             <DisabledCard
                                 key={name}
                                 name={name}
+                                entry={status.disabledEntries?.find((entry) => entry.name === name)}
+                                pendingEnable={
+                                    status.pendingRestart?.disabledButEnabled?.includes(name) ??
+                                    false
+                                }
                                 saving={savingName === name}
                                 onEnable={() => onToggle(name, false)}
                             />
@@ -109,9 +119,17 @@ export function PluginsPane(props: PluginsPaneProps): ReactElement {
                         emptyText={t("plugins.emptyFailed")}
                     >
                         {status.failed.map((f) => (
-                            <div key={f.name} className="pane-card plugins-card-failed">
+                            <div
+                                key={`${f.name}:${f.stage ?? "load"}`}
+                                className="pane-card plugins-card-failed"
+                            >
                                 <div className="pane-card-header">
                                     <span className="pane-card-name">{f.name}</span>
+                                    {status.pendingRestart?.failed?.includes(f.name) && (
+                                        <span className="plugins-perm-chip">
+                                            {t("plugins.pendingLoad")}
+                                        </span>
+                                    )}
                                 </div>
                                 <p className="plugins-card-reason">
                                     {t("plugins.failedReason", { reason: f.reason })}
@@ -165,14 +183,24 @@ function PluginSection(props: {
 
 function DisabledCard(props: {
     name: string;
+    entry?: ExtensionsStatusResult["disabledEntries"][number];
+    pendingEnable: boolean;
     saving: boolean;
     onEnable: () => void;
 }): ReactElement {
-    const { name, saving, onEnable } = props;
+    const { name, entry, pendingEnable, saving, onEnable } = props;
+    const { t } = useT();
     return (
         <div className="pane-card plugins-card-disabled">
             <div className="pane-card-header">
                 <span className="pane-card-name">{name}</span>
+                {entry?.version && <span className="pane-card-version">v{entry.version}</span>}
+                {pendingEnable && (
+                    <span className="plugins-perm-chip">{t("plugins.pendingEnable")}</span>
+                )}
+                {entry?.configSchema && (
+                    <span className="plugins-perm-chip">{t("plugins.configSchema")}</span>
+                )}
                 <Switch
                     checked={false}
                     disabled={saving}
@@ -190,10 +218,11 @@ function EnabledCard(props: {
     entry: ExtensionStatusEntry;
     saving: boolean;
     onDisable: () => void;
+    pendingDisable: boolean;
     permLabel: (p: ExtensionPermission) => string;
     t: ReturnType<typeof useT>["t"];
 }): ReactElement {
-    const { entry, saving, onDisable, permLabel, t } = props;
+    const { entry, saving, onDisable, pendingDisable, permLabel, t } = props;
     const isBuiltin = entry.source === "builtin";
     return (
         <div className="pane-card">
@@ -203,6 +232,12 @@ function EnabledCard(props: {
                 <span className="plugins-card-source">
                     {isBuiltin ? t("plugins.sourceBuiltin") : t("plugins.sourceExternal")}
                 </span>
+                {pendingDisable && (
+                    <span className="plugins-perm-chip">{t("plugins.pendingDisable")}</span>
+                )}
+                {entry.configSchema && (
+                    <span className="plugins-perm-chip">{t("plugins.configSchema")}</span>
+                )}
                 <Switch
                     checked
                     disabled={saving}
@@ -242,6 +277,51 @@ function EnabledCard(props: {
                         </span>
                     ))}
                 </div>
+            )}
+            <ContributionList entry={entry} t={t} />
+        </div>
+    );
+}
+
+function ContributionList(props: {
+    entry: ExtensionStatusEntry;
+    t: ReturnType<typeof useT>["t"];
+}): ReactElement | null {
+    const { entry, t } = props;
+    const c = entry.contributions;
+    if (!c) return null;
+    const counts = [
+        c.contextHooks,
+        c.toolCallHooks,
+        c.toolResultHooks,
+        c.systemPrompts,
+        c.workspaceActivators,
+        c.sessionActivators,
+    ];
+    if (c.tools.length === 0 && c.deferredTools.length === 0 && counts.every((n) => n === 0)) {
+        return null;
+    }
+    return (
+        <div className="plugins-card-contributions">
+            {c.tools.length > 0 && (
+                <p>{t("plugins.contributionTools", { items: c.tools.join(", ") })}</p>
+            )}
+            {c.deferredTools.length > 0 && (
+                <p>
+                    {t("plugins.contributionDeferredTools", { items: c.deferredTools.join(", ") })}
+                </p>
+            )}
+            {counts.some((n) => n > 0) && (
+                <p>
+                    {t("plugins.contributionLifecycle", {
+                        context: String(c.contextHooks),
+                        toolCall: String(c.toolCallHooks),
+                        toolResult: String(c.toolResultHooks),
+                        prompt: String(c.systemPrompts),
+                        workspace: String(c.workspaceActivators),
+                        session: String(c.sessionActivators),
+                    })}
+                </p>
             )}
         </div>
     );

@@ -69,6 +69,7 @@ export interface TurnBookkeepingArgs {
     readonly getCheckpoints: () => CheckpointManager | undefined;
     readonly getExtractor: () => MemoryExtractor | undefined;
     readonly getTitleSummarizer: () => TitleSummarizer | undefined;
+    readonly onRunEnd?: (status: "completed" | "aborted" | "failed") => void;
     /** Records successful `read`s of topic files; absent when memory is off. */
     readonly usageTracker?: TopicUsageTracker;
 }
@@ -220,6 +221,7 @@ export function wireTurnBookkeeping(args: TurnBookkeepingArgs): Array<() => void
         }),
         harness.events.on("run_end", (event) => {
             memoryHandlers.onRunEnd(event.status);
+            args.onRunEnd?.(event.status);
         }),
     );
 

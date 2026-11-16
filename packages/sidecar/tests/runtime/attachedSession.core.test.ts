@@ -10,6 +10,7 @@ import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
 import { createModels } from "@earendil-works/pi-ai/compat";
 import { fauxAssistantMessage, fauxProvider, fauxText } from "@earendil-works/pi-ai/providers/faux";
+import { SessionExtensionSet } from "../../src/extensions/activation.ts";
 import { harnessContext } from "../../src/lib/harnessContext.ts";
 import { createPlanModeState } from "../../src/plan/planModeState.ts";
 import {
@@ -68,6 +69,7 @@ describe("attachedSession.streaming", () => {
             session?: Session;
             shouldAbortOperation?: (operationId: string) => Promise<boolean>;
             tokensPerSecond?: number;
+            extensionSession?: SessionExtensionSet;
         } = {},
     ) {
         const env = new NodeExecutionEnv({ cwd: tmp });
@@ -107,10 +109,40 @@ describe("attachedSession.streaming", () => {
             attachmentsDir: tmp,
             sessionCwd: tmp as never,
             getToolContext: () => ({ env, workspace: tmp as never }) as never,
+            extensionSession: options.extensionSession,
         } as never);
 
         return attached;
     }
+
+    it("delivers run completion and disposes the extension session scope", async () => {
+        const calls: string[] = [];
+        const extensionSession = new SessionExtensionSet({
+            cwd: tmp,
+            sessionId: "lifecycle-session",
+            sessionKind: "main",
+            isIm: false,
+            config: {},
+        });
+        extensionSession.addContribution("lifecycle-fixture", {
+            runEndHooks: [
+                (event) => {
+                    calls.push(`event:${event.status}`);
+                },
+            ],
+            disposers: [
+                () => {
+                    calls.push("disposed");
+                },
+            ],
+        });
+        const attached = await makeAttached("done", true, { extensionSession });
+        await attached.prompt("hello");
+        await new Promise((resolve) => setImmediate(resolve));
+        assert.deepEqual(calls, ["event:completed"]);
+        await attached.dispose();
+        assert.deepEqual(calls, ["event:completed", "disposed"]);
+    });
 
     it("unsubscribe continues through failed event disposers to unwire hooks", async (t) => {
         const create = AgentHarness.create.bind(AgentHarness);

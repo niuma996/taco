@@ -46,6 +46,8 @@ export interface ExtensionManifest {
     readonly description?: string;
     /** Usage guidance ("when to use it"), from package.json taco.whenToUse, may be absent. */
     readonly whenToUse?: string;
+    /** Validates supplied configuration; schema defaults are not applied. */
+    readonly configSchema?: Record<string, unknown>;
 }
 
 /**
@@ -170,9 +172,37 @@ export interface ExtensionToolCandidateWithSource {
     readonly candidate: ExtensionToolCandidate;
 }
 
+/** Async cleanup is awaited for up to five seconds per scope, then continues in the background. */
+export type ExtensionDisposer = () => void | Promise<void>;
+
+export interface SessionActivatorContext {
+    readonly cwd: string;
+    readonly sessionId: string;
+    readonly sessionKind: "main" | "subagent";
+    readonly isIm: boolean;
+    readonly config: Readonly<Record<string, unknown>>;
+}
+
+export interface SessionRunEndEvent extends SessionActivatorContext {
+    readonly status: "completed" | "failed" | "aborted";
+}
+
+/** Async listeners are drained during disposal within the scope cleanup budget. */
+export type SessionRunEndHook = (event: SessionRunEndEvent) => void | Promise<void>;
+
+export interface SessionContribution {
+    runEndHooks?: SessionRunEndHook[];
+    disposers?: ExtensionDisposer[];
+}
+
+export type SessionActivator = (
+    ctx: SessionActivatorContext,
+) => SessionContribution | undefined | Promise<SessionContribution | undefined>;
+
 export interface ExtensionApi {
     readonly manifest: ExtensionManifest;
     readonly logger: ExtensionLogger;
+    readonly config: Readonly<Record<string, unknown>>;
     registerContextHook(hook: ContextHook): void;
     /** Intercept / block a tool invocation before it executes. */
     registerToolCallInterceptor(hook: ToolCallHook): void;
@@ -181,6 +211,7 @@ export interface ExtensionApi {
     registerTool(tool: TacoTool, options?: ExtensionToolRegistrationOptions): void;
     registerToolCandidate(candidate: ExtensionToolCandidate): void;
     registerWorkspaceActivator(activator: WorkspaceActivator): void;
+    registerSessionActivator(activator: SessionActivator): void;
     registerSystemPrompt(contributor: SystemPromptContributor): void;
     /** Register a custom tag — flows through the tag system's pin/drop/visibility
      *  pipeline. Requires the `tags` permission in the manifest. */
@@ -202,6 +233,8 @@ export interface WorkspaceContribution {
     toolResultHooks?: ToolResultHook[];
     tools?: Array<{ name: string; tool: TacoTool; fileAccess?: FileAccess }>;
     toolCandidates?: ExtensionToolCandidateWithSource[];
+    sessionActivators?: SessionActivator[];
+    disposers?: ExtensionDisposer[];
     systemPrompt?: SystemPromptContributor;
     /**
      * Shell allow-rules this extension adds for the workspace, merged after the
@@ -220,4 +253,5 @@ export interface WorkspaceContribution {
  */
 export type WorkspaceActivator = (ctx: {
     readonly cwd: string;
+    readonly config: Readonly<Record<string, unknown>>;
 }) => WorkspaceContribution | undefined | Promise<WorkspaceContribution | undefined>;

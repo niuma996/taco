@@ -33,6 +33,15 @@ describe("registry", () => {
             assert.equal(r.report.unauthorized.length, 0);
         });
 
+        it("does not mutate previously returned activation failure reports", () => {
+            const registry = new ExtensionRegistry();
+            registry.recordFailed("example", "first", "session");
+            const snapshot = registry.report;
+            registry.recordFailed("example", "second", "session");
+            assert.equal(snapshot.failed[0]?.reason, "first");
+            assert.equal(registry.report.failed[0]?.reason, "second");
+        });
+
         it("addContextHook stores by source bucket", () => {
             const r = new ExtensionRegistry();
             const hook = async (_e: ContextEvent): Promise<ContextResult> => ({ messages: [] });
@@ -587,6 +596,77 @@ describe("loader", () => {
             assert.ok(!r.workspaceActivators().some((entry) => entry.extName === "partial-ext"));
             assert.equal(fileAccessOf("partialFileTool"), undefined);
             assert.equal(Object.hasOwn(tagRegistry, "partial_tag"), false);
+        });
+
+        it("validates and deeply freezes extension configuration before factory use", async () => {
+            const dir = join(process.env.TACO_EXTENSIONS_DIR ?? "", "configured-ext");
+            mkdirSync(dir, { recursive: true });
+            writeFileSync(
+                join(dir, "package.json"),
+                JSON.stringify({
+                    name: "configured-ext",
+                    version: "0.0.1",
+                    main: "index.js",
+                    taco: {
+                        apiVersion: "1",
+                        permissions: ["systemPrompt"],
+                        configSchema: {
+                            type: "object",
+                            properties: { nested: { type: "object", required: ["value"] } },
+                            required: ["nested"],
+                        },
+                    },
+                }),
+            );
+            writeFileSync(
+                join(dir, "index.js"),
+                `export default function (taco) {
+                    if (taco.config.nested.value !== "ok") throw new Error("config not injected");
+                    if (!Object.isFrozen(taco.config) || !Object.isFrozen(taco.config.nested)) throw new Error("config not frozen");
+                    taco.registerSystemPrompt({ append: taco.config.nested.value });
+                }`,
+            );
+            const r = await loadExtensions({
+                extensions: [],
+                extensionConfig: { "configured-ext": { nested: { value: "ok" } } },
+            });
+            assert.ok(r.report.loaded.some((entry) => entry.name === "configured-ext"));
+            assert.equal(r.systemPromptContributors()[0]?.append, "ok");
+        });
+
+        it("does not inherit configuration from Object.prototype", async () => {
+            makeExt("constructor", "export default function () {}");
+            const registry = await loadExtensions({ extensions: [] });
+            assert.ok(registry.report.loaded.some((entry) => entry.name === "constructor"));
+            assert.ok(!registry.report.failed.some((entry) => entry.name === "constructor"));
+        });
+
+        it("rejects invalid extension configuration without importing the module", async () => {
+            const dir = join(process.env.TACO_EXTENSIONS_DIR ?? "", "invalid-config-ext");
+            mkdirSync(dir, { recursive: true });
+            writeFileSync(
+                join(dir, "package.json"),
+                JSON.stringify({
+                    name: "invalid-config-ext",
+                    version: "0.0.1",
+                    main: "index.js",
+                    taco: {
+                        apiVersion: "1",
+                        permissions: [],
+                        configSchema: { type: "object", required: ["enabled"] },
+                    },
+                }),
+            );
+            writeFileSync(
+                join(dir, "index.js"),
+                `await import("node:fs").then(({ writeFileSync }) => writeFileSync(${JSON.stringify(join(process.env.TACO_EXTENSIONS_DIR ?? "", "invalid-config-imported"))}, "yes")); export default function () {}`,
+            );
+            const r = await loadExtensions({ extensions: [] });
+            assert.ok(r.report.failed.some((entry) => entry.name === "invalid-config-ext"));
+            assert.equal(
+                existsSync(join(process.env.TACO_EXTENSIONS_DIR ?? "", "invalid-config-imported")),
+                false,
+            );
         });
 
         it("records an npm-listed extension as disabled when in disabledExtensions", async () => {

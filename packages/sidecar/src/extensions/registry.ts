@@ -9,6 +9,7 @@
  * `addWorkspaceActivator`; `activateExtensions` invokes them per workspace.
  */
 
+import type { ExtensionContributionSummary, ExtensionDisabledEntry } from "@taco-ai/protocol";
 import { registerExtensionTag, tagRegistry, unregisterExtensionTag } from "../tags/registry.ts";
 import type { TagSpec } from "../tags/types.ts";
 import type { FileAccess } from "../tools/fileAccess.ts";
@@ -24,6 +25,7 @@ import type {
     ExtensionPermission,
     ExtensionSource,
     ExtensionToolCandidateWithSource,
+    SessionActivator,
     SystemPromptContributor,
     ToolCallHook,
     ToolResultHook,
@@ -41,15 +43,30 @@ export interface LoadedEntry {
     whenToUse?: string;
     /** Tag names this extension registered via `registerTag`. */
     tags?: ReadonlyArray<string>;
+    configSchema?: Record<string, unknown>;
+    contributions: ExtensionContributionSummary;
 }
 
 export interface RegistryReport {
     loaded: LoadedEntry[];
-    failed: Array<{ name: string; reason: string }>;
+    failed: Array<{ name: string; reason: string; stage?: "load" | "workspace" | "session" }>;
     unauthorized: Array<{ name: string; method: ExtensionPermission }>;
     /** Extension names matched by disabledExtensions and never loaded (recorded by the loader's subtraction step). */
     disabled: string[];
+    disabledEntries: ExtensionDisabledEntry[];
 }
+
+const EMPTY_CONTRIBUTIONS = (): ExtensionContributionSummary => ({
+    tools: [],
+    deferredTools: [],
+    tags: [],
+    contextHooks: 0,
+    toolCallHooks: 0,
+    toolResultHooks: 0,
+    systemPrompts: 0,
+    workspaceActivators: 0,
+    sessionActivators: 0,
+});
 
 export interface ContextHookBuckets {
     builtins: ContextHook[];
@@ -65,6 +82,14 @@ export interface WorkspaceActivatorEntry {
     readonly extName: string;
     readonly source: ExtensionSource;
     readonly activator: WorkspaceActivator;
+    readonly config?: Readonly<Record<string, unknown>>;
+}
+
+export interface SessionActivatorEntry {
+    readonly extName: string;
+    readonly source: ExtensionSource;
+    readonly activator: SessionActivator;
+    readonly config?: Readonly<Record<string, unknown>>;
 }
 
 export interface ExtensionRegistryCheckpoint {
@@ -77,10 +102,12 @@ export interface ExtensionRegistryCheckpoint {
     readonly builtinToolResultHooks: number;
     readonly externalToolResultHooks: number;
     readonly workspaceActivators: number;
+    readonly sessionActivators: number;
     readonly extensionSkillDirs: number;
     readonly extensionTagIndex: ReadonlyMap<string, ReadonlySet<string>>;
     readonly tagNames: ReadonlySet<string>;
     readonly extensionFileAccess: ReadonlyMap<string, FileAccess>;
+    readonly contributions: ReadonlyMap<string, ExtensionContributionSummary>;
 }
 
 /** sources that can register a tool or system-prompt contributor today. */
@@ -97,8 +124,20 @@ export class ExtensionRegistry {
     private readonly _toolCallHooks: ToolCallHook[] = [];
     private readonly _toolResultHooks: ToolResultHookBuckets = { builtins: [], external: [] };
     private readonly _workspaceActivators: WorkspaceActivatorEntry[] = [];
+    private readonly _sessionActivators: SessionActivatorEntry[] = [];
     private readonly _extensionSkillDirs: string[] = [];
     private readonly _extensionTagIndex: Map<string, Set<string>> = new Map();
+    private readonly _contributions = new Map<string, ExtensionContributionSummary>();
+    private readonly _disabledEntries = new Map<string, ExtensionDisabledEntry>();
+    private runtimeConfig: {
+        disabled: ReadonlySet<string>;
+        values: Record<string, unknown>;
+        extensions: ReadonlySet<string>;
+    } = {
+        disabled: new Set(),
+        values: {},
+        extensions: new Set(),
+    };
     private readonly _report: { loaded: LoadedEntry[] } & Pick<
         RegistryReport,
         "failed" | "unauthorized" | "disabled"
@@ -117,12 +156,24 @@ export class ExtensionRegistry {
             builtinToolResultHooks: this._toolResultHooks.builtins.length,
             externalToolResultHooks: this._toolResultHooks.external.length,
             workspaceActivators: this._workspaceActivators.length,
+            sessionActivators: this._sessionActivators.length,
             extensionSkillDirs: this._extensionSkillDirs.length,
             extensionTagIndex: new Map(
                 [...this._extensionTagIndex].map(([name, tags]) => [name, new Set(tags)]),
             ),
             tagNames: new Set(Object.keys(tagRegistry)),
             extensionFileAccess: extensionFileAccessSnapshot(),
+            contributions: new Map(
+                [...this._contributions].map(([name, value]) => [
+                    name,
+                    {
+                        ...value,
+                        tools: [...value.tools],
+                        deferredTools: [...value.deferredTools],
+                        tags: [...value.tags],
+                    },
+                ]),
+            ),
         };
     }
 
@@ -136,6 +187,7 @@ export class ExtensionRegistry {
         this._toolResultHooks.builtins.length = checkpoint.builtinToolResultHooks;
         this._toolResultHooks.external.length = checkpoint.externalToolResultHooks;
         this._workspaceActivators.length = checkpoint.workspaceActivators;
+        this._sessionActivators.length = checkpoint.sessionActivators;
         this._extensionSkillDirs.length = checkpoint.extensionSkillDirs;
         this._extensionTagIndex.clear();
         for (const [name, tags] of checkpoint.extensionTagIndex) {
@@ -145,6 +197,43 @@ export class ExtensionRegistry {
             if (!checkpoint.tagNames.has(name)) unregisterExtensionTag(name);
         }
         restoreExtensionFileAccess(checkpoint.extensionFileAccess);
+        this._contributions.clear();
+        for (const [name, value] of checkpoint.contributions) {
+            this._contributions.set(name, value);
+        }
+    }
+
+    private contribution(name: string): ExtensionContributionSummary {
+        let value = this._contributions.get(name);
+        if (!value) {
+            value = EMPTY_CONTRIBUTIONS();
+            this._contributions.set(name, value);
+        }
+        return value;
+    }
+
+    private static addName(list: string[], name: string): void {
+        if (!list.includes(name)) list.push(name);
+    }
+
+    captureConfiguration(
+        disabled: ReadonlySet<string>,
+        values: Record<string, unknown>,
+        extensions: readonly string[] = [],
+    ): void {
+        this.runtimeConfig = {
+            disabled: new Set(disabled),
+            values: structuredClone(values),
+            extensions: new Set(extensions),
+        };
+    }
+
+    configurationSnapshot(): {
+        disabled: ReadonlySet<string>;
+        values: Record<string, unknown>;
+        extensions: ReadonlySet<string>;
+    } {
+        return this.runtimeConfig;
     }
 
     /**
@@ -155,6 +244,7 @@ export class ExtensionRegistry {
     addTool(name: string, tool: TacoTool, fileAccess?: FileAccess): void {
         this._tools.push({ name, tool, ...(fileAccess ? { fileAccess } : {}) });
         registerExtensionFileAccess(tool.name, fileAccess);
+        ExtensionRegistry.addName(this.contribution(name).tools, tool.name);
     }
 
     addToolCandidate(
@@ -163,26 +253,35 @@ export class ExtensionRegistry {
     ): void {
         this._toolCandidates.push({ name, candidate: contribution });
         registerExtensionFileAccess(contribution.name, contribution.fileAccess);
+        ExtensionRegistry.addName(this.contribution(name).deferredTools, contribution.name);
     }
 
-    addSystemPromptContributor(contributor: SystemPromptContributor): void {
+    addSystemPromptContributor(contributor: SystemPromptContributor, name = "unknown"): void {
         this._systemPrompt.push(contributor);
+        this.contribution(name).systemPrompts++;
     }
 
-    addContextHook(source: ExtensionSource, hook: ContextHook): void {
+    addContextHook(source: ExtensionSource, hook: ContextHook, name = "unknown"): void {
         if (source === "builtin") this._contextHooks.builtins.push(hook);
         else this._contextHooks.external.push(hook);
+        this.contribution(name).contextHooks++;
     }
 
-    addToolCallInterceptor(hook: ToolCallHook): void {
+    addToolCallInterceptor(hook: ToolCallHook, name = "unknown"): void {
         this._toolCallHooks.push(hook);
+        this.contribution(name).toolCallHooks++;
     }
 
     /** bucket a tool_result hook by source. `builtin` runs first in the pipeline
      *  (see attachedSession.ts §6.4). */
-    addToolResultInterceptor(source: ExtensionSource, hook: ToolResultHook): void {
+    addToolResultInterceptor(
+        source: ExtensionSource,
+        hook: ToolResultHook,
+        name = "unknown",
+    ): void {
         if (source === "builtin") this._toolResultHooks.builtins.push(hook);
         else this._toolResultHooks.external.push(hook);
+        this.contribution(name).toolResultHooks++;
     }
 
     /**
@@ -194,8 +293,20 @@ export class ExtensionRegistry {
         source: ExtensionSource,
         extName: string,
         activator: WorkspaceActivator,
+        config?: Readonly<Record<string, unknown>>,
     ): void {
-        this._workspaceActivators.push({ source, extName, activator });
+        this._workspaceActivators.push({ source, extName, activator, config });
+        this.contribution(extName).workspaceActivators++;
+    }
+
+    addSessionActivator(
+        source: ExtensionSource,
+        extName: string,
+        activator: SessionActivator,
+        config?: Readonly<Record<string, unknown>>,
+    ): void {
+        this._sessionActivators.push({ source, extName, activator, config });
+        this.contribution(extName).sessionActivators++;
     }
 
     /**
@@ -224,6 +335,7 @@ export class ExtensionRegistry {
             this._extensionTagIndex.set(extName, set);
         }
         set.add(name);
+        ExtensionRegistry.addName(this.contribution(extName).tags, name);
         return true;
     }
 
@@ -233,16 +345,38 @@ export class ExtensionRegistry {
         return [...(this._extensionTagIndex.get(extName) ?? [])];
     }
 
-    recordFailed(name: string, reason: string): void {
-        this._report.failed.push({ name, reason });
+    recordFailed(
+        name: string,
+        reason: string,
+        stage: "load" | "workspace" | "session" = "load",
+    ): void {
+        if (stage !== "load") {
+            const existing = this._report.failed.findIndex(
+                (entry) => entry.name === name && entry.stage === stage,
+            );
+            if (existing !== -1) {
+                this._report.failed[existing] = { name, reason, stage };
+                return;
+            }
+        }
+        this._report.failed.push({ name, reason, stage });
     }
 
     recordUnauthorized(name: string, method: ExtensionPermission): void {
         this._report.unauthorized.push({ name, method });
     }
 
-    recordLoaded(entry: LoadedEntry): void {
-        this._report.loaded.push(entry);
+    recordLoaded(entry: Omit<LoadedEntry, "contributions">): void {
+        const contributions = this.contribution(entry.name);
+        this._report.loaded.push({
+            ...entry,
+            contributions: {
+                ...contributions,
+                tools: [...contributions.tools],
+                deferredTools: [...contributions.deferredTools],
+                tags: [...contributions.tags],
+            },
+        });
     }
 
     /**
@@ -251,8 +385,9 @@ export class ExtensionRegistry {
      * `actual = extensions - disabled` subtraction — the extension is never
      * imported, so we only have its name (no version/permissions/manifest).
      */
-    recordDisabled(name: string): void {
+    recordDisabled(name: string, details: Omit<ExtensionDisabledEntry, "name"> = {}): void {
         if (!this._report.disabled.includes(name)) this._report.disabled.push(name);
+        if (!this._disabledEntries.has(name)) this._disabledEntries.set(name, { name, ...details });
     }
 
     tools(): TacoTool[] {
@@ -297,6 +432,10 @@ export class ExtensionRegistry {
         return [...this._workspaceActivators];
     }
 
+    sessionActivators(): SessionActivatorEntry[] {
+        return [...this._sessionActivators];
+    }
+
     /** Skill dirs contributed by enabled builtins, in registration order. */
     extensionSkillDirs(): readonly string[] {
         return [...this._extensionSkillDirs];
@@ -308,6 +447,7 @@ export class ExtensionRegistry {
             failed: [...this._report.failed],
             unauthorized: [...this._report.unauthorized],
             disabled: [...this._report.disabled],
+            disabledEntries: [...this._disabledEntries.values()],
         };
     }
 }
@@ -328,20 +468,25 @@ export async function registerBuiltinExtensions(
     // Narrowed view handed to `manifest.register` — deliberately excludes
     // recordLoaded/recordFailed so a builtin cannot double-record itself;
     // the dispatcher below owns that bookkeeping exclusively.
-    const builtinApi: BuiltinRegistryApi = {
-        addExtensionTag: (extName, name, spec) => registry.addExtensionTag(extName, name, spec),
-        addWorkspaceActivator: (source, extName, activator) =>
-            registry.addWorkspaceActivator(source, extName, activator),
-        addToolResultInterceptor: (source, hook) => registry.addToolResultInterceptor(source, hook),
-    };
-
     for (const manifest of manifests) {
         if (disabledExtensions.has(manifest.name)) {
-            registry.recordDisabled(manifest.name);
+            registry.recordDisabled(manifest.name, {
+                version: manifest.version,
+                source: "builtin",
+                description: manifest.description,
+                whenToUse: manifest.whenToUse,
+            });
             continue;
         }
 
         const checkpoint = registry.checkpoint();
+        const builtinApi: BuiltinRegistryApi = {
+            addExtensionTag: (extName, name, spec) => registry.addExtensionTag(extName, name, spec),
+            addWorkspaceActivator: (source, extName, activator) =>
+                registry.addWorkspaceActivator(source, extName, activator),
+            addToolResultInterceptor: (source, hook) =>
+                registry.addToolResultInterceptor(source, hook, manifest.name),
+        };
         try {
             if (manifest.register) {
                 await manifest.register(builtinApi);

@@ -38,6 +38,7 @@ const PERM_LABELS: Record<ExtensionPermission, string> = {
     systemPrompt: "registerSystemPrompt",
     tags: "registerTag",
     commandPermissions: "workspace commandPermissionRules",
+    lifecycle: "session/workspace lifecycle",
 };
 
 const WORKSPACE_PERMISSIONS: Record<
@@ -51,6 +52,8 @@ const WORKSPACE_PERMISSIONS: Record<
     toolCandidates: "tools",
     systemPrompt: "systemPrompt",
     commandPermissionRules: "commandPermissions",
+    sessionActivators: "lifecycle",
+    disposers: "lifecycle",
 } as const;
 
 export function createExtensionApi(
@@ -58,8 +61,10 @@ export function createExtensionApi(
     registry: ExtensionRegistry,
     logger: ExtensionLogger,
     source: ExtensionSource = EXTERNAL_SOURCE,
+    config: Readonly<Record<string, unknown>> = {},
 ): ExtensionApi {
     const declared = new Set<ExtensionPermission>(manifest.permissions);
+    const frozenConfig = deepFreeze(structuredClone(config));
 
     const check = (perm: ExtensionPermission, method = PERM_LABELS[perm]): boolean => {
         if (declared.has(perm)) return true;
@@ -93,23 +98,29 @@ export function createExtensionApi(
                 name: manifest.name,
             }));
         }
+        if (authorized.sessionActivators) {
+            authorized.sessionActivators = authorized.sessionActivators.map(
+                (activator) => (ctx) => activator({ ...ctx, config: frozenConfig }),
+            );
+        }
         return authorized;
     };
 
     return {
         manifest,
         logger,
+        config: frozenConfig,
         registerContextHook(hook: ContextHook): void {
             if (!check("context")) return;
-            registry.addContextHook(source, hook);
+            registry.addContextHook(source, hook, manifest.name);
         },
         registerToolCallInterceptor(hook: ToolCallHook): void {
             if (!check("toolCall")) return;
-            registry.addToolCallInterceptor(hook);
+            registry.addToolCallInterceptor(hook, manifest.name);
         },
         registerToolResultInterceptor(hook: ToolResultHook): void {
             if (!check("toolResult")) return;
-            registry.addToolResultInterceptor(source, hook);
+            registry.addToolResultInterceptor(source, hook, manifest.name);
         },
         registerTool(tool, options): void {
             if (!check("tools")) return;
@@ -126,14 +137,28 @@ export function createExtensionApi(
             registry.addToolCandidate(manifest.name, candidate);
         },
         registerWorkspaceActivator(activator: WorkspaceActivator): void {
-            registry.addWorkspaceActivator(source, manifest.name, async (ctx) => {
-                const contribution = await activator(ctx);
-                return contribution ? authorizeWorkspaceContribution(contribution) : undefined;
-            });
+            registry.addWorkspaceActivator(
+                source,
+                manifest.name,
+                async (ctx) => {
+                    const contribution = await activator({ ...ctx, config: frozenConfig });
+                    return contribution ? authorizeWorkspaceContribution(contribution) : undefined;
+                },
+                frozenConfig,
+            );
+        },
+        registerSessionActivator(activator): void {
+            if (!check("lifecycle")) return;
+            registry.addSessionActivator(
+                source,
+                manifest.name,
+                (ctx) => activator({ ...ctx, config: frozenConfig }),
+                frozenConfig,
+            );
         },
         registerSystemPrompt(contributor: SystemPromptContributor): void {
             if (!check("systemPrompt")) return;
-            registry.addSystemPromptContributor(contributor);
+            registry.addSystemPromptContributor(contributor, manifest.name);
         },
         registerTag(spec: TagSpec): void {
             if (!check("tags")) return;
@@ -149,4 +174,11 @@ export function createExtensionApi(
             }
         },
     };
+}
+
+function deepFreeze<T>(value: T, seen = new WeakSet<object>()): T {
+    if (!value || typeof value !== "object" || seen.has(value)) return value;
+    seen.add(value);
+    for (const child of Object.values(value)) deepFreeze(child, seen);
+    return Object.freeze(value);
 }

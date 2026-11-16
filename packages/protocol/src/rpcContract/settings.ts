@@ -149,20 +149,59 @@ export interface ExtensionStatusEntry {
     whenToUse?: string;
     /** Tag names registered by this extension via `registerTag`. Only populated for loaded entries. */
     tags?: ReadonlyArray<string>;
+    /** Manifest schema; validates supplied values without applying defaults. */
+    configSchema?: Record<string, unknown>;
+    /** Process-level registrations, excluding activator-returned contributions. */
+    contributions: ExtensionContributionSummary;
+}
+
+/** Registrations made at process startup; activator contributions vary by scope. */
+export interface ExtensionContributionSummary {
+    tools: string[];
+    deferredTools: string[];
+    tags: string[];
+    contextHooks: number;
+    toolCallHooks: number;
+    toolResultHooks: number;
+    systemPrompts: number;
+    workspaceActivators: number;
+    sessionActivators: number;
+}
+
+export interface ExtensionDisabledEntry {
+    name: string;
+    version?: string;
+    source?: ExtensionSource;
+    description?: string;
+    whenToUse?: string;
+    configSchema?: Record<string, unknown>;
+}
+
+export interface ExtensionPendingRestart {
+    /** Currently loaded extensions disabled in the saved configuration. */
+    loadedButDisabled: string[];
+    /** Extensions skipped at startup but enabled in the saved configuration. */
+    disabledButEnabled: string[];
+    /** Load failures whose saved configuration has changed since startup. */
+    failed: string[];
+    /** Names with changed enablement, npm allowlist membership, or configuration. */
+    configuration: string[];
 }
 
 export interface ExtensionsStatusResult {
     loaded: ExtensionStatusEntry[];
-    failed: Array<{ name: string; reason: string }>;
+    failed: Array<{
+        name: string;
+        reason: string;
+        stage?: "load" | "workspace" | "session";
+    }>;
     unauthorized: Array<{ name: string; method: string }>;
-    /**
-     * Extension names disabled via `disabledExtensions` and therefore not
-     * loaded. Only the name is exposed — disabled = not loaded = manifest
-     * unread, so version/permissions/description are unavailable. Mutually
-     * exclusive with `loaded`/`failed`/`unauthorized` (the loader routes
-     * them at the subtraction step).
-     */
+    /** Names skipped at startup via disabledExtensions, across all sources. */
     disabled: string[];
+    /** Available manifest details for extensions skipped at startup. */
+    disabledEntries: ExtensionDisabledEntry[];
+    /** Differences between startup state and saved configuration; empty if unreadable. */
+    pendingRestart: ExtensionPendingRestart;
 }
 
 /** `providers.list` RPC params. */

@@ -69,6 +69,8 @@ export interface TacoGlobalConfigShape {
      * zero migration cost.
      */
     disabledExtensions?: string[];
+    /** Per-extension configuration, keyed by package name. Values are validated by each manifest. */
+    extensionConfig?: Record<string, unknown>;
     /**
      * Auto-compaction policy. `enabled` defaults to true; `threshold` defaults
      * to 0.7. Both fields are ratios of the model's context window: the
@@ -397,7 +399,12 @@ export type McpServerConfigView = Omit<
 export interface TacoGlobalConfigView
     extends Omit<
         TacoGlobalConfigShape,
-        "anthropicApiKey" | "openaiApiKey" | "apiKeys" | "channels" | "mcpServers"
+        | "anthropicApiKey"
+        | "openaiApiKey"
+        | "apiKeys"
+        | "channels"
+        | "mcpServers"
+        | "extensionConfig"
     > {
     anthropicApiKey?: MaskedKey;
     openaiApiKey?: MaskedKey;
@@ -456,6 +463,7 @@ export type ExtensionPermission =
     | "tools"
     | "systemPrompt"
     | "tags"
-    | "commandPermissions";
+    | "commandPermissions"
+    | "lifecycle";
 /** Discriminator used to bucket extension contributions by origin. */
 export type ExtensionSource = "builtin" | "external";

@@ -84,6 +84,13 @@ describe("management queries", () => {
         const status: ExtensionsStatusResult = {
             loaded: [],
             disabled: [],
+            disabledEntries: [],
+            pendingRestart: {
+                loadedButDisabled: [],
+                disabledButEnabled: [],
+                failed: [],
+                configuration: [],
+            },
             failed: [],
             unauthorized: [],
         };
@@ -95,16 +102,57 @@ describe("management queries", () => {
         await waitFor(() => expect(two.result.current.extensionStatus).toEqual(status));
         expect(extensionsStatus).toHaveBeenCalledTimes(1);
     });
+    it("does not require restart for an unchanged failed plugin", async () => {
+        const status: ExtensionsStatusResult = {
+            loaded: [],
+            disabled: [],
+            disabledEntries: [],
+            unauthorized: [],
+            failed: [{ name: "broken", reason: "syntax error", stage: "load" }],
+            pendingRestart: {
+                loadedButDisabled: [],
+                disabledButEnabled: [],
+                failed: [],
+                configuration: [],
+            },
+        };
+        const client = { extensionsStatus: vi.fn(async () => status) } as unknown as TacoClient;
+        const view = renderHook(
+            () => usePluginsPane(client, true, "/a", async () => {}),
+            queryWrapper(),
+        );
+        await waitFor(() => expect(view.result.current.extensionStatus).toEqual(status));
+        expect(view.result.current.extensionPendingRestart).toBe(false);
+    });
+
     it("plugin changes update all readers and a restart reloads the shared cache", async () => {
         applyGlobalConfig({ disabledExtensions: [] });
         const initial: ExtensionsStatusResult = {
             loaded: [],
             disabled: [],
+            disabledEntries: [],
+            pendingRestart: {
+                loadedButDisabled: [],
+                disabledButEnabled: [],
+                failed: [],
+                configuration: [],
+            },
             failed: [],
             unauthorized: [],
         };
         const extensionsStatus = vi.fn(async () => initial);
-        const settingsWrite = vi.fn(async () => ({ global: { disabledExtensions: ["demo"] } }));
+        const settingsWrite = vi.fn(async () => {
+            extensionsStatus.mockResolvedValue({
+                ...initial,
+                pendingRestart: {
+                    loadedButDisabled: ["demo"],
+                    disabledButEnabled: [],
+                    failed: [],
+                    configuration: ["demo"],
+                },
+            });
+            return { global: { disabledExtensions: ["demo"] } };
+        });
         const restart = vi.fn(async () => {});
         const client = { extensionsStatus, settingsWrite } as unknown as TacoClient;
         const options = queryWrapper();
@@ -112,12 +160,15 @@ describe("management queries", () => {
         const second = renderHook(() => usePluginsPane(client, true, "/b", restart), options);
         await waitFor(() => expect(second.result.current.extensionStatus).toEqual(initial));
         await act(async () => first.result.current.toggleExtension("demo", true));
-        await waitFor(() =>
-            expect(second.result.current.extensionStatus?.disabled).toEqual(["demo"]),
-        );
+        await waitFor(() => expect(second.result.current.extensionPendingRestart).toBe(true));
+        expect(second.result.current.extensionStatus?.disabled).toEqual([]);
         expect(first.result.current.extensionPendingRestart).toBe(true);
         expect(settingsWrite).toHaveBeenCalledWith({ global: { disabledExtensions: ["demo"] } });
-        extensionsStatus.mockResolvedValue({ ...initial, disabled: ["demo"] });
+        extensionsStatus.mockResolvedValue({
+            ...initial,
+            disabled: ["demo"],
+            disabledEntries: [{ name: "demo" }],
+        });
         await act(async () => first.result.current.restartForPlugins());
         expect(restart).toHaveBeenCalledTimes(1);
         expect(first.result.current.extensionPendingRestart).toBe(false);
@@ -130,6 +181,13 @@ describe("management queries", () => {
         const initial: ExtensionsStatusResult = {
             loaded: [],
             disabled: [],
+            disabledEntries: [],
+            pendingRestart: {
+                loadedButDisabled: [],
+                disabledButEnabled: [],
+                failed: [],
+                configuration: [],
+            },
             failed: [],
             unauthorized: [],
         };

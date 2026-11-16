@@ -178,6 +178,38 @@ describe("WorkspaceRuntime ↔ extensions integration", () => {
         }
     });
 
+    it("disposes the workspace extension scope with the runtime", async () => {
+        const registry = new ExtensionRegistry();
+        let disposed = 0;
+        const api = createExtensionApi(
+            {
+                name: "workspace-dispose-fixture",
+                version: "0.0.1",
+                apiVersion: "1",
+                permissions: ["lifecycle"],
+            },
+            registry,
+            silentLogger,
+        );
+        api.registerWorkspaceActivator(() => ({
+            disposers: [
+                () => {
+                    disposed++;
+                },
+            ],
+        }));
+        const extensions = await activateExtensions(registry, { cwd: tmpDirCore });
+        const ws = new WorkspaceRuntime({
+            providerKeyStore: new ProviderKeyStore({}),
+            cwd: asWorkspaceId(tmpDirCore),
+            tools: [],
+            extensions,
+        });
+        await ws.dispose();
+        await extensions.dispose();
+        assert.equal(disposed, 1);
+    });
+
     it("extension tool with same name overrides base tool (no duplicate in harness)", async () => {
         const registry = makeRegistry([fakeTool("shared")], []);
         const extensions = await activateExtensions(registry, { cwd: tmpDirCore });

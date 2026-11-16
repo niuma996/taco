@@ -1565,6 +1565,7 @@ export class WorkspaceRuntime extends EventEmitter {
             () => this.agentSpawner.dispose(),
             () => this.skillHotReload.dispose(),
             () => this.sessionRegistry.dispose(),
+            () => this.extensions?.dispose(),
             () => this.toolRegistry.dispose?.(),
             () => {
                 this.removeAllListeners();

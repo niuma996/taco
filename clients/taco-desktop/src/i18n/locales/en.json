@@ -656,7 +656,15 @@
     "permTools": "Register new tools",
     "permSystemPrompt": "Append/prepend to system prompt",
     "permTags": "Register custom tags",
-    "permCommandPermissions": "Contribute workspace command allow rules"
+    "permCommandPermissions": "Contribute workspace command allow rules",
+    "permLifecycle": "Use workspace/session lifecycle and completion events",
+    "pendingDisable": "Disables after restart",
+    "pendingEnable": "Enables after restart",
+    "pendingLoad": "Loads after restart",
+    "configSchema": "Config schema",
+    "contributionTools": "Tools: {{items}}",
+    "contributionDeferredTools": "Lazy tools: {{items}}",
+    "contributionLifecycle": "Process registrations — context: {{context}}, tool call: {{toolCall}}, tool result: {{toolResult}}, prompt: {{prompt}}; activators — workspace: {{workspace}}, session: {{session}}. Activator contributions vary by workspace/session."
   },
   "channels": {
     "title": "Channels",

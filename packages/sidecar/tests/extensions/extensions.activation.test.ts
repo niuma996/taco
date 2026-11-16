@@ -6,7 +6,11 @@ import { dirname, join } from "node:path";
 import { after, before, describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 import { extensionSkillDirInputs } from "../../src/config/config.ts";
-import { activateExtensions, WorkspaceExtensionSet } from "../../src/extensions/activation.ts";
+import {
+    activateExtensions,
+    SessionExtensionSet,
+    WorkspaceExtensionSet,
+} from "../../src/extensions/activation.ts";
 import {
     buildGitContextActivator,
     buildGitContextHook,
@@ -158,6 +162,11 @@ describe("activation", () => {
                 extNames.includes("bad-ext"),
                 `expected bad-ext, got: ${JSON.stringify(extNames)}`,
             );
+            assert.ok(
+                registry.report.failed.some(
+                    (entry) => entry.name === "throws-once" && entry.stage === "workspace",
+                ),
+            );
         });
     });
 
@@ -247,6 +256,265 @@ describe("activation", () => {
                 "context",
                 "systemPrompt",
             ]);
+        });
+    });
+
+    describe("extension lifecycle", () => {
+        it("isolates listener and disposer failures", async () => {
+            const calls: string[] = [];
+            const session = new SessionExtensionSet({
+                cwd: "/tmp",
+                sessionId: "failures",
+                sessionKind: "main",
+                isIm: false,
+                config: {},
+            });
+            session.addContribution("bad-extension", {
+                runEndHooks: [
+                    () => {
+                        throw new Error("sync failure");
+                    },
+                    async () => {
+                        throw new Error("async failure");
+                    },
+                ],
+                disposers: [
+                    () => {
+                        calls.push("bad-dispose");
+                        throw new Error("dispose failure");
+                    },
+                ],
+            });
+            session.addContribution("good-extension", {
+                runEndHooks: [
+                    () => {
+                        calls.push("good-event");
+                    },
+                ],
+                disposers: [
+                    () => {
+                        calls.push("good-dispose");
+                    },
+                ],
+            });
+            session.notifyRunEnd("failed");
+            await session.dispose();
+            assert.ok(calls.includes("good-event"));
+            assert.ok(calls.includes("good-dispose"));
+            assert.ok(calls.includes("bad-dispose"));
+        });
+
+        it("disposes workspace contributions once in reverse order", async () => {
+            const r = new ExtensionRegistry();
+            const calls: string[] = [];
+            const api = createExtensionApi(
+                {
+                    name: "workspace-lifecycle",
+                    version: "0.0.1",
+                    apiVersion: "1",
+                    permissions: ["lifecycle"],
+                },
+                r,
+                silentLogger,
+            );
+            api.registerWorkspaceActivator(() => ({
+                disposers: [
+                    () => {
+                        calls.push("first");
+                    },
+                    async () => {
+                        calls.push("second");
+                    },
+                ],
+            }));
+            const set = await activateExtensions(r, { cwd: "/tmp" });
+            await set.dispose();
+            await set.dispose();
+            assert.deepEqual(calls, ["second", "first"]);
+        });
+
+        it("scopes session events and drains listeners before disposal", async () => {
+            const r = new ExtensionRegistry();
+            const calls: string[] = [];
+            let release!: () => void;
+            const gate = new Promise<void>((resolve) => {
+                release = resolve;
+            });
+            const api = createExtensionApi(
+                {
+                    name: "session-lifecycle",
+                    version: "0.0.1",
+                    apiVersion: "1",
+                    permissions: ["lifecycle"],
+                },
+                r,
+                silentLogger,
+                "external",
+                { marker: "configured" },
+            );
+            api.registerSessionActivator(() => ({
+                runEndHooks: [
+                    async (event) => {
+                        calls.push(
+                            `${event.sessionId}:${event.status}:${event.sessionKind}:${event.config.marker}`,
+                        );
+                        await gate;
+                        calls.push("listener-done");
+                    },
+                ],
+                disposers: [
+                    () => {
+                        calls.push("session-disposed");
+                    },
+                ],
+            }));
+            const workspace = await activateExtensions(r, { cwd: "/tmp" });
+            const session = await workspace.activateSession({
+                cwd: "/tmp",
+                sessionId: "session-1",
+                sessionKind: "main",
+                isIm: false,
+                config: {},
+            });
+            session.notifyRunEnd("completed");
+            await new Promise((resolve) => setImmediate(resolve));
+            const disposing = session.dispose();
+            await new Promise((resolve) => setImmediate(resolve));
+            assert.deepEqual(calls, ["session-1:completed:main:configured"]);
+            release();
+            await disposing;
+            session.notifyRunEnd("completed");
+            await session.dispose();
+            assert.deepEqual(calls, [
+                "session-1:completed:main:configured",
+                "listener-done",
+                "session-disposed",
+            ]);
+        });
+
+        it("delivers each workspace activator's frozen configuration to its run-end hooks", async () => {
+            const registry = new ExtensionRegistry();
+            const values: unknown[] = [];
+            for (const name of ["one", "two"]) {
+                const api = createExtensionApi(
+                    { name, version: "1", apiVersion: "1", permissions: ["lifecycle"] },
+                    registry,
+                    silentLogger,
+                    "external",
+                    { marker: name },
+                );
+                api.registerWorkspaceActivator(() => ({
+                    sessionActivators: [
+                        () => ({
+                            runEndHooks: [
+                                (event) => {
+                                    values.push(event.config.marker);
+                                    assert.ok(Object.isFrozen(event.config));
+                                },
+                            ],
+                        }),
+                    ],
+                }));
+            }
+            const workspace = await activateExtensions(registry, { cwd: "/tmp" });
+            const session = await workspace.activateSession({
+                cwd: "/tmp",
+                sessionId: "config",
+                sessionKind: "main",
+                isIm: false,
+                config: {},
+            });
+            session.notifyRunEnd("completed");
+            await session.dispose();
+            assert.deepEqual(values, ["one", "two"]);
+        });
+
+        it("bounds cleanup when a run-end listener never settles", async (t) => {
+            t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
+            const calls: string[] = [];
+            const session = new SessionExtensionSet({
+                cwd: "/tmp",
+                sessionId: "stuck",
+                sessionKind: "main",
+                isIm: false,
+                config: {},
+            });
+            session.addContribution("stuck", {
+                runEndHooks: [() => new Promise(() => {})],
+                disposers: [
+                    () => {
+                        calls.push("disposed");
+                    },
+                ],
+            });
+            session.notifyRunEnd("completed");
+            const disposal = session.dispose();
+            t.mock.timers.tick(5000);
+            const result = await Promise.race([
+                disposal.then(() => "done"),
+                new Promise<string>((resolve) => setImmediate(() => resolve("stuck"))),
+            ]);
+            assert.equal(result, "done");
+            assert.deepEqual(calls, ["disposed"]);
+        });
+
+        it("bounds workspace cleanup and still starts remaining disposers", async (t) => {
+            t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
+            const calls: string[] = [];
+            const workspace = new WorkspaceExtensionSet();
+            workspace.addContribution(
+                "external",
+                {
+                    disposers: [
+                        () => {
+                            calls.push("last");
+                        },
+                        () => new Promise(() => {}),
+                    ],
+                },
+                "stuck",
+            );
+            const disposal = workspace.dispose();
+            await Promise.resolve();
+            t.mock.timers.tick(5000);
+            const result = await Promise.race([
+                disposal.then(() => "done"),
+                new Promise<string>((resolve) => setImmediate(() => resolve("stuck"))),
+            ]);
+            assert.equal(result, "done");
+            assert.deepEqual(calls, ["last"]);
+        });
+
+        it("requires lifecycle permission for workspace disposers and session activators", async () => {
+            const r = new ExtensionRegistry();
+            const api = createExtensionApi(
+                {
+                    name: "no-lifecycle",
+                    version: "0.0.1",
+                    apiVersion: "1",
+                    permissions: [],
+                },
+                r,
+                silentLogger,
+            );
+            api.registerWorkspaceActivator(() => ({
+                disposers: [() => {}],
+                sessionActivators: [() => ({})],
+            }));
+            api.registerSessionActivator(() => ({}));
+            const set = await activateExtensions(r, { cwd: "/tmp" });
+            const session = await set.activateSession({
+                cwd: "/tmp",
+                sessionId: "s",
+                sessionKind: "main",
+                isIm: false,
+                config: {},
+            });
+            assert.equal(
+                r.report.unauthorized.filter((entry) => entry.method === "lifecycle").length,
+                3,
+            );
+            assert.equal(session.listenerCount(), 0);
         });
     });
 
@@ -674,13 +942,13 @@ describe("gitContext", () => {
     describe("builtin git-context extension — activator", () => {
         it("returns undefined when cwd is not a git repo", async () => {
             const activator = buildGitContextActivator();
-            const result = await activator({ cwd: nonGitDir });
+            const result = await activator({ cwd: nonGitDir, config: {} });
             assert.equal(result, undefined);
         });
 
         it("returns {contextHooks} (no systemPrompt) when cwd is a git repo", async () => {
             const activator = buildGitContextActivator();
-            const result = await activator({ cwd: gitDir });
+            const result = await activator({ cwd: gitDir, config: {} });
             assert.ok(result, "activator should return a contribution");
             assert.ok(result.contextHooks && result.contextHooks.length > 0);
             assert.equal(result.contextHooks.length, 1);
@@ -699,7 +967,7 @@ describe("officeCli", () => {
         it("contributes the officecli allow-rule for any cwd", async () => {
             const activator = await officeCliManifest.activator?.();
             assert.ok(activator, "manifest must declare an activator");
-            const contribution = await activator({ cwd: "/nonexistent" });
+            const contribution = await activator({ cwd: "/nonexistent", config: {} });
             assert.deepEqual(contribution?.commandPermissionRules, [OFFICECLI_RULE]);
         });
     });
@@ -910,13 +1178,13 @@ describe("projectManifests", () => {
 
         it("returns undefined when no manifest matches", async () => {
             const activator = buildProjectManifestsActivator();
-            const result = await activator({ cwd: empty });
+            const result = await activator({ cwd: empty, config: {} });
             assert.equal(result, undefined);
         });
 
         it("returns contextHooks when a single manifest matches", async () => {
             const activator = buildProjectManifestsActivator();
-            const result = await activator({ cwd: cargoOnly });
+            const result = await activator({ cwd: cargoOnly, config: {} });
             assert.ok(result, "activator must contribute when Cargo.toml is present");
             assert.ok(result?.contextHooks);
             assert.equal(result?.contextHooks.length, 1);
@@ -924,7 +1192,7 @@ describe("projectManifests", () => {
 
         it("returns sorted, deduplicated filenames for a polyglot workspace", async () => {
             const activator = buildProjectManifestsActivator();
-            const result = await activator({ cwd: polyglot });
+            const result = await activator({ cwd: polyglot, config: {} });
             assert.ok(result?.contextHooks);
             const hook = buildProjectManifestsHook(polyglot);
             const out = await hook({ messages: makeMessages() } as ContextEvent);
@@ -949,7 +1217,7 @@ describe("projectManifests", () => {
 
         it("matches glob patterns for filename families", async () => {
             const activator = buildProjectManifestsActivator();
-            const result = await activator({ cwd: csprojDir });
+            const result = await activator({ cwd: csprojDir, config: {} });
             assert.ok(result, "activator must contribute when *.csproj / *.sln match");
             const hook = buildProjectManifestsHook(csprojDir);
             const out = await hook({ messages: makeMessages() } as ContextEvent);

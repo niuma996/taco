@@ -10,6 +10,8 @@ import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+import type { TSchema } from "typebox";
+import { Value } from "typebox/value";
 import { tacoHome } from "../config/config.ts";
 import { createLogger } from "../lib/logger.ts";
 import { extensionRequireRoot } from "../runtime/runtimeResources.ts";
@@ -30,6 +32,7 @@ export interface LoadedConfig {
     extensions: string[];
     /** Names to skip (taco.json's `disabledExtensions`), across all sources. */
     disabledExtensions?: string[];
+    extensionConfig?: Record<string, unknown>;
 }
 
 interface Candidate {
@@ -42,6 +45,7 @@ interface Candidate {
     invalidReason?: string;
     description?: string;
     whenToUse?: string;
+    configSchema?: Record<string, unknown>;
 }
 
 const SUPPORTED_API: ExtensionApiVersion = "1";
@@ -70,6 +74,7 @@ interface RawTacoManifest {
     permissions?: unknown;
     description?: unknown;
     whenToUse?: unknown;
+    configSchema?: unknown;
 }
 
 interface RawManifestPlusMain {
@@ -92,6 +97,14 @@ function readManifest(dir: string): RawManifestPlusMain | { error: string } {
         return { error: `unsupported apiVersion: ${String(taco.apiVersion)}` };
     }
     if (!Array.isArray(taco.permissions)) return { error: 'missing "taco.permissions" array' };
+    if (
+        taco.configSchema !== undefined &&
+        (!taco.configSchema ||
+            typeof taco.configSchema !== "object" ||
+            Array.isArray(taco.configSchema))
+    ) {
+        return { error: 'invalid "taco.configSchema": expected object' };
+    }
     return {
         manifest: {
             name: String(pkg.name ?? ""),
@@ -100,6 +113,7 @@ function readManifest(dir: string): RawManifestPlusMain | { error: string } {
             permissions: taco.permissions as ExtensionManifest["permissions"],
             description: typeof taco.description === "string" ? taco.description : undefined,
             whenToUse: typeof taco.whenToUse === "string" ? taco.whenToUse : undefined,
+            configSchema: taco.configSchema as Record<string, unknown> | undefined,
         },
         main: typeof pkg.main === "string" ? pkg.main : undefined,
     };
@@ -161,6 +175,7 @@ function candidatesFromDir(root: string): Candidate[] {
             source: "external",
             description: m.manifest.description,
             whenToUse: m.manifest.whenToUse,
+            configSchema: m.manifest.configSchema,
         });
     }
     return out;
@@ -227,6 +242,7 @@ function candidatesFromNpm(packages: string[]): Candidate[] {
             source: "external",
             description: m.manifest.description,
             whenToUse: m.manifest.whenToUse,
+            configSchema: m.manifest.configSchema,
         });
     }
     return out;
@@ -245,10 +261,40 @@ function dedupByName(candidates: Candidate[]): Candidate[] {
     return [...map.values()];
 }
 
-async function loadOne(registry: ExtensionRegistry, c: Candidate): Promise<void> {
+async function loadOne(
+    registry: ExtensionRegistry,
+    c: Candidate,
+    extensionConfig: Record<string, unknown>,
+): Promise<void> {
     if (c.entry === "__invalid__") {
         registry.recordFailed(c.name, c.invalidReason ?? "unknown");
         return;
+    }
+    const configValue =
+        (Object.hasOwn(extensionConfig, c.name) ? extensionConfig[c.name] : undefined) ?? {};
+    if (!configValue || typeof configValue !== "object" || Array.isArray(configValue)) {
+        registry.recordFailed(c.name, "invalid extension config: expected object");
+        return;
+    }
+    const config = configValue as Record<string, unknown>;
+    if (c.configSchema) {
+        try {
+            const errors = [...Value.Errors(c.configSchema as TSchema, config)];
+            if (errors.length > 0) {
+                const detail = errors
+                    .slice(0, 3)
+                    .map((error) => `${error.instancePath || "/"}: ${error.message}`)
+                    .join("; ");
+                registry.recordFailed(c.name, `invalid extension config: ${detail}`);
+                return;
+            }
+        } catch (error) {
+            registry.recordFailed(
+                c.name,
+                `invalid configSchema: ${error instanceof Error ? error.message : String(error)}`,
+            );
+            return;
+        }
     }
     let mod: { default?: ExtensionModule } & Record<string, unknown>;
     try {
@@ -261,10 +307,17 @@ async function loadOne(registry: ExtensionRegistry, c: Candidate): Promise<void>
     const factory: ExtensionModule =
         typeof mod.default === "function" ? mod.default : (mod as unknown as ExtensionModule);
     const api = createExtensionApi(
-        { name: c.name, version: c.version, apiVersion: c.apiVersion, permissions: c.permissions },
+        {
+            name: c.name,
+            version: c.version,
+            apiVersion: c.apiVersion,
+            permissions: c.permissions,
+            configSchema: c.configSchema,
+        },
         registry,
         silentLogger(c.name),
         c.source,
+        config,
     );
     const checkpoint = registry.checkpoint();
     try {
@@ -279,6 +332,7 @@ async function loadOne(registry: ExtensionRegistry, c: Candidate): Promise<void>
             permissions: c.permissions,
             description: c.description,
             whenToUse: c.whenToUse,
+            configSchema: c.configSchema,
         };
         if (tags.length > 0) entry.tags = tags;
         registry.recordLoaded(entry);
@@ -295,6 +349,7 @@ export async function loadExtensions(config: LoadedConfig): Promise<ExtensionReg
     // first in the toolResultHooks pipeline and can be overridden by external
     // extensions if needed.
     const disabled = new Set(config.disabledExtensions ?? []);
+    registry.captureConfiguration(disabled, config.extensionConfig ?? {}, config.extensions);
     await registerBuiltinExtensions(registry, disabled, BUILTIN_EXTENSIONS);
 
     const dirRoot = process.env.TACO_EXTENSIONS_DIR ?? join(tacoHome(), "extensions");
@@ -314,8 +369,15 @@ export async function loadExtensions(config: LoadedConfig): Promise<ExtensionReg
 
     const candidates = dedupByName([...candidatesFromDir(dirRoot), ...candidatesFromNpm(actual)]);
     for (const c of candidates) {
-        if (disabled.has(c.name)) registry.recordDisabled(c.name);
-        else await loadOne(registry, c);
+        if (disabled.has(c.name)) {
+            registry.recordDisabled(c.name, {
+                version: c.version,
+                source: c.source,
+                description: c.description,
+                whenToUse: c.whenToUse,
+                configSchema: c.configSchema,
+            });
+        } else await loadOne(registry, c, config.extensionConfig ?? {});
     }
     return registry;
 }

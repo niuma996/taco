@@ -12,6 +12,7 @@ import { afterEach, beforeEach, describe, it } from "node:test";
 import { createModels } from "@earendil-works/pi-ai/compat";
 import { asSessionId, type WorkspaceId } from "@taco-ai/protocol";
 import { agentToolPolicy } from "../../src/agents/filterTools.ts";
+import { WorkspaceExtensionSet } from "../../src/extensions/activation.ts";
 import { harnessContext } from "../../src/lib/harnessContext.ts";
 import { AttachedSession } from "../../src/runtime/harness/attachedSession.ts";
 import { FileError, NodeExecutionEnv } from "../../src/runtime/pi/node.ts";
@@ -104,6 +105,31 @@ describe("SessionRegistry", () => {
         const sr = makeRegistry();
         const list = await sr.listSessions();
         assert.equal(list.length, 0);
+    });
+
+    it("disposes the extension session scope when attach construction fails", async (t) => {
+        const extensions = new WorkspaceExtensionSet();
+        let disposed = 0;
+        extensions.addSessionActivator({
+            source: "external",
+            extName: "attach-failure-fixture",
+            config: {},
+            activator: () => ({
+                disposers: [
+                    () => {
+                        disposed++;
+                    },
+                ],
+            }),
+        });
+        const sr = makeRegistry({ extensions });
+        const id = asSessionId(uuidv7());
+        await seedSession(repo, id);
+        t.mock.method(AttachedSession, "create", async () => {
+            throw new Error("harness construction failed");
+        });
+        await assert.rejects(sr.attach(id), /harness construction failed/);
+        assert.equal(disposed, 1);
     });
 
     it("reads concurrently created sessions without listing unrelated sessions", async (t) => {

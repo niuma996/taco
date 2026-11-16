@@ -67,6 +67,7 @@ export interface ResolvedTacoConfig {
     extensions?: string[];
     /** npm package names to skip loading (taco.json disabledExtensions). */
     disabledExtensions?: string[];
+    extensionConfig?: Record<string, unknown>;
     /** Resolved compaction strategy (all fields filled in at parse time, non-optional). */
     compaction: ResolvedCompaction;
     /** Enable user-level memory. `undefined` = default (enabled). */
@@ -407,6 +408,7 @@ export function resolveConfig(
         },
         extensions: cliOverrides.extensions ?? global.extensions,
         disabledExtensions: cliOverrides.disabledExtensions ?? global.disabledExtensions,
+        extensionConfig: global.extensionConfig,
         channels: (cliOverrides.channels ?? global.channels) as ChannelConfig[] | undefined,
         compaction: (() => {
             const cliCompaction = validateCompactionConfig(cliOverrides.compaction, "cli");
@@ -884,6 +886,13 @@ function mergeGlobalConfigPatch(
     }
     if ("extensions" in patch) next.extensions = patch.extensions;
     if ("disabledExtensions" in patch) next.disabledExtensions = patch.disabledExtensions;
+    if ("extensionConfig" in patch) {
+        const value = patch.extensionConfig;
+        if (value !== undefined && (!value || typeof value !== "object" || Array.isArray(value))) {
+            throw new Error("invalid extensionConfig from patch: expected object");
+        }
+        next.extensionConfig = value;
+    }
     if ("channels" in patch) next.channels = patch.channels;
     if ("customProviders" in patch) {
         // Whole-array replace (no merge). Validation failure throws → falls back to unwritten.
