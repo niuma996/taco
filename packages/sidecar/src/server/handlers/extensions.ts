@@ -7,8 +7,10 @@ import type { ExtensionsStatusResult, TacoGlobalConfigShape } from "@taco-ai/pro
 import { readGlobalConfig } from "../../config/config.ts";
 import type { ExtensionRegistry } from "../../extensions/registry.ts";
 import { registerMethod } from "../methodRegistry.ts";
+import { registerExtensionConfigHandlers } from "./extensionConfig.ts";
 
 export function registerExtensionsHandlers(): void {
+    registerExtensionConfigHandlers();
     registerMethod("extensionsStatus", false, async ({ server, params }) => {
         const registry = server.extensionRegistry;
         if (!registry) {
@@ -46,7 +48,10 @@ export function registerExtensionsHandlers(): void {
                 configSchema: e.configSchema,
                 contributions: e.contributions,
             })),
-            failed: r.failed,
+            failed: r.failed.map((entry) => ({
+                ...entry,
+                configSchema: registry.configSchema(entry.name),
+            })),
             unauthorized: r.unauthorized,
             disabled: r.disabled,
             disabledEntries: r.disabledEntries,

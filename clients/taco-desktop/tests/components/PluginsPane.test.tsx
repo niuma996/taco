@@ -81,12 +81,12 @@ describe("PluginsPane", () => {
         expect(screen.queryByText("plugins.capabilityContext")).toBeNull();
         expect(screen.queryByText("convertDocument")).toBeNull();
         const toggle = screen.getByRole("button", { name: "plugins.showRegistrations" });
-        expect(toggle.getAttribute("aria-expanded")).toBe("false");
+        expect(toggle.getAttribute("aria-haspopup")).toBe("dialog");
         fireEvent.click(toggle);
-        expect(toggle.getAttribute("aria-expanded")).toBe("true");
+        expect(screen.getByRole("dialog")).toBeTruthy();
         expect(screen.getByText("convertDocument")).toBeTruthy();
         expect(screen.getByText("plugins.registrationScopeHint")).toBeTruthy();
-        fireEvent.click(toggle);
+        fireEvent.click(screen.getByRole("button", { name: "plugins.closeDetails" }));
         expect(screen.queryByText("convertDocument")).toBeNull();
     });
     it("distinguishes inactive workspace hooks and shows bundled skills and command rules", () => {

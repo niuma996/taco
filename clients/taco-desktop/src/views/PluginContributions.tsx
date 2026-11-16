@@ -3,22 +3,23 @@ import type {
     ExtensionStatusEntry,
     ExtensionWorkspaceStatus,
 } from "@taco-ai/protocol";
-import { ChevronDown } from "lucide-react";
-import { type ReactElement, useId, useState } from "react";
+import { type ReactElement, useState } from "react";
 import { Button } from "../components/ui/Button";
 import type { useT } from "../i18n/useI18n";
+import { type PluginSettingsAccess, PluginSettingsDialog } from "./PluginSettingsDialog";
 
 export function PluginContributions({
     entry,
     t,
     activation,
+    settings,
 }: {
     entry: ExtensionStatusEntry;
     activation?: ExtensionWorkspaceStatus;
+    settings?: PluginSettingsAccess;
     t: ReturnType<typeof useT>["t"];
 }): ReactElement | null {
-    const [expanded, setExpanded] = useState(false);
-    const detailsId = useId();
+    const [open, setOpen] = useState(false);
     const c = entry.contributions;
     if (!c) return null;
     const rows = (summary: ExtensionContributionSummary) =>
@@ -45,7 +46,7 @@ export function PluginContributions({
     const registrations = rows(c);
     const workspace = activation ? rows(activation.contributions) : [];
     const capabilities = [...new Set([...registrations, ...workspace].map(({ key }) => key))];
-    if (capabilities.length === 0 && !activation) return null;
+    if (capabilities.length === 0 && !activation && !entry.configSchema) return null;
     return (
         <div className="plugins-contributions">
             <div className="plugins-contributions-summary">
@@ -65,16 +66,14 @@ export function PluginContributions({
                     variant="ghost"
                     size="sm"
                     className="plugins-contributions-toggle"
-                    aria-expanded={expanded}
-                    aria-controls={detailsId}
-                    onClick={() => setExpanded(!expanded)}
+                    aria-haspopup="dialog"
+                    onClick={() => setOpen(true)}
                 >
-                    {t(expanded ? "plugins.hideRegistrations" : "plugins.showRegistrations")}
-                    <ChevronDown aria-hidden="true" />
+                    {t("plugins.showRegistrations")}
                 </Button>
             </div>
-            {expanded && (
-                <div id={detailsId} className="plugins-registration-details">
+            {open && (
+                <PluginSettingsDialog entry={entry} {...settings} onClose={() => setOpen(false)}>
                     <p className="plugins-registration-hint">{t("plugins.registrationHint")}</p>
                     <RegistrationRows rows={registrations} t={t} />
                     {activation && (
@@ -95,7 +94,7 @@ export function PluginContributions({
                             {t("plugins.registrationScopeHint")}
                         </p>
                     )}
-                </div>
+                </PluginSettingsDialog>
             )}
         </div>
     );

@@ -568,6 +568,8 @@ describe("methods.snapshot", () => {
         "channels.submitVerifyCode": { ensureWorkspace: false, command: true },
         "channels.unbind": { ensureWorkspace: false, command: true },
         "commandPermission.resolve": { ensureWorkspace: true, command: true },
+        "extensions.configGet": { ensureWorkspace: false },
+        "extensions.configUpdate": { ensureWorkspace: false },
         "extensions.status": { ensureWorkspace: false },
         "memory.deleteTopic": { ensureWorkspace: true },
         "memory.list": { ensureWorkspace: true },

@@ -338,17 +338,18 @@ export async function loadExtensions(config: LoadedConfig): Promise<ExtensionReg
     // `disabledExtensions` is recorded via recordDisabled and never enters the
     // load pipeline, so it can never end up in failed/unauthorized (disabled
     // and failed are mutually exclusive by construction).
-    const actual: string[] = [];
     for (const name of new Set(config.extensions)) {
         if (disabled.has(name)) {
             registry.recordDisabled(name);
-        } else {
-            actual.push(name);
         }
     }
 
-    const candidates = dedupByName([...candidatesFromDir(dirRoot), ...candidatesFromNpm(actual)]);
+    const candidates = dedupByName([
+        ...candidatesFromDir(dirRoot),
+        ...candidatesFromNpm([...new Set(config.extensions)]),
+    ]);
     for (const c of candidates) {
+        registry.registerConfigSchema(c.name, c.configSchema);
         if (disabled.has(c.name)) {
             registry.recordDisabled(c.name, {
                 version: c.version,

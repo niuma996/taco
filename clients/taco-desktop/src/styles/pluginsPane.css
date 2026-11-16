@@ -143,16 +143,6 @@
     margin-left: auto;
     color: var(--fg-dim);
 }
-.plugins-contributions-toggle svg {
-    width: var(--text-xs);
-    height: var(--text-xs);
-}
-.plugins-contributions-toggle[aria-expanded="true"] svg {
-    transform: rotate(180deg);
-}
-.plugins-registration-details {
-    margin-top: var(--space-3);
-}
 .plugins-registration-hint {
     margin: var(--space-2) 0;
     color: var(--fg-dim);
@@ -197,4 +187,38 @@
 }
 .plugins-activation--failed {
     color: var(--danger);
+}
+
+.plugins-settings-dialog {
+    width: min(40rem, calc(100vw - var(--space-6)));
+    max-width: min(40rem, calc(100vw - var(--space-6)));
+    min-width: 0;
+}
+.plugins-settings-dialog .ui-modal-title {
+    overflow-wrap: anywhere;
+}
+.plugins-settings-section + .plugins-settings-section {
+    border-top: var(--space-px) solid var(--border-subtle);
+    margin-top: var(--space-5);
+    padding-top: var(--space-4);
+}
+.plugins-settings-section h3 {
+    margin: 0 0 var(--space-3);
+    color: var(--fg);
+    font-size: var(--text-md);
+    font-weight: var(--weight-title);
+}
+.plugins-config-fields {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+    margin-top: var(--space-4);
+}
+.plugins-config-feedback {
+    color: var(--accent);
+    font-size: var(--text-xs);
+}
+.plugins-config-error {
+    color: var(--danger);
+    font-size: var(--text-xs);
 }

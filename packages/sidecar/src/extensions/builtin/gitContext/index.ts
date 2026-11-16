@@ -330,10 +330,60 @@ export const manifest: BuiltinManifest = {
         type: "object",
         additionalProperties: false,
         properties: {
-            commitLimit: { type: "integer", minimum: 0, maximum: 50, default: 5 },
-            fileLimit: { type: "integer", minimum: 1, maximum: 200, default: 50 },
-            includeCommits: { type: "boolean", default: true },
-            includeWorkingTree: { type: "boolean", default: true },
+            commitLimit: {
+                type: "integer",
+                minimum: 0,
+                maximum: 50,
+                default: 5,
+                title: "Recent commits",
+                description:
+                    "Number of recent commits to include (0–50). Zero disables commit history.",
+                "x-i18n": {
+                    zh: {
+                        title: "最近提交数量",
+                        description: "注入最近 0–50 条提交；设为 0 关闭提交历史。",
+                    },
+                },
+            },
+            fileLimit: {
+                type: "integer",
+                minimum: 1,
+                maximum: 200,
+                default: 50,
+                title: "Files per group",
+                description:
+                    "Maximum filenames in each staged, unstaged and untracked group (1–200).",
+                "x-i18n": {
+                    zh: {
+                        title: "每组文件上限",
+                        description: "已暂存、未暂存、未跟踪三组各展示最多 1–200 个文件名。",
+                    },
+                },
+            },
+            includeCommits: {
+                type: "boolean",
+                default: true,
+                title: "Include recent commits",
+                description: "Provide recent commit history as context for the model.",
+                "x-i18n": {
+                    zh: {
+                        title: "包含最近提交",
+                        description: "将最近提交历史提供给模型作为上下文。",
+                    },
+                },
+            },
+            includeWorkingTree: {
+                type: "boolean",
+                default: true,
+                title: "Include working tree changes",
+                description: "Provide staged, unstaged and untracked filenames as context.",
+                "x-i18n": {
+                    zh: {
+                        title: "包含工作区变更",
+                        description: "提供已暂存、未暂存和未跟踪文件列表作为上下文。",
+                    },
+                },
+            },
         },
     },
     register: (registry) => {

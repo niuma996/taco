@@ -10,6 +10,7 @@ starting with `v0.1.0` (the first open-source release).
 
 ### Changed
 
+- Plugin details now open in a modal with schema-generated settings for primitive types and enums, plugin-owned localized field copy, validated incremental saves, and restart feedback. — `sidecar` + `desktop`
 - Upgraded existing built-in plugins with validated configuration, live Git/project detection, independent OfficeCLI skill/approval options, and workspace activation diagnostics. Core display redaction remains independent of the model-result plugin. — `sidecar` + `desktop`
 - Strengthened the extension runtime with atomic rollback, workspace activators, lazy tools, and file-access declarations. `disabledExtensions` now also disables directory-discovered extensions; built-in file-access declarations cannot be overridden, and tool-name collisions or a broken candidate no longer take down a workspace or tool listing. — `sidecar` + `desktop`
 - Added workspace/session extension lifecycles with completion events and deterministic cleanup, validated per-extension configuration, and diagnostics that distinguish actual contributions from pending-restart state. — `sidecar` + `desktop`

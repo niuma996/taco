@@ -144,6 +144,17 @@ export class ExtensionRegistry {
         "failed" | "unauthorized" | "disabled"
     > = { loaded: [], failed: [], unauthorized: [], disabled: [] };
 
+    private readonly configSchemas = new Map<string, Record<string, unknown>>();
+
+    registerConfigSchema(name: string, schema?: Record<string, unknown>): void {
+        if (schema) this.configSchemas.set(name, structuredClone(schema));
+    }
+
+    configSchema(name: string): Record<string, unknown> | undefined {
+        const schema = this.configSchemas.get(name);
+        return schema ? structuredClone(schema) : undefined;
+    }
+
     checkpoint(): ExtensionRegistryCheckpoint {
         // Loading is serial and every contribution is append-only. The global
         // snapshots cover the two registries whose entries live outside this object.
@@ -386,13 +397,12 @@ export class ExtensionRegistry {
 
     /**
      * Record an extension name that was skipped because it appears in
-     * disabledExtensions. Called by the loader during the
-     * `actual = extensions - disabled` subtraction — the extension is never
-     * imported, so we only have its name (no version/permissions/manifest).
+     * disabledExtensions. Manifest metadata may be read for configuration
+     * editing, but the extension module is never imported.
      */
     recordDisabled(name: string, details: Omit<ExtensionDisabledEntry, "name"> = {}): void {
         if (!this._report.disabled.includes(name)) this._report.disabled.push(name);
-        if (!this._disabledEntries.has(name)) this._disabledEntries.set(name, { name, ...details });
+        this._disabledEntries.set(name, { ...this._disabledEntries.get(name), name, ...details });
     }
 
     tools(): TacoTool[] {
@@ -475,6 +485,7 @@ export async function registerBuiltinExtensions(
     // recordLoaded/recordFailed so a builtin cannot double-record itself;
     // the dispatcher below owns that bookkeeping exclusively.
     for (const manifest of manifests) {
+        registry.registerConfigSchema(manifest.name, manifest.configSchema);
         if (disabledExtensions.has(manifest.name)) {
             registry.recordDisabled(manifest.name, {
                 version: manifest.version,

@@ -12,14 +12,16 @@ import type {
     ExtensionsStatusResult,
     ExtensionWorkspaceStatus,
 } from "@taco-ai/protocol";
-import type { ReactElement } from "react";
+import { type ReactElement, useState } from "react";
 import { ContentHeader } from "../components/ContentHeader";
 import { Button } from "../components/ui/Button.tsx";
 import { Switch } from "../components/ui/Switch.tsx";
 import { useT } from "../i18n/useI18n";
 import { PluginContributions } from "./PluginContributions";
+import { type PluginSettingsAccess, PluginSettingsDialog } from "./PluginSettingsDialog";
 
 export interface PluginsPaneProps {
+    settings?: PluginSettingsAccess;
     status: ExtensionsStatusResult | null;
     loading: boolean;
     error: string | null;
@@ -82,6 +84,7 @@ export function PluginsPane(props: PluginsPaneProps): ReactElement {
                         {status.loaded.map((e) => (
                             <EnabledCard
                                 key={e.name}
+                                settings={props.settings}
                                 entry={e}
                                 activation={status.workspace?.entries.find(
                                     (item) => item.name === e.name,
@@ -106,6 +109,7 @@ export function PluginsPane(props: PluginsPaneProps): ReactElement {
                         {status.disabled.map((name) => (
                             <DisabledCard
                                 key={name}
+                                settings={props.settings}
                                 name={name}
                                 entry={status.disabledEntries?.find((entry) => entry.name === name)}
                                 pendingEnable={
@@ -139,6 +143,9 @@ export function PluginsPane(props: PluginsPaneProps): ReactElement {
                                 <p className="plugins-card-reason">
                                     {t("plugins.failedReason", { reason: f.reason })}
                                 </p>
+                                {f.configSchema && (
+                                    <PluginConfigureButton entry={f} settings={props.settings} />
+                                )}
                             </div>
                         ))}
                     </PluginSection>
@@ -187,6 +194,7 @@ function PluginSection(props: {
 }
 
 function DisabledCard(props: {
+    settings?: PluginSettingsAccess;
     name: string;
     entry?: ExtensionsStatusResult["disabledEntries"][number];
     pendingEnable: boolean;
@@ -215,11 +223,15 @@ function DisabledCard(props: {
                     label={`Enable ${name}`}
                 />
             </div>
+            {entry?.configSchema && (
+                <PluginConfigureButton entry={{ ...entry, name }} settings={props.settings} />
+            )}
         </div>
     );
 }
 
 function EnabledCard(props: {
+    settings?: PluginSettingsAccess;
     entry: ExtensionStatusEntry;
     activation?: ExtensionWorkspaceStatus;
     saving: boolean;
@@ -286,7 +298,33 @@ function EnabledCard(props: {
                     ))}
                 </div>
             )}
-            <PluginContributions entry={entry} activation={activation} t={t} />
+            <PluginContributions
+                entry={entry}
+                activation={activation}
+                t={t}
+                settings={props.settings}
+            />
         </div>
+    );
+}
+
+function PluginConfigureButton({
+    entry,
+    settings,
+}: {
+    entry: { name: string; configSchema?: Record<string, unknown> };
+    settings?: PluginSettingsAccess;
+}) {
+    const [open, setOpen] = useState(false);
+    const { t } = useT();
+    return (
+        <>
+            <Button variant="ghost" size="sm" onClick={() => setOpen(true)}>
+                {t("plugins.showRegistrations")}
+            </Button>
+            {open && (
+                <PluginSettingsDialog entry={entry} {...settings} onClose={() => setOpen(false)} />
+            )}
+        </>
     );
 }

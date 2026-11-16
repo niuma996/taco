@@ -87,6 +87,22 @@ export const extensionsStatusSchema = Type.Union([
     Type.Object({ workspace: Type.Optional(workspace) }, { additionalProperties: false }),
 ]);
 
+export const extensionConfigGetSchema = Type.Object(
+    { name: Type.String({ minLength: 1 }) },
+    { additionalProperties: false },
+);
+export const extensionConfigUpdateSchema = Type.Object(
+    {
+        name: Type.String({ minLength: 1 }),
+        values: Type.Record(
+            Type.String(),
+            Type.Union([Type.String(), Type.Number(), Type.Boolean()]),
+        ),
+        unset: Type.Optional(Type.Array(Type.String(), { uniqueItems: true })),
+    },
+    { additionalProperties: false },
+);
+
 /**
  * The MCP server id becomes a tool-name prefix, so it is constrained to the
  * same charset the sidecar's tool-name rewriting accepts.

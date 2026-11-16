@@ -25,6 +25,8 @@ import type {
 import {
     commandPermissionResolveSchema,
     configPatchSchema,
+    extensionConfigGetSchema,
+    extensionConfigUpdateSchema,
     extensionsStatusSchema,
     mcpCreateConfigSchema,
     mcpDeleteConfigSchema,
@@ -138,6 +140,16 @@ export interface ConfigPatchResult {
 /** `extensions.status` RPC — returns the current extension registry's status. */
 export type ExtensionsStatusParams = ParamsOf<typeof extensionsStatusSchema>;
 
+export type ExtensionConfigGetParams = ParamsOf<typeof extensionConfigGetSchema>;
+export type ExtensionConfigUpdateParams = ParamsOf<typeof extensionConfigUpdateSchema>;
+/** Only declared primitive non-secret values; secret fields expose presence, never content. */
+export interface ExtensionConfigResult {
+    schema: Record<string, unknown>;
+    values: Record<string, string | number | boolean>;
+    configuredSecrets: string[];
+    pendingRestart: boolean;
+}
+
 export interface ExtensionStatusEntry {
     name: string;
     version: string;
@@ -208,6 +220,8 @@ export interface ExtensionsStatusResult {
         name: string;
         reason: string;
         stage?: "load" | "workspace" | "session";
+        /** Retained schema allows repairing configuration without importing the plugin. */
+        configSchema?: Record<string, unknown>;
     }>;
     unauthorized: Array<{ name: string; method: string }>;
     /** Names skipped at startup via disabledExtensions, across all sources. */
@@ -393,6 +407,16 @@ const settingsRows = {
     settingsGet: row<SettingsGetResult>()("settings.get", "process", settingsGetSchema),
     settingsWrite: row<SettingsWriteResult>()("settings.write", "process", settingsWriteSchema),
     configPatch: row<ConfigPatchResult>()("config.patch", "workspace", configPatchSchema),
+    extensionConfigGet: row<ExtensionConfigResult>()(
+        "extensions.configGet",
+        "process",
+        extensionConfigGetSchema,
+    ),
+    extensionConfigUpdate: row<ExtensionConfigResult>()(
+        "extensions.configUpdate",
+        "process",
+        extensionConfigUpdateSchema,
+    ),
     extensionsStatus: row<ExtensionsStatusResult>()(
         "extensions.status",
         "process",

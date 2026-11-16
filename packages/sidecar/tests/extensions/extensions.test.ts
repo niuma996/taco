@@ -663,6 +663,10 @@ describe("loader", () => {
             );
             const r = await loadExtensions({ extensions: [] });
             assert.ok(r.report.failed.some((entry) => entry.name === "invalid-config-ext"));
+            assert.deepEqual(r.configSchema("invalid-config-ext"), {
+                type: "object",
+                required: ["enabled"],
+            });
             assert.equal(
                 existsSync(join(process.env.TACO_EXTENSIONS_DIR ?? "", "invalid-config-imported")),
                 false,

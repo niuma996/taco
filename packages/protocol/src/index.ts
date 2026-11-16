@@ -125,6 +125,12 @@ export type {
 } from "./errors.js";
 // Error code constants — wire-stable strings for RpcResponse.error.code.
 export { ErrorCodes, readValidationIssues } from "./errors.js";
+export type { ExtensionConfigField, ExtensionConfigValue } from "./extensionConfig.js";
+export {
+    extensionConfigEnumNames,
+    extensionConfigFields,
+    extensionConfigText,
+} from "./extensionConfig.js";
 // Wire frames — routing keys, request/response/push, hello + capabilities.
 export type {
     Brand,
@@ -299,6 +305,9 @@ export type {
     CommandPermissionResolveParams,
     CommandPermissionResolveResult,
     ConfigPatchResult,
+    ExtensionConfigGetParams,
+    ExtensionConfigResult,
+    ExtensionConfigUpdateParams,
     ExtensionContributionSummary,
     ExtensionDisabledEntry,
     ExtensionPendingRestart,

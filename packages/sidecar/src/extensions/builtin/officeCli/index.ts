@@ -56,12 +56,28 @@ export const manifest: BuiltinManifest = {
             bundledSkill: {
                 type: "boolean",
                 default: true,
-                description: "Include the bundled OfficeCLI skill.",
+                title: "Bundled OfficeCLI skill",
+                description: "Include instructions for creating and editing Office documents.",
+                "x-i18n": {
+                    zh: {
+                        title: "内置 OfficeCLI 技能",
+                        description: "加载创建和编辑 Office 文档的操作指引。",
+                    },
+                },
             },
             autoApprove: {
                 type: "boolean",
                 default: true,
-                description: "Allow officecli commands without per-command approval.",
+                title: "Automatically allow OfficeCLI commands",
+                description:
+                    "Skip per-command approval for officecli. Turn off to keep the skill while reviewing commands individually.",
+                "x-i18n": {
+                    zh: {
+                        title: "自动放行 OfficeCLI 命令",
+                        description:
+                            "执行 officecli 时免逐次审批；关闭后仍可保留技能并逐次审核命令。",
+                    },
+                },
             },
         },
     },
