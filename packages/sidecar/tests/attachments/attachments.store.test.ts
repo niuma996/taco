@@ -217,7 +217,11 @@ describe("staging", () => {
         );
     });
 
-    it("follows a symlink source to its content and records the link's name", async () => {
+    it("follows a symlink source to its content and records the link's name", {
+        // Windows only lets unelevated processes create symlinks when Developer
+        // Mode is on; skip there rather than fail the suite on a permission error.
+        skip: process.platform === "win32" ? "symlinks require Developer Mode on Windows" : false,
+    }, async () => {
         const target = join(dir, "real.txt");
         await writeFile(target, "real");
         const link = join(dir, "link.txt");

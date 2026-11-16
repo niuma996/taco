@@ -24,7 +24,7 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
-    "test": "tsx --test 'tests/**/*.test.ts'",
+    "test": "tsx --test \"tests/**/*.test.ts\"",
     "test:controlNode": "tsx --test --test-force-exit tests/controlNode.test.ts"
   },
   "devDependencies": {

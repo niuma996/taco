@@ -6,7 +6,8 @@
  */
 
 import { mkdirSync, rmSync } from "node:fs";
-import { resolve as resolvePath } from "node:path";
+import { tmpdir } from "node:os";
+import { join, resolve as resolvePath } from "node:path";
 import { fileURLToPath } from "node:url";
 import { asWorkspaceId, type ServerPush } from "@taco-ai/protocol";
 import { TacoClient } from "@taco-ai/shared/node";
@@ -51,15 +52,20 @@ async function main(): Promise<number> {
 
     const repoRoot = resolvePath(__dirname, "../../..");
     // Use a fresh directory so session history cannot affect event-count assertions.
-    const sandboxRoot = `/tmp/taco-e2e-${Date.now()}`;
-    const cwd = asWorkspaceId(`${sandboxRoot}/workspace`);
+    // `/tmp` keeps the path short on POSIX; Windows has no such root, and a
+    // literal "/tmp" there resolves to a protected drive root (EPERM).
+    const sandboxRoot =
+        process.platform === "win32"
+            ? join(tmpdir(), `taco-e2e-${Date.now()}`)
+            : `/tmp/taco-e2e-${Date.now()}`;
+    const cwd = asWorkspaceId(join(sandboxRoot, "workspace"));
     mkdirSync(cwd, { recursive: true });
 
     const client = new TacoClient(
         createDefaultSidecarSpawn({
             repoRoot,
             env: {
-                TACO_SESSIONS_ROOT: `${sandboxRoot}/sessions`,
+                TACO_SESSIONS_ROOT: join(sandboxRoot, "sessions"),
                 TACO_DEFAULT_MODEL: process.env.TACO_DEFAULT_MODEL ?? "claude-sonnet-4-5",
             },
         }),

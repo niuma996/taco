@@ -170,6 +170,10 @@ async function runRipgrep(
         ];
         if (params.ignoreCase) args.push("--ignore-case");
         if (params.glob) args.push("--glob", params.glob);
+        // ripgrep prints `src\a.ts` on Windows; the tool contract (and the
+        // fallback path) report forward slashes, so pin the separator. POSIX
+        // already defaults to "/", so this only changes Windows output.
+        if (process.platform === "win32") args.push("--path-separator=/");
         args.push("--", params.pattern, ".");
         const result = searchResult();
         const child = spawn("rg", args, {
@@ -276,14 +280,20 @@ async function runFallback(
     const buffer = Buffer.alloc(MAX_FILE_BYTES + 1);
     for await (const entry of files) {
         if (piContext.abortSignal?.aborted) throw new Error("Operation aborted");
-        const rel = String(entry);
+        // The walker yields `src\a.ts` on Windows; normalise so .gitignore
+        // matching and `file:line` output keep the tool's forward-slash
+        // contract. POSIX paths never contain `\`, so gate the rewrite.
+        const rel =
+            process.platform === "win32" ? String(entry).replace(/\\/g, "/") : String(entry);
         if (ig?.(rel)) continue;
         const absPath = resolve(root, rel);
         const { text, oversized } = await readSearchFile(absPath, buffer);
         if (oversized) result.skippedLarge++;
         if (text === undefined) continue;
         if (piContext.abortSignal?.aborted) throw new Error("Operation aborted");
-        const lines = text.split("\n");
+        // Split on CRLF too: on Windows most checked-out files keep `\r`, which
+        // would otherwise ride along in every match row and break `$` anchors.
+        const lines = text.split(/\r?\n/);
         for (let i = 0; i < lines.length; i++) {
             if (re.test(lines[i])) appendMatch(result, `${rel}:${i + 1}:${lines[i]}`);
         }

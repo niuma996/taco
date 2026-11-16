@@ -24,7 +24,7 @@
     "start": "tsx lib/index.ts start",
     "build": "node esbuild.config.mjs",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test 'tests/**/*.test.ts'"
+    "test": "tsx --test \"tests/**/*.test.ts\""
   },
   "dependencies": {
     "@taco-ai/shared": "workspace:*",

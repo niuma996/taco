@@ -42,12 +42,25 @@ function escalateToSigkill(child: ChildProcess): void {
  *
  * POSIX-only, and deliberately so: on Windows `detached` gives the child its
  * own console window — what `HIDDEN_WINDOWS_SPAWN` exists to prevent — and
- * negative pids are not a thing there. Windows still terminates only the
- * direct child.
+ * negative pids are not a thing there. Windows reaches descendants through
+ * `taskkill /T` instead.
  */
 function killProcessTree(child: ChildProcess, signal: NodeJS.Signals): void {
-    if (process.platform === "win32" || child.pid === undefined) {
+    if (child.pid === undefined) {
         child.kill(signal);
+        return;
+    }
+    if (process.platform === "win32") {
+        // Windows has neither process groups nor negative pids, so signalling
+        // the direct child leaves grandchildren (the node a `pnpm test` spawns)
+        // holding the inherited stdout/stderr pipes — the `close` event this
+        // module awaits would never fire. `taskkill /T` walks the tree; `/F`
+        // is required because console children have no window to close.
+        const killer = spawn("taskkill", ["/pid", String(child.pid), "/T", "/F"], {
+            stdio: "ignore",
+            ...HIDDEN_WINDOWS_SPAWN,
+        });
+        killer.on("error", () => child.kill(signal));
         return;
     }
     // ESRCH just means the group is already gone — the normal race when a short

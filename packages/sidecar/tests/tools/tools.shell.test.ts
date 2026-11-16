@@ -28,7 +28,12 @@ const IGNORE_SIGTERM_AND_BUSY_LOOP = "trap '' TERM; while true; do sleep 0.1; do
 const COMPOUND_COMMAND = "sleep 30 & wait";
 
 describe("runShell — SIGTERM→SIGKILL escalation", () => {
-    it("SIGKILLs a child that ignores SIGTERM after a timeout", async () => {
+    // Both cases drive a `trap '' TERM` busy loop through /bin/sh, which has no
+    // Windows equivalent — the command exits immediately there, so the timeout
+    // path under test is never entered.
+    const posixOnly = process.platform === "win32" ? "requires POSIX sh" : false;
+
+    it("SIGKILLs a child that ignores SIGTERM after a timeout", { skip: posixOnly }, async () => {
         const result = await runShell(IGNORE_SIGTERM_AND_BUSY_LOOP, null, {
             cwd: tmpdir(),
             timeoutMs: 50,
@@ -41,7 +46,9 @@ describe("runShell — SIGTERM→SIGKILL escalation", () => {
         // ran, and a child that traps SIGTERM would hang this call forever.
     });
 
-    it("SIGKILLs a child that ignores SIGTERM after an abort signal", async () => {
+    it("SIGKILLs a child that ignores SIGTERM after an abort signal", {
+        skip: posixOnly,
+    }, async () => {
         const controller = new AbortController();
         const pending = runShell(IGNORE_SIGTERM_AND_BUSY_LOOP, null, {
             cwd: tmpdir(),

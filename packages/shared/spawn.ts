@@ -44,8 +44,17 @@ export function createDefaultSidecarSpawn(opts?: SidecarSpawnOptions): {
         };
     }
     const repoRoot = opts?.repoRoot ?? process.env.TACO_SIDECAR_CWD ?? process.cwd();
-    const command = process.env.TACO_SIDECAR_CMD ?? "tsx";
-    const args = (process.env.TACO_SIDECAR_ARGS ?? "packages/sidecar/src/index.ts").split(" ");
+    let command = process.env.TACO_SIDECAR_CMD ?? "tsx";
+    let args = (process.env.TACO_SIDECAR_ARGS ?? "packages/sidecar/src/index.ts").split(" ");
+    // Windows cannot spawn the extensionless `tsx` bin shim: node_modules/.bin
+    // only ships tsx.CMD / tsx.ps1 there, and Node 22 refuses to execute .cmd
+    // directly (CVE-2024-27980). Run the loader through node itself instead —
+    // the same shape as the CLI's dev launcher. An explicit TACO_SIDECAR_CMD
+    // still wins so callers can point at a packaged entry point.
+    if (process.platform === "win32" && process.env.TACO_SIDECAR_CMD === undefined) {
+        command = process.execPath;
+        args = ["--import", "tsx", ...args];
+    }
     return {
         spawn: {
             command,

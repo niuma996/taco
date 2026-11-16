@@ -18,11 +18,13 @@
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { connect } from "node:net";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const POLL_MS = 20;
 const TIMEOUT_MS = 90_000;
+const IS_WINDOWS = process.platform === "win32";
 
 function findRepoRoot() {
     let dir = dirname(fileURLToPath(import.meta.url));
@@ -89,8 +91,10 @@ const ms = (t0) => `${Number(t0) / 1e6}ms`;
 
 async function main() {
     const repoRoot = findRepoRoot();
-    // /tmp keeps the socket path under macOS's 104-byte sun_path limit.
-    const tmpHome = mkdtempSync("/tmp/taco-boot-");
+    // /tmp keeps the socket path under macOS's 104-byte sun_path limit, so it
+    // stays the POSIX default. Windows has no /tmp; os.tmpdir() is the only
+    // writable root there (a literal "/tmp" resolves to a protected drive root).
+    const tmpHome = mkdtempSync(IS_WINDOWS ? join(tmpdir(), "taco-boot-") : "/tmp/taco-boot-");
     const runtimeDir = join(tmpHome, "run");
     mkdirSync(runtimeDir, { recursive: true });
     const ndjson = join(runtimeDir, "sidecar.sock");
@@ -106,9 +110,19 @@ async function main() {
     };
 
     const t0 = process.hrtime.bigint();
+    const entry = join(repoRoot, "packages", "sidecar", "src", "index.ts");
+    // The repo-local `.bin/tsx` is a POSIX shell shim; Windows ships only
+    // tsx.CMD/tsx.ps1 next to it and Node 22 refuses to spawn those directly.
+    // Launch the loader through node itself there instead.
     const child = spawn(
-        join(repoRoot, "node_modules", ".bin", "tsx"),
-        [join(repoRoot, "packages", "sidecar", "src", "index.ts")],
+        IS_WINDOWS ? process.execPath : join(repoRoot, "node_modules", ".bin", "tsx"),
+        IS_WINDOWS
+            ? [
+                  "--import",
+                  pathToFileURL(join(repoRoot, "node_modules", "tsx", "dist", "loader.mjs")).href,
+                  entry,
+              ]
+            : [entry],
         { env, stdio: ["ignore", "ignore", "pipe"] },
     );
     let tFirstLog;
