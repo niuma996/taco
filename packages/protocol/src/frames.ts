@@ -102,8 +102,12 @@ export type CompactionFailureReason =
  *  2.15 adds peer-scoped IM directory associations.
  *  2.16 adds source-layer Skill reads and original builtin Agent reads.
  *  2.17 adds layered Memory reads and the IM Taco-system-memory opt-in.
- *  2.18 adds scoped `memory.read` and opaque memory source references. */
-export const SIDECAR_PROTOCOL_VERSION = { major: 2, minor: 18 } as const;
+ *  2.18 adds scoped `memory.read` and opaque memory source references.
+ *  2.19 adds `extensions.configGet` / `extensions.configUpdate`, the optional
+ *  `workspace` param on `extensions.status`, and its new result fields; a 2.18
+ *  daemon answers `unknown_method` for the config RPCs and rejects the new
+ *  `extensions.status` params shape. */
+export const SIDECAR_PROTOCOL_VERSION = { major: 2, minor: 19 } as const;
 
 /**
  * Client-side gate for a sidecar's advertised protocol version. Semver-ish but

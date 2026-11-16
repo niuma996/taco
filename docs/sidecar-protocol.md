@@ -115,6 +115,7 @@ because a registered system-service daemon can outlive a desktop upgrade.
 | 2.16 | Optional `scope: global / workspace / builtin` on `skills.list` and `skills.content`; `builtin` source selection on `agents.list` and `agents.content`. Explicit sources expose original definitions before cross-layer overrides; omitted scope preserves the effective catalog. Agent write/delete scopes remain `global / workspace`. |
 | 2.17 | Layered `memory.list`: optional `memoryLayer` / `memoryLayerKey` / `readOnly` on topics and `memorySources` on the result. `memory.deleteTopic` accepts an optional current-layer selector. IM policy accepts optional `memory.inheritManagedGlobal`; absent means off. New clients read associated workspace memory automatically and expose Taco system memory only when the resolved channel policy opts in. |
 | 2.18 | `memory.read` retrieves a topic by `memoryLayer`, opaque `sourceId`, and `id`. Context summaries and `memory.list` expose usable source references; every read rechecks live source authorization. |
+| 2.19 | `extensions.configGet` / `extensions.configUpdate`; optional `workspace` on `extensions.status`; `ExtensionsStatusResult` adds `workspace` / `disabledEntries` / `pendingRestart`, and `ExtensionStatusEntry` adds `contributions`. |
 
 Adding a value to an existing response enum is potentially breaking: older clients
 may index exhaustive maps with it. Such values require connection-scoped capability
