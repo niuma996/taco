@@ -8,12 +8,77 @@ starting with `v0.1.0` (the first open-source release).
 
 ## [Unreleased]
 
+## [0.4.2] — 2026-11-16
+
+This release is about the plugin system: every extension gets a real settings
+surface, built-in plugins become configurable, and the runtime now isolates a
+broken or conflicting third-party extension instead of letting it take the
+workspace down.
+
+### Added
+
+- Plugin details and settings now open in a separate dialog. Supported
+  scalar/enum settings are rendered from the plugin's own schema with
+  localized, plugin-owned labels; saving writes only changed fields, and a
+  restart applies them. — `sidecar` + `desktop`
+- Existing built-in plugins now support validated configuration and workspace
+  activation diagnostics. Git/project context refreshes after project
+  initialization; OfficeCLI skill and command approval are independent
+  options. — `sidecar` + `desktop`
+
 ### Changed
 
-- Plugin details now open in a modal with schema-generated settings for primitive types and enums, plugin-owned localized field copy, validated incremental saves, and restart feedback. — `sidecar` + `desktop`
-- Upgraded existing built-in plugins with validated configuration, live Git/project detection, independent OfficeCLI skill/approval options, and workspace activation diagnostics. Core display redaction remains independent of the model-result plugin. — `sidecar` + `desktop`
-- Strengthened the extension runtime with atomic rollback, workspace activators, lazy tools, and file-access declarations. `disabledExtensions` now also disables directory-discovered extensions; built-in file-access declarations cannot be overridden, and tool-name collisions or a broken candidate no longer take down a workspace or tool listing. — `sidecar` + `desktop`
-- Added workspace/session extension lifecycles with completion events and deterministic cleanup, validated per-extension configuration, and diagnostics that distinguish actual contributions from pending-restart state. — `sidecar` + `desktop`
+- Strengthened the extension runtime with atomic rollback, workspace
+  activators, lazy tools, and file-access declarations. A failing tool
+  candidate is skipped with its name logged, a tool name colliding with a
+  built-in tool is dropped, and one extension can no longer remove another's
+  file-access declaration. — `sidecar` + `desktop`
+- Added workspace/session extension lifecycles with completion events and
+  deterministic cleanup, validated per-extension configuration, and
+  diagnostics that distinguish actual contributions from pending-restart
+  state. Toggled cards stay in their current Enabled/Disabled section with a
+  pending chip until restart. — `sidecar` + `desktop`
+- Git context probes run in parallel with bounded timeouts, so a slow
+  repository no longer eats the turn's context budget. Core display redaction
+  stays enabled when the model-result redaction plugin is disabled. — `sidecar`
+
+### Fixed
+
+- A corrupted `taco.json` returns a structured error from the extension-config
+  RPCs instead of an opaque internal one; the desktop shows a localized
+  message instead of raw English, and a required secret that is explicitly
+  cleared is flagged like any other required field. — `sidecar` + `desktop`
+- Keys removed from a plugin's schema can be unset through the settings
+  dialog, so leftover values no longer leave the configuration permanently
+  invalid. — `sidecar`
+- A configured enum secret now shows "configured; leave blank to keep"
+  instead of looking unset. — `desktop`
+- Refreshing the checkpoint list clears the previous error instead of showing
+  it alongside the loading spinner. — `desktop`
+- The tools panel opens without stalling: showing a tool's input schema loads
+  only the one grammar it needs instead of every bundled syntax highlighter,
+  so the panel no longer freezes or fails to open on a cold cache. — `desktop`
+- Workspace activation probes are cached briefly while the plugins pane is
+  open, so polling no longer spawns processes repeatedly. — `sidecar`
+
+### Breaking changes
+
+- `disabledExtensions` now also disables directory-discovered extensions.
+  Previously a same-named directory extension could shadow a disabled
+  built-in/npm entry; if you rely on that override, re-enable the entry or
+  rename the directory extension. — `sidecar`
+- `ExtensionsStatusResult` adds `workspace` / `disabledEntries` /
+  `pendingRestart` and `ExtensionStatusEntry` adds `contributions` as required
+  fields. The wire change is additive, but external TypeScript
+  implementations of `@taco-ai/protocol` must populate the new fields. —
+  `protocol`
+
+### Upgrade notes
+
+- Upgrade the desktop and the sidecar together (protocol 2.19). The desktop
+  replaces an outdated daemon on its own; if you registered the daemon as a
+  system service with `taco install`, upgrade it with `taco upgrade` or
+  restart it.
 
 ## [0.4.1] — 2026-11-15
 
