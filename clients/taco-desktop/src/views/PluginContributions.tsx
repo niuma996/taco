@@ -74,11 +74,15 @@ export function PluginContributions({
             </div>
             {open && (
                 <PluginSettingsDialog entry={entry} {...settings} onClose={() => setOpen(false)}>
-                    <p className="plugins-registration-hint">{t("plugins.registrationHint")}</p>
-                    <RegistrationRows rows={registrations} t={t} />
+                    <div className="plugins-capability-group">
+                        <p className="plugins-capability-group-title">
+                            {t("plugins.registrationHint")}
+                        </p>
+                        <RegistrationRows rows={registrations} t={t} />
+                    </div>
                     {activation && (
-                        <>
-                            <p className="plugins-registration-hint">
+                        <div className="plugins-capability-group">
+                            <p className="plugins-capability-group-title">
                                 {t("plugins.workspaceContributions")}
                             </p>
                             {activation.reason && (
@@ -87,7 +91,7 @@ export function PluginContributions({
                                 </p>
                             )}
                             <RegistrationRows rows={workspace} t={t} />
-                        </>
+                        </div>
                     )}
                     {!activation && (c.workspaceActivators > 0 || c.sessionActivators > 0) && (
                         <p className="plugins-registration-hint">
@@ -121,8 +125,10 @@ function RegistrationRows({
         <dl className="plugins-registration-list">
             {rows.map(({ key, count, names }) => (
                 <div key={key} className="plugins-registration-row">
-                    <dt>{t(`plugins.registration${key}`)}</dt>
-                    <dd>{count}</dd>
+                    <dt>
+                        {t(`plugins.registration${key}`)}
+                        {count > 0 && <span className="plugins-registration-count">{count}</span>}
+                    </dt>
                     {names && (
                         <dd className="plugins-registration-names">
                             {names.map((name) => (
