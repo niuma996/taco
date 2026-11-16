@@ -16,6 +16,7 @@ import { ContentHeader } from "../components/ContentHeader";
 import { Button } from "../components/ui/Button.tsx";
 import { Switch } from "../components/ui/Switch.tsx";
 import { useT } from "../i18n/useI18n";
+import { PluginContributions } from "./PluginContributions";
 
 export interface PluginsPaneProps {
     status: ExtensionsStatusResult | null;
@@ -262,13 +263,15 @@ function EnabledCard(props: {
                     {entry.whenToUse}
                 </p>
             )}
-            <div className="plugins-perm-chips">
-                {entry.permissions.map((p) => (
-                    <span key={p} className="plugins-perm-chip" title={permLabel(p)}>
-                        {p}
-                    </span>
-                ))}
-            </div>
+            {entry.permissions.length > 0 && (
+                <div className="plugins-perm-chips">
+                    {entry.permissions.map((p) => (
+                        <span key={p} className="plugins-perm-chip" title={permLabel(p)}>
+                            {p}
+                        </span>
+                    ))}
+                </div>
+            )}
             {entry.tags && entry.tags.length > 0 && (
                 <div className="plugins-perm-chips">
                     {entry.tags.map((tag) => (
@@ -278,51 +281,7 @@ function EnabledCard(props: {
                     ))}
                 </div>
             )}
-            <ContributionList entry={entry} t={t} />
-        </div>
-    );
-}
-
-function ContributionList(props: {
-    entry: ExtensionStatusEntry;
-    t: ReturnType<typeof useT>["t"];
-}): ReactElement | null {
-    const { entry, t } = props;
-    const c = entry.contributions;
-    if (!c) return null;
-    const counts = [
-        c.contextHooks,
-        c.toolCallHooks,
-        c.toolResultHooks,
-        c.systemPrompts,
-        c.workspaceActivators,
-        c.sessionActivators,
-    ];
-    if (c.tools.length === 0 && c.deferredTools.length === 0 && counts.every((n) => n === 0)) {
-        return null;
-    }
-    return (
-        <div className="plugins-card-contributions">
-            {c.tools.length > 0 && (
-                <p>{t("plugins.contributionTools", { items: c.tools.join(", ") })}</p>
-            )}
-            {c.deferredTools.length > 0 && (
-                <p>
-                    {t("plugins.contributionDeferredTools", { items: c.deferredTools.join(", ") })}
-                </p>
-            )}
-            {counts.some((n) => n > 0) && (
-                <p>
-                    {t("plugins.contributionLifecycle", {
-                        context: String(c.contextHooks),
-                        toolCall: String(c.toolCallHooks),
-                        toolResult: String(c.toolResultHooks),
-                        prompt: String(c.systemPrompts),
-                        workspace: String(c.workspaceActivators),
-                        session: String(c.sessionActivators),
-                    })}
-                </p>
-            )}
+            <PluginContributions entry={entry} t={t} />
         </div>
     );
 }
