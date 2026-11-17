@@ -487,19 +487,22 @@ describe("CheckpointManager", () => {
 
 it("serializes index writes across store instances sharing the same storage path", async () => {
     const ctx = setup("checkpoint-parallel");
-    const first = new CheckpointStore(ctx.workspace, { home: ctx.home });
-    const second = new CheckpointStore(ctx.workspace, { home: ctx.home });
-    const results = await Promise.all(
-        Array.from({ length: 20 }, (_, index) =>
-            (index % 2 === 0 ? first : second).create({
-                sessionId: `session-${index}`,
-                label: `parallel-${index}`,
-                paths: [join(ctx.workspace, `missing-${index}`)],
-            }),
-        ),
-    );
-    assert.equal(results.length, 20);
-    assert.equal((await first.list()).length, 20);
-    rmSync(ctx.home, { recursive: true, force: true });
-    rmSync(ctx.workspace, { recursive: true, force: true });
+    try {
+        const first = new CheckpointStore(ctx.workspace, { home: ctx.home });
+        const second = new CheckpointStore(ctx.workspace, { home: ctx.home });
+        const results = await Promise.all(
+            Array.from({ length: 20 }, (_, index) =>
+                (index % 2 === 0 ? first : second).create({
+                    sessionId: `session-${index}`,
+                    label: `parallel-${index}`,
+                    paths: [join(ctx.workspace, `missing-${index}`)],
+                }),
+            ),
+        );
+        assert.equal(results.length, 20);
+        assert.equal((await first.list()).length, 20);
+    } finally {
+        rmSync(ctx.home, { recursive: true, force: true });
+        rmSync(ctx.workspace, { recursive: true, force: true });
+    }
 });

@@ -240,8 +240,8 @@ export class CheckpointStore {
                 syncParent: true,
             });
         });
-        // `chain` swallows the error so one failed commit does not poison every
-        // later create; `await next` still reports it to this caller.
+        // The coordinator advances past a failed commit so later writes can
+        // proceed; `await next` still reports this write's error to its caller.
         try {
             await next;
         } catch (e) {

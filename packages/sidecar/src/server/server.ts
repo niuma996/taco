@@ -120,7 +120,6 @@ import {
 } from "../workspace/associationStore.ts";
 import {
     createWorkspaceStores,
-    releaseWorkspaceStores,
     resolveWorkspaceResourceOwners,
     type WorkspaceStores,
 } from "../workspace/workspaceResources.ts";
@@ -1274,7 +1273,6 @@ export class SidecarServer implements ServerRpcSurface {
                 scope,
                 resourceOwners,
                 stores,
-                storesOwned: true,
                 configSources,
                 sessionsRoot,
                 defaultModel: this.options.defaultModel,
@@ -1349,11 +1347,7 @@ export class SidecarServer implements ServerRpcSurface {
             // process: every caller of ensureWorkspace sees the same error
             // and can retry.
             if (ws) await ws.dispose().catch(() => undefined);
-            else {
-                if (stores)
-                    await releaseWorkspaceStores({ ...stores, owned: true }).catch(() => undefined);
-                await mcpLease.release().catch(() => undefined);
-            }
+            else await mcpLease.release().catch(() => undefined);
             // The ctor never ran: ws.dispose() (which would release the
             // workspace activators' disposers) is unavailable, so the
             // extension set acquired in loadWorkspaceAssets is released here.

@@ -34,6 +34,9 @@ export function skillScopeOf(
 ): AgentScope | undefined {
     if (skill.source === "builtin" || executionCwd === undefined) return undefined;
     const file = resolve(executionCwd, skill.filePath);
+    // `.pi/skills` remains an implicit compatibility root. It is intentionally
+    // excluded from scope-filtered scans so `scope=workspace` keeps its
+    // historical meaning (project `.taco/skills` only).
     const roots = sources
         ? [
               ...sources.skillDirs

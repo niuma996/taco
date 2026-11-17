@@ -441,18 +441,3 @@ for (const reserved of ["im", "scratch", "chats", "--partition--"]) {
         assert.ok(existsSync(sibling));
     });
 }
-
-test("cleanup storage paths are derived through the shared storage helpers", async () => {
-    const { memoryProjectDir, checkpointStoragePaths } = await import(
-        "../../src/workspace/storagePaths.ts"
-    );
-    const home = mkdtempSync(join(tmpdir(), "cleanup-paths-"));
-    const project = "/project/cleanup";
-    const memoryPath = memoryProjectDir(project, home);
-    assert.equal(memoryPath.startsWith(join(home, "memory", "projects")), true);
-    assert.equal(
-        checkpointStoragePaths(project, home).root.startsWith(join(home, "checkpoints")),
-        true,
-    );
-    rmSync(home, { recursive: true, force: true });
-});

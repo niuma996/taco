@@ -1,4 +1,9 @@
-/** Process-local serialization for read-modify-write checkpoint indexes. */
+/**
+ * Process-local serialization for read-modify-write checkpoint indexes.
+ * Multiple checkpoint stores can point at one index when workspaces share an
+ * execution directory, so the lock belongs to the canonical index path rather
+ * than to a store instance.
+ */
 
 const chains = new Map<string, Promise<void>>();
 

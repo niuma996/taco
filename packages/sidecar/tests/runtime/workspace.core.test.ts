@@ -816,30 +816,3 @@ describe("workspace configuration injection", () => {
         }
     });
 });
-
-describe("workspace owned store lifecycle", () => {
-    useTempTacoHome("taco-owned-stores-");
-    it("releases stores explicitly marked as owned during runtime disposal", async () => {
-        const { CheckpointStore } = await import("../../src/checkpoints/store.ts");
-        const memory = new LocalMemoryStore();
-        memory.initialize("owned-memory");
-        const checkpoint = new CheckpointStore("owned-checkpoint");
-        let releases = 0;
-        const runtime = new WorkspaceRuntime({
-            cwd: asWorkspaceId("/owned-runtime"),
-            providerKeyStore: new ProviderKeyStore({}),
-            stores: {
-                memory,
-                checkpoint,
-                owned: true,
-                release: async () => {
-                    releases++;
-                },
-            },
-            storesOwned: true,
-        });
-        await runtime.dispose();
-        await runtime.dispose();
-        assert.equal(releases, 1);
-    });
-});
