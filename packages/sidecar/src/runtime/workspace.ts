@@ -94,6 +94,7 @@ import { orderTools, toolNamesKey } from "../tools/toolOrder.ts";
 import type { BackgroundWorkHooks } from "../work/workHooks.ts";
 import {
     createWorkspaceStores,
+    releaseWorkspaceStores,
     resolveWorkspaceResourceOwners,
     type WorkspaceResourceOwners,
     type WorkspaceStores,
@@ -259,6 +260,8 @@ interface WorkspaceRuntimeConfig {
     memoryEnabled?: boolean;
     /** Preconstructed stores; borrowed without initialization or disposal. */
     stores?: WorkspaceStores;
+    /** Whether this runtime owns and releases the injected stores. */
+    storesOwned?: boolean;
     resourceOwners?: WorkspaceResourceOwners;
     configSources?: WorkspaceConfigSources;
     /** Entry point for `tasks.updated` pushes; defaults to NoopTaskPushAdapter. */
@@ -460,6 +463,8 @@ export class WorkspaceRuntime extends EventEmitter {
      */
     private agentCatalog: ReadonlyArray<AgentDefinition>;
     /** Storage and configuration identities resolved independently of routing. */
+    private readonly stores: WorkspaceStores;
+    private readonly storesOwned: boolean;
     readonly resourceOwners: WorkspaceResourceOwners;
     readonly configSources: WorkspaceConfigSources;
     /** User-level memory store. */
@@ -701,6 +706,8 @@ export class WorkspaceRuntime extends EventEmitter {
                 memoryEnabled: options.memoryEnabled,
                 checkpointsEnabled: imPolicy ? imPolicy.tools.fsTools === "allow" : true,
             });
+        this.storesOwned = options.storesOwned ?? options.stores === undefined;
+        this.stores = this.storesOwned ? stores : { ...stores, owned: false };
         this.memoryStore = stores.memory;
         this.memoryContextStore =
             isIm && this.memoryStore.enabled
@@ -1589,6 +1596,7 @@ export class WorkspaceRuntime extends EventEmitter {
             () => this.sessionRegistry.dispose(),
             () => this.extensions?.dispose(),
             () => this.toolRegistry.dispose?.(),
+            () => releaseWorkspaceStores(this.stores),
             () => {
                 this.removeAllListeners();
             },

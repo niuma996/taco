@@ -89,3 +89,31 @@ test("storage paths retain distinct historical memory and checkpoint hashing", a
         join(home, "checkpoints", hash(identity)),
     );
 });
+
+test("releases owned stores once while borrowed stores remain usable", async () => {
+    const { createWorkspaceStores, releaseWorkspaceStores, resolveWorkspaceResourceOwners } =
+        await import("../../src/workspace/workspaceResources.ts");
+    const owners = resolveWorkspaceResourceOwners(
+        scopeModule.createWorkspaceScope(asWorkspaceId("/lease")),
+    );
+    const stores = createWorkspaceStores(owners);
+    let disposed = 0;
+    const leased = {
+        ...stores,
+        release: async () => {
+            disposed++;
+        },
+    };
+    await releaseWorkspaceStores(leased);
+    await releaseWorkspaceStores(leased);
+    assert.equal(disposed, 1);
+    const borrowed = createWorkspaceStores(owners);
+    const borrowedLease = {
+        ...borrowed,
+        release: async () => {
+            disposed++;
+        },
+    };
+    await releaseWorkspaceStores({ ...borrowedLease, owned: false });
+    assert.equal(disposed, 1);
+});

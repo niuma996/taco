@@ -24,6 +24,8 @@ export function resolveWorkspaceResourceOwners(scope: WorkspaceScope): Workspace
 export interface WorkspaceStores {
     readonly memory: MemoryStore;
     readonly checkpoint: CheckpointStore | undefined;
+    readonly release?: () => Promise<void>;
+    readonly owned?: boolean;
 }
 
 export function createWorkspaceStores(
@@ -32,11 +34,25 @@ export function createWorkspaceStores(
 ): WorkspaceStores {
     const memory = options.memoryEnabled !== false ? new LocalMemoryStore() : new NoOpMemoryStore();
     memory.initialize(owners.memory);
+    let released = false;
     return {
         memory,
         checkpoint:
             options.checkpointsEnabled !== false
                 ? new CheckpointStore(owners.checkpoint)
                 : undefined,
+        owned: true,
+        release: async () => {
+            if (released) return;
+            released = true;
+        },
     };
+}
+
+const releasedStores = new WeakSet<object>();
+
+export async function releaseWorkspaceStores(stores: WorkspaceStores): Promise<void> {
+    if (stores.owned === false || releasedStores.has(stores)) return;
+    releasedStores.add(stores);
+    await stores.release?.();
 }

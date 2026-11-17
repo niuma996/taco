@@ -18,6 +18,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { mkdir, open, readFile, rename, rm, stat, unlink } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { checkpointStoragePaths } from "../workspace/storagePaths.ts";
+import { enqueueCheckpointIndexWrite, waitForCheckpointIndex } from "./writeCoordinator.ts";
 
 /** One captured file. `content: null` records "did not exist", so restoring deletes it. */
 export interface CheckpointFile {
@@ -141,8 +142,6 @@ export class CheckpointStore {
     private readonly root: string;
     private readonly blobsDir: string;
     private readonly indexPath: string;
-    /** Serialises read-modify-write on index.json. */
-    private chain: Promise<unknown> = Promise.resolve();
 
     constructor(cwd: string, options?: { home?: string }) {
         const paths = checkpointStoragePaths(cwd, options?.home);
@@ -229,7 +228,7 @@ export class CheckpointStore {
             files,
         };
 
-        const next = this.chain.then(async () => {
+        const next = enqueueCheckpointIndexWrite(this.indexPath, async () => {
             const index = await this.readIndex();
             index.push(meta);
             const pruned = index.length > INDEX_CAP ? index.slice(-INDEX_CAP) : index;
@@ -243,7 +242,6 @@ export class CheckpointStore {
         });
         // `chain` swallows the error so one failed commit does not poison every
         // later create; `await next` still reports it to this caller.
-        this.chain = next.catch(() => undefined);
         try {
             await next;
         } catch (e) {
@@ -274,7 +272,7 @@ export class CheckpointStore {
         }
 
         let updated: CheckpointMeta | undefined;
-        const next = this.chain.then(async () => {
+        const next = enqueueCheckpointIndexWrite(this.indexPath, async () => {
             const index = await this.readIndex();
             const current = index.find((checkpoint) => checkpoint.id === id);
             if (!current) throw new Error(`checkpoint not found: ${id}`);
@@ -302,7 +300,6 @@ export class CheckpointStore {
                 { syncParent: true },
             );
         });
-        this.chain = next.catch(() => undefined);
         await next;
         if (!updated) throw new Error(`checkpoint not found: ${id}`);
         return updated;
@@ -322,7 +319,7 @@ export class CheckpointStore {
             })),
         );
         let updated: CheckpointMeta | undefined;
-        const next = this.chain.then(async () => {
+        const next = enqueueCheckpointIndexWrite(this.indexPath, async () => {
             const index = await this.readIndex();
             const current = index.find((checkpoint) => checkpoint.id === id);
             if (!current) throw new Error(`checkpoint not found: ${id}`);
@@ -345,7 +342,6 @@ export class CheckpointStore {
                 { syncParent: true },
             );
         });
-        this.chain = next.catch(() => undefined);
         await next;
         return updated ?? { ...existing, files };
     }
@@ -394,13 +390,13 @@ export class CheckpointStore {
 
     /** Newest first. */
     async list(sessionId?: string): Promise<CheckpointMeta[]> {
-        await this.chain;
+        await waitForCheckpointIndex(this.indexPath);
         const all = (await this.readIndex()).reverse();
         return sessionId ? all.filter((c) => c.sessionId === sessionId) : all;
     }
 
     async get(id: string): Promise<CheckpointMeta | undefined> {
-        await this.chain;
+        await waitForCheckpointIndex(this.indexPath);
         return (await this.readIndex()).find((c) => c.id === id);
     }
 

@@ -120,7 +120,9 @@ import {
 } from "../workspace/associationStore.ts";
 import {
     createWorkspaceStores,
+    releaseWorkspaceStores,
     resolveWorkspaceResourceOwners,
+    type WorkspaceStores,
 } from "../workspace/workspaceResources.ts";
 import { createWorkspaceScope, type WorkspaceScope } from "../workspace/workspaceScope.ts";
 import { type ChannelControlSurface, createChannelControl } from "./channelControl.ts";
@@ -1262,8 +1264,9 @@ export class SidecarServer implements ServerRpcSurface {
         // throw on bad config; we don't get a second chance to release the
         // provider once it leaves this function.
         let ws: WorkspaceRuntime | undefined;
+        let stores: WorkspaceStores | undefined;
         try {
-            const stores = createWorkspaceStores(resourceOwners, {
+            stores = createWorkspaceStores(resourceOwners, {
                 memoryEnabled: this.options.memoryEnabled,
                 checkpointsEnabled: imPolicy ? imPolicy.tools.fsTools === "allow" : true,
             });
@@ -1271,6 +1274,7 @@ export class SidecarServer implements ServerRpcSurface {
                 scope,
                 resourceOwners,
                 stores,
+                storesOwned: true,
                 configSources,
                 sessionsRoot,
                 defaultModel: this.options.defaultModel,
@@ -1344,7 +1348,12 @@ export class SidecarServer implements ServerRpcSurface {
             // released. Single failure here is preferable to a leaked
             // process: every caller of ensureWorkspace sees the same error
             // and can retry.
-            await (ws ? ws.dispose() : mcpLease.release()).catch(() => undefined);
+            if (ws) await ws.dispose().catch(() => undefined);
+            else {
+                if (stores)
+                    await releaseWorkspaceStores({ ...stores, owned: true }).catch(() => undefined);
+                await mcpLease.release().catch(() => undefined);
+            }
             // The ctor never ran: ws.dispose() (which would release the
             // workspace activators' disposers) is unavailable, so the
             // extension set acquired in loadWorkspaceAssets is released here.
