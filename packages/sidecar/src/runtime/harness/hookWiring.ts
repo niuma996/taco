@@ -11,6 +11,7 @@
 
 import type { InstructionsConfig, SupportedLocale } from "@taco-ai/protocol";
 import type { CheckpointManager } from "../../checkpoints/manager.ts";
+import type { WorkspaceConfigSources } from "../../config/workspaceConfigSources.ts";
 import type {
     ContextEvent,
     ContextHookBuckets,
@@ -160,6 +161,7 @@ export interface HookWiringOptions {
      * that don't yet pass it through).
      */
     getInstructionsConfig?: () => InstructionsConfig | undefined;
+    configSources?: WorkspaceConfigSources;
     /** User-level memory store — injects `<memory>` tag on every context build. */
     memoryStore?: Pick<MemoryStore, "buildMemoryBlock">;
     /** Thunk returning the current session's task / plan state, used by the active_tasks hook. */
@@ -409,6 +411,7 @@ export async function wireHarnessHooks(
         onContext(
             buildInstructionsContextHook({
                 cwd: opts.cwd,
+                sources: opts.configSources,
                 // Fall back to "no config" (= defaults) when the caller did
                 // not supply a thunk — preserves the documented behavior
                 // for tests / older call sites that don't pass it through.

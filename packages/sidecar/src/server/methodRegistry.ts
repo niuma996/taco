@@ -15,14 +15,15 @@ import {
     type RpcContractKey,
     type RpcParams,
     type RpcResult,
+    rpcContract,
     rpcSchemas,
 } from "@taco-ai/protocol";
 import type { ServerRpcSurface } from "../runtime/serverRpcSurface.ts";
 import type { WorkspaceRuntime } from "../runtime/workspace.ts";
 
-export interface MethodCtx<P> {
+export interface MethodCtx<P, EnsureWorkspace extends boolean = true> {
     readonly id: string;
-    readonly workspace: WorkspaceRuntime;
+    readonly workspace: EnsureWorkspace extends true ? WorkspaceRuntime : undefined;
     readonly cwd: WorkspaceId;
     readonly server: ServerRpcSurface;
     readonly params: P;
@@ -35,21 +36,22 @@ export interface MethodCtx<P> {
  * `unknown`: the registry stores handlers generically, but a handler that
  * returns the wrong shape is rejected where it is registered.
  */
-export type MethodHandler<P, R> = (ctx: MethodCtx<P>) => Promise<R>;
+export type MethodHandler<P, R, EnsureWorkspace extends boolean = true> = (
+    ctx: MethodCtx<P, EnsureWorkspace>,
+) => Promise<R>;
 
 interface RegisteredMethod {
     ensureWorkspace: boolean;
     options: RegisterMethodOptions;
+    routeParam: "workspace" | "cwd" | undefined;
     /** Params validator, taken from the contract table so it cannot be paired with the wrong method. */
     schema: unknown;
     handler: AnyMethodHandler;
 }
 
-type AnyMethodHandler = (ctx: MethodCtx<unknown>) => Promise<unknown>;
+type AnyMethodHandler = MethodHandler<unknown, unknown, boolean>;
 
 export interface RegisterMethodOptions {
-    /** Workspace route param extracted from params; used by workspace.* lifecycle methods with `cwd`. */
-    workspaceParam?: "workspace" | "cwd";
     /** Mutating command; identical commandId values are deduplicated by SidecarServer. */
     command?: boolean;
     /** Starts an exclusive model turn for params.workspace + params.sessionId. */
@@ -69,15 +71,16 @@ const registry = new Map<string, RegisteredMethod>();
  * The registry itself is keyed by the wire method name, because that is what
  * the dispatcher looks up.
  */
-export function registerMethod<K extends RpcContractKey>(
+export function registerMethod<K extends RpcContractKey, EnsureWorkspace extends boolean>(
     key: K,
-    ensureWorkspace: boolean,
-    handler: MethodHandler<RpcParams<K>, RpcResult<K>>,
+    ensureWorkspace: EnsureWorkspace,
+    handler: MethodHandler<RpcParams<K>, RpcResult<K>, NoInfer<EnsureWorkspace>>,
     options: RegisterMethodOptions = {},
 ): void {
     registry.set(RPC[key], {
         ensureWorkspace,
         options,
+        routeParam: rpcContract[key].routeParam,
         schema: rpcSchemas[key],
         handler: handler as AnyMethodHandler,
     });
@@ -86,19 +89,21 @@ export function registerMethod<K extends RpcContractKey>(
 /**
  * Registers a method that is not part of the wire contract.
  *
+ * Only process-level probes without a runtime are supported.
  * Tests use this to stand up a probe method without adding it to the
  * published contract. Production methods belong in the contract table and
  * should use {@link registerMethod} so their types stay checked.
  */
 export function registerAdhocMethod(
     method: string,
-    ensureWorkspace: boolean,
-    handler: MethodHandler<unknown, unknown>,
+    ensureWorkspace: false,
+    handler: MethodHandler<unknown, unknown, false>,
     options: RegisterMethodOptions = {},
 ): void {
     registry.set(method, {
         ensureWorkspace,
         options,
+        routeParam: undefined,
         schema: undefined,
         handler: handler as AnyMethodHandler,
     });

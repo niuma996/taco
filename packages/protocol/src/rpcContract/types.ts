@@ -11,12 +11,14 @@ import type { Static, TSchema } from "typebox";
 /**
  * How the client routes a call.
  *
- * `workspace` — the transport picks a per-workspace sidecar; the call carries
- * a workspace key in its routing position.
- * `process` — the transport picks a process-level sidecar; no workspace
- * dimension travels with the call.
+ * `workspace` — the call carries a workspace key in the declared route field.
+ * `process` — no workspace transport route is required. Params may still
+ * name a workspace for inspection or admission without constructing a runtime.
  */
 export type RpcScope = "workspace" | "process";
+
+/** Workspace key field in a routed request. */
+export type RpcRouteParam = "workspace" | "cwd";
 
 /**
  * One row of the type contract: the wire types of a method.
@@ -27,8 +29,14 @@ export type RpcScope = "workspace" | "process";
  * routed by workspace but need no workspace runtime on the server, so the
  * two axes disagree for three methods.
  */
-export interface RpcContractRow<P, R, S extends RpcScope = RpcScope> {
+export interface RpcContractRow<
+    P,
+    R,
+    S extends RpcScope = RpcScope,
+    Q extends RpcRouteParam | undefined = RpcRouteParam | undefined,
+> {
     readonly scope: S;
+    readonly routeParam: Q;
     /** Phantom carrier for the wire params type — never present at runtime. */
     readonly __params?: P;
     /** Phantom carrier for the wire result type — never present at runtime. */
@@ -48,9 +56,11 @@ export interface DomainRow<
     S extends RpcScope,
     Sch extends TSchema,
     M extends string = string,
+    Q extends RpcRouteParam | undefined = RpcRouteParam | undefined,
 > {
     readonly method: M;
     readonly scope: S;
+    readonly routeParam: Q;
     readonly schema: Sch;
     readonly __params?: P;
     readonly __result?: R;
@@ -65,11 +75,31 @@ export interface DomainRow<
  * call and the wire name, scope, and schema are inferred by the second.
  */
 export function row<R>() {
-    return <const M extends string, S extends RpcScope, Sch extends TSchema>(
+    function declareRow<const M extends string, S extends RpcScope, Sch extends TSchema>(
         method: M,
         scope: S,
         schema: Sch,
-    ): DomainRow<ParamsOf<Sch>, R, S, Sch, M> => ({ method, scope, schema });
+    ): DomainRow<ParamsOf<Sch>, R, S, Sch, M, S extends "workspace" ? "workspace" : undefined>;
+    function declareRow<
+        const M extends string,
+        S extends RpcScope,
+        Sch extends TSchema,
+        Q extends S extends "workspace" ? RpcRouteParam : undefined,
+    >(method: M, scope: S, schema: Sch, routeParam: Q): DomainRow<ParamsOf<Sch>, R, S, Sch, M, Q>;
+    function declareRow(
+        method: string,
+        scope: RpcScope,
+        schema: TSchema,
+        routeParam?: RpcRouteParam,
+    ) {
+        return {
+            method,
+            scope,
+            schema,
+            routeParam: routeParam ?? (scope === "workspace" ? "workspace" : undefined),
+        };
+    }
+    return declareRow;
 }
 
 /**
@@ -98,11 +128,15 @@ export function domainContract<const T extends Record<string, AnyDomainRow>>(
     readonly [K in keyof T]: RpcContractRow<
         T[K] extends DomainRow<infer P, unknown, RpcScope, TSchema, string> ? P : never,
         T[K] extends DomainRow<unknown, infer R, RpcScope, TSchema, string> ? R : never,
-        T[K]["scope"]
+        T[K]["scope"],
+        T[K]["routeParam"]
     >;
 } {
     return Object.fromEntries(
-        Object.entries(rows).map(([key, value]) => [key, { scope: value.scope }]),
+        Object.entries(rows).map(([key, value]) => [
+            key,
+            { scope: value.scope, routeParam: value.routeParam },
+        ]),
     ) as never;
 }
 

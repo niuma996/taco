@@ -3,7 +3,7 @@
  * their content. Populated by loadSourcedSkills during
  * ensureWorkspace from <cwd>/.taco/skills, $TACO_HOME/skills,
  * ~/.claude/skills, ~/.pi/skills, and built-in skills/builtin
- * (see defaultSkillDirs); each skill is tagged source: "builtin" |
+ * (see resolveWorkspaceConfigSources); each skill is tagged source: "builtin" |
  * "user" (TacoSkill, see tacoSkill.ts). skills.content enforces a
  * filePath whitelist to block path traversal outside the workspace.
  */
@@ -24,6 +24,7 @@ export function registerSkillsHandlers(): void {
                       workspace.executionCwd,
                       server.extensionRegistry?.extensionSkillDirs() ?? [],
                       params.scope,
+                      workspace.configSources,
                   )
                 : undefined;
             const skills = scan?.skills ?? workspace.resources.skills ?? [];
@@ -32,7 +33,7 @@ export function registerSkillsHandlers(): void {
                 const scope =
                     params.scope === "global" || params.scope === "workspace"
                         ? params.scope
-                        : skillScopeOf(s, workspace.executionCwd);
+                        : skillScopeOf(s, workspace.executionCwd, workspace.configSources);
                 return {
                     name: s.name,
                     description: s.description,
@@ -62,6 +63,7 @@ export function registerSkillsHandlers(): void {
                       workspace.executionCwd,
                       server.extensionRegistry?.extensionSkillDirs() ?? [],
                       params.scope,
+                      workspace.configSources,
                   )
                 : undefined;
             const absPath = resolveLoadedSkillPath(
@@ -92,7 +94,7 @@ export function registerSkillsHandlers(): void {
  *
  * Both sides are compared in forward-slash form so the whitelist holds on
  * Windows regardless of whether the loader stored backslash (native) or
- * forward-slash (normalized via SlashNormalizedExecutionEnv / defaultSkillDirs)
+ * forward-slash (normalized via SlashNormalizedExecutionEnv / resolveWorkspaceConfigSources)
  * separators.
  */
 function resolveLoadedSkillPath(

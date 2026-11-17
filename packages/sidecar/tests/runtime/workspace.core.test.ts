@@ -750,3 +750,69 @@ describe("skills catalog withholds host paths when the session cannot read files
         assert.ok(ws.systemPrompt.includes("<location>"));
     });
 });
+
+describe("workspace store injection", () => {
+    useTempTacoHome("taco-workspace-stores-");
+    it("borrows injected stores without reinitializing or disposing them", async () => {
+        const { CheckpointStore } = await import("../../src/checkpoints/store.ts");
+        const memory = new LocalMemoryStore();
+        memory.initialize("injected-memory-identity");
+        const checkpoint = new CheckpointStore("injected-checkpoint-identity");
+        const options: WorkspaceRuntimeOptions & {
+            stores: { memory: LocalMemoryStore; checkpoint: InstanceType<typeof CheckpointStore> };
+        } = {
+            cwd: asWorkspaceId("/injected-runtime"),
+            providerKeyStore: new ProviderKeyStore({}),
+            stores: { memory, checkpoint },
+        };
+        const runtime = new WorkspaceRuntime(options);
+        try {
+            assert.equal(runtime.memoryStore, memory);
+            assert.equal(runtime.checkpointStore, checkpoint);
+            assert.equal(
+                (memory as unknown as { _workspaceId: string })._workspaceId,
+                "injected-memory-identity",
+            );
+        } finally {
+            await runtime.dispose();
+        }
+        await memory.appendEntry({
+            id: "still-usable",
+            name: "Still usable",
+            description: "borrowed",
+            type: "project",
+            content: "kept",
+            createdAt: new Date().toISOString(),
+        });
+        assert.equal(memory.getTopic("still-usable")?.content, "kept");
+    });
+});
+
+describe("workspace configuration injection", () => {
+    const home = useTempTacoHome("taco-workspace-config-");
+    it("uses injected sources for authoring guidance and refreshed parent instructions", async () => {
+        const { mkdirSync, writeFileSync } = await import("node:fs");
+        const { resolveWorkspaceConfigSources } = await import(
+            "../../src/config/workspaceConfigSources.ts"
+        );
+        const configCwd = join(home, "config-source");
+        mkdirSync(configCwd, { recursive: true });
+        writeFileSync(join(configCwd, "CLAUDE.md"), "Injected project rules");
+        const configSources = resolveWorkspaceConfigSources(configCwd);
+        const options: WorkspaceRuntimeOptions & { configSources: typeof configSources } = {
+            cwd: asWorkspaceId(home),
+            providerKeyStore: new ProviderKeyStore({}),
+            configSources,
+        };
+        const runtime = new WorkspaceRuntime(options);
+        try {
+            assert.ok(runtime.skillAuthoringGuidance.includes(configSources.skillDirs[0].path));
+            assert.ok(runtime.parentInstructionsBlock.includes("Injected project rules"));
+            writeFileSync(join(configCwd, "CLAUDE.md"), "Updated injected rules");
+            runtime.updateInstructionsConfig({ enabled: true });
+            assert.ok(runtime.parentInstructionsBlock.includes("Updated injected rules"));
+        } finally {
+            await runtime.dispose();
+        }
+    });
+});

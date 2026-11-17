@@ -14,7 +14,6 @@ import {
 } from "@taco-ai/protocol";
 import {
     defaultSessionsRoot,
-    defaultSkillDirs,
     mergeCompactionPatch,
     readGlobalConfig,
     resolveConfig,
@@ -22,6 +21,7 @@ import {
     tacoHome,
     validateCompactionConfig,
 } from "../../src/config/config.ts";
+import { resolveWorkspaceConfigSources } from "../../src/config/workspaceConfigSources.ts";
 import { useTempTacoHome } from "../_helpers/tempTacoHome.ts";
 
 describe("saveGlobalConfig round-trip", () => {
@@ -226,7 +226,7 @@ describe("tacoHome", () => {
     });
 });
 
-describe("defaultSkillDirs / defaultSessionsRoot", () => {
+describe("resolveWorkspaceConfigSources / defaultSessionsRoot", () => {
     let prevTacoHome: string | undefined;
     let prevSessionsRootOverride: string | undefined;
 
@@ -243,17 +243,17 @@ describe("defaultSkillDirs / defaultSessionsRoot", () => {
         else process.env.TACO_SESSIONS_ROOT = prevSessionsRootOverride;
     });
 
-    it("defaultSkillDirs returns multi-source array with project .taco first, builtin last", () => {
+    it("resolveWorkspaceConfigSources returns multi-source array with project .taco first, builtin last", () => {
         const tmpTacoHome = mkdtempSync(join(tmpdir(), "taco-skills-"));
         process.env.TACO_HOME = tmpTacoHome;
         try {
             const cwd = mkdtempSync(join(tmpdir(), "taco-skills-cwd-"));
             try {
-                // defaultSkillDirs normalizes to forward slashes even on Windows
+                // resolveWorkspaceConfigSources normalizes to forward slashes even on Windows
                 // (pi-agent-core's relativeEnvPath compares with "/" separators), so
                 // compare against the forward-slash form of the expected native path.
                 const fwd = (p: string) => p.replace(/\\/g, "/");
-                const dirs = defaultSkillDirs(cwd);
+                const dirs = resolveWorkspaceConfigSources(cwd).skillDirs;
                 assert.equal(dirs.length, 5, "should have exactly 5 entries");
                 // Project .taco/skills must be first (highest priority, first-wins dedup)
                 assert.equal(dirs[0].path, fwd(resolve(cwd, ".taco", "skills")));

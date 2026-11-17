@@ -16,7 +16,6 @@ import {
     rpcContract,
     type SteerParams,
     type WorkspaceId,
-    type WorkspaceScopedKey,
 } from "@taco-ai/protocol";
 import { createContractDispatch, type RpcDispatch } from "./contractDispatch.js";
 
@@ -27,35 +26,6 @@ type TypedRpcKey = Exclude<RpcContractKey, `jobs${string}` | "configPatch">;
 function isTypedRpcKey(key: RpcContractKey): key is TypedRpcKey {
     return !key.startsWith("jobs") && key !== "configPatch";
 }
-
-/** Workspace lifecycle methods route by `cwd` because no runtime exists yet. */
-type CwdRoutedKey =
-    | "workspaceEnsure"
-    | "workspaceDispose"
-    | "workspaceCleanupPreview"
-    | "workspaceCleanup";
-const CWD_ROUTED: ReadonlySet<string> = new Set<CwdRoutedKey>([
-    "workspaceEnsure",
-    "workspaceDispose",
-    "workspaceCleanupPreview",
-    "workspaceCleanup",
-]);
-
-/**
- * Every workspace-scoped method must carry its routing key in params, or the
- * generated facade would route it nowhere. A new method that names the key
- * differently fails here instead of at runtime.
- */
-type MisroutedKey = {
-    [K in WorkspaceScopedKey & TypedRpcKey]: K extends CwdRoutedKey
-        ? RpcParams<K> extends { cwd: WorkspaceId }
-            ? never
-            : K
-        : RpcParams<K> extends { workspace: WorkspaceId }
-          ? never
-          : K;
-}[WorkspaceScopedKey & TypedRpcKey];
-export const workspaceParamsCarryRoute: [MisroutedKey] extends [never] ? true : false = true;
 
 type RpcMethod<K extends RpcContractKey> =
     undefined extends RpcParams<K>
@@ -91,10 +61,11 @@ export function createTypedRpc(dispatch: RpcDispatch): TypedRpc {
     for (const key of Object.keys(rpcContract) as RpcContractKey[]) {
         if (!isTypedRpcKey(key)) continue;
         const method = RPC[key];
-        if (rpcContract[key].scope === "process") {
+        const row = rpcContract[key];
+        if (row.scope === "process") {
             methods[key] = (params) => dispatch.callProcess(method, params);
         } else {
-            const routeField = CWD_ROUTED.has(key) ? "cwd" : "workspace";
+            const routeField = row.routeParam;
             methods[key] = (params) =>
                 dispatch.call(method, (params as Record<string, WorkspaceId>)[routeField], params);
         }

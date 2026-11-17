@@ -1,4 +1,5 @@
 import type { AgentChatArgs, AgentChatResult } from "../../agents/agentConversationTypes.ts";
+import type { WorkspaceConfigSources } from "../../config/workspaceConfigSources.ts";
 import { disposeInOrder } from "../../lib/async.ts";
 import { createChatToAgentTool } from "../../tools/chatToAgent.ts";
 import { createListAgentSessionsTool } from "../../tools/listAgentSessions.ts";
@@ -237,6 +238,7 @@ export interface SessionRegistryOptions {
      * the thunk from the latest `taco.json: instructions` after each patch.
      */
     readonly getInstructionsConfig?: () => InstructionsConfig | undefined;
+    readonly configSources?: WorkspaceConfigSources;
     /**
      * Lazy accessor for the current IM channel identity (platform type +
      * configured instance id). `undefined` for non-IM workspaces. Forwarded
@@ -304,6 +306,7 @@ export class SessionRegistry extends EventEmitter {
     readonly toolRegistry?: DeferredToolRegistry;
     /** Lazy accessor for the current `InstructionsConfig` (see options below). */
     readonly getInstructionsConfig?: () => InstructionsConfig | undefined;
+    readonly configSources?: WorkspaceConfigSources;
     /** Lazy accessor for the current IM channel identity (see options below). */
     readonly getImChannelContext?: () => ImChannelContext | undefined;
     /**
@@ -460,6 +463,7 @@ export class SessionRegistry extends EventEmitter {
         this.checkpointStore = options.checkpointStore;
         this.toolRegistry = options.toolRegistry;
         this.getInstructionsConfig = options.getInstructionsConfig;
+        this.configSources = options.configSources;
         this.getImChannelContext = options.getImChannelContext;
         this.getAssociatedRoots = options.getAssociatedRoots;
         this.requestPlanWriteApproval = options.requestPlanWriteApproval;
@@ -1152,6 +1156,7 @@ export class SessionRegistry extends EventEmitter {
                             : undefined,
                     workspaceTools,
                     getInstructionsConfig: this.getInstructionsConfig,
+                    configSources: this.configSources,
                     getImChannelContext: this.getImChannelContext,
                     getAssociatedRoots: this.getAssociatedRoots,
                     requestPlanWriteApproval: requestPlanWriteApproval

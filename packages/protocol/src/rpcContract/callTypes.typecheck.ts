@@ -1,5 +1,6 @@
 /** Compile-only contract assertions, checked by typecheck:protocol; not runtime tests. */
 
+import { Type } from "typebox";
 import { asSessionId, asWorkspaceId } from "../frames.js";
 import type {
     WorkspaceAssociationsGetParams,
@@ -8,6 +9,7 @@ import type {
 } from "../workspace.js";
 import { createRpcRequest, type ProcessScopedKey, RPC, type WorkspaceScopedKey } from "./index.js";
 import type { ParamsLacksShape } from "./types.js";
+import { row } from "./types.js";
 
 // `Type.Any` and `Type.Unknown` must both trip the untyped-params guard;
 // valid no-param and concrete shapes must not.
@@ -62,3 +64,16 @@ function checkRequests() {
     createRpcRequest("6", RPC.sessionHistory, { workspace, sessionId: asSessionId("s") });
 }
 void checkRequests;
+
+// A custom route must be supplied at runtime as well as in the type arguments.
+function checkRouteDeclaration() {
+    const schema = Type.Object({ cwd: Type.String() });
+    const custom = row<null>()("test.route", "workspace", schema, "cwd");
+    const field: "cwd" = custom.routeParam;
+    void field;
+    // @ts-expect-error an explicit custom-route type cannot omit its runtime argument
+    row<null>()<"test.route", "workspace", typeof schema, "cwd">("test.route", "workspace", schema);
+    // @ts-expect-error process methods do not have a transport workspace route
+    row<null>()("test.process", "process", schema, "cwd");
+}
+void checkRouteDeclaration;

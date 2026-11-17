@@ -25,6 +25,7 @@ import {
     renderInstructionBlock,
     resolveInstructions,
 } from "../config/instructions.ts";
+import type { WorkspaceConfigSources } from "../config/workspaceConfigSources.ts";
 import type { ContextEvent, ContextResult } from "../extensions/types.ts";
 import { createLogger } from "../lib/logger.ts";
 import type { AgentMessage } from "../runtime/pi/types.ts";
@@ -38,6 +39,7 @@ export interface BuildInstructionsContextHookOptions {
     cwd: string;
     /** Lazy config accessor — invoked on each hook call so hot-reload works. */
     getConfig: () => InstructionsConfig | undefined;
+    sources?: WorkspaceConfigSources;
 }
 
 /**
@@ -57,7 +59,7 @@ export function buildInstructionsContextHook(
 ): (event: ContextEvent) => ContextResult | undefined {
     const { cwd, getConfig } = opts;
     return (event: ContextEvent): ContextResult | undefined => {
-        const resolution = resolveInstructions({ cwd, config: getConfig() });
+        const resolution = resolveInstructions({ cwd, config: getConfig(), sources: opts.sources });
         logResolutionErrors(resolution);
         if (!resolution.enabled || resolution.blocks.length === 0) {
             return undefined;

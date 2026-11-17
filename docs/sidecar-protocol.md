@@ -562,9 +562,11 @@ months leading up to the release.
 
 ### ~~`workspace.ensure` / `workspace.dispose` ignore `cwd` parameter~~ [fixed]
 
-Resolved by registering both methods with `workspaceParam: "cwd"`; the
-dispatcher now parses `params.cwd` and forwards it as the routing key. See
-`tests/server/workspaceRouting.test.ts` for the regression test.
+The protocol contract declares `routeParam: "cwd"` for both methods; the
+client and dispatcher read that declaration to route `params.cwd`. Runtime
+construction is a separate registration choice. Coverage lives in
+`packages/shared/tests/typedRpc.test.ts` and
+`packages/sidecar/tests/server/server.methods.test.ts`.
 
 ### ~~`memory.*` methods are declared but not implemented~~ [fixed]
 

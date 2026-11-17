@@ -42,21 +42,25 @@ const workspaceRows = {
         "workspace.ensure",
         "workspace",
         workspaceEnsureSchema,
+        "cwd",
     ),
     workspaceDispose: row<WorkspaceDisposeResult>()(
         "workspace.dispose",
         "workspace",
         workspaceDisposeSchema,
+        "cwd",
     ),
     workspaceCleanupPreview: row<WorkspaceCleanupResult>()(
         "workspace.cleanupPreview",
         "workspace",
         workspaceCleanupPreviewSchema,
+        "cwd",
     ),
     workspaceCleanup: row<WorkspaceCleanupResult>()(
         "workspace.cleanup",
         "workspace",
         workspaceCleanupSchema,
+        "cwd",
     ),
     workspaceAssociationsGet: row<WorkspaceAssociationsGetResult>()(
         "workspace.associations.get",

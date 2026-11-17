@@ -72,10 +72,8 @@ import type { ChannelConfig } from "../channels/registry.ts";
 import { ChannelRegistry } from "../channels/registry.ts";
 import type { ChannelContext, Logger } from "../channels/types.ts";
 import { makeImSessionsRoot } from "../channels/virtualWorkspace.ts";
-import { defaultAgentDirs } from "../config/agentDirs.ts";
 import {
     defaultSessionsRoot,
-    defaultSkillDirs,
     type ResolvedCompaction,
     type ResolvedTacoConfig,
     readGlobalConfig,
@@ -83,6 +81,10 @@ import {
     validateCommandPermissions,
 } from "../config/config.ts";
 import { tacoHome } from "../config/tacoHome.ts";
+import {
+    resolveWorkspaceConfigSources,
+    type WorkspaceConfigSources,
+} from "../config/workspaceConfigSources.ts";
 import { activateExtensions } from "../extensions/activation.ts";
 import type { ExtensionRegistry, WorkspaceExtensionSet } from "../extensions/index.ts";
 import { InboxStore } from "../inbox/inboxStore.ts";
@@ -116,6 +118,10 @@ import {
     associationAffectsWorkspace,
     WorkspaceAssociationStore,
 } from "../workspace/associationStore.ts";
+import {
+    createWorkspaceStores,
+    resolveWorkspaceResourceOwners,
+} from "../workspace/workspaceResources.ts";
 import { createWorkspaceScope, type WorkspaceScope } from "../workspace/workspaceScope.ts";
 import { type ChannelControlSurface, createChannelControl } from "./channelControl.ts";
 import { ClientSinkRegistry } from "./clientSinkRegistry.ts";
@@ -975,7 +981,7 @@ export class SidecarServer implements ServerRpcSurface {
         reg: NonNullable<ReturnType<typeof getRegisteredMethod>>,
     ): Promise<RpcResponse> {
         const params = (req.params ?? {}) as Record<string, unknown>;
-        const cwd = params[reg.options.workspaceParam ?? "workspace"];
+        const cwd = params[reg.routeParam ?? "workspace"];
         if (
             typeof cwd !== "string" ||
             req.method === RPC.workspaceCleanup ||
@@ -997,14 +1003,14 @@ export class SidecarServer implements ServerRpcSurface {
         try {
             let workspace: WorkspaceRuntime | undefined;
             let cwd: WorkspaceId = WORKSPACE_ANY;
-            if (reg.options.workspaceParam) {
+            if (reg.routeParam) {
                 const params = (req.params ?? {}) as Record<string, unknown>;
-                const route = params[reg.options.workspaceParam];
+                const route = params[reg.routeParam];
                 if (typeof route !== "string" || route.length === 0) {
                     return err(
                         req.id,
                         ErrorCodes.InvalidParams,
-                        `missing required field: ${reg.options.workspaceParam}`,
+                        `missing required field: ${reg.routeParam}`,
                     );
                 }
                 cwd = asWorkspaceId(route);
@@ -1022,10 +1028,9 @@ export class SidecarServer implements ServerRpcSurface {
                 // ensureWorkspace always resolves a runtime (failures throw, caught by outer normalizeError)
                 workspace = await this.ensureWorkspace(cwd);
             }
-            const ctx: MethodCtx<unknown> = {
+            const ctx: MethodCtx<unknown, boolean> = {
                 id: req.id,
-                // when ensureWorkspace=false, workspace is undefined — handler handles it itself
-                workspace: workspace as WorkspaceRuntime,
+                workspace,
                 cwd,
                 server: this,
                 params: req.params,
@@ -1079,13 +1084,19 @@ export class SidecarServer implements ServerRpcSurface {
      * Extracted from `loadWorkspaceAssets` so hot reload can re-run this
      * exact path instead of a second, drifting copy.
      *
-     * Sources come from `defaultSkillDirs` in priority order (.taco/skills
+     * Sources come from `resolveWorkspaceConfigSources` in priority order (.taco/skills
      * → $TACO_HOME/skills → ~/.claude/skills → ~/.pi/skills → builtin).
      */
     private async loadSkills(
         fsCwd: string,
+        sources = resolveWorkspaceConfigSources(fsCwd),
     ): Promise<{ skills: TacoSkill[]; diagnostics: SkillDiagnosticEntry[] }> {
-        return loadSkillCatalog(fsCwd, this.extensionRegistry?.extensionSkillDirs() ?? []);
+        return loadSkillCatalog(
+            fsCwd,
+            this.extensionRegistry?.extensionSkillDirs() ?? [],
+            undefined,
+            sources,
+        );
     }
 
     /**
@@ -1093,20 +1104,26 @@ export class SidecarServer implements ServerRpcSurface {
      * filesystem, so they are awaited before the synchronous WorkspaceRuntime
      * constructor.
      */
-    private async loadWorkspaceAssets(scope: WorkspaceScope): Promise<{
+    private async loadWorkspaceAssets(
+        scope: WorkspaceScope,
+        sources: WorkspaceConfigSources,
+    ): Promise<{
         skills: TacoSkill[];
         skillDiagnostics: SkillDiagnosticEntry[];
         agents: AgentDefinition[];
         extensions?: Readonly<WorkspaceExtensionSet>;
     }> {
-        const { skills, diagnostics: skillDiagnostics } = await this.loadSkills(scope.executionCwd);
+        const { skills, diagnostics: skillDiagnostics } = await this.loadSkills(
+            scope.executionCwd,
+            sources,
+        );
 
         // Load agents (builtin + user-defined). Same pattern as skills:
         // file I/O is awaited here.
         const builtinDir = join(resourceRoot(), "agents", "builtin");
         const agents = await loadAgents({
             builtinDir,
-            userDirs: defaultAgentDirs(scope.executionCwd),
+            userDirs: sources.agentDirs,
         });
 
         // Activate extensions: workspace activators are called here and
@@ -1191,8 +1208,12 @@ export class SidecarServer implements ServerRpcSurface {
 
     private async buildWorkspace(cwd: WorkspaceId): Promise<WorkspaceRuntime> {
         const { scope, sessionsRoot, imPolicy } = this.resolveWorkspacePaths(cwd);
-        const { skills, skillDiagnostics, agents, extensions } =
-            await this.loadWorkspaceAssets(scope);
+        const resourceOwners = resolveWorkspaceResourceOwners(scope);
+        const configSources = resolveWorkspaceConfigSources(resourceOwners.configCwd);
+        const { skills, skillDiagnostics, agents, extensions } = await this.loadWorkspaceAssets(
+            scope,
+            configSources,
+        );
 
         // Lease MCP providers (stdio cwd defaults to the workspace dir; local
         // workspaces share them process-wide, IM workspaces get private ones) and build a registry whose MCP candidates are prepared lazily.
@@ -1242,8 +1263,15 @@ export class SidecarServer implements ServerRpcSurface {
         // provider once it leaves this function.
         let ws: WorkspaceRuntime | undefined;
         try {
+            const stores = createWorkspaceStores(resourceOwners, {
+                memoryEnabled: this.options.memoryEnabled,
+                checkpointsEnabled: imPolicy ? imPolicy.tools.fsTools === "allow" : true,
+            });
             ws = new WorkspaceRuntime({
                 scope,
+                resourceOwners,
+                stores,
+                configSources,
                 sessionsRoot,
                 defaultModel: this.options.defaultModel,
                 defaultProvider: this.options.defaultProvider,
@@ -1286,10 +1314,10 @@ export class SidecarServer implements ServerRpcSurface {
                 // both together is what makes WorkspaceRuntime opt into
                 // watching; omitting either leaves reload off (e.g. tests that
                 // construct WorkspaceRuntime directly without a live server).
-                skillDirs: defaultSkillDirs(scope.executionCwd)
+                skillDirs: configSources.skillDirs
                     .filter((d) => d.source === "user")
                     .map((d) => d.path),
-                reloadSkills: () => this.loadSkills(scope.executionCwd),
+                reloadSkills: () => this.loadSkills(scope.executionCwd, configSources),
                 // IM channel identity for the <im_channel> context tag — the
                 // workspace only calls this for IM workspaces, passing the
                 // route's channelId; peer/chat ids never reach it.
@@ -1728,7 +1756,7 @@ export class SidecarServer implements ServerRpcSurface {
         const builtinDir = join(resourceRoot(), "agents", "builtin");
         for (const ws of this.workspaces.list()) {
             ws.reloadAgentsNow(
-                await loadAgents({ builtinDir, userDirs: defaultAgentDirs(ws.executionCwd) }),
+                await loadAgents({ builtinDir, userDirs: ws.configSources.agentDirs }),
             );
         }
     }

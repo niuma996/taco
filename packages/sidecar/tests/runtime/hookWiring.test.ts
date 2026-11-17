@@ -144,6 +144,9 @@ function bodyTexts(result: { messages?: AgentMessage[] } | undefined): string {
     for (const m of msgs) {
         const c = (m as { content?: unknown }).content;
         if (typeof c === "string") s += `${c}\n`;
+        else if (Array.isArray(c)) {
+            s += c.map((part) => (part.type === "text" ? part.text : "")).join("\n");
+        }
     }
     return s;
 }
@@ -194,5 +197,33 @@ describe("hookWiring — skill reinjector reads getSkills live", () => {
             !after.includes("echo v1 body"),
             "stale v1 body must not appear after the store swapped lists",
         );
+    });
+});
+
+describe("hookWiring — shared configuration sources", () => {
+    it("reads injected instruction roots and reloads their content on the next context build", async () => {
+        const { mkdtempSync, writeFileSync, rmSync } = await import("node:fs");
+        const { tmpdir } = await import("node:os");
+        const { join } = await import("node:path");
+        const { resolveWorkspaceConfigSources } = await import(
+            "../../src/config/workspaceConfigSources.ts"
+        );
+        const root = mkdtempSync(join(tmpdir(), "taco-hook-sources-"));
+        const { harness, contextHandlers } = makeHarness();
+        try {
+            writeFileSync(join(root, "CLAUDE.md"), "Injected hook instructions");
+            const configSources = resolveWorkspaceConfigSources(root);
+            await wireHarnessHooks(harness, minimalLane, {
+                cwd: join(root, "execution"),
+                configSources,
+                getThinkingLevel: () => "off",
+                models: createModels(),
+            });
+            assert.ok((await fireAll(contextHandlers)).includes("Injected hook instructions"));
+            writeFileSync(join(root, "CLAUDE.md"), "Refreshed hook instructions");
+            assert.ok((await fireAll(contextHandlers)).includes("Refreshed hook instructions"));
+        } finally {
+            rmSync(root, { recursive: true, force: true });
+        }
     });
 });

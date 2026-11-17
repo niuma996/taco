@@ -308,7 +308,7 @@ describe("dedupeSkillsByName", () => {
     });
 
     it("preserves the source field of the winning skill on duplicate name", () => {
-        // user skill listed before builtin (defaultSkillDirs semantics), first-wins preserves user.
+        // user skill listed before builtin (resolveWorkspaceConfigSources semantics), first-wins preserves user.
         const input = [mkSkill("foo", "user-dir"), mkSkill("foo", "builtin")];
         const out = dedupeSkillsByName(input);
         assert.equal(out.length, 1);
@@ -325,7 +325,7 @@ describe("dedupeSkillsByName", () => {
 
 describe("dedupeSkillsByNameWithDuplicates", () => {
     it("reports a builtin shadowed by a user skill, keeping the user one", () => {
-        // defaultSkillDirs order: user dirs first, builtin last.
+        // resolveWorkspaceConfigSources order: user dirs first, builtin last.
         const { kept, duplicates } = dedupeSkillsByNameWithDuplicates([
             userSkill("deep-review"),
             builtinSkill("deep-review"),

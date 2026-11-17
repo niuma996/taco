@@ -17,7 +17,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, open, readFile, rename, rm, stat, unlink } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { tacoHome } from "../config/tacoHome.ts";
+import { checkpointStoragePaths } from "../workspace/storagePaths.ts";
 
 /** One captured file. `content: null` records "did not exist", so restoring deletes it. */
 export interface CheckpointFile {
@@ -61,11 +61,6 @@ const CHECKPOINT_INDEX_SCHEMA_VERSION = 1;
 
 function sha256(buf: Buffer | string): string {
     return createHash("sha256").update(buf).digest("hex");
-}
-
-/** Stable per-workspace directory name; the raw path is unusable as one. */
-function workspaceKey(cwd: string): string {
-    return sha256(cwd).slice(0, 16);
 }
 
 async function pathExists(path: string): Promise<boolean> {
@@ -150,10 +145,10 @@ export class CheckpointStore {
     private chain: Promise<unknown> = Promise.resolve();
 
     constructor(cwd: string, options?: { home?: string }) {
-        const base = options?.home ?? tacoHome();
-        this.root = join(base, "checkpoints", workspaceKey(cwd));
-        this.blobsDir = join(this.root, "blobs");
-        this.indexPath = join(this.root, "index.json");
+        const paths = checkpointStoragePaths(cwd, options?.home);
+        this.root = paths.root;
+        this.blobsDir = paths.blobsDir;
+        this.indexPath = paths.indexPath;
     }
 
     private async readIndex(): Promise<CheckpointMeta[]> {

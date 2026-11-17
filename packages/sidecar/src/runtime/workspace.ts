@@ -34,8 +34,7 @@ import {
     type ImWorkspacePolicy,
 } from "../channels/imWorkspacePolicy.ts";
 import { CheckpointManager } from "../checkpoints/manager.ts";
-import type { CheckpointMeta, RestoreOutcome } from "../checkpoints/store.ts";
-import { CheckpointStore } from "../checkpoints/store.ts";
+import type { CheckpointMeta, CheckpointStore, RestoreOutcome } from "../checkpoints/store.ts";
 import type { ResolvedCompaction } from "../config/config.ts";
 import {
     defaultSessionsRoot,
@@ -43,10 +42,13 @@ import {
     validateCommandPermissions,
 } from "../config/config.ts";
 import { renderInstructionBlock, resolveInstructions } from "../config/instructions.ts";
+import {
+    resolveWorkspaceConfigSources,
+    type WorkspaceConfigSources,
+} from "../config/workspaceConfigSources.ts";
 import type { WorkspaceExtensionSet } from "../extensions/index.ts";
 import { createLogger } from "../lib/logger.ts";
 import type { MemoryStore } from "../memory/index.ts";
-import { LocalMemoryStore, NoOpMemoryStore } from "../memory/index.ts";
 import { buildLayeredMemoryBlock, resolveMemorySources } from "../memory/sources.ts";
 import { PermissionBroker } from "../permissions/permissionBroker.ts";
 import {
@@ -90,6 +92,12 @@ import { isFsToolDenied, registerExtensionFileAccess } from "../tools/fileAccess
 import { defaultToolsWithTasks, type TacoTool } from "../tools/index.ts";
 import { orderTools, toolNamesKey } from "../tools/toolOrder.ts";
 import type { BackgroundWorkHooks } from "../work/workHooks.ts";
+import {
+    createWorkspaceStores,
+    resolveWorkspaceResourceOwners,
+    type WorkspaceResourceOwners,
+    type WorkspaceStores,
+} from "../workspace/workspaceResources.ts";
 import { createWorkspaceScope, type WorkspaceScope } from "../workspace/workspaceScope.ts";
 import type { AttachedSession } from "./harness/attachedSession.ts";
 import type { DeferredToolRegistry } from "./harness/deferredToolRegistry.ts";
@@ -249,6 +257,10 @@ interface WorkspaceRuntimeConfig {
     providerHiddenModels?: Record<string, string[]>;
     /** Enable user-level memory. Default = enabled. */
     memoryEnabled?: boolean;
+    /** Preconstructed stores; borrowed without initialization or disposal. */
+    stores?: WorkspaceStores;
+    resourceOwners?: WorkspaceResourceOwners;
+    configSources?: WorkspaceConfigSources;
     /** Entry point for `tasks.updated` pushes; defaults to NoopTaskPushAdapter. */
     taskPushAdapter?: TaskPushAdapter;
     /** Entry point for `plan.state.updated` pushes; defaults to NoopPlanPushAdapter. */
@@ -303,7 +315,7 @@ interface WorkspaceRuntimeConfig {
     toolRegistry?: DeferredToolRegistry;
     /**
      * User-writable skill directories to watch for hot reload (from
-     * `defaultSkillDirs`, filtered to `source: "user"` — the builtin dir
+     * `resolveWorkspaceConfigSources`, filtered to `source: "user"` — the builtin dir
      * ships with the binary and only changes on an app upgrade, i.e. a full
      * restart, so it is never watched). A watcher is only created when this
      * AND `reloadSkills` are both present; either alone leaves reload off,
@@ -420,7 +432,7 @@ export class WorkspaceRuntime extends EventEmitter {
     instructionsConfig: InstructionsConfig | undefined;
     /**
      * "Where does a new skill go, and which frontmatter does taco read" block,
-     * rendered once from `executionCwd` via `defaultSkillDirs`. Unlike
+     * rendered once from `executionCwd` via `resolveWorkspaceConfigSources`. Unlike
      * `parentInstructionsBlock`, no setting reachable via `settings.write`
      * affects this string, so — unlike that block — there is no
      * recompute-on-update path to mirror.
@@ -447,6 +459,9 @@ export class WorkspaceRuntime extends EventEmitter {
      * `reloadAgentsNow` after an `agents.write` / `agents.delete`.
      */
     private agentCatalog: ReadonlyArray<AgentDefinition>;
+    /** Storage and configuration identities resolved independently of routing. */
+    readonly resourceOwners: WorkspaceResourceOwners;
+    readonly configSources: WorkspaceConfigSources;
     /** User-level memory store. */
     readonly memoryStore: MemoryStore;
     /** Context-hook view; IM workspaces may read current + inherited layers. */
@@ -526,13 +541,17 @@ export class WorkspaceRuntime extends EventEmitter {
     constructor(options: WorkspaceRuntimeOptions) {
         super();
         this.scope = options.scope ?? createWorkspaceScope(options.cwd);
+        this.resourceOwners = options.resourceOwners ?? resolveWorkspaceResourceOwners(this.scope);
+        this.configSources =
+            options.configSources ?? resolveWorkspaceConfigSources(this.resourceOwners.configCwd);
         const isIm = this.scope.kind === "im";
         const imChannelId = this.scope.kind === "im" ? this.scope.route.channelId : undefined;
         this.sessionsRoot = defaultSessionsRoot(options.sessionsRoot);
-        // executionCwd, not sessionCwd — defaultSkillDirs (inside
-        // formatSkillAuthoringGuidance) is what actually gets scanned against
-        // the execution location, and the two diverge for IM workspaces.
-        this.skillAuthoringGuidance = formatSkillAuthoringGuidance(this.executionCwd);
+        // Guidance uses the same resolved sources as the workspace skill scan.
+        this.skillAuthoringGuidance = formatSkillAuthoringGuidance(
+            this.executionCwd,
+            this.configSources,
+        );
         // Two envs so storage identity and execution location cannot drift.
         this.sessionEnv = new NodeExecutionEnv({ cwd: this.sessionCwd });
         this.env = new NodeExecutionEnv({ cwd: this.executionCwd });
@@ -676,16 +695,13 @@ export class WorkspaceRuntime extends EventEmitter {
         this.defaultThinkingLevel = options.defaultThinkingLevel;
         this.defaultUiLocale = options.defaultUiLocale;
         this.compaction = options.compaction;
-        // MemoryStore.initialize is sync (LocalMemoryStore does sync I/O internally).
-        // Disable by passing `memoryEnabled: false` — hooks downstream check for
-        // the `NoOpMemoryStore` (returns "" for buildMemoryBlock), so the cost is
-        // one extra hook invocation per context build that short-circuits.
-        this.memoryStore =
-            options.memoryEnabled !== false ? new LocalMemoryStore() : new NoOpMemoryStore();
-        // IM scratch directories are shared by a channel. Only the full route
-        // identifies a private memory partition; execution/binding changes must
-        // never merge one chat's memories into another's.
-        this.memoryStore.initialize(isIm ? this.workspaceKey : this.sessionCwd);
+        const stores =
+            options.stores ??
+            createWorkspaceStores(this.resourceOwners, {
+                memoryEnabled: options.memoryEnabled,
+                checkpointsEnabled: imPolicy ? imPolicy.tools.fsTools === "allow" : true,
+            });
+        this.memoryStore = stores.memory;
         this.memoryContextStore =
             isIm && this.memoryStore.enabled
                 ? {
@@ -702,11 +718,7 @@ export class WorkspaceRuntime extends EventEmitter {
                   }
                 : this.memoryStore;
 
-        // One store per workspace, shared by every session in it, so a restore
-        // can reach snapshots an earlier session took. Files are written under
-        // executionCwd, so snapshots track that tree. Off when fs tools are denied.
-        const fsToolsEnabled = imPolicy ? imPolicy.tools.fsTools === "allow" : true;
-        this.checkpointStore = fsToolsEnabled ? new CheckpointStore(this.executionCwd) : undefined;
+        this.checkpointStore = stores.checkpoint;
 
         const agents = options.agents ?? [];
         const skills = this.resources.skills ?? [];
@@ -774,6 +786,7 @@ export class WorkspaceRuntime extends EventEmitter {
             // hot-reload without re-constructing the registry. `undefined`
             // here means "use defaults" (resolveInstructions handles it).
             getInstructionsConfig: () => this.instructionsConfig,
+            configSources: this.configSources,
             // Per-turn tool context (workspace, call, actor). The harness
             // invokes this once per turn; returning a fresh snapshot lets
             // future hot-reload flows (e.g. imRouting change) take effect.
@@ -1107,6 +1120,7 @@ export class WorkspaceRuntime extends EventEmitter {
             parentInstructionsBlock: renderParentInstructionsBlock(
                 this.executionCwd,
                 options.instructionsConfig,
+                this.configSources,
             ),
             environmentContext: {
                 cwd: this.executionCwd,
@@ -1466,7 +1480,11 @@ export class WorkspaceRuntime extends EventEmitter {
     /** Hot-reload the instructions config. */
     updateInstructionsConfig(next: InstructionsConfig | undefined): void {
         this.instructionsConfig = next;
-        this.parentInstructionsBlock = renderParentInstructionsBlock(this.executionCwd, next);
+        this.parentInstructionsBlock = renderParentInstructionsBlock(
+            this.executionCwd,
+            next,
+            this.configSources,
+        );
     }
 
     /**
@@ -1604,8 +1622,9 @@ export type WorkspaceEvent =
 function renderParentInstructionsBlock(
     cwd: string,
     config: InstructionsConfig | undefined,
+    sources: WorkspaceConfigSources,
 ): string {
-    const resolution = resolveInstructions({ cwd, config });
+    const resolution = resolveInstructions({ cwd, config, sources });
     for (const { name, message } of resolution.errors) {
         log.warn(`failed to read ${name}: ${message}`);
     }

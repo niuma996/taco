@@ -13,11 +13,13 @@
  */
 
 import { readFileSync } from "node:fs";
-import { homedir } from "node:os";
 import { resolve as resolvePath } from "node:path";
 import type { InstructionsConfig } from "@taco-ai/protocol";
 import { escapeTagText } from "../tags/builder.ts";
-import { tacoHome } from "./tacoHome.ts";
+import {
+    resolveWorkspaceConfigSources,
+    type WorkspaceConfigSources,
+} from "./workspaceConfigSources.ts";
 
 /** Canonical file names; order matches the section comment above. */
 export type InstructionFileName = "CLAUDE.md" | "AGENTS.md" | "DESIGN.md";
@@ -107,6 +109,8 @@ export interface ResolveInstructionsOptions {
     cwd: string;
     /** User config; merged with defaults inside this function. */
     config?: InstructionsConfig;
+    /** Shared workspace lookup roots; omitted callers resolve them on each call. */
+    sources?: WorkspaceConfigSources;
 }
 
 /**
@@ -122,6 +126,7 @@ export function resolveInstructions(opts: ResolveInstructionsOptions): Instructi
         return { enabled: false, blocks: [], errors: [] };
     }
 
+    const sources = opts.sources ?? resolveWorkspaceConfigSources(opts.cwd);
     const blocks: InstructionBlock[] = [];
     const errors: { name: InstructionFileName; message: string }[] = [];
 
@@ -149,7 +154,11 @@ export function resolveInstructions(opts: ResolveInstructionsOptions): Instructi
                 continue;
             }
         } else {
-            result = readInstructionsFromChain(name, opts.cwd, entry.checkClaudeHome);
+            result = readInstructionsFromChain(
+                name,
+                sources.instructionDirs,
+                entry.checkClaudeHome,
+            );
             if (result === undefined) continue; // not found anywhere
         }
         if ("error" in result) {
@@ -164,20 +173,12 @@ export function resolveInstructions(opts: ResolveInstructionsOptions): Instructi
 
 function readInstructionsFromChain(
     name: InstructionFileName,
-    cwd: string,
+    chain: WorkspaceConfigSources["instructionDirs"],
     checkClaudeHome: boolean,
 ): InstructionBlock | undefined | { error: string } {
-    const chain: Array<{ dir: string; label: InstructionSource }> = [
-        { dir: resolvePath(cwd, ".taco"), label: "project-taco" },
-        { dir: cwd, label: "project" },
-        { dir: tacoHome(), label: "user-taco" },
-    ];
-    if (checkClaudeHome) {
-        chain.push({ dir: resolvePath(homedir(), ".claude"), label: "user-claude" });
-    }
-
     let lastError = "";
     for (const { dir, label } of chain) {
+        if (label === "user-claude" && !checkClaudeHome) continue;
         const result = readInstructionsFromPath(resolvePath(dir, name), label, name);
         if (result === undefined) continue; // not present here, try next
         if ("error" in result) {

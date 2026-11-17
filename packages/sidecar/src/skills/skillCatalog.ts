@@ -2,8 +2,11 @@
 import { readFile } from "node:fs/promises";
 import { isAbsolute, relative, resolve } from "node:path";
 import type { AgentScope, CatalogScope, SkillDiagnosticEntry } from "@taco-ai/protocol";
-import { defaultSkillDirs, extensionSkillDirInputs } from "../config/config.ts";
-import { tacoHome } from "../config/tacoHome.ts";
+import { extensionSkillDirInputs } from "../config/config.ts";
+import {
+    resolveWorkspaceConfigSources,
+    type WorkspaceConfigSources,
+} from "../config/workspaceConfigSources.ts";
 import { harnessContext } from "../lib/harnessContext.ts";
 import { createLogger } from "../lib/logger.ts";
 import { SlashNormalizedExecutionEnv } from "../runtime/harness/slashNormalizedEnv.ts";
@@ -27,11 +30,20 @@ import type { SkillScanResult, TacoSkill } from "./tacoSkill.ts";
 export function skillScopeOf(
     skill: Pick<TacoSkill, "source" | "filePath">,
     executionCwd: string | undefined,
+    sources?: WorkspaceConfigSources,
 ): AgentScope | undefined {
     if (skill.source === "builtin" || executionCwd === undefined) return undefined;
     const file = resolve(executionCwd, skill.filePath);
-    return [".taco", ".pi"].some((dir) => {
-        const rel = relative(resolve(executionCwd, dir, "skills"), file);
+    const roots = sources
+        ? [
+              ...sources.skillDirs
+                  .filter((dir) => dir.scope === "workspace")
+                  .map((dir) => dir.path),
+              resolve(executionCwd, ".pi", "skills"),
+          ]
+        : [".taco", ".pi"].map((dir) => resolve(executionCwd, dir, "skills"));
+    return roots.some((root) => {
+        const rel = relative(resolve(root), file);
         return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
     })
         ? "workspace"
@@ -43,6 +55,7 @@ export async function loadSkillCatalog(
     fsCwd: string,
     extensionDirs: readonly string[] = [],
     scope?: CatalogScope,
+    sources?: WorkspaceConfigSources,
 ): Promise<SkillScanResult> {
     // Clear first, not after: an edited SKILL.md's frontmatter
     // (runAs/inlineOnly/allowedTools/model) must not keep serving a
@@ -57,30 +70,25 @@ export async function loadSkillCatalog(
     // `path.startsWith(root + "/")` and falls back to the unchanged
     // absolute path when separators don't match — on Windows that
     // makes `ignore` throw "path should be a path.relative()'d
-    // string". Combined with `defaultSkillDirs` (also forward-slash
+    // string". Combined with workspace skill dirs (also forward-slash
     // normalized) both sides of the comparison agree.
     const skillEnv = new SlashNormalizedExecutionEnv({ cwd: fsCwd });
     // Enabled builtins may ship their own skill dirs (BuiltinManifest
-    // .skillDirs). They are appended after defaultSkillDirs so a user skill
+    // .skillDirs). They are appended after workspace skill dirs so a user skill
     // of the same name still wins by first-wins, and a disabled builtin
     // contributes nothing — its dirs are never collected (see
     // registerBuiltinExtensions).
-    const inputs = [...defaultSkillDirs(fsCwd), ...extensionSkillDirInputs(extensionDirs)];
+    const inputs = [
+        ...(sources ?? resolveWorkspaceConfigSources(fsCwd)).skillDirs,
+        ...extensionSkillDirInputs(extensionDirs),
+    ];
     // Select roots before deduplication so shadowed definitions remain visible in their layer.
     const skillDirs =
         scope === undefined
             ? inputs
             : inputs.filter((input) => {
                   if (scope === "builtin") return input.source === "builtin";
-                  const root = resolve(input.path);
-                  return (
-                      input.source === "user" &&
-                      root ===
-                          resolve(
-                              scope === "global" ? tacoHome() : resolve(fsCwd, ".taco"),
-                              "skills",
-                          )
-                  );
+                  return input.source === "user" && input.scope === scope;
               });
     const loaded = await loadSourcedSkills<TacoSkill["source"], TacoSkill>(
         skillEnv,
@@ -88,7 +96,7 @@ export async function loadSkillCatalog(
         (skill, source): TacoSkill => ({ ...skill, source }),
         harnessContext,
     );
-    // pi's loadSourcedSkills does not dedupe internally; defaultSkillDirs
+    // pi's loadSourcedSkills does not dedupe internally; workspace skill dirs
     // places .taco/skills first and builtin last, so dedupeSkillsByName
     // gives ".taco wins, builtin falls back" first-match semantics.
     const deduped = dedupeSkillsByNameWithDuplicates(loaded.skills.map((entry) => entry.skill));

@@ -5,7 +5,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
-import { defaultSkillDirs } from "../../src/config/config.ts";
+import { resolveWorkspaceConfigSources } from "../../src/config/workspaceConfigSources.ts";
 import { buildPlatformPrompt } from "../../src/prompts/buildPlatformPrompt.ts";
 import {
     buildSystemPrompt,
@@ -864,7 +864,7 @@ describe("formatSkillsForSystemPrompt", () => {
 
 describe("formatSkillAuthoringGuidance", () => {
     it("always includes the path-discovery preamble, regardless of dir count", () => {
-        // Structural assertion independent of how many dirs defaultSkillDirs
+        // Structural assertion independent of how many dirs resolveWorkspaceConfigSources
         // happens to return — a future change that trims the writable list
         // to zero must not make this silently pass on an empty guidance
         // string.
@@ -875,7 +875,7 @@ describe("formatSkillAuthoringGuidance", () => {
     it("lists every user skill search dir without granting write access", () => {
         const cwd = "/work/project";
         const guidance = formatSkillAuthoringGuidance(cwd);
-        const dirs = defaultSkillDirs(cwd);
+        const dirs = resolveWorkspaceConfigSources(cwd).skillDirs;
         const writable = dirs.filter((d) => d.source === "user");
 
         assert.ok(writable.length > 0, "expected at least one writable skill dir");
@@ -905,8 +905,10 @@ describe("formatSkillAuthoringGuidance", () => {
     it("flags the builtin dir as read-only rather than listing it as writable", () => {
         const cwd = "/work/project";
         const guidance = formatSkillAuthoringGuidance(cwd);
-        const builtin = defaultSkillDirs(cwd).find((d) => d.source === "builtin");
-        assert.ok(builtin, "expected defaultSkillDirs to include a builtin entry");
+        const builtin = resolveWorkspaceConfigSources(cwd).skillDirs.find(
+            (d) => d.source === "builtin",
+        );
+        assert.ok(builtin, "expected resolveWorkspaceConfigSources to include a builtin entry");
         assert.ok(guidance.includes(builtin.path));
         assert.ok(guidance.toLowerCase().includes("read-only"));
     });

@@ -227,3 +227,85 @@ it("reads a shadowed bundled skill's original content and keeps builtin sources 
         rmSync(project, { recursive: true, force: true });
     }
 });
+
+it("scoped skill RPCs read injected configuration roots instead of execution roots", async () => {
+    const { resolveWorkspaceConfigSources } = await import(
+        "../../../src/config/workspaceConfigSources.ts"
+    );
+    const { WorkspaceRuntime } = await import("../../../src/runtime/workspace.ts");
+    const { loadSkillCatalog } = await import("../../../src/skills/skillCatalog.ts");
+    const root = mkdtempSync(join(tmpdir(), "taco-injected-skill-layers-"));
+    const execution = join(root, "execution");
+    const config = join(root, "config");
+    mkdirSync(execution);
+    const server = new SidecarServer({ providerKeyStore: new ProviderKeyStore({}) });
+    const workspaceId = asWorkspaceId(execution);
+    const sources = resolveWorkspaceConfigSources(config);
+    const folder = join(config, ".taco", "skills", "injected-example");
+    mkdirSync(folder, { recursive: true });
+    const filePath = join(folder, "SKILL.md").replaceAll("\\", "/");
+    writeFileSync(
+        filePath,
+        "---\nname: injected-example\ndescription: injected\n---\ninjected body\n",
+    );
+    const globalRoot = join(root, "injected-global");
+    const globalFolder = join(globalRoot, "global-example");
+    mkdirSync(globalFolder, { recursive: true });
+    const globalPath = join(globalFolder, "SKILL.md").replaceAll("\\", "/");
+    writeFileSync(
+        globalPath,
+        "---\nname: global-example\ndescription: injected global\n---\nglobal body\n",
+    );
+    sources.skillDirs = sources.skillDirs.map((dir) =>
+        dir.scope === "global" ? { ...dir, path: globalRoot } : dir,
+    );
+    const scan = await loadSkillCatalog(execution, [], undefined, sources);
+    const workspace = new WorkspaceRuntime({
+        cwd: workspaceId,
+        providerKeyStore: new ProviderKeyStore({}),
+        configSources: sources,
+        resources: { skills: scan.skills },
+    });
+    try {
+        for (const scope of [undefined, "workspace"] as const) {
+            const result = await callMethod<SkillsListResult>("skills.list", {
+                server,
+                workspace,
+                params: { workspace: workspaceId, ...(scope ? { scope } : {}) },
+            });
+            const skill = result.skills.find((entry) => entry.name === "injected-example");
+            assert.ok(skill, `injected skill visible for ${scope ?? "effective"} catalog`);
+            assert.equal(skill.scope, "workspace");
+            const content = await callMethod<SkillContentResult>("skills.content", {
+                server,
+                workspace,
+                params: { workspace: workspaceId, filePath, ...(scope ? { scope } : {}) },
+            });
+            assert.match(content.content, /injected body/);
+        }
+        const global = await callMethod<SkillsListResult>("skills.list", {
+            server,
+            workspace,
+            params: { workspace: workspaceId, scope: "global" },
+        });
+        assert.ok(global.skills.some((entry) => entry.name === "global-example"));
+        const globalContent = await callMethod<SkillContentResult>("skills.content", {
+            server,
+            workspace,
+            params: { workspace: workspaceId, filePath: globalPath, scope: "global" },
+        });
+        assert.match(globalContent.content, /global body/);
+        await assert.rejects(
+            callMethod("skills.content", {
+                server,
+                workspace,
+                params: { workspace: workspaceId, filePath, scope: "global" },
+            }),
+            /not available/,
+        );
+    } finally {
+        await workspace.dispose();
+        await server.stop();
+        rmSync(root, { recursive: true, force: true });
+    }
+});

@@ -110,7 +110,7 @@ export function registerMcpHandlers(): void {
         false,
         async ({
             params,
-        }: MethodCtx<{ ids?: string[]; forceProbe?: boolean }>): Promise<{
+        }: MethodCtx<{ ids?: string[]; forceProbe?: boolean }, false>): Promise<{
             servers: McpServerView[];
         }> => {
             const cfg = readGlobalConfig();

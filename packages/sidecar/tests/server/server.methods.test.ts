@@ -551,7 +551,7 @@ describe("methods.snapshot", () => {
             ensureWorkspace: reg.ensureWorkspace,
             command: reg.options.command ?? undefined,
             turnStart: reg.options.turnStart ?? undefined,
-            workspaceParam: reg.options.workspaceParam ?? undefined,
+            workspaceParam: reg.routeParam ?? undefined,
         };
     }
 
@@ -1067,5 +1067,34 @@ describe("commandIdempotency", () => {
         });
         assert.deepEqual(await first, { id: "turn-1", ok: true, result: { ok: true } });
         assert.equal(turnCalls, 1);
+    });
+});
+
+describe("contract routing without runtime construction", () => {
+    it("validates workspace routes and resolves associations without constructing a runtime", async () => {
+        registerBuiltinMethods();
+        const server = new SidecarServer({ providerKeyStore: new ProviderKeyStore({}) });
+        try {
+            assert.equal(
+                getRegisteredMethod("workspace.associations.resolve")?.ensureWorkspace,
+                false,
+            );
+            const missing = await server.dispatchRpc({
+                id: "missing-route",
+                method: "workspace.associations.resolve",
+                params: {},
+            });
+            assert.equal(missing.ok, false);
+            if (!missing.ok) assert.equal(missing.error.code, "invalid_params");
+            const valid = await server.dispatchRpc({
+                id: "valid-route",
+                method: "workspace.associations.resolve",
+                params: { workspace: "/route-only" },
+            });
+            assert.equal(valid.ok, true);
+            assert.deepEqual(server.workspaceIds(), []);
+        } finally {
+            await server.stop();
+        }
     });
 });

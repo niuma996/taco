@@ -74,11 +74,13 @@ describe("skills.diagnostics", () => {
         diagnostics: SkillDiagnosticEntry[];
     }> {
         const { loadSourcedSkills } = await import("@taco-ai/pi-harness");
-        const { defaultSkillDirs } = await import("../../../src/config/config.ts");
+        const { resolveWorkspaceConfigSources } = await import(
+            "../../../src/config/workspaceConfigSources.ts"
+        );
         const skillEnv = new SlashNormalizedExecutionEnv({ cwd: tmpCwd });
         const loaded = await loadSourcedSkills<TacoSkill["source"], TacoSkill>(
             skillEnv,
-            defaultSkillDirs(tmpCwd),
+            resolveWorkspaceConfigSources(tmpCwd).skillDirs,
             (skill, source): TacoSkill => ({ ...skill, source }),
             harnessContext,
         );
@@ -109,7 +111,7 @@ describe("skills.diagnostics", () => {
         before(() => {
             prevHome = process.env.HOME;
             tmpCwd = mkdtempSync(join(tmpdir(), "taco-skills-diag-cwd-"));
-            // Isolate $HOME too: defaultSkillDirs reads ~/.claude/skills and
+            // Isolate $HOME too: resolveWorkspaceConfigSources reads ~/.claude/skills and
             // ~/.pi/skills via os.homedir(), so without this the scan picks up the
             // developer's real user skills. A personal skill sharing a name with a
             // builtin would then surface here as a duplicate_name diagnostic and
@@ -238,7 +240,7 @@ describe("skills.inlineOnly", () => {
         before(() => {
             prevHome = process.env.HOME;
             tmpCwd = mkdtempSync(join(tmpdir(), "taco-skills-io-cwd-"));
-            // Isolate $HOME: defaultSkillDirs reads ~/.claude/skills and ~/.pi/skills
+            // Isolate $HOME: resolveWorkspaceConfigSources reads ~/.claude/skills and ~/.pi/skills
             // via os.homedir(), and the assertion below pins the real builtin
             // fan-out-agents. A personal skill of the same name would shadow it.
             tmpUserHome = mkdtempSync(join(tmpdir(), "taco-skills-io-userhome-"));
@@ -271,7 +273,9 @@ describe("skills.inlineOnly", () => {
 
         it("inlineOnly skills are flagged in the list response", async () => {
             const { loadSourcedSkills } = await import("@taco-ai/pi-harness");
-            const { defaultSkillDirs } = await import("../../../src/config/config.ts");
+            const { resolveWorkspaceConfigSources } = await import(
+                "../../../src/config/workspaceConfigSources.ts"
+            );
             const { SlashNormalizedExecutionEnv } = await import(
                 "../../../src/runtime/harness/slashNormalizedEnv.ts"
             );
@@ -287,7 +291,7 @@ describe("skills.inlineOnly", () => {
             const skillEnv = new SlashNormalizedExecutionEnv({ cwd: tmpCwd });
             const loaded = await loadSourcedSkills<TacoSkill["source"], TacoSkill>(
                 skillEnv,
-                defaultSkillDirs(tmpCwd),
+                resolveWorkspaceConfigSources(tmpCwd).skillDirs,
                 (skill, source): TacoSkill => ({ ...skill, source }),
                 harnessContext,
             );

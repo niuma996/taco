@@ -19,7 +19,11 @@ import {
 } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve as resolveTacoHome } from "node:path";
 import { MEMORY_CONTENT_MAX_CHARS } from "@taco-ai/protocol";
-import { tacoHome } from "../../config/config.ts";
+import {
+    memoryPartitionKey,
+    memoryProjectDir,
+    memoryStoragePaths,
+} from "../../workspace/storagePaths.ts";
 import { buildMemoryContextBlock } from "../contextBlock.ts";
 import {
     type ArchiveCleanupCandidate,
@@ -181,8 +185,7 @@ function ensureDir(path: string): void {
  * directory for a given workspace id instead of hardcoding the raw path.
  */
 export function workspaceKey(workspaceId: string): string {
-    const normalised = workspaceId.replace(/\\/g, "/");
-    return createHash("sha256").update(normalised).digest("hex").slice(0, 16);
+    return memoryPartitionKey(workspaceId);
 }
 
 // ─── LocalMemoryStore ─────────────────────────────────────────────────────────
@@ -212,10 +215,10 @@ export class LocalMemoryStore implements MemoryStore {
     constructor() {
         // Resolve at construction so tests can override TACO_HOME before
         // instantiating. Later `tacoHome()` changes are NOT picked up.
-        const root = resolveTacoHome(tacoHome(), "memory");
-        this.memoryDir = root;
-        this.memoryIndex = join(root, "MEMORY.md");
-        this.projectsDir = join(root, "projects");
+        const paths = memoryStoragePaths();
+        this.memoryDir = paths.root;
+        this.memoryIndex = paths.indexPath;
+        this.projectsDir = paths.projectsDir;
     }
 
     initialize(workspaceId: string): void {
@@ -245,7 +248,7 @@ export class LocalMemoryStore implements MemoryStore {
 
     /** Every project dir key under `projects/`. */
     static listDirKeys(): string[] {
-        const root = join(resolveTacoHome(tacoHome(), "memory"), "projects");
+        const root = memoryStoragePaths().projectsDir;
         try {
             return readdirSync(root, { withFileTypes: true })
                 .filter((d) => d.isDirectory() && /^[0-9a-f]{16}$/.test(d.name))
@@ -639,7 +642,7 @@ export class LocalMemoryStore implements MemoryStore {
 
 /** Read all topic files from a project directory. */
 export function readProjectTopics(workspaceId: string): MemoryEntry[] {
-    const root = join(resolveTacoHome(tacoHome()), "memory", "projects", workspaceKey(workspaceId));
+    const root = memoryProjectDir(workspaceId);
     return readTopicDir(root, workspaceId);
 }
 

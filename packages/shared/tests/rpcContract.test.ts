@@ -84,3 +84,32 @@ test("typed request builder preserves wire names and payloads", async () => {
         '{"id":"2","method":"workspace.list"}',
     );
 });
+
+test("workspace route fields are declared by contract rows and exist in their schemas", () => {
+    for (const key of contractKeys) {
+        const row = rpcContract[key];
+        const routeParam = Reflect.get(row, "routeParam");
+        if (row.scope === "process") {
+            assert.equal(routeParam, undefined, `${key} has no transport workspace route`);
+            continue;
+        }
+        const expected = [
+            "workspaceEnsure",
+            "workspaceDispose",
+            "workspaceCleanupPreview",
+            "workspaceCleanup",
+        ].includes(key)
+            ? "cwd"
+            : "workspace";
+        assert.equal(routeParam, expected, `${key} route field`);
+        const schema = rpcSchemas[key] as {
+            properties?: Record<string, unknown>;
+            anyOf?: Array<{ properties?: Record<string, unknown> }>;
+        };
+        const variants = schema.anyOf ?? [schema];
+        assert.ok(
+            variants.every((variant) => variant.properties?.[routeParam]),
+            `${key} schema must carry its route`,
+        );
+    }
+});

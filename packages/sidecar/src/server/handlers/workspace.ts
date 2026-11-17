@@ -61,7 +61,7 @@ export function registerWorkspaceHandlers(): void {
             await server.ensureWorkspace(cwd);
             return { cwd };
         },
-        { workspaceParam: "cwd", command: true },
+        { command: true },
     );
 
     registerMethod(
@@ -71,20 +71,20 @@ export function registerWorkspaceHandlers(): void {
             await server.disposeWorkspace(cwd);
             return null;
         },
-        { workspaceParam: "cwd", command: true },
+        { command: true },
     );
 
     registerMethod(
         "workspaceCleanupPreview",
         false,
         async ({ cwd, server }) => server.cleanupWorkspace(cwd, true),
-        { workspaceParam: "cwd", command: false },
+        { command: false },
     );
     registerMethod(
         "workspaceCleanup",
         false,
         async ({ cwd, server }) => server.cleanupWorkspace(cwd, false),
-        { workspaceParam: "cwd", command: true },
+        { command: true },
     );
 
     registerMethod("workspaceAssociationsGet", false, async ({ server, params }) => {
@@ -106,19 +106,14 @@ export function registerWorkspaceHandlers(): void {
         }
     });
 
-    registerMethod(
-        "workspaceAssociationsResolve",
-        false,
-        async ({ server, params }) => {
-            const workspace = params?.workspace;
-            if (typeof workspace !== "string" || workspace.length === 0) {
-                throw new RpcHandlerError("invalid_params", "workspace is required");
-            }
-            const resolved = server.associations.resolve(asWorkspaceId(workspace));
-            return resolved.source
-                ? { roots: resolved.roots, source: resolved.source }
-                : { roots: resolved.roots };
-        },
-        { workspaceParam: "workspace" },
-    );
+    registerMethod("workspaceAssociationsResolve", false, async ({ server, params }) => {
+        const workspace = params?.workspace;
+        if (typeof workspace !== "string" || workspace.length === 0) {
+            throw new RpcHandlerError("invalid_params", "workspace is required");
+        }
+        const resolved = server.associations.resolve(asWorkspaceId(workspace));
+        return resolved.source
+            ? { roots: resolved.roots, source: resolved.source }
+            : { roots: resolved.roots };
+    });
 }

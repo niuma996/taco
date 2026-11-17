@@ -1,22 +1,13 @@
 /**
- * skillAuthoringGuidance — tells the model where a new skill file should go
- * and which frontmatter fields taco actually reads.
- *
- * Neither fact is derivable without reading source. `defaultSkillDirs` is the
- * single source of truth for the five-path search order, but it exists only
- * as code + comments — nothing renders it for the model. Likewise
- * `runAs` / `inlineOnly` / `allowedTools` / `model` are taco-private
- * frontmatter keys that pi-agent-core's `loadSourcedSkills` silently drops;
- * they are re-parsed by `skillFrontmatter.ts`, but a user (especially one
- * without the source tree) has no way to discover they exist.
- *
- * Rendered from `defaultSkillDirs` rather than duplicated as a hardcoded
- * string — same rationale as `agent.ts`'s `AgentTypeDescriptor` hints: a
- * blurb that repeats the directory list drifts from the function the moment
- * either one changes, and only one side can be caught by a test.
+ * Render skill locations from the same sources used by the loader so the
+ * model's authoring guidance cannot drift from the scan order. Also describe
+ * taco-specific frontmatter that pi's loader does not expose to the model.
  */
 
-import { defaultSkillDirs } from "../config/config.ts";
+import {
+    resolveWorkspaceConfigSources,
+    type WorkspaceConfigSources,
+} from "../config/workspaceConfigSources.ts";
 
 /**
  * Render the "where do I put a new skill" + "what frontmatter does taco read"
@@ -26,11 +17,14 @@ import { defaultSkillDirs } from "../config/config.ts";
  * to a workspace with no skills yet.
  *
  * `cwd` should be `executionCwd`, not `sessionCwd` — for IM workspaces the two
- * diverge (session storage vs. scratch/local-binding), and `defaultSkillDirs`
+ * diverge (session storage vs. scratch/local-binding), and the source resolver
  * is what actually gets scanned against the execution location.
  */
-export function formatSkillAuthoringGuidance(cwd: string): string {
-    const dirs = defaultSkillDirs(cwd);
+export function formatSkillAuthoringGuidance(
+    cwd: string,
+    sources?: WorkspaceConfigSources,
+): string {
+    const dirs = (sources ?? resolveWorkspaceConfigSources(cwd)).skillDirs;
     const userLocations: string[] = [];
     let builtin: string | undefined;
     for (const dir of dirs) {

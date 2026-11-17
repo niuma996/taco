@@ -27,6 +27,7 @@ import { CheckpointManager } from "../../checkpoints/manager.ts";
 import type { CheckpointStore } from "../../checkpoints/store.ts";
 import type { ResolvedCompaction } from "../../config/config.ts";
 import { tacoHome } from "../../config/tacoHome.ts";
+import type { WorkspaceConfigSources } from "../../config/workspaceConfigSources.ts";
 import type { SessionExtensionSet } from "../../extensions/activation.ts";
 import type {
     ContextHookBuckets,
@@ -175,6 +176,7 @@ export interface AttachedSessionOptions {
      * re-attaching the session. `undefined` means "use defaults".
      */
     getInstructionsConfig?: () => InstructionsConfig | undefined;
+    configSources?: WorkspaceConfigSources;
     /**
      * Lazy accessor for the current IM channel identity (platform type +
      * configured instance id), supplied by the workspace. `undefined` for
@@ -835,6 +837,7 @@ export class AttachedSession extends EventEmitter {
                 // and re-reads `taco.json` on every settings.write, so the hook
                 // picks up hot-reload without re-attaching the session.
                 getInstructionsConfig: () => attached.getInstructionsConfig(),
+                configSources: args.configSources,
                 // Lazy accessor — yields undefined for non-IM workspaces; the
                 // im_channel hook injects nothing there.
                 getImChannelContext: args.getImChannelContext,

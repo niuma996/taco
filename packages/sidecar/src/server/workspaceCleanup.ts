@@ -16,7 +16,6 @@ import {
 } from "../channels/imWorkspacePolicyStore.ts";
 import { makeImSessionsRoot } from "../channels/virtualWorkspace.ts";
 import { harnessContext } from "../lib/harnessContext.ts";
-import { workspaceKey } from "../memory/local/store.ts";
 import { NodeExecutionEnv } from "../runtime/pi/node.ts";
 import type { JsonlSessionMetadata } from "../runtime/pi/types.ts";
 import { JsonlSessionRepo } from "../runtime/pi/values.ts";
@@ -25,6 +24,7 @@ import {
     type WorkspaceAssociationStore,
     workspaceAssociationsPath,
 } from "../workspace/associationStore.ts";
+import { checkpointStoragePaths, memoryProjectDir } from "../workspace/storagePaths.ts";
 import { RpcHandlerError } from "./methodRegistry.ts";
 
 type Action = { path: string; execute: () => Promise<void>; validate: () => Promise<void> };
@@ -287,12 +287,12 @@ export class WorkspaceCleanupService {
             });
         }
         await add(join(home, "staging", "attachments", hash(cwd, 32)));
-        await add(join(home, "memory", "projects", workspaceKey(route ? cwd : storageCwd)));
-        if (!route) await add(join(home, "checkpoints", hash(storageCwd, 16)));
+        await add(memoryProjectDir(route ? cwd : storageCwd, home));
+        if (!route) await add(checkpointStoragePaths(storageCwd, home).root);
         if (route) {
             const chatScratch = join(root, "chats", chatPolicyKey(route), "scratch");
             await add(chatScratch, root);
-            await add(join(home, "checkpoints", hash(chatScratch, 16)));
+            await add(checkpointStoragePaths(chatScratch, home).root);
             if (routeSession)
                 record(
                     `${join(home, "sessions", "im", "routing.json")}#${cwd}`,

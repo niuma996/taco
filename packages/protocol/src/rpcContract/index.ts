@@ -11,7 +11,7 @@
  * routed by workspace but need no workspace runtime on the server.
  */
 
-import type { RpcRequest } from "../frames.js";
+import type { RpcRequest, WorkspaceId } from "../frames.js";
 import { attachmentContract, attachmentMethods, attachmentSchemas } from "./attachment.js";
 import { channelsContract, channelsMethods, channelsSchemas } from "./channels.js";
 import { jobsContract, jobsMethods, jobsSchemas } from "./jobs.js";
@@ -23,7 +23,7 @@ import type { ParamsLacksShape, RpcContractRow } from "./types.js";
 import { workContract, workMethods, workSchemas } from "./work.js";
 import { workspaceContract, workspaceMethods, workspaceSchemas } from "./workspace.js";
 
-export type { RpcContractRow, RpcScope } from "./types.js";
+export type { RpcContractRow, RpcRouteParam, RpcScope } from "./types.js";
 
 /** Wire names for every method the sidecar serves. */
 export const RPC = {
@@ -156,3 +156,14 @@ export function createRpcRequest<M extends RpcMethodName>(
 ): RpcRequest {
     return commandId === undefined ? { id, method, params } : { id, commandId, method, params };
 }
+
+/** Every workspace route field must carry a workspace identity in the wire params. */
+type MissingRouteParams = {
+    [K in WorkspaceScopedKey]: RpcParams<K> extends Record<
+        (typeof rpcContract)[K]["routeParam"],
+        WorkspaceId
+    >
+        ? never
+        : K;
+}[WorkspaceScopedKey];
+export const routeParamsAreTyped: [MissingRouteParams] extends [never] ? true : false = true;
