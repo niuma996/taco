@@ -19,7 +19,7 @@ import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { connect } from "node:net";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const POLL_MS = 20;
@@ -97,8 +97,16 @@ async function main() {
     const tmpHome = mkdtempSync(IS_WINDOWS ? join(tmpdir(), "taco-boot-") : "/tmp/taco-boot-");
     const runtimeDir = join(tmpHome, "run");
     mkdirSync(runtimeDir, { recursive: true });
-    const ndjson = join(runtimeDir, "sidecar.sock");
-    const control = join(runtimeDir, "sidecar-ctl.sock");
+    // POSIX binds a unix socket at a filesystem path; Windows binds a named
+    // pipe, whose address must live under \\.\pipe\ — a filesystem path
+    // there never becomes connectable.
+    const pipeBase = basename(tmpHome);
+    const ndjson = IS_WINDOWS
+        ? `\\\\.\\pipe\\${pipeBase}-ndjson`
+        : join(runtimeDir, "sidecar.sock");
+    const control = IS_WINDOWS
+        ? `\\\\.\\pipe\\${pipeBase}-control`
+        : join(runtimeDir, "sidecar-ctl.sock");
 
     const env = {
         ...process.env,
@@ -106,6 +114,9 @@ async function main() {
         TACO_DAEMON_MODE: "1",
         TACO_SOCKET: ndjson,
         TACO_CONTROL_SOCKET: control,
+        // The daemon derives its pid file from dirname(socketPath) unless this
+        // is set — and dirname of a pipe address is \\.\pipe, not writable.
+        TACO_RUNTIME_DIR: runtimeDir,
         TACO_STDERR_LOG: join(tmpHome, "daemon.err.log"),
     };
 

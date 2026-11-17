@@ -9,6 +9,10 @@
  * `repoRoot` is NOT auto-derived from `import.meta.url`; callers pass it.
  */
 
+import { existsSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { pathToFileURL } from "node:url";
+
 export interface SidecarSpawn {
     command: string;
     args: string[];
@@ -26,6 +30,30 @@ export interface SidecarSpawnOptions {
     args?: string[];
     repoRoot?: string;
     env?: NodeJS.ProcessEnv;
+}
+
+/**
+ * Locate tsx's ESM loader so the loader can be imported by node itself.
+ *
+ * Never spawn the `node_modules/.bin/tsx` shim: on Windows that file is
+ * `tsx.cmd`, and Node 22+ refuses to execute `.cmd`/`.bat` directly
+ * (CVE-2024-27980). A bare `--import tsx` would instead resolve against the
+ * spawn cwd, so the loader is located by path and passed as a file:// URL.
+ */
+function locateTsxLoader(repoRoot: string): string {
+    const fromRepo = join(repoRoot, "node_modules", "tsx", "dist", "loader.mjs");
+    if (existsSync(fromRepo)) return fromRepo;
+    let dir = import.meta.dirname;
+    for (let i = 0; i < 8; i++) {
+        const candidate = join(dir, "node_modules", "tsx", "dist", "loader.mjs");
+        if (existsSync(candidate)) return candidate;
+        const parent = dirname(dir);
+        if (parent === dir) break;
+        dir = parent;
+    }
+    throw new Error(
+        "tsx loader not found (node_modules/tsx/dist/loader.mjs). Run `pnpm install` in the taco checkout.",
+    );
 }
 
 /** Default sidecar spawn config. */
@@ -53,7 +81,7 @@ export function createDefaultSidecarSpawn(opts?: SidecarSpawnOptions): {
     // still wins so callers can point at a packaged entry point.
     if (process.platform === "win32" && process.env.TACO_SIDECAR_CMD === undefined) {
         command = process.execPath;
-        args = ["--import", "tsx", ...args];
+        args = ["--import", pathToFileURL(locateTsxLoader(repoRoot)).href, ...args];
     }
     return {
         spawn: {

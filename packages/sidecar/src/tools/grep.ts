@@ -157,6 +157,8 @@ async function runRipgrep(
         await writeFile(ignorePath, ignoreContent, { mode: 0o600 });
         const args = [
             "--line-number",
+            // Match end anchors before CRLF as the fallback does, on every host.
+            "--crlf",
             "--no-heading",
             "--color",
             "never",
@@ -291,8 +293,10 @@ async function runFallback(
         if (oversized) result.skippedLarge++;
         if (text === undefined) continue;
         if (piContext.abortSignal?.aborted) throw new Error("Operation aborted");
-        // Split on CRLF too: on Windows most checked-out files keep `\r`, which
-        // would otherwise ride along in every match row and break `$` anchors.
+        // Split on CRLF too. Not platform-gated: a CRLF file reaches a POSIX
+        // checkout as well (an autocrlf checkout, a file copied from Windows),
+        // and the trailing `\r` would ride along in every match row and break
+        // `$` anchors.
         const lines = text.split(/\r?\n/);
         for (let i = 0; i < lines.length; i++) {
             if (re.test(lines[i])) appendMatch(result, `${rel}:${i + 1}:${lines[i]}`);

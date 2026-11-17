@@ -48,8 +48,8 @@ function mount(
     getResult: ExtensionConfigResult = result,
 ) {
     const client = {
-        extensionConfigGet: vi.fn(async () => getResult),
-        extensionConfigUpdate: update,
+        extensionsConfigGet: vi.fn(async () => getResult),
+        extensionsConfigUpdate: update,
     } as unknown as TacoClient;
     const close = vi.fn();
     render(
@@ -89,7 +89,7 @@ describe("PluginSettingsDialog", () => {
     it("shows a localized message and logs the detail when configuration fails to load", async () => {
         const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
         const client = {
-            extensionConfigGet: vi.fn().mockRejectedValue(new Error("connection refused")),
+            extensionsConfigGet: vi.fn().mockRejectedValue(new Error("connection refused")),
         } as unknown as TacoClient;
         render(
             <PluginSettingsDialog
@@ -102,7 +102,7 @@ describe("PluginSettingsDialog", () => {
         await screen.findByText("plugins.configLoadFailed");
         expect(screen.queryByText("connection refused")).toBeNull();
         expect(consoleError).toHaveBeenCalledWith(
-            "[taco] extensionConfigGet failed",
+            "[taco] extensionsConfigGet failed",
             expect.any(Error),
         );
         consoleError.mockRestore();

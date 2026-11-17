@@ -1,7 +1,9 @@
 // Shell-family tool tests: runShell signal escalation, shellTool, glob, grep.
 
 import { strict as assert } from "node:assert";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import childProcess from "node:child_process";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, afterEach, before, describe, it } from "node:test";
@@ -275,6 +277,89 @@ describe("shell tool env scrubbing", () => {
             if (k.endsWith("_API_KEY")) delete process.env[k];
         }
     });
+
+    for (const trigger of ["timeout", "abort"]) {
+        for (const taskkillCode of [0, 1]) {
+            it(`Windows taskkill scrubs keys on ${trigger} with exit ${taskkillCode}`, async (t) => {
+                const dir = mkdtempSync(join(tmpdir(), "taco-taskkill-env-"));
+                const probe = join(dir, "env-probe.json");
+                const store = new ProviderKeyStore({ anthropic: "taskkill-test-secret" });
+                const platform = Object.getOwnPropertyDescriptor(process, "platform");
+                assert.ok(platform);
+                const realSpawn = childProcess.spawn;
+                let child: ReturnType<typeof realSpawn> | undefined;
+                let killerClosed: Promise<void> | undefined;
+                let taskkillCalls = 0;
+                let fallbackCalls = 0;
+                // Exercise Windows dispatch on every host. A real subprocess
+                // probes its inherited env and simulates taskkill's result.
+                const mocked = t.mock.method(childProcess, "spawn", ((
+                    ...args: Parameters<typeof realSpawn>
+                ) => {
+                    if (args[0] === "taskkill") {
+                        taskkillCalls++;
+                        assert.ok(child?.pid);
+                        assert.deepEqual(args[1], ["/pid", String(child.pid), "/T", "/F"]);
+                        assert.equal(args[2]?.windowsHide, true);
+                        const killer = realSpawn(
+                            process.execPath,
+                            [
+                                "-e",
+                                "require('node:fs').writeFileSync(process.argv[1], JSON.stringify({ leaked: Boolean(process.env.ANTHROPIC_API_KEY) })); " +
+                                    (taskkillCode === 0
+                                        ? "process.kill(Number(process.argv[2]));"
+                                        : "process.exitCode = 1;"),
+                                probe,
+                                String(child.pid),
+                            ],
+                            args[2],
+                        );
+                        killerClosed = new Promise((resolve) =>
+                            killer.once("close", () => resolve()),
+                        );
+                        return killer;
+                    }
+                    child = realSpawn(...args);
+                    const realKill = child.kill.bind(child);
+                    t.mock.method(child, "kill", (signal?: NodeJS.Signals | number) => {
+                        fallbackCalls++;
+                        return realKill(signal);
+                    });
+                    return child;
+                }) as typeof childProcess.spawn);
+                syncBuiltinESMExports();
+                Object.defineProperty(process, "platform", { value: "win32" });
+                const controller = new AbortController();
+                try {
+                    const pending = runShell(
+                        process.execPath,
+                        ["-e", "setTimeout(() => process.stdout.write('natural exit'), 2000)"],
+                        {
+                            cwd: dir,
+                            timeoutMs: trigger === "timeout" ? 30 : 5000,
+                            signal: controller.signal,
+                        },
+                    );
+                    if (trigger === "abort") controller.abort();
+                    const result = await pending;
+                    await killerClosed;
+                    assert.equal(result.details.interrupted, true);
+                    assert.doesNotMatch(result.content[0]?.text ?? "", /natural exit/);
+                    assert.deepEqual(JSON.parse(readFileSync(probe, "utf8")), { leaked: false });
+                    assert.equal(taskkillCalls, 1);
+                    assert.equal(fallbackCalls, taskkillCode === 0 ? 0 : 1);
+                } finally {
+                    child?.kill();
+                    await killerClosed;
+                    Object.defineProperty(process, "platform", platform);
+                    mocked.mock.restore();
+                    syncBuiltinESMExports();
+                    store.update({ anthropic: "" });
+                    rmSync(dir, { recursive: true, force: true });
+                }
+            });
+        }
+    }
 
     it("does not expose injected provider keys to executed commands", {
         skip: process.platform === "win32",

@@ -47,7 +47,7 @@ export function PluginSettingsDialog({
         if (!entry.configSchema || !client) return;
         let current = true;
         client
-            .extensionConfigGet({ name: entry.name })
+            .extensionsConfigGet({ name: entry.name })
             .then((result) => {
                 if (!current) return;
                 setConfig(result);
@@ -55,7 +55,7 @@ export function PluginSettingsDialog({
             })
             .catch((error: unknown) => {
                 if (!current) return;
-                console.error("[taco] extensionConfigGet failed", error);
+                console.error("[taco] extensionsConfigGet failed", error);
                 setError(t("plugins.configLoadFailed"));
             });
         return () => {
@@ -95,7 +95,7 @@ export function PluginSettingsDialog({
         setSaving(true);
         setError(undefined);
         try {
-            const result = await client.extensionConfigUpdate({
+            const result = await client.extensionsConfigUpdate({
                 name: entry.name,
                 values: patch.values,
                 unset: patch.unset,

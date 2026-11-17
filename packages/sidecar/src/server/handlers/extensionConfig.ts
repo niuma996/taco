@@ -68,10 +68,10 @@ function view(registry: ExtensionRegistry | undefined, name: string): ExtensionC
 }
 
 export function registerExtensionConfigHandlers(): void {
-    registerMethod("extensionConfigGet", false, async ({ server, params }) =>
+    registerMethod("extensionsConfigGet", false, async ({ server, params }) =>
         view(server.extensionRegistry, params.name),
     );
-    registerMethod("extensionConfigUpdate", false, async ({ server, params }) => {
+    registerMethod("extensionsConfigUpdate", false, async ({ server, params }) => {
         const schema = schemaFor(server.extensionRegistry, params.name);
         const fields = new Map(extensionConfigFields(schema).map((field) => [field.key, field]));
         for (const key of Object.keys(params.values)) {

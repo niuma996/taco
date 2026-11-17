@@ -221,8 +221,8 @@ test("every facade method serializes a payload accepted by its registered schema
     await client.settingsGet();
     await client.settingsWrite({ global: { defaultModel: "m" } });
     await client.extensionsStatus();
-    await client.extensionConfigGet({ name: "example" });
-    await client.extensionConfigUpdate({ name: "example", values: { enabled: true }, unset: [] });
+    await client.extensionsConfigGet({ name: "example" });
+    await client.extensionsConfigUpdate({ name: "example", values: { enabled: true }, unset: [] });
     await client.channelsList();
     await client.channelsListConversations({});
     await client.channelsCreate({ name: "wechat" });

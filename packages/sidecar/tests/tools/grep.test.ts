@@ -99,6 +99,31 @@ test("fallback counts all matches while retaining bounded output", async (t) => 
     assert.ok(result.content[0].text.length < 51_000);
 });
 
+test("fallback strips the carriage return of CRLF files so end anchors match", async (t) => {
+    const { dir, env, tool } = await fixture(t);
+    writeFileSync(join(dir, "crlf.txt"), "needle\r\nplain\r\n");
+    const result = grepResult(await invokeTool(tool, { pattern: "needle$" }, { env }));
+    assert.match(result.content[0].text, /crlf\.txt:1:needle/);
+    assert.doesNotMatch(result.content[0].text, /\r/);
+});
+
+for (const ripgrep of [false, true]) {
+    test(`${ripgrep ? "real ripgrep" : "fallback"} matches end anchors in CRLF and LF files`, async (t) => {
+        if (ripgrep && realSpawnSync("rg", ["--version"]).status !== 0) {
+            t.skip("ripgrep is not installed");
+            return;
+        }
+        const { dir, env, tool } = await fixture(t, ripgrep);
+        writeFileSync(join(dir, "mixed.txt"), "needle\r\nneedle\nplain\r\nneedle");
+        const result = grepResult(await invokeTool(tool, { pattern: "^needle$" }, { env }));
+        assert.equal(result.details.count, 3);
+        assert.match(result.content[0].text, /mixed\.txt:1:needle/);
+        assert.match(result.content[0].text, /mixed\.txt:2:needle/);
+        assert.match(result.content[0].text, /mixed\.txt:4:needle/);
+        assert.equal(result.details.truncated, false);
+    });
+}
+
 test("ripgrep reads ignore rules from a portable temporary file and cleans it up", async (t) => {
     const { dir, env, tool } = await fixture(t, true);
     writeFileSync(join(dir, ".gitignore"), "secret/\n");

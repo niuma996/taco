@@ -407,12 +407,12 @@ const settingsRows = {
     settingsGet: row<SettingsGetResult>()("settings.get", "process", settingsGetSchema),
     settingsWrite: row<SettingsWriteResult>()("settings.write", "process", settingsWriteSchema),
     configPatch: row<ConfigPatchResult>()("config.patch", "workspace", configPatchSchema),
-    extensionConfigGet: row<ExtensionConfigResult>()(
+    extensionsConfigGet: row<ExtensionConfigResult>()(
         "extensions.configGet",
         "process",
         extensionConfigGetSchema,
     ),
-    extensionConfigUpdate: row<ExtensionConfigResult>()(
+    extensionsConfigUpdate: row<ExtensionConfigResult>()(
         "extensions.configUpdate",
         "process",
         extensionConfigUpdateSchema,

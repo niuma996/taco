@@ -6,7 +6,7 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import { StringDecoder } from "node:string_decoder";
 import { HIDDEN_WINDOWS_SPAWN } from "../lib/hiddenWindowsSpawn.ts";
-import { isInjectedEnvKey } from "../runtime/models/providerKeyStore.ts";
+import { isInjectedEnvKey, scrubbedProcessEnv } from "../runtime/models/providerKeyStore.ts";
 import type { TextContent } from "../runtime/pi/types.ts";
 
 export const DEFAULT_TIMEOUT_MS = 120_000;
@@ -58,9 +58,15 @@ function killProcessTree(child: ChildProcess, signal: NodeJS.Signals): void {
         // is required because console children have no window to close.
         const killer = spawn("taskkill", ["/pid", String(child.pid), "/T", "/F"], {
             stdio: "ignore",
+            env: scrubbedProcessEnv(),
             ...HIDDEN_WINDOWS_SPAWN,
         });
         killer.on("error", () => child.kill(signal));
+        // A taskkill that ran but failed (access denied, protected process)
+        // leaves the tree alive; the fallback only covers a spawn failure.
+        killer.on("close", (code) => {
+            if (code !== 0) child.kill(signal);
+        });
         return;
     }
     // ESRCH just means the group is already gone — the normal race when a short
@@ -124,8 +130,8 @@ export async function runShell(
     );
 
     // POSIX: the command runs under its own process group so `killProcessTree`
-    // can reach every process it starts. Windows: `detached` would pop a console
-    // window, so the tree kill there is limited to the direct child.
+    // can reach every process it starts. Windows uses taskkill /T without
+    // detaching, so commands do not open a separate console window.
     const child =
         spawnArgs === null
             ? spawn(command, {
@@ -165,10 +171,8 @@ export async function runShell(
         interrupted = true;
         killProcessTree(child, "SIGTERM");
         // POSIX: SIGTERM gives the child a chance to flush; SIGKILL after 5s is
-        // the hard backstop. Windows: kill() maps to TerminateProcess for any
-        // signal name, so the SIGTERM→SIGKILL escalation is a no-op there —
-        // the first kill is already hard. The code is correct on both; the
-        // delay is only meaningful on Unix.
+        // the hard backstop. Windows taskkill /F already forces termination;
+        // retry if the direct child is still alive after the delay.
         sigkillTimer = setTimeout(() => escalateToSigkill(child), sigkillDelayMs);
     }, timeoutMs);
 
