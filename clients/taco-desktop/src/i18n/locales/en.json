@@ -1301,5 +1301,29 @@
     "channelDirectoryHint": "Directory definitions loaded for this channel chat; associated directories do not add configuration.",
     "noChannel": "No channel chats yet. Receive a channel message to add one.",
     "noTarget": "Open a workspace or channel chat first."
+  },
+  "git": {
+    "status": "Workspace Git status",
+    "loading": "Checking Git…",
+    "refreshing": "Refreshing…",
+    "missing": "Git is not installed",
+    "notRepository": "No Git repository",
+    "create": "Create repository",
+    "creating": "Creating…",
+    "install": "Install Git",
+    "retry": "Retry",
+    "bare": "Bare repository",
+    "detached": "Detached HEAD",
+    "noCommits": "No commits yet",
+    "inspectFailed": "Could not refresh Git status: {{error}}",
+    "initFailed": "Could not create repository",
+    "installFailed": "Could not open Git downloads",
+    "added": "Added / untracked",
+    "modified": "Modified",
+    "deleted": "Deleted",
+    "renamed": "Renamed",
+    "conflict": "Conflict",
+    "renamedFrom": "Renamed from",
+    "deletedNoPreview": "Deleted file — preview unavailable"
   }
 }

@@ -116,6 +116,7 @@ because a registered system-service daemon can outlive a desktop upgrade.
 | 2.17 | Layered `memory.list`: optional `memoryLayer` / `memoryLayerKey` / `readOnly` on topics and `memorySources` on the result. `memory.deleteTopic` accepts an optional current-layer selector. IM policy accepts optional `memory.inheritManagedGlobal`; absent means off. New clients read associated workspace memory automatically and expose Taco system memory only when the resolved channel policy opts in. |
 | 2.18 | `memory.read` retrieves a topic by `memoryLayer`, opaque `sourceId`, and `id`. Context summaries and `memory.list` expose usable source references; every read rechecks live source authorization. |
 | 2.19 | `extensions.configGet` / `extensions.configUpdate`; optional `workspace` on `extensions.status`; `ExtensionsStatusResult` adds `workspace` / `disabledEntries` / `pendingRestart`, and `ExtensionStatusEntry` adds `contributions`. |
+| 2.20 | `git.inspect`, `git.init` and `worktree.list`; local Git availability, repository metadata, worktree inventory and uncommitted file status. |
 
 Adding a value to an existing response enum is potentially breaking: older clients
 may index exhaustive maps with it. Such values require connection-scoped capability
@@ -696,3 +697,37 @@ This document is generated from source.  Run `pnpm sidecar:docs` to regenerate t
 Local cleanup targets Taco-owned session history, descendant session data, attachments, staging, memory, checkpoints and workspace association records. Project/source folders and associated folders are retained. Work history/results, completed queue records, inbox logs and scheduled-job definitions are retained and listed in the preview. Enabled scheduled jobs can create future sessions. IM cleanup selects the exact routed session tree and its owned per-chat execution directory; channel-shared and custom execution directories are retained. Removing one conversation never removes another conversation's transcript or the channel configuration.
 
 Temporarily hiding an IM conversation is a desktop preference, preserving routing and history. The hide baseline stores the session ID and inbound `lastUsedAt`. Inbound batches record activity at admission before enqueue; route revalidation itself does not record activity. Reused-route activity refreshes are coalesced in fixed 100 ms windows, so continuous traffic cannot postpone a refresh indefinitely. `channels.conversations_changed` restores the row as unread without changing the selected page. Renames, metadata reads and refreshes do not restore hidden rows. Permanent cleanup removes the route; subsequent inbound traffic creates a fresh session.
+
+## Local Git and worktree discovery (2.20)
+
+`git.inspect`, `git.init` and `worktree.list` carry `{ workspace }` and route by
+that local absolute directory, without constructing a WorkspaceRuntime. IM
+routing keys are rejected. All subprocess calls use argument arrays, a shared
+10-second request deadline, a 5-second command limit and an environment cleared
+of ambient `GIT_*` overrides. `core.fsmonitor` is disabled, including inherited
+configuration passed to child Git processes, so automatic polling cannot invoke
+a repository-provided fsmonitor script. Invalid Git metadata is an error and
+never enables initialization.
+
+- `git.inspect` returns `{ status: "missing" }`, `{ status: "not_repository" }`,
+  or `{ status: "repository", repository, changes }`. Missing directories,
+  permission failures and Git command failures are errors, not empty status.
+- `repository` distinguishes checkout root, per-checkout Git directory and
+  canonical shared Git directory. Branch is nullable for detached HEAD; HEAD
+  is nullable before the first commit. Bare repositories have no checkout root.
+- `changes` contains staged, unstaged and untracked files, with paths relative
+  to the requested workspace subtree. Deletions and renames retain their status;
+  NUL-delimited Git output preserves whitespace and Unicode filenames.
+- `worktree.list` returns the actual Git inventory, including detached, bare,
+  locked and prunable entries. It is independent of `workspace.list`, which
+  enumerates loaded Taco runtimes.
+- `git.init` is a mutating command with existing `commandId` deduplication.
+  The desktop invokes it only after the user clicks **Create Git repository**.
+  An existing parent checkout is returned instead of creating a nested repo.
+  Initialization does not stage files, create commits, fetch or configure identity.
+
+Git discovery is a core read service. The optional `@taco/builtin-git-context`
+plugin controls model context injection; disabling it does not disable desktop
+branch/status display or repository discovery. A future worktree plugin may
+control agent tools and guidance while using this shared service. D1 adds no
+worktree create/remove, source binding, memory sharing or permission grants.

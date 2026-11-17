@@ -106,8 +106,9 @@ export type CompactionFailureReason =
  *  2.19 adds `extensions.configGet` / `extensions.configUpdate`, the optional
  *  `workspace` param on `extensions.status`, and its new result fields; a 2.18
  *  daemon answers `unknown_method` for the config RPCs and rejects the new
- *  `extensions.status` params shape. */
-export const SIDECAR_PROTOCOL_VERSION = { major: 2, minor: 19 } as const;
+ *  `extensions.status` params shape.
+ *  2.20 adds git.inspect, git.init and worktree.list for local repository discovery. */
+export const SIDECAR_PROTOCOL_VERSION = { major: 2, minor: 20 } as const;
 
 /**
  * Client-side gate for a sidecar's advertised protocol version. Semver-ish but

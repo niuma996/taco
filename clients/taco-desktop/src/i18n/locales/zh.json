@@ -1301,5 +1301,29 @@
     "channelDirectoryHint": "仅显示该渠道聊天实际加载的目录配置，关联目录不会自动参与聚合。",
     "noChannel": "暂无渠道聊天，接收一条渠道消息后即可在此选择。",
     "noTarget": "请先打开一个工作区或渠道聊天。"
+  },
+  "git": {
+    "status": "工作区 Git 状态",
+    "loading": "正在检查 Git…",
+    "refreshing": "正在刷新…",
+    "missing": "尚未安装 Git",
+    "notRepository": "尚未创建 Git 仓库",
+    "create": "创建仓库",
+    "creating": "正在创建…",
+    "install": "安装 Git",
+    "retry": "重试",
+    "bare": "裸仓库",
+    "detached": "分离 HEAD",
+    "noCommits": "尚无提交",
+    "inspectFailed": "无法刷新 Git 状态：{{error}}",
+    "initFailed": "创建仓库失败",
+    "installFailed": "无法打开 Git 下载页面",
+    "added": "新增 / 未跟踪",
+    "modified": "已修改",
+    "deleted": "已删除",
+    "renamed": "已重命名",
+    "conflict": "冲突",
+    "renamedFrom": "原路径",
+    "deletedNoPreview": "文件已删除，无法预览"
   }
 }

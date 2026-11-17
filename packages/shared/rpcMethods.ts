@@ -15,8 +15,8 @@ import { RPC } from "@taco-ai/protocol";
 /**
  * Methods that must answer promptly or not at all.
  *
- * These are pure reads: the server answers from disk or memory without waiting
- * on a model, a subprocess, or the network. A daemon that has accepted the
+ * These are read operations: the server answers from disk, memory or bounded local Git queries without waiting
+ * on a model or the network. A daemon that has accepted the
  * connection and finished the handshake but cannot answer one of these within
  * seconds is not "busy", it is broken — and the caller is better served by an
  * error it can retry than by a promise that never settles. The default RPC
@@ -34,6 +34,8 @@ import { RPC } from "@taco-ai/protocol";
  */
 export const FAST_RPC_METHODS: ReadonlySet<string> = new Set<string>([
     RPC.workspaceList,
+    RPC.gitInspect,
+    RPC.worktreeList,
     RPC.workspaceAssociationsGet,
     RPC.workspaceAssociationsResolve,
     RPC.sessionList,

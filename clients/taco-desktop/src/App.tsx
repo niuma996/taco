@@ -906,6 +906,7 @@ export default function App() {
                                     >
                                         <ChatPane
                                             client={client}
+                                            notify={pushNotification}
                                             ws={ws}
                                             checkpoints={(
                                                 checkpoints.data?.checkpoints ?? []
@@ -1096,6 +1097,7 @@ export default function App() {
                         across all mainViews so tree/preview state survives view
                         switches. Renders nothing while closed. */}
                     <FilesDrawer
+                        client={activeCwd?.startsWith(IM_CWD_PREFIX) ? undefined : client}
                         open={rightPanel.panel === "files"}
                         activeCwd={activeCwd}
                         onClose={rightPanel.close}

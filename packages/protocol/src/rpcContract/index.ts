@@ -14,6 +14,7 @@
 import type { RpcRequest, WorkspaceId } from "../frames.js";
 import { attachmentContract, attachmentMethods, attachmentSchemas } from "./attachment.js";
 import { channelsContract, channelsMethods, channelsSchemas } from "./channels.js";
+import { gitContract, gitMethods, gitSchemas } from "./git.js";
 import { jobsContract, jobsMethods, jobsSchemas } from "./jobs.js";
 import { memoryContract, memoryMethods, memorySchemas } from "./memory.js";
 import { sessionContract, sessionMethods, sessionSchemas } from "./session.js";
@@ -27,6 +28,7 @@ export type { RpcContractRow, RpcRouteParam, RpcScope } from "./types.js";
 
 /** Wire names for every method the sidecar serves. */
 export const RPC = {
+    ...gitMethods,
     ...sessionMethods,
     ...attachmentMethods,
     ...workspaceMethods,
@@ -40,6 +42,7 @@ export const RPC = {
 
 /** Params/result types and routing scope for every method. */
 export const rpcContract = {
+    ...gitContract,
     ...sessionContract,
     ...attachmentContract,
     ...workspaceContract,
@@ -53,6 +56,7 @@ export const rpcContract = {
 
 /** Params schemas for every method. */
 export const rpcSchemas = {
+    ...gitSchemas,
     ...sessionSchemas,
     ...attachmentSchemas,
     ...workspaceSchemas,

@@ -14,6 +14,7 @@ import { registerCheckpointsHandlers } from "./handlers/checkpoints.ts";
 import { registerCommandPermissionHandlers } from "./handlers/commandPermission.ts";
 import { registerConfigHandlers } from "./handlers/config.ts";
 import { registerExtensionsHandlers } from "./handlers/extensions.ts";
+import { registerGitHandlers } from "./handlers/git.ts";
 import { registerImPolicyHandlers } from "./handlers/imPolicy.ts";
 import { registerInitializeHandler } from "./handlers/initialize.ts";
 import { registerJobsHandlers } from "./handlers/jobs.ts";
@@ -41,6 +42,7 @@ export function registerBuiltinMethods(): void {
     // `initialize` response to advertise it.
     registerInitializeHandler();
     registerWorkspaceHandlers();
+    registerGitHandlers();
     registerCommandPermissionHandlers();
     registerSessionLifecycleHandlers();
     registerSessionReadHandlers();

@@ -16,9 +16,9 @@ export function createDesktopQueryClient() {
     });
 }
 
-const identities = new WeakMap<TacoClient, number>();
+const identities = new WeakMap<object, number>();
 let nextIdentity = 0;
-export function clientQueryKey(client: TacoClient) {
+export function clientQueryKey(client: object) {
     let identity = identities.get(client);
     if (identity === undefined) {
         identity = ++nextIdentity;
@@ -28,7 +28,7 @@ export function clientQueryKey(client: TacoClient) {
 }
 
 export function resourceQueryKey(
-    client: TacoClient,
+    client: object,
     resource: string,
     ...identity: (string | null | undefined)[]
 ) {

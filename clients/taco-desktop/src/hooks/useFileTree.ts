@@ -22,7 +22,7 @@ export interface UseFileTreeApi {
     showHidden: boolean;
     setShowHidden(v: boolean): Promise<void>;
     loadRoot(): Promise<void>;
-    toggleExpand(relPath: string): Promise<void>;
+    toggleExpand(relPath: string, skipRead?: boolean): Promise<void>;
     refresh(): Promise<void>;
 }
 
@@ -59,7 +59,7 @@ export function useFileTree(api: FsClient): UseFileTreeApi {
     }, [fetchDir]);
 
     const toggleExpand = useCallback(
-        async (rel: string) => {
+        async (rel: string, skipRead = false) => {
             if (expanded.has(rel)) {
                 setExpanded((prev) => {
                     const next = new Set(prev);
@@ -70,7 +70,7 @@ export function useFileTree(api: FsClient): UseFileTreeApi {
             }
             // expand
             setExpanded((prev) => new Set(prev).add(rel));
-            if (!entriesByDir.has(rel)) {
+            if (!skipRead && !entriesByDir.has(rel)) {
                 await fetchDir(rel);
             }
         },

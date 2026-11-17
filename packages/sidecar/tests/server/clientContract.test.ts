@@ -150,6 +150,9 @@ test("every facade method serializes a payload accepted by its registered schema
     const id = asSessionId("s");
     await client.initialize({ protocolVersion: SIDECAR_PROTOCOL_VERSION, clientCapabilities: {} });
     await client.workspaceList();
+    await client.gitInspect({ workspace });
+    await client.gitInit({ workspace });
+    await client.worktreeList({ workspace });
     await client.sessionList({ workspace });
     await client.sessionCreate({ workspace });
     await client.sessionAttach({ workspace, sessionId: id });

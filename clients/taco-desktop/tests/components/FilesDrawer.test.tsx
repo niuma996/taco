@@ -7,12 +7,13 @@ import { strict as assert } from "node:assert";
  * Mocks @tauri-apps/plugin-fs (+ stat size gate), @tauri-apps/plugin-opener,
  * and shiki (echoes code unhighlighted so token spans don't split assertions).
  */
-import { render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { FilesDrawer } from "../../src/components/FilesDrawer";
 import * as useI18n from "../../src/i18n/useI18n";
+import { queryWrapper } from "../helpers/queryWrapper";
 
 // Mock @tauri-apps/plugin-fs
 // The createFsClient wrapper normalises (cwd, rel) → absolute path via resolveFsPath,
@@ -81,4 +82,114 @@ describe("FilesDrawer integration", () => {
             assert.ok(screen.getByText("console.log('x')"));
         });
     });
+});
+
+afterEach(cleanup);
+describe("FilesDrawer Git integration", () => {
+    it("merges polled deleted files without reading them for preview", async () => {
+        const client = {
+            gitInspect: vi.fn().mockResolvedValue({
+                status: "repository",
+                repository: {
+                    checkoutRoot: "/proj",
+                    gitDir: "/proj/.git",
+                    commonDir: "/proj/.git",
+                    branch: "main",
+                    headOid: null,
+                    isBare: false,
+                },
+                changes: [
+                    {
+                        path: "src/deleted.ts",
+                        kind: "deleted",
+                        indexStatus: "D",
+                        worktreeStatus: " ",
+                    },
+                ],
+            }),
+            gitInit: vi.fn(),
+        };
+        const { wrapper } = queryWrapper();
+        render(<FilesDrawer client={client} open activeCwd="/proj" onClose={() => {}} />, {
+            wrapper,
+        });
+        await waitFor(() => expect(client.gitInspect).toHaveBeenCalledWith({ workspace: "/proj" }));
+        const user = userEvent.setup({ delay: null });
+        await user.click(await screen.findByText("src"));
+        const row = (await screen.findByText("deleted.ts")).closest(
+            "[role=treeitem]",
+        ) as HTMLElement;
+        expect(row.getAttribute("aria-disabled")).toBe("true");
+        await user.click(row);
+        expect(screen.queryByRole("dialog")).toBeNull();
+    });
+});
+
+it("expands a fully deleted directory without attempting a filesystem read", async () => {
+    const { readDir } = await import("@tauri-apps/plugin-fs");
+    const client = {
+        gitInspect: vi.fn().mockResolvedValue({
+            status: "repository",
+            repository: {
+                checkoutRoot: "/proj",
+                gitDir: "/proj/.git",
+                commonDir: "/proj/.git",
+                branch: "main",
+                headOid: null,
+                isBare: false,
+            },
+            changes: [
+                {
+                    path: "gone/deleted.ts",
+                    kind: "deleted",
+                    indexStatus: "D",
+                    worktreeStatus: " ",
+                },
+            ],
+        }),
+        gitInit: vi.fn(),
+    };
+    render(<FilesDrawer client={client} open activeCwd="/proj" onClose={() => {}} />, {
+        wrapper: queryWrapper().wrapper,
+    });
+    await userEvent.setup().click(await screen.findByText("gone"));
+    expect(await screen.findByText("deleted.ts")).toBeTruthy();
+    expect(readDir).not.toHaveBeenCalledWith("/proj/gone");
+});
+
+it("refreshes the filesystem snapshot on demand", async () => {
+    const { readDir } = await import("@tauri-apps/plugin-fs");
+    render(<FilesDrawer open activeCwd="/proj" onClose={() => {}} />);
+    await screen.findByText("README.md");
+    const before = vi.mocked(readDir).mock.calls.length;
+    await userEvent.setup().click(screen.getByRole("button", { name: "git.refreshFiles" }));
+    await waitFor(() => expect(vi.mocked(readDir).mock.calls.length).toBeGreaterThan(before));
+});
+
+it("reads an existing directory even when its only changed file was deleted", async () => {
+    const client = {
+        gitInspect: vi.fn().mockResolvedValue({
+            status: "repository",
+            repository: {
+                checkoutRoot: "/proj",
+                gitDir: "/proj/.git",
+                commonDir: "/proj/.git",
+                branch: "main",
+                headOid: null,
+                isBare: false,
+            },
+            changes: [
+                { path: "src/deleted.ts", kind: "deleted", indexStatus: "D", worktreeStatus: " " },
+            ],
+        }),
+        gitInit: vi.fn(),
+    };
+    render(<FilesDrawer client={client} open activeCwd="/proj" onClose={() => {}} />, {
+        wrapper: queryWrapper().wrapper,
+    });
+    await screen.findByText("README.md");
+    await waitFor(() => expect(client.gitInspect).toHaveBeenCalled());
+    await userEvent.setup().click(screen.getByText("src"));
+    expect(await screen.findByText("index.ts")).toBeTruthy();
+    expect(await screen.findByText("deleted.ts")).toBeTruthy();
 });

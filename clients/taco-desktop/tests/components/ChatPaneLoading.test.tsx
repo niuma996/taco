@@ -18,6 +18,7 @@ import type { UiMessage } from "../../src/lib/chat/chatUtils";
 import { createSessionState, type SessionState } from "../../src/lib/chat/sessionState";
 import { createEmptyWorkspace, type WorkspaceState } from "../../src/lib/chat/workspaceReducer";
 import { ChatPane, type ChatPaneProps } from "../../src/views/ChatPane";
+import { queryWrapper } from "../helpers/queryWrapper";
 
 vi.spyOn(useI18n, "useT").mockReturnValue({
     t: (key: string, opts?: Record<string, unknown>) =>
@@ -65,10 +66,14 @@ function workspace(
     };
 }
 
-function renderPane(ws: WorkspaceState | undefined) {
+function renderPane(ws: WorkspaceState | undefined, isIm = false) {
     const props: ChatPaneProps = {
-        client: {} as ChatPaneProps["client"],
+        client: {
+            gitInspect: () => new Promise(() => {}),
+            gitInit: async () => ({ status: "not_repository" }),
+        } as unknown as ChatPaneProps["client"],
         ws,
+        isIm,
         checkpoints: [],
         onRestoreCheckpoint: async () => ({ ok: true }),
         input: "draft",
@@ -110,6 +115,7 @@ function renderPane(ws: WorkspaceState | undefined) {
         <ToastProvider>
             <ChatPane {...props} />
         </ToastProvider>,
+        { wrapper: queryWrapper().wrapper },
     );
     return {
         ...view,
@@ -374,5 +380,16 @@ describe("empty workspace composer", () => {
     it("disables input after the last workspace is removed", () => {
         renderPane(undefined);
         assert.equal((screen.getByRole("textbox") as HTMLTextAreaElement).disabled, true);
+    });
+});
+
+describe("local workspace Git footer", () => {
+    it("places Git status below the input card and hides it for IM", () => {
+        renderPane(workspace({}));
+        const footer = document.querySelector("footer.input");
+        assert.ok(footer?.querySelector(".input-card + .workspace-git-status"));
+        cleanup();
+        renderPane(workspace({}), true);
+        assert.equal(document.querySelector(".workspace-git-status"), null);
     });
 });

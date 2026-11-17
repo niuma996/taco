@@ -9,8 +9,8 @@ import {
     WORK_KINDS,
 } from "../src/index.ts";
 
-test("work controls are process-scoped methods in protocol 2.19", () => {
-    assert.deepEqual(SIDECAR_PROTOCOL_VERSION, { major: 2, minor: 19 });
+test("work controls remain process-scoped methods", () => {
+    assert.deepEqual(SIDECAR_PROTOCOL_VERSION, { major: 2, minor: 20 });
     assert.equal(RPC.workCancel, "work.cancel");
     assert.equal(RPC.workDelete, "work.delete");
     assert.equal(rpcContract.workCancel.scope, "process");

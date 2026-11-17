@@ -159,6 +159,14 @@ export {
     SIDECAR_PROTOCOL_VERSION,
     WORKSPACE_ANY,
 } from "./frames.js";
+export type {
+    GitFileChange,
+    GitInspectResult,
+    GitRepositoryInfo,
+    GitUnavailable,
+    GitWorktreeInfo,
+    WorktreeListResult,
+} from "./git.js";
 // jobs.* RPC types — the scheduler's wire contract.
 export type {
     Actor,

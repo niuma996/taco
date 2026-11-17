@@ -26,6 +26,7 @@ import { ModelMenu } from "../components/settings/ModelMenu";
 import type { ModelOption, ModelSelection } from "../components/settings/ModelPicker";
 import { UserMessageGuide } from "../components/UserMessageGuide";
 import { Button } from "../components/ui/Button";
+import { WorkspaceGitStatus } from "../components/WorkspaceGitStatus";
 import { useAttachments } from "../hooks/primitives/useAttachments";
 import { useDelayedFlag } from "../hooks/primitives/useDelayedFlag";
 import { useStickToBottom } from "../hooks/primitives/useStickToBottom";
@@ -43,6 +44,7 @@ import { defaultThinkingLevelForNewSession, getGlobalConfig } from "../lib/globa
 
 export interface ChatPaneProps {
     client: TacoClient;
+    notify?: (message: string) => void;
     ws: WorkspaceState | undefined;
     checkpoints: CheckpointEntry[];
     onRestoreCheckpoint: (
@@ -628,6 +630,14 @@ export function ChatPane(props: ChatPaneProps) {
                             </div>
                         </div>
                     </div>
+                    {ws?.cwd && !props.isIm && (
+                        <WorkspaceGitStatus
+                            key={ws.cwd}
+                            client={props.client}
+                            cwd={ws.cwd}
+                            notify={props.notify}
+                        />
+                    )}
                     {llmDumpDock}
                 </footer>
             </main>

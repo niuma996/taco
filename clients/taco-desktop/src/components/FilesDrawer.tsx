@@ -12,18 +12,20 @@
  *  - open change → loadRoot once
  */
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { FolderOpen } from "lucide-react";
+import { FolderOpen, RefreshCw } from "lucide-react";
 import { useEffect, useMemo } from "react";
 
 import type { DragHandleProps } from "../hooks/primitives/useDragResize";
 import { useFilePreview } from "../hooks/useFilePreview";
 import { useFileTree } from "../hooks/useFileTree";
+import { type GitWorkspaceClient, useGitWorkspace } from "../hooks/useGitWorkspace";
 import { useT } from "../i18n/useI18n";
 import { createFsClient, type FsClient } from "../lib/clients/fsClient";
 import { fileUrl } from "../lib/fileUrl";
 import { FilePreviewPopup } from "./FilePreviewPopup";
-import { FilesTreeView } from "./FilesTreeView";
+import { FilesTreeView, type FilesTreeViewProps } from "./FilesTreeView";
 import { RightPanel } from "./panels/RightPanel";
+import { Button } from "./ui/Button";
 import { IconButton } from "./ui/IconButton.tsx";
 import { Switch } from "./ui/Switch.tsx";
 
@@ -32,6 +34,7 @@ import { Switch } from "./ui/Switch.tsx";
 const showHiddenId = "files-show-hidden-switch";
 
 export interface FilesDrawerProps {
+    client?: GitWorkspaceClient;
     open: boolean;
     activeCwd: string | null;
     onClose: () => void;
@@ -93,20 +96,32 @@ export function FilesDrawer(props: FilesDrawerProps) {
                 resizeLabel={resizeLabel}
                 actions={
                     activeCwd && (
-                        <IconButton
-                            onClick={() => {
-                                // A file:// URL for a directory lands in the OS
-                                // file manager (Finder/Explorer), so the user
-                                // sees the workspace's contents directly.
-                                void openUrl(fileUrl(activeCwd)).catch((err: unknown) => {
-                                    console.error("[taco] open workspace failed", err);
-                                });
-                            }}
-                            aria-label={t("files.revealWorkspace")}
-                            title={t("files.revealWorkspace")}
-                        >
-                            <FolderOpen size={14} aria-hidden="true" />
-                        </IconButton>
+                        <>
+                            <IconButton
+                                onClick={() => {
+                                    preview.clear();
+                                    void tree.refresh();
+                                }}
+                                aria-label={t("git.refreshFiles")}
+                                title={t("git.refreshFiles")}
+                            >
+                                <RefreshCw size={14} aria-hidden="true" />
+                            </IconButton>
+                            <IconButton
+                                onClick={() => {
+                                    // A file:// URL for a directory lands in the OS
+                                    // file manager (Finder/Explorer), so the user
+                                    // sees the workspace's contents directly.
+                                    void openUrl(fileUrl(activeCwd)).catch((err: unknown) => {
+                                        console.error("[taco] open workspace failed", err);
+                                    });
+                                }}
+                                aria-label={t("files.revealWorkspace")}
+                                title={t("files.revealWorkspace")}
+                            >
+                                <FolderOpen size={14} aria-hidden="true" />
+                            </IconButton>
+                        </>
                     )
                 }
             >
@@ -124,11 +139,17 @@ export function FilesDrawer(props: FilesDrawerProps) {
                                     {t("files.loadError")}: {tree.error}
                                 </div>
                             )}
-                            <FilesTreeView
+                            <WorkspaceFilesTree
+                                client={props.client}
+                                cwd={activeCwd}
+                                onClearPreview={preview.clear}
+                                showHidden={tree.showHidden}
                                 entriesByDir={tree.entriesByDir}
                                 expanded={tree.expanded}
                                 selectedRelPath={preview.selectedRelPath}
-                                onToggleExpand={(rel) => void tree.toggleExpand(rel)}
+                                onToggleExpand={(rel, skipRead) =>
+                                    void tree.toggleExpand(rel, skipRead)
+                                }
                                 onSelect={(rel) => void preview.select(rel)}
                             />
                             <div className="files-tree-footer">
@@ -145,6 +166,77 @@ export function FilesDrawer(props: FilesDrawerProps) {
                 )}
             </RightPanel>
             {activeCwd !== null && <FilePreviewPopup preview={preview} cwd={activeCwd} />}
+        </>
+    );
+}
+
+interface WorkspaceFilesTreeProps extends FilesTreeViewProps {
+    onToggleExpand: (rel: string, skipRead?: boolean) => void;
+    client?: GitWorkspaceClient;
+    cwd: string;
+    onClearPreview: () => void;
+}
+
+// Keep the no-client tree independent of QueryClientProvider for existing embeds.
+function WorkspaceFilesTree(props: WorkspaceFilesTreeProps) {
+    if (!props.client) return <FilesTreeView {...props} />;
+    return <GitFilesTree {...props} client={props.client} />;
+}
+
+function GitFilesTree({
+    client,
+    cwd,
+    onClearPreview,
+    ...props
+}: WorkspaceFilesTreeProps & { client: GitWorkspaceClient }) {
+    const { t } = useT();
+    const git = useGitWorkspace(client, cwd);
+    const changes = git.data?.status === "repository" ? git.data.changes : undefined;
+    const selectedDeleted = changes?.some(
+        (change) => change.path === props.selectedRelPath && change.kind === "deleted",
+    );
+    useEffect(() => {
+        if (selectedDeleted) onClearPreview();
+    }, [selectedDeleted, onClearPreview]);
+    return (
+        <>
+            {git.loading && (
+                <div className="files-git-status" role="status">
+                    {t("git.loading")}
+                </div>
+            )}
+            {git.error && (
+                <div className="files-git-status" role="alert">
+                    <span>{t("git.inspectFailed", { error: git.error })}</span>
+                    <Button
+                        size="sm"
+                        variant="ghost"
+                        disabled={git.refreshing}
+                        onClick={() => void git.refresh()}
+                    >
+                        {t("git.retry")}
+                    </Button>
+                </div>
+            )}
+            <FilesTreeView
+                {...props}
+                gitChanges={changes}
+                onToggleExpand={(rel) => {
+                    const descendants = changes?.filter((change) =>
+                        change.path.startsWith(`${rel}/`),
+                    );
+                    const parent = rel.includes("/") ? rel.slice(0, rel.lastIndexOf("/")) : "";
+                    const existsInSnapshot = props.entriesByDir
+                        .get(parent)
+                        ?.some((entry) => entry.relPath === rel && entry.kind === "dir");
+                    const deletedDirectory = Boolean(
+                        !existsInSnapshot &&
+                            descendants?.length &&
+                            descendants.every((change) => change.kind === "deleted"),
+                    );
+                    props.onToggleExpand(rel, deletedDirectory);
+                }}
+            />
         </>
     );
 }

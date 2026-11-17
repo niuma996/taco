@@ -4,14 +4,19 @@
  * Indent is driven by the CSS variable `--depth` (0.85rem per level, hard
  * cap 8).
  */
+import type { GitFileChange } from "@taco-ai/protocol";
 import { ChevronRight, File, Folder, FolderOpen } from "lucide-react";
-
+import { useMemo } from "react";
+import { useT } from "../i18n/useI18n";
 import type { DirectoryListing, FileEntry } from "../lib/fileTypes";
+import { gitFileTree, gitStatusLetter, gitStatusTone } from "../lib/gitFileTree";
 import { IconSwap } from "./ui/IconSwap.tsx";
 
 const MAX_DEPTH = 8;
 
 export interface FilesTreeViewProps {
+    gitChanges?: readonly GitFileChange[];
+    showHidden?: boolean;
     entriesByDir: DirectoryListing;
     expanded: ReadonlySet<string>;
     selectedRelPath: string | null;
@@ -20,9 +25,19 @@ export interface FilesTreeViewProps {
 }
 
 export function FilesTreeView(props: FilesTreeViewProps) {
+    const merged = useMemo(
+        () => gitFileTree(props.entriesByDir, props.gitChanges ?? [], props.showHidden ?? false),
+        [props.entriesByDir, props.gitChanges, props.showHidden],
+    );
     return (
         <div className="files-tree-root" role="tree">
-            <TreeRows rel="" depth={0} {...props} />
+            <TreeRows
+                rel=""
+                depth={0}
+                {...props}
+                entriesByDir={merged.entriesByDir}
+                statuses={merged.statuses}
+            />
         </div>
     );
 }
@@ -30,6 +45,7 @@ export function FilesTreeView(props: FilesTreeViewProps) {
 interface TreeRowsProps extends FilesTreeViewProps {
     rel: string;
     depth: number;
+    statuses: ReadonlyMap<string, GitFileChange>;
 }
 
 function TreeRows(props: TreeRowsProps) {
@@ -42,6 +58,7 @@ function TreeRows(props: TreeRowsProps) {
             {entries.map((entry) => (
                 <TreeRow
                     key={entry.relPath}
+                    statuses={props.statuses}
                     entry={entry}
                     depth={depth}
                     entriesByDir={entriesByDir}
@@ -56,6 +73,7 @@ function TreeRows(props: TreeRowsProps) {
 }
 
 interface TreeRowProps {
+    statuses: ReadonlyMap<string, GitFileChange>;
     entry: FileEntry;
     depth: number;
     entriesByDir: DirectoryListing;
@@ -66,6 +84,7 @@ interface TreeRowProps {
 }
 
 function TreeRow({
+    statuses,
     entry,
     depth,
     entriesByDir,
@@ -74,12 +93,30 @@ function TreeRow({
     onToggleExpand,
     onSelect,
 }: TreeRowProps) {
+    const { t } = useT();
+    const change = statuses.get(entry.relPath);
+    const isDeleted = entry.kind === "file" && change?.kind === "deleted";
     const isDir = entry.kind === "dir";
+    const statusLabel = change ? t(isDir ? "git.folderChanges" : `git.${change.kind}`) : null;
+    const statusLetter = change
+        ? isDir && change.kind !== "conflict"
+            ? "M"
+            : gitStatusLetter(change)
+        : null;
+    const title = [
+        entry.relPath,
+        statusLabel,
+        !isDir && change?.originalPath ? `${t("git.renamedFrom")}: ${change.originalPath}` : null,
+        isDeleted ? t("git.deletedNoPreview") : null,
+    ]
+        .filter(Boolean)
+        .join(" · ");
     const isExpanded = isDir && expanded.has(entry.relPath);
     const isActive = selectedRelPath === entry.relPath;
     const cappedDepth = Math.min(depth, MAX_DEPTH);
 
     function handleClick() {
+        if (isDeleted) return;
         if (isDir) {
             onToggleExpand(entry.relPath);
         } else {
@@ -92,12 +129,30 @@ function TreeRow({
             <div
                 className="files-tree-row"
                 role="treeitem"
+                tabIndex={isDeleted ? -1 : 0}
+                aria-label={title}
+                aria-disabled={isDeleted || undefined}
+                data-git-tone={change ? gitStatusTone(change) : undefined}
+                data-deleted={isDeleted || undefined}
+                onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        handleClick();
+                    } else if (
+                        isDir &&
+                        ((event.key === "ArrowRight" && !isExpanded) ||
+                            (event.key === "ArrowLeft" && isExpanded))
+                    ) {
+                        event.preventDefault();
+                        onToggleExpand(entry.relPath);
+                    }
+                }}
                 aria-expanded={isDir ? isExpanded : undefined}
                 aria-selected={!isDir ? isActive : undefined}
                 data-active={isActive}
                 style={{ ["--depth" as string]: cappedDepth } as React.CSSProperties}
                 onClick={handleClick}
-                title={entry.relPath}
+                title={title}
             >
                 {isDir ? (
                     <span
@@ -124,9 +179,19 @@ function TreeRow({
                     )}
                 </span>
                 <span className="files-tree-row-name">{entry.name}</span>
+                {change && (
+                    <span
+                        className="files-tree-row-status"
+                        title={statusLabel ?? undefined}
+                        aria-hidden="true"
+                    >
+                        {statusLetter}
+                    </span>
+                )}
             </div>
             {isDir && isExpanded && (
                 <TreeRows
+                    statuses={statuses}
                     rel={entry.relPath}
                     depth={depth + 1}
                     entriesByDir={entriesByDir}
