@@ -17,7 +17,6 @@ import {
     getGlobalConfig,
     subscribeGlobalConfig,
 } from "../../lib/globalConfig.ts";
-import { Select } from "../ui/Select.tsx";
 import { ModelMenu } from "./ModelMenu";
 import type { ModelOption, ModelSelection } from "./ModelPicker";
 import { ProviderSection } from "./ProviderSection";
@@ -68,10 +67,8 @@ export function ModelTab(props: ModelTabProps) {
     const onSetThinking = (next: ThinkingLevel) =>
         void saveThinking({ kind: "global", patch: { thinkingLevel: next } }).catch(() => {});
 
-    // A sentinel stands in for "no lite model configured": Radix Select forbids
-    // an empty item value, and `""` on the Root means "no selection". `provider/id`
-    // matches the resolver's slash form.
-    const NO_LITE_MODEL = "none";
+    // The config stores `provider/id`; an id-only value is still accepted for
+    // configs written before the provider was qualified.
     const {
         save: saveLite,
         saving: savingLite,
@@ -81,24 +78,20 @@ export function ModelTab(props: ModelTabProps) {
     const liteOption =
         props.options.find((o) => `${o.provider}/${o.id}` === configuredLite) ??
         props.options.find((o) => o.id === configuredLite);
-    const liteValue = liteOption
-        ? `${liteOption.provider}/${liteOption.id}`
-        : (configuredLite ?? NO_LITE_MODEL);
-    const liteOptions = [
-        { value: NO_LITE_MODEL, label: t("settings.liteModelNone") },
-        ...props.options.map((o) => ({
-            value: `${o.provider}/${o.id}`,
-            label: o.name ? `${o.name} (${o.provider})` : `${o.id} (${o.provider})`,
-        })),
-    ];
-    if (!liteOptions.some((o) => o.value === liteValue) && liteValue !== "") {
-        liteOptions.push({ value: liteValue, label: liteValue });
-    }
-    const onSetLite = (next: string) =>
+    // A configured model that is no longer in the catalog keeps its raw value as
+    // the id, so the trigger still shows what is actually configured.
+    const liteSelection: ModelSelection | undefined = liteOption
+        ? { provider: liteOption.provider, id: liteOption.id }
+        : configuredLite
+          ? { provider: "", id: configuredLite }
+          : undefined;
+    const onSetLite = (next: ModelSelection) =>
         void saveLite({
             kind: "global",
-            patch: { liteModel: next === NO_LITE_MODEL ? null : next },
+            patch: { liteModel: `${next.provider}/${next.id}` },
         }).catch(() => {});
+    const onClearLite = () =>
+        void saveLite({ kind: "global", patch: { liteModel: null } }).catch(() => {});
 
     // An unset lite level follows the model; explicit off disables reasoning.
     const {
@@ -172,12 +165,15 @@ export function ModelTab(props: ModelTabProps) {
                 <h3 id="lite-model-title">{t("settings.liteModelTitle")}</h3>
                 <p className="settings-tab-desc">{t("settings.liteModelDesc")}</p>
                 <div className="settings-row">
-                    <Select
-                        value={liteValue}
-                        options={liteOptions}
-                        onValueChange={onSetLite}
+                    <ModelMenu
+                        value={liteSelection}
+                        options={props.options}
+                        onModelChange={onSetLite}
+                        onClear={onClearLite}
+                        clearLabel={t("settings.liteModelNone")}
                         disabled={savingLite || savingLiteThinking}
-                        label={t("settings.liteModelTitle")}
+                        onOpen={props.onRefreshModels}
+                        placement="down"
                     />
                     {savingLite && <span className="settings-saving">{t("app.saving")}</span>}
                 </div>

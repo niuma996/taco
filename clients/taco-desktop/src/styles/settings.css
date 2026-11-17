@@ -397,8 +397,7 @@
 .model-config-card .settings-row {
     flex-wrap: wrap;
 }
-.model-config-card .model-menu,
-.model-config-card .ui-select-trigger {
+.model-config-card .model-menu {
     flex: 1;
     min-width: 0;
     max-width: 100%;

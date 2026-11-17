@@ -30,7 +30,11 @@ const OPTIONS: ModelOption[] = [
     { provider: "openrouter", id: "anthropic/claude-haiku-4-5", name: "Relayed Haiku" },
 ];
 
-function renderModelTab(liteModel: string, options = OPTIONS) {
+function renderModelTab(
+    liteModel: string,
+    options = OPTIONS,
+    triggerLabel = "settings.liteModelNone",
+) {
     applyGlobalConfig({ liteModel });
     const settingsWrite = vi.fn(async () => ({ global: {} }));
     const client = { settingsWrite } as unknown as TacoClient;
@@ -39,7 +43,7 @@ function renderModelTab(liteModel: string, options = OPTIONS) {
         ...view,
         client,
         settingsWrite,
-        trigger: screen.getByRole("combobox", { name: "settings.liteModelTitle" }),
+        trigger: screen.getByRole("button", { name: triggerLabel }),
     };
 }
 
@@ -89,44 +93,63 @@ describe("ModelTab auxiliary thinking level", () => {
 
 describe("ModelTab auxiliary model selection", () => {
     it.each([
-        ["claude-haiku-4-5", "Claude Haiku 4.5 (anthropic)"],
-        ["anthropic/claude-haiku-4-5", "Claude Haiku 4.5 (anthropic)"],
-        ["openrouter/anthropic/claude-haiku-4-5", "Relayed Haiku (openrouter)"],
+        ["claude-haiku-4-5", "Claude Haiku 4.5 · anthropic"],
+        ["anthropic/claude-haiku-4-5", "Claude Haiku 4.5 · anthropic"],
+        ["openrouter/anthropic/claude-haiku-4-5", "Relayed Haiku · openrouter"],
     ])("displays the configured model %s", (value, label) => {
-        const { trigger, settingsWrite } = renderModelTab(value);
+        const { trigger, settingsWrite } = renderModelTab(value, OPTIONS, label);
         expect(trigger.textContent).toBe(label);
         expect(settingsWrite).not.toHaveBeenCalled();
     });
 
     it.each(["removed-model", "removed-provider/removed-model"])(
         "displays the current value %s when it is absent from the catalog",
-        async (value) => {
-            const user = userEvent.setup({ delay: null });
-            const { trigger, settingsWrite } = renderModelTab(value, []);
+        (value) => {
+            const { trigger, settingsWrite } = renderModelTab(value, [], value);
             expect(trigger.textContent).toBe(value);
-            await user.click(trigger);
-            const option = await screen.findByRole("option", { name: value });
-            expect(option.getAttribute("aria-selected")).toBe("true");
             expect(settingsWrite).not.toHaveBeenCalled();
         },
     );
 
     it("keeps displaying the configured value after the model list changes", () => {
         const value = "anthropic/claude-haiku-4-5";
-        const { trigger, client, rerender } = renderModelTab(value);
-        expect(trigger.textContent).toBe("Claude Haiku 4.5 (anthropic)");
+        const { trigger, client, rerender } = renderModelTab(
+            value,
+            OPTIONS,
+            "Claude Haiku 4.5 · anthropic",
+        );
+        expect(trigger.textContent).toBe("Claude Haiku 4.5 · anthropic");
         rerender(<ModelTab client={client} workspace={null} options={[]} />);
         expect(trigger.textContent).toBe(value);
     });
 
     it("clears an out-of-catalog selection through the real picker", async () => {
         const user = userEvent.setup({ delay: null });
-        const { trigger, settingsWrite } = renderModelTab("removed-provider/removed-model");
+        const value = "removed-provider/removed-model";
+        const { trigger, settingsWrite } = renderModelTab(value, [], value);
         await user.click(trigger);
-        await user.click(await screen.findByRole("option", { name: "settings.liteModelNone" }));
+        await user.click(
+            await screen.findByRole("menuitemradio", { name: "settings.liteModelNone" }),
+        );
         await waitFor(() => {
             expect(settingsWrite).toHaveBeenCalledWith({ global: { liteModel: null } });
             expect(trigger.textContent).toBe("settings.liteModelNone");
+        });
+    });
+
+    it("writes the picked model back as provider/id", async () => {
+        const user = userEvent.setup({ delay: null });
+        const { trigger, settingsWrite } = renderModelTab(
+            "anthropic/claude-haiku-4-5",
+            OPTIONS,
+            "Claude Haiku 4.5 · anthropic",
+        );
+        await user.click(trigger);
+        await user.click(await screen.findByRole("menuitemradio", { name: "Relayed Haiku" }));
+        await waitFor(() => {
+            expect(settingsWrite).toHaveBeenCalledWith({
+                global: { liteModel: "openrouter/anthropic/claude-haiku-4-5" },
+            });
         });
     });
 });

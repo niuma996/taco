@@ -29,6 +29,12 @@ interface ModelMenuProps {
     /** When provided, the popover also renders a thinking-level slider at the bottom (chat-input scenario). */
     thinkingValue?: ThinkingLevel;
     onThinkingChange?: (next: ThinkingLevel) => void;
+    /** Label of the "no model" entry. Paired with `onClear` it adds a leading item
+     *  that clears the selection; the trigger shows this label while nothing is
+     *  selected, instead of the "select a model" placeholder. */
+    clearLabel?: string;
+    /** Clears the selection. Only meaningful together with `clearLabel`. */
+    onClear?: () => void;
     /** Popover placement: up (default; chat input) or down (settings pane — its top
      * space is too tight for an upward expand, and the pane overflow would clip it). */
     placement?: "up" | "down";
@@ -78,8 +84,15 @@ export function ModelMenu(props: ModelMenuProps) {
               (o) => o.provider === props.value?.provider && o.id === props.value?.id,
           )
         : undefined;
-    const hasSelection = Boolean(props.value);
-    const label = current?.name ?? current?.id ?? props.value?.id ?? t("modelMenu.selectModel");
+    // A configured model that is no longer in the catalog still has to be
+    // visible, so fall back to its id before giving up on a label.
+    const label =
+        current?.name ??
+        current?.id ??
+        props.value?.id ??
+        props.clearLabel ??
+        t("modelMenu.selectModel");
+    const canClear = props.clearLabel !== undefined && props.onClear !== undefined;
 
     // Search matches id, display name, and provider id (case-insensitive).
     const q = query.trim().toLowerCase();
@@ -115,7 +128,7 @@ export function ModelMenu(props: ModelMenuProps) {
                 title={props.pendingNote ? t("modelMenu.takesEffectNextTurn") : undefined}
             >
                 <span className="model-trigger-label">{label}</span>
-                {hasSelection && props.value && (
+                {props.value?.provider && (
                     <>
                         {/* Flex gap separates the two visually; this space only
                             keeps the button's text readable when copied. */}{" "}
@@ -134,6 +147,28 @@ export function ModelMenu(props: ModelMenuProps) {
                             onChange={(e) => setQuery(e.target.value)}
                         />
                     </div>
+                    {canClear && (
+                        <>
+                            <div className="model-menu-section">
+                                <button
+                                    type="button"
+                                    role="menuitemradio"
+                                    aria-checked={props.value === undefined}
+                                    className="ui-menu-item"
+                                    onClick={() => {
+                                        props.onClear?.();
+                                        setOpen(false);
+                                    }}
+                                >
+                                    <span className="ui-menu-label">{props.clearLabel}</span>
+                                    {props.value === undefined && (
+                                        <Check size={14} aria-hidden="true" />
+                                    )}
+                                </button>
+                            </div>
+                            <Divider tone="section" className="model-menu-divider" />
+                        </>
+                    )}
                     <div className="model-menu-section">
                         {groups.size === 0 && (
                             <div className="model-menu-empty">{t("modelMenu.noMatch")}</div>
