@@ -22,7 +22,7 @@ import type { DeferredToolRegistry } from "./deferredToolRegistry.ts";
 import type { SessionToolState, ToolState, ToolStateChange } from "./sessionToolState.ts";
 
 export interface AddToolsResult {
-    /** Tool names successfully added in this batch. */
+    /** Tool names loaded or re-activated in this batch. */
     added: string[];
     /** Tool names already active — idempotent skip. */
     skipped: string[];
@@ -161,6 +161,7 @@ export class DefaultSessionToolController implements SessionToolController {
         this.loadPolicy = policy;
         const toolState = this.toolState;
         if (!toolState) return false;
+        const fsDenied = await this.fsToolsDenied();
         // The loader is judged by the create-time criterion (see
         // AttachedSession.create's includeAddTools), not by the whitelist:
         // no profile lists its own loader, so a whitelist check removed it
@@ -175,7 +176,7 @@ export class DefaultSessionToolController implements SessionToolController {
             const refused = activeNames.filter((name) =>
                 name === ADD_TOOLS_TOOL_NAME
                     ? !loaderHasWork
-                    : this.loadRefusal(name) !== undefined,
+                    : this.loadRefusal(name) !== undefined || isFsToolDenied(name, fsDenied),
             );
             // A loosened policy hands back what a tightening hid: the
             // definition stayed behind, so the name only needs re-activating.
@@ -194,7 +195,8 @@ export class DefaultSessionToolController implements SessionToolController {
                     (name) =>
                         !active.has(name) &&
                         defined.has(name) &&
-                        this.loadRefusal(name) === undefined,
+                        this.loadRefusal(name) === undefined &&
+                        !isFsToolDenied(name, fsDenied),
                 ),
             ];
             if (refused.length === 0 && reactivated.length === 0) return undefined;
@@ -226,8 +228,8 @@ export class DefaultSessionToolController implements SessionToolController {
     /**
      * Restores tools persisted in the session branch transcript. Candidates
      * still in the registry are restored; vanished or failed candidates are
-     * skipped silently (the name was already persisted so re-attaching the
-     * same session will attempt to restore it again — this is intentional).
+     * skipped silently. The attach-time toolset reconciliation removes their
+     * names from the active allowlist so the harness can continue prompting.
      * A file tool the session's policy denies is skipped too: loading it
      * would install a tool whose every call refuses, so the attach-time
      * prune (`pruneDeniedFsTools` in toolsetRefresh.ts) also drops its name —
@@ -270,8 +272,9 @@ export class DefaultSessionToolController implements SessionToolController {
                 const tool = await this.registry.load(name);
                 if (tool) loaded.set(name, tool);
             } catch {
-                // Candidate vanished or load failed — skip silently; the persisted
-                // name remains so re-attaching the same session retries on next startup.
+                // Candidate vanished, load failed, or its definition name did not
+                // match. Attach-time reconciliation removes the persisted name so
+                // it cannot reject every subsequent generation.
             }
         }
         this.loadedNames = [...loaded.keys()];
@@ -314,21 +317,44 @@ export class DefaultSessionToolController implements SessionToolController {
         const failed: Array<{ name: string; error: string }> = [];
         const blocked: Array<{ name: string; reason: string }> = [];
         const fsDenied = await this.fsToolsDenied();
+        let removedStale = false;
 
         for (const name of names) {
-            if (activeNames.has(name) || currentTools.has(name)) {
-                // Already active or defined: idempotent skip.
+            const defined = currentTools.has(name);
+            if (activeNames.has(name) && defined) {
+                // Active with a definition: a true idempotent no-op.
+                skipped.push(name);
+                continue;
+            }
+            if (activeNames.has(name) && !defined) {
+                // Repair an inconsistent allowlist rather than skipping the name
+                // forever. A successful load below reuses this existing slot.
+                activeNames.delete(name);
+                removedStale = true;
+            }
+            if (defined && !this.loadedNames.includes(name)) {
+                // A resident tool can be defined but deliberately inactive. Only
+                // this controller's own dynamic loads may be re-activated through
+                // addTools; otherwise the model could widen the workspace toolset.
                 skipped.push(name);
                 continue;
             }
             if (isFsToolDenied(name, fsDenied)) {
-                // Policy answer, not a load failure: report it and change nothing.
+                // Policy answer, not a load failure: never activate the definition.
                 blocked.push({ name, reason: FS_DENY_REASON });
                 continue;
             }
             const refusal = this.loadRefusal(name);
             if (refusal !== undefined) {
                 blocked.push({ name, reason: refusal });
+                continue;
+            }
+            if (defined) {
+                // Policy tightening hides a tool without discarding its definition.
+                // Re-activate that definition instead of reporting "already loaded"
+                // while leaving it invisible.
+                activeNames.add(name);
+                added.push(name);
                 continue;
             }
             let tool: TacoTool | undefined;
@@ -348,6 +374,7 @@ export class DefaultSessionToolController implements SessionToolController {
             // Register in the staging map immediately so repeated names in the same
             // request are caught as skipped, not as a second load attempt.
             currentTools.set(name, tool);
+            activeNames.add(name);
             added.push(name);
         }
 
@@ -357,12 +384,12 @@ export class DefaultSessionToolController implements SessionToolController {
         }
 
         const result = { added, skipped, unknown, failed, blocked };
-        if (added.length === 0) return { result };
+        if (added.length === 0 && !removedStale) return { result };
         return {
             result,
             change: {
                 tools: [...currentTools.values()],
-                activeNames: [...activeNames, ...added],
+                activeNames: [...activeNames],
             },
         };
     }

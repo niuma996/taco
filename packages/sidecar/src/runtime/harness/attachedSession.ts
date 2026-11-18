@@ -49,6 +49,7 @@ import type { SubagentBudgetState } from "../../tags/subagentBudget.ts";
 import type { TaskStore } from "../../tasks/taskTypes.ts";
 import { createAddToolsTool } from "../../tools/addTools.ts";
 import type { TacoToolContext, TacoToolContextBase } from "../../tools/context.ts";
+import { isFsToolDenied } from "../../tools/fileAccess.ts";
 import type { TacoTool } from "../../tools/index.ts";
 import {
     COMPACTION_END_EVENT,
@@ -78,7 +79,7 @@ import { AgentHarness, laneConfig, NoActiveOperation, value } from "../pi/values
 import { findBranchEntries, MAIN_BRANCH } from "../session/sessionBranch.ts";
 import { type RecoveryOutcome, resumeOpenOperations } from "../session/sessionRecovery.ts";
 import { TitleSummarizer } from "../session/titleSummarizer.ts";
-import type { DeferredToolRegistry } from "./deferredToolRegistry.ts";
+import { type DeferredToolRegistry, loadToolCandidate } from "./deferredToolRegistry.ts";
 import { isBusyError, toHarnessError, toTerminalError } from "./harnessErrors.ts";
 import { wireHarnessHooks } from "./hookWiring.ts";
 import {
@@ -95,6 +96,7 @@ import {
 } from "./operationExecution.ts";
 import { resolvePromptReply } from "./promptReply.ts";
 import {
+    ADD_TOOLS_TOOL_NAME,
     DefaultSessionToolController,
     loadableCandidates,
     type SessionToolController,
@@ -105,6 +107,7 @@ import {
     createToolsetRefresher,
     pruneDeniedFsTools,
     pruneLoadRefusedTools,
+    pruneUndefinedTools,
 } from "./toolsetRefresh.ts";
 import { wireTurnBookkeeping } from "./turnBookkeeping.ts";
 
@@ -516,8 +519,17 @@ export class AttachedSession extends EventEmitter {
                 laneConfig(MAIN_BRANCH),
                 harnessContext,
             );
+            const persistedActiveNames = storedConfig?.value.activeToolNames ?? [];
+            // A release can promote a deferred candidate into the resident set.
+            // Restoring that persisted name as well would install two definitions
+            // and make harness construction fail before the session can continue.
+            // The resident definition owns the name; the allowlist keeps it.
+            const residentRestoreNames = new Set([
+                ...args.tools.map((tool) => tool.name),
+                ADD_TOOLS_TOOL_NAME,
+            ]);
             const restored = await controller.restoreTools(
-                storedConfig?.value.activeToolNames ?? [],
+                persistedActiveNames.filter((name) => !residentRestoreNames.has(name)),
             );
 
             // `addTools` is only worth installing when something is loadable.
@@ -555,10 +567,10 @@ export class AttachedSession extends EventEmitter {
                         return undefined;
                     }
                     if (candidate.source !== "extension") {
-                        return [candidate.name, await candidate.load()] as const;
+                        return [candidate.name, await loadToolCandidate(candidate)] as const;
                     }
                     try {
-                        return [candidate.name, await candidate.load()] as const;
+                        return [candidate.name, await loadToolCandidate(candidate)] as const;
                     } catch (error) {
                         log.warn(
                             `skipping always tool candidate "${candidate.name}" from "${candidate.extensionName ?? "unknown"}": ${error instanceof Error ? error.message : String(error)}`,
@@ -690,10 +702,9 @@ export class AttachedSession extends EventEmitter {
             setActiveToolNames: (names) => lane.setActiveTools([...names], harnessContext),
         });
 
-        // A denied fs tool is not restored (see restoreTools), so the
-        // allowlist would name a tool with no definition — pi fails the
-        // generation with `configured_tools_unavailable`. Prune before the
-        // alignment below adds anything back.
+        // A denied deferred fs tool is not restored, while an always candidate
+        // may still have a definition. Neither may remain visible under the
+        // policy. Prune before the alignment below adds anything back.
         const fsToolsDenied = args.getToolContext().fsToolsDenied === true;
         if (await pruneDeniedFsTools(toolState, fsToolsDenied)) {
             log.info("pruned policy-denied fs tools from the persisted allowlist", {
@@ -716,6 +727,18 @@ export class AttachedSession extends EventEmitter {
             log.info("pruned load-refused tools from the persisted allowlist", {
                 sessionId: args.session.metadata.id,
             });
+        }
+
+        // A resident tool can be renamed or removed by a release, and a deferred
+        // or MCP candidate can fail to restore. No persisted name may remain
+        // active without a definition: the harness rejects the whole generation.
+        if (await pruneUndefinedTools(toolState)) {
+            log.info(
+                "pruned tools unavailable in the current process from the persisted allowlist",
+                {
+                    sessionId: args.session.metadata.id,
+                },
+            );
         }
 
         // The lane's persisted allowlist predates this process's toolset;
@@ -792,21 +815,56 @@ export class AttachedSession extends EventEmitter {
         attached.subagentBudgetThunk = args.getSubagentBudget;
         attached.systemPromptCell = systemPromptCell;
         // Per-turn toolset convergence. Assigned here rather than threaded
-        // through the constructor (already 11 params); the refresher also owns
-        // the prompt cell so the two can only move together.
-        if (args.refreshToolset) {
-            attached.applyToolsetRefresh = createToolsetRefresher({
-                toolState,
-                installed: {
-                    tools: args.workspaceTools ?? args.tools,
-                    systemPrompt: args.systemPrompt,
-                },
-                refresh: args.refreshToolset,
-                setSystemPrompt: (prompt) => {
-                    systemPromptCell.current = prompt;
-                },
-            });
-        }
+        // through the constructor (already 11 params); the workspace refresher
+        // also owns the prompt cell so the two can only move together. Policy
+        // pruning runs for subagents too: their workspace set is deliberately
+        // not refreshed, but a loaded dynamic file tool must still be hidden on
+        // the next turn after an IM policy revocation.
+        const refreshToolset = args.refreshToolset
+            ? createToolsetRefresher({
+                  toolState,
+                  installed: {
+                      tools: args.workspaceTools ?? args.tools,
+                      systemPrompt: args.systemPrompt,
+                  },
+                  refresh: args.refreshToolset,
+                  setSystemPrompt: (prompt) => {
+                      systemPromptCell.current = prompt;
+                  },
+              })
+            : undefined;
+        attached.applyToolsetRefresh = async () => {
+            await refreshToolset?.();
+            const fsDenied = args.getToolContext().fsToolsDenied === true;
+            await pruneDeniedFsTools(toolState, fsDenied);
+            const persistentNames = new Set<string>();
+            if (!refreshToolset) {
+                // A subagent's static profile is not rebuilt from the parent
+                // workspace. Re-activate its retained definitions after a
+                // deny→allow cycle without widening the original profile.
+                for (const tool of args.tools) persistentNames.add(tool.name);
+            }
+            if (args.toolRegistry) {
+                // `always` is a residency contract, not a deferred catalog entry.
+                // Once a file-policy revocation is lifted, restore its active seat
+                // automatically; failed or colliding candidates have no definition
+                // and alignActiveTools leaves those names alone.
+                for (const candidate of args.toolRegistry.listAlways()) {
+                    persistentNames.add(candidate.name);
+                }
+            }
+            if (persistentNames.size > 0) {
+                const allowedPersistent = [...persistentNames].filter(
+                    (name) =>
+                        !isFsToolDenied(name, fsDenied) &&
+                        toolController?.loadRefusal(name) === undefined,
+                );
+                await alignActiveTools(toolState, allowedPersistent);
+            }
+            // Keep the active-name invariant even if a future dynamic-tool path
+            // installs definitions without going through the attach-time prune.
+            await pruneUndefinedTools(toolState);
+        };
 
         // Per-session task/plan state must be assigned before wireHarnessHooks —
         // hook thunks read attached.taskStore / planState / tasksDir at context build.

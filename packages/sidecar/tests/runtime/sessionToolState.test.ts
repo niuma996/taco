@@ -140,7 +140,7 @@ describe("SessionToolState", () => {
         assert.equal(prompts, 0, "an unchanged toolset must not rewrite the prompt");
     });
 
-    it("keeps an active name that has no definition", async () => {
+    it("does not drop an unrelated stale name as a side effect of addTools", async () => {
         const target = new RecordingCollection([fakeTool("read")]);
         target.active.add("mcp-down");
         const state = new SessionToolState(target);
@@ -148,7 +148,10 @@ describe("SessionToolState", () => {
         controller.bindHarness(state);
 
         await controller.addTools(["pg"]);
-        assert.ok(target.active.has("mcp-down"), "a tool whose load failed must not be dropped");
+        assert.ok(
+            target.active.has("mcp-down"),
+            "attach/per-turn reconciliation owns pruning; an unrelated add must not rewrite it",
+        );
     });
 
     it("a failed commit neither blocks the queue nor advances the refresh baseline", async () => {

@@ -1067,6 +1067,27 @@ describe("attachedSession.deferredTools", () => {
             await attached.abort();
         });
 
+        it("an always file tool is not active while the session policy denies file tools", async () => {
+            const fileCandidate: ToolCandidate = {
+                name: "pdfMerge",
+                summary: "file-capable extension tool",
+                loading: "always",
+                source: "extension",
+                extensionName: "file-ext",
+                load: async () => fakeTool("pdfMerge"),
+            };
+            const registry = new DefaultDeferredToolRegistry({ candidates: [fileCandidate] });
+
+            const attached = await makeAttachedSession(registry, true);
+
+            const activeNames = (await attached.toolController?.activeToolNames()) ?? [];
+            assert.ok(
+                !activeNames.includes("pdfMerge"),
+                `a denied file tool must be hidden even when its definition loaded, got: ${activeNames.join(", ")}`,
+            );
+            await attached.abort();
+        });
+
         it("an always candidate colliding with a resident tool name is dropped", async () => {
             const colliding: ToolCandidate = {
                 name: "builtin-tool",
@@ -1166,14 +1187,58 @@ describe("attachedSession.deferredTools", () => {
             await reloaded.abort();
         });
 
-        it("re-alignment preserves a persisted name whose candidate failed to load", async () => {
-            // restoreTools deliberately swallows a failing load and leaves the name
-            // on the persisted allowlist so the next attach retries it (an MCP
-            // server that is merely down must not cost the user their tool). The
-            // allowlist re-alignment intersects against the assembled toolset,
-            // which excludes tools that failed to load — so it must not treat
-            // "failed to load this time" as "revoked by policy", or a transient MCP
-            // outage would silently drop the tool forever.
+        it("re-attaches when a persisted deferred tool has become a resident tool", async () => {
+            // A release can promote a deferred built-in into the resident set. The
+            // old allowlist still names it, so restore must leave the resident
+            // definition as the single owner instead of installing a duplicate.
+            const registry = new DefaultDeferredToolRegistry({
+                candidates: [makeToolCandidate("promoted-tool", "deferred")],
+            });
+            const session = await repo.create({ cwd: tmpDir }, harnessContext);
+            const build = (tools: TacoTool[]) =>
+                AttachedSession.create({
+                    session,
+                    models,
+                    model: stubModel,
+                    env,
+                    systemPrompt: "test prompt",
+                    tools,
+                    resources: {},
+                    streamOptions: {},
+                    taskStore: {
+                        getTaskState: () => ({ planMode: false, currentTask: undefined }),
+                        setTaskState: () => {},
+                    } as unknown as TaskStore,
+                    planState: createPlanModeState(),
+                    tasksDir: tmpDir,
+                    attachmentsDir: tmpDir,
+                    toolRegistry: registry,
+                    sessionCwd: tmpDir as never,
+                    getToolContext: (): TacoToolContextBase => ({
+                        env,
+                        workspace: tmpDir as never,
+                    }),
+                    sessionKind: "main",
+                } as AttachedSessionOptions);
+
+            const first = await build([fakeTool("builtin-tool")]);
+            await first.toolController?.addTools(["promoted-tool"]);
+            await first.abort();
+
+            const reloaded = await build([fakeTool("builtin-tool"), fakeTool("promoted-tool")]);
+            const active = (await reloaded.toolController?.activeToolNames()) ?? [];
+            const installed = (await reloaded.toolController?.installedToolNames()) ?? [];
+            assert.equal(active.filter((name) => name === "promoted-tool").length, 1);
+            assert.equal(installed.filter((name) => name === "promoted-tool").length, 1);
+            await reloaded.abort();
+        });
+
+        it("removes a persisted name whose candidate failed to load before prompting", async () => {
+            // restoreTools can fail when an MCP server is unavailable. Keeping that
+            // name active leaves pi with an allowlist entry that has no definition,
+            // so every continuation fails before it reaches the provider with
+            // configured_tools_unavailable. The name can still be loaded later from
+            // the deferred catalog after the server recovers.
             let failLoad = true;
             const flaky: ToolCandidate = {
                 name: "flaky-mcp-tool",
@@ -1187,10 +1252,14 @@ describe("attachedSession.deferredTools", () => {
             };
             const registry = new DefaultDeferredToolRegistry({ candidates: [flaky] });
             const session = await repo.create({ cwd: tmpDir }, harnessContext);
+            const faux = fauxProvider({ provider: "faux", tokensPerSecond: 0 } as never);
+            faux.setResponses([fauxAssistantMessage([fauxText("ok")])] as never);
+            const fauxModels = createModels();
+            fauxModels.setProvider(faux.provider);
             const opts = {
                 session,
-                models,
-                model: stubModel,
+                models: fauxModels,
+                model: faux.getModel(),
                 env,
                 systemPrompt: "test prompt",
                 tools: [fakeTool("builtin-tool")],
@@ -1220,16 +1289,86 @@ describe("attachedSession.deferredTools", () => {
             await first.abort();
 
             // Re-attach while the MCP server is down: the load throws, so the tool
-            // is absent from the assembled set.
+            // is absent from the assembled set and must leave the active allowlist.
             failLoad = true;
             const reloaded = await AttachedSession.create(opts);
             assert.ok(
-                ((await reloaded.toolController?.activeToolNames()) ?? []).includes(
+                !((await reloaded.toolController?.activeToolNames()) ?? []).includes(
                     "flaky-mcp-tool",
                 ),
-                "a name kept for retry must survive re-alignment, not be dropped as revoked",
+                "an unavailable definition must not remain active during a continuation",
             );
+            await reloaded.prompt("hi");
             await reloaded.abort();
+        });
+
+        it("continues after resident renames and MCP disappearance, then reloads MCP on recovery", async () => {
+            const mcp: ToolCandidate = {
+                name: "mcp__server__query",
+                summary: "query",
+                loading: "deferred",
+                source: "mcp",
+                load: async () => fakeTool("mcp__server__query"),
+            };
+            const withMcp = new DefaultDeferredToolRegistry({ candidates: [mcp] });
+            const withoutMcp = new DefaultDeferredToolRegistry({ candidates: [] });
+            const session = await repo.create({ cwd: tmpDir }, harnessContext);
+            const faux = fauxProvider({ provider: "faux", tokensPerSecond: 0 } as never);
+            faux.setResponses([
+                fauxAssistantMessage([fauxText("after upgrade")]),
+                fauxAssistantMessage([fauxText("after recovery")]),
+            ] as never);
+            const fauxModels = createModels();
+            fauxModels.setProvider(faux.provider);
+            const build = (tools: TacoTool[], toolRegistry: DefaultDeferredToolRegistry) =>
+                AttachedSession.create({
+                    session,
+                    models: fauxModels,
+                    model: faux.getModel(),
+                    env,
+                    systemPrompt: "test prompt",
+                    tools,
+                    resources: {},
+                    streamOptions: {},
+                    taskStore: {
+                        getTaskState: () => ({ planMode: false, currentTask: undefined }),
+                        setTaskState: () => {},
+                    } as unknown as TaskStore,
+                    planState: createPlanModeState(),
+                    tasksDir: tmpDir,
+                    attachmentsDir: tmpDir,
+                    toolRegistry,
+                    sessionCwd: tmpDir as never,
+                    getToolContext: (): TacoToolContextBase => ({
+                        env,
+                        workspace: tmpDir as never,
+                    }),
+                    sessionKind: "main",
+                } as AttachedSessionOptions);
+
+            const beforeUpgrade = await build([fakeTool("legacyBuiltin")], withMcp);
+            await beforeUpgrade.toolController?.addTools(["mcp__server__query"]);
+            await beforeUpgrade.abort();
+
+            // The release renames a resident tool and MCP discovery contributes no
+            // candidates (for example, its server is offline). Neither stale name
+            // may prevent the continued session from reaching the provider.
+            const upgraded = await build([fakeTool("renamedBuiltin")], withoutMcp);
+            const upgradedActive = (await upgraded.toolController?.activeToolNames()) ?? [];
+            assert.ok(!upgradedActive.includes("legacyBuiltin"));
+            assert.ok(!upgradedActive.includes("mcp__server__query"));
+            assert.ok(upgradedActive.includes("renamedBuiltin"));
+            await upgraded.prompt("continue");
+            await upgraded.abort();
+
+            // A later process discovers the same MCP tool again. It is deliberately
+            // not auto-activated from an old allowlist; addTools performs an
+            // explicit, policy-checked reload and the next generation can use it.
+            const recovered = await build([fakeTool("renamedBuiltin")], withMcp);
+            const added = await recovered.toolController?.addTools(["mcp__server__query"]);
+            assert.deepEqual(added?.added, ["mcp__server__query"]);
+            await recovered.prompt("continue again");
+            await recovered.abort();
         });
 
         it("a policy-denied fs tool is not restored and the session still generates", async () => {
@@ -1297,6 +1436,139 @@ describe("attachedSession.deferredTools", () => {
             );
             await reloaded.prompt("hi", undefined, undefined);
             await reloaded.abort();
+        });
+
+        it("revokes a loaded dynamic file tool on a policy flip and reactivates it after allow", async () => {
+            const registry = new DefaultDeferredToolRegistry({
+                candidates: [
+                    makeToolCandidate("pdfMerge", "deferred"),
+                    makeToolCandidate("pdfFields", "always"),
+                ],
+            });
+            const session = await repo.create({ cwd: tmpDir }, harnessContext);
+            const faux = fauxProvider({ provider: "faux", tokensPerSecond: 0 } as never);
+            faux.setResponses([
+                fauxAssistantMessage([fauxText("denied")]),
+                fauxAssistantMessage([fauxText("allowed again")]),
+                fauxAssistantMessage([fauxText("allowed")]),
+            ] as never);
+            const fauxModels = createModels();
+            fauxModels.setProvider(faux.provider);
+            let fsToolsDenied = false;
+            const tools = [fakeTool("builtin-tool")];
+            const attached = await AttachedSession.create({
+                session,
+                models: fauxModels,
+                model: faux.getModel(),
+                env,
+                systemPrompt: "test prompt",
+                tools,
+                resources: {},
+                streamOptions: {},
+                taskStore: {
+                    getTaskState: () => ({ planMode: false, currentTask: undefined }),
+                    setTaskState: () => {},
+                } as unknown as TaskStore,
+                planState: createPlanModeState(),
+                tasksDir: tmpDir,
+                attachmentsDir: tmpDir,
+                toolRegistry: registry,
+                sessionCwd: tmpDir as never,
+                getToolContext: (): TacoToolContextBase => ({
+                    env,
+                    workspace: tmpDir as never,
+                    fsToolsDenied,
+                }),
+                sessionKind: "main",
+                // Keep the workspace set unchanged: revoking the dynamic tool must
+                // not depend on a resident-tool change triggering the refresher.
+                refreshToolset: () => ({ tools, systemPrompt: "test prompt" }),
+            } as AttachedSessionOptions);
+
+            await attached.toolController?.addTools(["pdfMerge"]);
+            fsToolsDenied = true;
+            await attached.prompt("revoke");
+            const deniedActive = (await attached.toolController?.activeToolNames()) ?? [];
+            assert.ok(!deniedActive.includes("pdfMerge"));
+            assert.ok(
+                !deniedActive.includes("pdfFields"),
+                "a permission revocation must hide an always-loaded file tool too",
+            );
+
+            fsToolsDenied = false;
+            await attached.prompt("allow again");
+            const allowedActive = (await attached.toolController?.activeToolNames()) ?? [];
+            assert.ok(
+                allowedActive.includes("pdfFields"),
+                "an always tool must return automatically when the policy allows it",
+            );
+            assert.ok(
+                !allowedActive.includes("pdfMerge"),
+                "a deferred tool stays inactive until addTools explicitly reloads it",
+            );
+
+            const reactivated = await attached.toolController?.addTools(["pdfMerge"]);
+            assert.deepEqual(reactivated?.added, ["pdfMerge"]);
+            await attached.prompt("use again");
+            assert.equal(
+                ((await attached.toolController?.installedToolNames()) ?? []).filter(
+                    (name) => name === "pdfMerge",
+                ).length,
+                1,
+                "reactivation must reuse, not duplicate, the retained definition",
+            );
+            await attached.abort();
+        });
+
+        it("restores a static subagent file tool after a deny-allow cycle without a workspace refresh", async () => {
+            const session = await repo.create({ cwd: tmpDir }, harnessContext);
+            const faux = fauxProvider({ provider: "faux", tokensPerSecond: 0 } as never);
+            faux.setResponses([
+                fauxAssistantMessage([fauxText("denied")]),
+                fauxAssistantMessage([fauxText("allowed")]),
+            ] as never);
+            const fauxModels = createModels();
+            fauxModels.setProvider(faux.provider);
+            let fsToolsDenied = false;
+            const attached = await AttachedSession.create({
+                session,
+                models: fauxModels,
+                model: faux.getModel(),
+                env,
+                systemPrompt: "test prompt",
+                tools: [fakeTool("builtin-tool"), fakeTool("read")],
+                resources: {},
+                streamOptions: {},
+                taskStore: {
+                    getTaskState: () => ({ planMode: false, currentTask: undefined }),
+                    setTaskState: () => {},
+                } as unknown as TaskStore,
+                planState: createPlanModeState(),
+                tasksDir: tmpDir,
+                attachmentsDir: tmpDir,
+                toolRegistry: new DefaultDeferredToolRegistry({ candidates: [] }),
+                sessionCwd: tmpDir as never,
+                getToolContext: (): TacoToolContextBase => ({
+                    env,
+                    workspace: tmpDir as never,
+                    fsToolsDenied,
+                }),
+                sessionKind: "subagent",
+                // Subagents deliberately have no workspace refresher: their static
+                // profile must not be replaced by the parent's workspace tools.
+            } as AttachedSessionOptions);
+
+            fsToolsDenied = true;
+            await attached.prompt("revoke");
+            assert.ok(!((await attached.toolController?.activeToolNames()) ?? []).includes("read"));
+
+            fsToolsDenied = false;
+            await attached.prompt("restore");
+            assert.ok(
+                ((await attached.toolController?.activeToolNames()) ?? []).includes("read"),
+                "the retained static definition must be re-activated when policy allows it",
+            );
+            await attached.abort();
         });
 
         it("re-attach activates a workspace tool the persisted allowlist predates", async () => {
