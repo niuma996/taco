@@ -8,6 +8,61 @@ starting with `v0.1.0` (the first open-source release).
 
 ## [Unreleased]
 
+## [0.4.3] — 2026-11-19
+
+This release puts the workspace's Git state on screen, and tidies up the
+plumbing behind configuration and provider requests.
+
+### Added
+
+- The workspace's Git state is now visible: a Git status line in the chat area
+  shows the current branch (plus the detached HEAD, bare repository and "no
+  commits yet" states), the file drawer marks added, modified, deleted, renamed
+  and conflicted files, and you can initialize a repository or jump to the Git
+  download page from the same place when Git is missing. — `sidecar` +
+  `desktop`
+- A single setting under Providers & Models replaces the default
+  `taco/<version>` User-Agent on provider requests. — `sidecar` + `desktop`
+
+### Changed
+
+- The layered configuration (global, workspace, project), the skill and agent
+  directories and the checkpoint stores are resolved through a single routing
+  layer instead of several overlapping ones, and checkpoint writes are
+  serialized so two sessions saving at the same time no longer race. —
+  `sidecar`
+- Only the default model, thinking level, system prompt, compaction,
+  instructions and command permissions can be changed by the agent; anything
+  else is refused before you are asked to approve it. — `sidecar`
+- The auxiliary model selector in settings now uses the same menu component as
+  the primary picker. — `desktop`
+
+### Fixed
+
+- Reattaching to an existing session reconciles its toolset with the current
+  policy, and a tool that was temporarily unavailable is retried on the next
+  attach instead of being forgotten. — `sidecar`
+- Arrow keys and Enter in the file tree act on the row under the cursor
+  instead of the container jumping back to the first row. — `desktop`
+- Windows works again: test scripts expand their globs instead of silently
+  matching nothing, the sidecar starts through the real Node binary,
+  temporary files land in the OS temp directory, timed-out commands kill their
+  whole process tree, and the grep tool normalizes path separators. — `all`
+
+### Breaking changes
+
+- The sidecar protocol is now 2.21. A 2.20 daemon silently drops the
+  request-identity field when it is written, so the desktop and the sidecar
+  have to be upgraded together. — `protocol`
+
+### Upgrade notes
+
+- Upgrade the desktop and the sidecar together (protocol 2.21). The desktop
+  replaces an outdated daemon on its own; if you registered the daemon as a
+  system service with `taco install` and run the npm packages separately,
+  upgrade it with `taco upgrade` or restart it — otherwise the desktop refuses
+  the connection.
+
 ## [0.4.2] — 2026-11-16
 
 This release is about the plugin system: every extension gets a real settings
