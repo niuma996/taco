@@ -1017,15 +1017,13 @@ export class SidecarServer implements ServerRpcSurface {
                 cwd = asWorkspaceId(route);
             }
             if (reg.ensureWorkspace) {
-                const params = (req.params ?? {}) as { workspace?: WorkspaceId };
-                if (typeof params.workspace !== "string" || params.workspace.length === 0) {
+                if (!reg.routeParam || cwd === WORKSPACE_ANY) {
                     return err(
                         req.id,
                         ErrorCodes.InvalidParams,
-                        "missing required field: workspace",
+                        `missing required field: ${reg.routeParam ?? "workspace"}`,
                     );
                 }
-                cwd = params.workspace;
                 // ensureWorkspace always resolves a runtime (failures throw, caught by outer normalizeError)
                 workspace = await this.ensureWorkspace(cwd);
             }

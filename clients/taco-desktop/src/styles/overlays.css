@@ -990,6 +990,9 @@ html *:hover {
 .files-tree-row[data-git-tone="success"] {
     color: var(--success);
 }
+.files-tree-row[data-git-tone="warning"] {
+    color: var(--warning);
+}
 .files-tree-row[data-git-tone="danger"] {
     color: var(--danger);
 }

@@ -57,12 +57,35 @@ describe("Git file tree", () => {
                 .getByText("changed.ts")
                 .closest("[role=treeitem]")
                 ?.getAttribute("data-git-tone"),
-        ).toBe("danger");
+        ).toBe("warning");
         expect(
             screen.getByText("src").closest("[role=treeitem]")?.getAttribute("data-git-tone"),
         ).toBe("danger");
         for (const letter of ["A", "M", "R", "U"])
             expect(screen.getAllByText(letter).length).toBeGreaterThan(0);
+    });
+
+    it("keeps one tree row in the tab order", () => {
+        render(
+            <FilesTreeView
+                entriesByDir={
+                    new Map([
+                        ["", [entry("src", "dir"), entry("README.md")]],
+                        ["src", [entry("src/app.ts"), entry("src/view.ts")]],
+                    ])
+                }
+                expanded={new Set(["src"])}
+                selectedRelPath={null}
+                onSelect={vi.fn()}
+                onToggleExpand={vi.fn()}
+            />,
+        );
+
+        expect(screen.getByRole("tree").tabIndex).toBe(0);
+        expect(screen.getAllByRole("treeitem").filter((row) => row.tabIndex === 0)).toHaveLength(0);
+        expect(
+            screen.getAllByRole("treeitem").filter((row) => row.tabIndex === -1),
+        ).not.toHaveLength(0);
     });
     it("synthesizes deleted files and missing ancestors without allowing preview", () => {
         const onSelect = vi.fn();

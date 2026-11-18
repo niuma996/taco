@@ -20,8 +20,10 @@ export function gitStatusLetter(change: GitFileChange): "A" | "M" | "D" | "R" | 
     return letters[change.kind];
 }
 
-export function gitStatusTone(change: GitFileChange): "success" | "danger" {
-    return change.kind === "added" ? "success" : "danger";
+export function gitStatusTone(change: GitFileChange): "success" | "warning" | "danger" {
+    if (change.kind === "added") return "success";
+    if (change.kind === "deleted" || change.kind === "conflict") return "danger";
+    return "warning";
 }
 
 /** Merge status paths into a snapshot without re-reading directories or changing the cache. */

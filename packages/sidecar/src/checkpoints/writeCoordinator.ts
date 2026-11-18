@@ -5,25 +5,50 @@
  * than to a store instance.
  */
 
+import { existsSync, realpathSync } from "node:fs";
+import { basename, dirname, join, resolve } from "node:path";
+
 const chains = new Map<string, Promise<void>>();
+
+/**
+ * Use the same lock for spelling variants of one index path. The index itself
+ * may not exist on the first write, so resolve the nearest existing ancestor
+ * before appending the missing path components.
+ */
+function checkpointIndexKey(indexPath: string): string {
+    let cursor = resolve(indexPath);
+    const suffix: string[] = [];
+    while (!existsSync(cursor)) {
+        const parent = dirname(cursor);
+        if (parent === cursor) {
+            const fallback = resolve(indexPath);
+            return process.platform === "win32" ? fallback.toLowerCase() : fallback;
+        }
+        suffix.unshift(basename(cursor));
+        cursor = parent;
+    }
+    const canonical = join(realpathSync.native(cursor), ...suffix);
+    return process.platform === "win32" ? canonical.toLowerCase() : canonical;
+}
 
 export function enqueueCheckpointIndexWrite<T>(
     indexPath: string,
     operation: () => Promise<T>,
 ): Promise<T> {
-    const previous = chains.get(indexPath) ?? Promise.resolve();
+    const key = checkpointIndexKey(indexPath);
+    const previous = chains.get(key) ?? Promise.resolve();
     const current = previous.catch(() => undefined).then(operation);
     const settled = current.then(
         () => undefined,
         () => undefined,
     );
-    chains.set(indexPath, settled);
+    chains.set(key, settled);
     void settled.then(() => {
-        if (chains.get(indexPath) === settled) chains.delete(indexPath);
+        if (chains.get(key) === settled) chains.delete(key);
     });
     return current;
 }
 
 export async function waitForCheckpointIndex(indexPath: string): Promise<void> {
-    await (chains.get(indexPath) ?? Promise.resolve());
+    await (chains.get(checkpointIndexKey(indexPath)) ?? Promise.resolve());
 }

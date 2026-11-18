@@ -30,7 +30,18 @@ export function FilesTreeView(props: FilesTreeViewProps) {
         [props.entriesByDir, props.gitChanges, props.showHidden],
     );
     return (
-        <div className="files-tree-root" role="tree">
+        <div
+            className="files-tree-root"
+            role="tree"
+            tabIndex={0}
+            onKeyDown={(event) => {
+                if (event.key !== "ArrowDown" && event.key !== "Enter") return;
+                event.preventDefault();
+                event.currentTarget
+                    .querySelector<HTMLElement>('[role="treeitem"]:not([aria-disabled="true"])')
+                    ?.focus();
+            }}
+        >
             <TreeRows
                 rel=""
                 depth={0}
@@ -129,7 +140,7 @@ function TreeRow({
             <div
                 className="files-tree-row"
                 role="treeitem"
-                tabIndex={isDeleted ? -1 : 0}
+                tabIndex={-1}
                 aria-label={title}
                 aria-disabled={isDeleted || undefined}
                 data-git-tone={change ? gitStatusTone(change) : undefined}
@@ -145,6 +156,17 @@ function TreeRow({
                     ) {
                         event.preventDefault();
                         onToggleExpand(entry.relPath);
+                    } else if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+                        event.preventDefault();
+                        const tree = event.currentTarget.closest('[role="tree"]');
+                        if (!tree) return;
+                        const rows = Array.from(
+                            tree.querySelectorAll<HTMLElement>(
+                                '[role="treeitem"]:not([aria-disabled="true"])',
+                            ),
+                        );
+                        const index = rows.indexOf(event.currentTarget);
+                        rows[index + (event.key === "ArrowDown" ? 1 : -1)]?.focus();
                     }
                 }}
                 aria-expanded={isDir ? isExpanded : undefined}
