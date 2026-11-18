@@ -29,7 +29,8 @@ export function configToolCandidates(): ToolCandidate[] {
             name: "configPatch",
             summary:
                 "Change the global taco configuration. The user approves each change " +
-                "before it is written. API keys and channel credentials are not settable here.",
+                "before it is written. API keys, providers, MCP servers, channels and the " +
+                "outbound User-Agent are not settable here.",
             loading: "deferred",
             source: "builtin",
             load: async () => createConfigTools().configPatch,

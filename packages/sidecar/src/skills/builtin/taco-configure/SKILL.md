@@ -1,93 +1,83 @@
 ---
 name: taco-configure
-description: Use when modifying taco configuration — creating or installing skills or agents, editing $TACO_HOME/taco.json (default model, providers, channels, MCP servers, instructions, command permissions), or downloading remote skills. For skill authoring alone, prefer the `create-skill` skill.
+description: Use when changing taco's own setup — installing a skill from a URL, writing an agent definition, or editing the global config (default model, thinking level, system prompt, instructions, command permissions). For authoring a new skill from scratch, prefer the `create-skill` skill.
 metadata:
-  version: "1.1.0"
+  version: "1.2.0"
 ---
 
 # Configuring taco
 
-`create-skill` covers skill authoring in depth. This skill is the umbrella for everything else: skill install from a URL, agent authoring, and patches to the global config. Reach for it when the ask crosses more than one of those surfaces, or when the change touches global state rather than a single SKILL.md.
+`create-skill` covers writing a skill from scratch. This skill covers the rest: installing a skill someone else wrote, defining agents, and patching the global config. Reach for it when the ask touches global state rather than one SKILL.md.
 
 ## Read first
 
-Before writing anything, find out what's already there. State lives in three places:
+- **Global config** — read it with the `configGet` tool (below).
+- **Skills and agents** — the resolved skill search paths are in the `skill` tool's description; read them there rather than guessing, they depend on `TACO_HOME` and the workspace. The agent directories are listed in the Agents section below.
+- **Desktop settings panes** — channel bindings and MCP servers live partly in the config file and partly in the desktop app's binding state. The file is what the sidecar loads; the UI may hold secrets it has not written back yet.
 
-- **Skills and agents** — read the directories directly. `$TACO_HOME/skills/`, `~/.claude/skills/`, `~/.pi/skills/`, `<cwd>/.taco/skills/`, and `<sidecar>/skills/builtin/` (read-only — never write here). Same set under `agents/` instead of `skills/`.
-- **Global config** — read it with the `configGet` tool (see below).
-- **Desktop settings panes** — channel bindings and MCP servers live partly in the config file and partly in the desktop app's binding state. The file is what the sidecar loads; the UI may have secrets in memory not yet written back.
 ## Global config: use the config tools
 
-Two deferred tools, not the filesystem:
+Two deferred tools, listed in the system prompt's `<deferred_tools>` section:
 
 ```
-addTools("configGet")     → read the current config (secrets come back masked)
-addTools("configPatch")   → change it (the user approves each change)
+addTools({ toolNames: "configGet,configPatch" })
 ```
 
-Load them with `addTools` first — they are not resident, so they are not in the tool list until then. Both work only in a local desktop session: unavailable in an IM conversation, and in a subagent.
+Load them before use — they are not resident, so they are absent from the tool list until then. Both work only in a local desktop session: an IM conversation is driven by a third party, and a subagent runs without the user watching.
 
-`configGet` masks every secret: API keys show as "configured" but never their value; MCP `env`/`headers`/`command`/`args`/`url` and channel `config` are omitted. A stored key can be confirmed present, never read back. Never read `~/.taco/taco.json` with the `read` tool — it holds API keys in plaintext, and reading it puts them in the conversation.
+`configGet` returns the masked config. A stored key comes back as `{ configured: true, mask: "sk-ant-…AbCd" }` — you can confirm it is set and see a few characters of it, never read it back. MCP servers and channels are dropped from the response entirely. Provider entries are visible; their keys live in `apiKeys` and are masked there. Never read the config file with the `read` tool: it holds API keys in plaintext, and reading it puts them in the conversation.
 
-`configPatch` takes a `patch` with only the fields to change; the rest keep their value. The user sees a prompt listing the changed fields and must approve before anything is written. The `allow` / `deny` arrays are **replaced wholesale**, not merged — send the complete list. Schema: `TacoGlobalConfigShape` in `packages/protocol/src/config.ts`.
+`configPatch` takes a `patch` naming only the fields to change; everything else keeps its value. The user sees a prompt naming the changed fields and must approve before anything is written.
 
-Accepted fields:
+Accepted fields — this is the whole list:
 
-- `defaultModel` / `defaultProvider` — single strings; no restart needed if hot-reload picks it up.
-- `systemPrompt` — free text. Quote carefully if it contains newlines or colons.
-- `thinkingLevel` — `"off" | "minimal" | "low" | "medium" | "high" | "xhigh"`.
-- `compaction` — `{ enabled, threshold }` with threshold in 0–1.
-- `commandPermissions` — `{ mode: "ask" | "auto", allow?: string[], deny?: string[] }`. Glob patterns; deny wins and asks. Unmatched commands ask in `ask`, pass in `auto`. Built-in high-risk commands, parse failures and unauthorized `cd` always ask.
-- `instructions` — `{ enabled: boolean, files: { claudeMd?: boolean, agentsMd?: boolean, designMd?: boolean }, inheritToSubagents: boolean }`.
+- `defaultModel` / `defaultProvider` — single strings.
+- `systemPrompt` — free text.
+- `thinkingLevel` — `"off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max"`.
+- `compaction` — `{ enabled?, threshold? }`; threshold is 0.1–0.95.
+- `instructions` — `{ enabled?, files?: { claudeMd?, agentsMd?, designMd? }, inheritToSubagents? }`. A nested merge: naming one file leaves the others alone.
+- `commandPermissions` — `{ mode?: "ask" | "auto", allow?: string[], deny?: string[] }`. Glob patterns; deny wins and asks. Unmatched commands ask in `ask` mode and pass in `auto`. Built-in high-risk commands, parse failures and unauthorized `cd` always ask.
 
-**Secrets cannot be set through these tools.** `configPatch` rejects API keys, MCP servers, and channels, because their secret fields are masked on read and a partial write would erase them. When the ask involves one of those — `customProviders` (array of `{ id, name, api, baseUrl, models: [{ id }] }`, `api` is `"chatcomplete"` for OpenAI-compatible endpoints), `mcpServers` (array of `{ id, transport, enabled, command?, args?, url?, env?, alwaysLoaded? }`, `transport` is `"stdio" | "http"`, `alwaysLoaded` lists tool names always in the toolset), or `channels` (array of `{ channelId, manifest: { name, version }, config }`, `channelId` must match `/^[a-z0-9][a-z0-9-]*$/`, credentials live separately at `$TACO_HOME/channels/<channelId>.json`) — stop and point the user at the desktop settings pane. That path writes the secret without echoing it back.
+`allow` / `deny` are **replaced wholesale**, not merged — send the complete list. An omitted array keeps its value; `[]` clears it.
 
-The outbound `userAgent` is not settable through these tools either — it is the identity every provider request presents, so only the user changes it (desktop settings pane, Providers & Models → Request identity). If the ask is "make the provider stop seeing taco", point the user there instead of patching config.
+**Secrets are not settable here.** API keys, provider definitions, MCP servers, channels and the outbound `userAgent` are entered by the user in the desktop settings pane — Providers & Models for providers and request identity, the channel and MCP panes for the rest. Those paths write the secret without echoing it back. A patch naming one of these fields is refused before the user is even asked, so do not offer it as an option.
 
-## Skills: directory choice
+The `userAgent` is the identity every provider request presents, so only the user changes it (Providers & Models → Request identity). If the ask is "make the provider stop seeing taco", point them there.
 
-Four user-writable directories in priority order (first match by name wins):
+## Skills: where to put one
 
-1. `<cwd>/.taco/skills/` — project-local
-2. `$TACO_HOME/skills/` (default `~/.taco/skills/`) — global
-3. `~/.claude/skills/`
-4. `~/.pi/skills/`
+Skills resolve first-match-by-name across the search paths, so a project-local skill shadows a global one of the same name. Default to the global directory (`$TACO_HOME/skills/`, typically `~/.taco/skills/`) when the user has not said otherwise; use `askUser` with `scope` as the header when the choice matters — Global first, Project-local second. Never write to the builtin directory: it ships with taco and upgrades overwrite it.
 
-Default to **global** (option 2) when the user hasn't specified. Use `askUser` with `scope` as the header when ambiguous — Global first, Project-local second. Never write to `<sidecar>/skills/builtin/` — it ships with taco and is overwritten by upgrades.
+Saving is enough — the directory is watched and the catalog reloads a moment later. If the running session's `<available_skills>` does not pick the skill up, start a new session.
 
-`write` reaches the workspace and `$TACO_HOME/{skills,agents}/` (local only); elsewhere needs user-approved `shell`. New skills only show up in `<available_skills>` after a new session (the system prompt is frozen at boot); the directory itself hot-reloads in ~300ms. For body composition, frontmatter keys, scripts-vs-body tradeoffs, and `runAs` / `inlineOnly` choices, defer to the `create-skill` skill.
+`write` reaches the workspace and its associated directories, plus `$TACO_HOME/skills` and `$TACO_HOME/agents` for a local main session. Anywhere else needs a user-approved `shell`; `$TACO_HOME` itself is never writable, because it holds the config file.
 
-## Agents: directory choice and layout
+For body composition, frontmatter keys, scripts-vs-body tradeoffs, and `runAs` / `inlineOnly` choices, defer to the `create-skill` skill.
 
-Agents live in `*.md` files in one of four user-writable directories (last-wins overwrites by name — opposite of skills):
+## Agents: where to put one
 
-1. `~/.claude/agents/`
-2. `~/.pi/agents/`
-3. `$TACO_HOME/agents/` (default `~/.taco/agents/`)
-4. `<cwd>/.taco/agents/` — highest priority; project-local wins
+Agents are `*.md` files, one agent per file, in one of four user directories: `~/.claude/agents/`, `~/.pi/agents/`, `$TACO_HOME/agents/` (default `~/.taco/agents/`), and `<workspace>/.taco/agents/`. Agent resolution is last-wins, the opposite of skills: a project-local agent overrides a global one of the same name for that workspace. Name the file after the `name` frontmatter so it is greppable.
 
-Default to **global** (option 3) for personal agents. Use project-local only when the agent is bound to this repo's conventions. Use `askUser` with `scope` as the header when ambiguous — Global first, Project-local second. In an IM conversation there is no project directory, so write global only. File name should match the `name` frontmatter so it's greppable.
+Default to the global directory (`$TACO_HOME/agents/`) for personal agents; use the project-local one only when the agent is bound to this repo's conventions. In an IM conversation there is no project directory, so write global only. Before writing a global agent, check whether a project-local one of the same name exists — it would shadow the new copy in that workspace.
 
-A project-local agent shadows a global one of the same name for this workspace only; check both directories first and tell the user when a copy would be shadowed.
+Frontmatter taco reads: `name` (the only required key), `description`, `whenToUse`, `tools` (a whitelist of tool names), `maxTurns`, `timeoutMinutes`, `context` (`independent`, or `fork` to hand the subagent this conversation's transcript), `runtime` (`standard`, `claude-code`, `codex`), `permissionMode`, `cwd`, `fewShots` (a YAML list of `{ user, assistant }` pairs injected ahead of the body), and a `codex` block of codex-runtime options.
 
-Frontmatter (all keys taco reads; pi loads with these but ignores unknowns): `name`, `description`, `whenToUse`, `tools` (a whitelist of tool names), `maxTurns`, `context` (`independent`, or `fork` to give the subagent this conversation's transcript), `runtime`, `permissionMode`, `cwd`, and `fewShots` — a YAML list of `{ user, assistant }` pairs injected ahead of the body to demonstrate the contract.
+`whenToUse` is a one-line hint shown in the system prompt's `<available_agents>` listing — prefer it over `description`, which is only metadata.
 
-`name` and `description` are required; `whenToUse` is preferred over `description` — the `agent` tool's hint block surfaces `whenToUse` when the model is choosing a subagent.
+A `runtime: claude-code` agent takes `cwd`: the absolute directory it always runs in, fixed when the definition is written. Pick the workspace directory or one of its associated directories, and ask the user which one when it is not obvious. Omitted = the calling workspace's directory. The path applies from every workspace that calls the agent, so a global agent with a `cwd` sends every caller — IM conversations included — into that directory; say so before writing one.
 
-A `runtime: claude-code` agent takes `cwd`: the absolute directory it always runs in, fixed when the definition is written. Pick the workspace directory or one of its associated directories, and ask the user which one when it is not obvious. Omitted = the calling workspace's directory. The path applies from every workspace that calls the agent, so a global agent with a `cwd` sends every caller — IM conversations included — into that directory; say so to the user before writing one.
+## Installing a skill from a URL
 
-## Remote skill install
+Three shapes: a public GitHub repo with a top-level `SKILL.md` (`git clone --depth 1`, then move `SKILL.md` into `<target>/<repoName>/`), a path inside a repo (fetch the tarball with `curl -L | tar -xz -C <staging>`, copy the named directory), or a bare tarball or git URL (same flow, treat the unpacked root as the candidate).
 
-The user points at a URL. Three shapes: a public GitHub repo with a top-level `SKILL.md` (`git clone --depth 1`, then move `SKILL.md` into `<target>/<repoName>/`), a path inside a repo (fetch the tarball with `curl -L | tar -xz -C <staging>`, copy the named directory), or a bare tarball or git URL (same flow, treat the unpacked root as the candidate).
+Stage into `mktemp -d` to keep the workspace clean, then copy just the skill directory into the target. Validate `name` + `description` in the frontmatter before writing. If a higher-priority path already holds a skill with the same `name`, say so — first-match-by-name means the new copy will be shadowed.
 
-Stage into `mktemp -d` to keep the workspace clean, then copy just the skill directory into the target. Validate `name` + `description` in frontmatter before writing. If a higher-priority directory already has a skill with the same `name`, warn — first-wins means the new copy will be shadowed.
-
-Ask for the target directory with the same `scope` question used for local creation.
+Ask for the target with the same `scope` question used for local creation.
 
 ## The loop
 
-1. Read what's there — the config via `configGet`, the candidate skill/agent directories, any same-named entry that would be shadowed.
+1. Read what is there — the config via `configGet`, the candidate skill/agent directories, any same-named entry that would be shadowed.
 2. Confirm scope and target with `askUser` when ambiguous — no narration.
 3. Make the change. Skills/agents: write the file. Config: `configPatch`. Remote install: stage, validate, copy.
-4. Verify on a new session. Tell the user to start one before reporting a regression.
-5. If something doesn't load, read the sidecar log or ask what the SkillsPane diagnostics show — a missing or empty `description` is the most common reason a skill silently fails to load.
+4. Verify. The sidecar picks a config change up as soon as it is written, but a new default model applies to new sessions — not to the chat that asked for it. A new skill lands in `<available_skills>` after the reload; start a new session if the running one does not list it.
+5. If something does not load, read the sidecar log or ask what the SkillsPane diagnostics show. A missing or empty `description` is the one failure that drops a skill outright, and the pane names it.

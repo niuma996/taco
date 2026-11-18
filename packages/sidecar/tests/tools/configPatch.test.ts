@@ -105,6 +105,39 @@ describe("configPatch tool through handler and persistence", () => {
         assert.equal(readGlobalConfig().userAgent, "my-gateway/1.0");
     });
 
+    // Fields outside the writable set carry secret material `configGet`
+    // masks on read, or are plain not the model's to write. The tool has to
+    // refuse them before the user is asked — a whole-array replace (MCP
+    // servers, channels) would drop secrets the model never saw.
+    for (const field of [
+        "anthropicApiKey",
+        "openaiApiKey",
+        "apiKeys",
+        "customProviders",
+        "mcpServers",
+        "channels",
+        "sessionsRoot",
+    ]) {
+        it(`refuses to write ${field} before the user is asked`, async () => {
+            saveGlobalConfig({ defaultModel: "keep-me" });
+            let calls = 0;
+            const ctx = context();
+            const call = ctx.call;
+            assert.ok(call);
+            ctx.call = async (method, workspace, params) => {
+                calls++;
+                return call(method, workspace, params);
+            };
+            const { configPatch } = createConfigTools();
+            await assert.rejects(
+                invokeTool(configPatch, { patch: { [field]: "x" } }, ctx),
+                /is not settable here/,
+            );
+            assert.equal(calls, 0);
+            assert.equal(readGlobalConfig().defaultModel, "keep-me");
+        });
+    }
+
     for (const [name, patch] of [
         ["mode", { mode: "auto" }],
         ["allow replacement", { allow: ["pnpm test"] }],

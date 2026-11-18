@@ -93,13 +93,38 @@ const configPatchSchema = Type.Object({
                 "Config fields to change. Only the fields you list are touched; " +
                 "everything else keeps its current value, including omitted command permission " +
                 "fields. Explicit allow/deny arrays REPLACE the stored list; [] clears it. " +
-                "Omitted arrays stay unchanged. Authorized directories cannot be changed here.",
+                "Omitted arrays stay unchanged. Any other field is refused — API keys, " +
+                "providers, MCP servers, channels and the outbound User-Agent are entered in " +
+                "the desktop settings pane. Authorized directories cannot be changed here.",
         },
     ),
 });
 
 export type ConfigGetToolInput = Static<typeof configGetSchema>;
 export type ConfigPatchToolInput = Static<typeof configPatchSchema>;
+
+/**
+ * The only config fields the model may write.
+ *
+ * Everything else — API keys, provider definitions, MCP servers, channels —
+ * carries secret material that `configGet` masks on read. A model that could
+ * write those would replace a stored secret with a value it never saw, and
+ * the whole-array replaces (MCP servers, channels) would drop the secrets of
+ * entries it did not know about.
+ *
+ * The boundary is here, in the tool, and not in the `config.patch` handler:
+ * the desktop writes the same fields through `settings.write`, where the
+ * user typed the secret and the approval prompt is not needed.
+ */
+const WRITABLE_FIELDS = [
+    "defaultModel",
+    "defaultProvider",
+    "thinkingLevel",
+    "systemPrompt",
+    "compaction",
+    "instructions",
+    "commandPermissions",
+] as const;
 
 /** The config fields a patch touches — shown on the approval prompt. */
 export function patchFields(patch: GlobalConfigPatch): string[] {
@@ -109,7 +134,7 @@ export function patchFields(patch: GlobalConfigPatch): string[] {
 /**
  * Render the masked config for the model.
  *
- * The MCP server list and the channel list are dropped: the model cannot
+ * The MCP server list and the channel list are dropped: the tool refuses to
  * change them (their env/headers/credentials are masked, so a partial
  * write would wipe secrets it never saw), and they only add noise.
  */
@@ -138,8 +163,8 @@ function createConfigGet(): TacoTool {
         label: "configGet",
         description:
             "Read the global taco configuration (default model, thinking level, system " +
-            "prompt, command permissions). Secrets are masked and cannot be read back. " +
-            "Use this before changing a setting, to see its current value.",
+            "prompt, command permissions). Secrets are masked and cannot be read back in " +
+            "full. Use this before changing a setting, to see its current value.",
         parameters: configGetSchema,
         executionMode: "sequential",
         taco: {
@@ -191,8 +216,10 @@ function createConfigPatch(): TacoTool {
         label: "configPatch",
         description:
             "Change the global taco configuration. The user is asked to approve each change " +
-            "before it is written. API keys, MCP servers and channels cannot be set here — " +
-            "the desktop settings pane is the only way to enter them.",
+            "before it is written. Only the model, system prompt, thinking level, compaction, " +
+            "instructions and command permissions can be set here — API keys, providers, MCP " +
+            "servers, channels and the outbound User-Agent are entered in the desktop " +
+            "settings pane.",
         parameters: configPatchSchema,
         executionMode: "sequential",
         taco: {
@@ -234,6 +261,19 @@ function createConfigPatch(): TacoTool {
                         "every provider request presents. Ask the user to set it in the " +
                         "desktop settings pane (Providers & Models → Request identity).",
                 );
+            }
+            // The patch schema keeps unknown properties (the RPC envelope is
+            // deliberately open), so the writable set is enforced here rather
+            // than by the schema.
+            for (const field of Object.keys(patch)) {
+                if (!(WRITABLE_FIELDS as readonly string[]).includes(field)) {
+                    throw new Error(
+                        `configPatch: "${field}" is not settable here. This tool writes only ` +
+                            `${WRITABLE_FIELDS.join(", ")}. API keys, providers, MCP servers and ` +
+                            "channels are entered in the desktop settings pane, where the secret " +
+                            "is never echoed back.",
+                    );
+                }
             }
             const result = await ctx.call(RPC.configPatch, ctx.workspace, {
                 workspace: ctx.workspace,
