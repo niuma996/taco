@@ -566,7 +566,7 @@ describe("titleSummarizer", () => {
      * surface at the provider as the bundled sidecar's mangled default user agent.
      */
     describe("TitleSummarizer — taco headers on the summarization LLM call", () => {
-        it("forwards tacoRequestHeaders to models.completeSimple", async () => {
+        it("forwards the request identity headers to models.completeSimple", async () => {
             const version = sidecarVersion();
             let capturedOptions: { headers?: Record<string, string> } | undefined;
 

@@ -14,7 +14,8 @@ import { createLogger } from "../../lib/logger.ts";
 import { textBlocks } from "../../lib/textBlocks.ts";
 import { completeSimpleWithLiteFallback } from "../../runtime/models/liteModel.ts";
 import type { AgentMessage, Api, Model, Models } from "../../runtime/pi/types.ts";
-import { backgroundThinkingLevel, tacoRequestHeaders } from "../../runtime/runtimeResources.ts";
+import { buildRequestHeaders } from "../../runtime/requestIdentity.ts";
+import { backgroundThinkingLevel } from "../../runtime/runtimeResources.ts";
 import { serializeMessagesForFacts } from "../../tags/factExtractor.ts";
 import { readMemorySubmission } from "../submission.ts";
 import {
@@ -524,7 +525,7 @@ export class MemoryExtractorImpl implements MemoryExtractor {
                 // The configured lite level applies only to the lite branch;
                 // the main-model fallback keeps its auxiliary default.
                 reasoning: thinking ? thinking.reasoning : backgroundThinkingLevel(model),
-                headers: tacoRequestHeaders(),
+                headers: buildRequestHeaders(),
             }),
             (response) => {
                 readMemorySubmission(response, memoryExtractionTool);

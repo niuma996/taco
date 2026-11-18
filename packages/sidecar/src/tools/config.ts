@@ -225,6 +225,16 @@ function createConfigPatch(): TacoTool {
                     }
                 }
             }
+            // The outbound User-Agent is an identity setting: a model that
+            // rewrites it changes how every provider request identifies
+            // itself. The user sets it in the desktop settings pane.
+            if ("userAgent" in patch) {
+                throw new Error(
+                    "configPatch: userAgent is not settable here — it changes the identity " +
+                        "every provider request presents. Ask the user to set it in the " +
+                        "desktop settings pane (Providers & Models → Request identity).",
+                );
+            }
             const result = await ctx.call(RPC.configPatch, ctx.workspace, {
                 workspace: ctx.workspace,
                 sessionId: ctx.sessionId,

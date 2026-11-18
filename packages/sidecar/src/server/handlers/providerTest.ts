@@ -31,7 +31,8 @@ import type {
 } from "@taco-ai/protocol";
 import { CUSTOM_PROVIDER_APIS, ErrorCodes } from "@taco-ai/protocol";
 import { buildCustomProvider } from "../../runtime/models/customProvider.ts";
-import { backgroundThinkingLevel, tacoRequestHeaders } from "../../runtime/runtimeResources.ts";
+import { buildRequestHeaders } from "../../runtime/requestIdentity.ts";
+import { backgroundThinkingLevel } from "../../runtime/runtimeResources.ts";
 import { type MethodCtx, RpcHandlerError, registerMethod } from "../methodRegistry.ts";
 
 /** Overall probe budget. Long enough for a cold relay, short enough to feel like a test. */
@@ -172,7 +173,7 @@ export async function performProbe(
             // A test should report the first failure, not hide it behind retries.
             maxRetries: 0,
             timeoutMs: TIMEOUT_MS,
-            headers: tacoRequestHeaders(),
+            headers: buildRequestHeaders(),
         },
     );
 }

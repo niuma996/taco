@@ -16,7 +16,8 @@ import { createLogger } from "../../lib/logger.ts";
 import { serializeMessagesForFacts } from "../../tags/factExtractor.ts";
 import { completeSimpleWithLiteFallback } from "../models/liteModel.ts";
 import type { AgentMessage, Api, Model, Models, TextContent } from "../pi/types.ts";
-import { backgroundThinkingLevel, tacoRequestHeaders } from "../runtimeResources.ts";
+import { buildRequestHeaders } from "../requestIdentity.ts";
+import { backgroundThinkingLevel } from "../runtimeResources.ts";
 
 const log = createLogger("session:titleSummarizer");
 
@@ -145,7 +146,7 @@ export class TitleSummarizer {
                 // The configured lite level applies only to the lite branch;
                 // the main-model fallback keeps its auxiliary default.
                 reasoning: thinking ? thinking.reasoning : backgroundThinkingLevel(model),
-                headers: tacoRequestHeaders(),
+                headers: buildRequestHeaders(),
             }),
         );
 

@@ -39,6 +39,7 @@ export type GlobalConfigPatch = Partial<
         | "thinkingLevel"
         | "anthropicApiKey"
         | "openaiApiKey"
+        | "userAgent"
     >
 > & {
     /** Incremental permission changes applied atomically to the latest disk state. */
@@ -58,6 +59,8 @@ export type GlobalConfigPatch = Partial<
     thinkingLevel?: ThinkingLevel | null;
     anthropicApiKey?: string | null;
     openaiApiKey?: string | null;
+    /** Custom outbound User-Agent; `null` clears it back to the default identity. */
+    userAgent?: string | null;
 };
 
 /**

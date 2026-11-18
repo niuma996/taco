@@ -134,6 +134,7 @@ Taco 会读 / 写下列文件路径。基准目录是 `$TACO_HOME`，默认 `~/.
   "providerHiddenModels": {
     "minimax": ["MiniMax-M2.7-highspeed"]
   },
+  "userAgent": "my-gateway/1.0",
   "mcpServers": [
     {
       "id": "dbx",
@@ -181,7 +182,37 @@ Taco 会读 / 写下列文件路径。基准目录是 `$TACO_HOME`，默认 `~/.
 | `apiKeys`         | object | 其它 provider → key，注入到 `<PROVIDER>_API_KEY` env |
 | `providerExtraModels`  | object | 内置 provider id → 追加模型列表，见下方「内置供应商的模型列表」 |
 | `providerHiddenModels` | object | 内置 provider id → 从静态列表移除的模型 id         |
+| `userAgent`        | string | 发往模型服务的自定义 User-Agent，见下方「自定义请求标识」  |
 | `extra`           | object | 兜底，未来扩展用                                       |
+
+#### 自定义请求标识（`userAgent`）
+
+默认情况下，发往模型服务的请求会带上 taco 的身份标识：
+
+```
+user-agent: taco/<sidecar 版本>
+x-taco-sidecar-version: <sidecar 版本>
+```
+
+设置 `userAgent` 后：
+
+- `user-agent` 换成你填写的值；
+- **不再发送** `x-taco-sidecar-version` —— 这个头直接写明了 taco，保留它就
+  等于没有伪装。
+
+主对话路径上的 Anthropic OAuth 是例外：pi-ai 对这类请求硬编码
+`claude-cli/<版本>` 身份（覆盖它会丢掉 Claude Code 的 OAuth beta 能力），
+所以自定义 `userAgent` 不会应用到这些请求上。绕过 harness 的辅助调用
+（会话标题、记忆抽取、`/v1/models` 与 provider 测试探针）没有这层 SDK 身份，
+始终发送你配置的值。
+
+取值必须是可见 ASCII（0x20–0x7E）、不超过 256 个字符 —— 这个值会直接进
+HTTP 头，写入时会拒绝换行等控制字符。留空即恢复默认标识。
+
+设置项在桌面端「设置 → 供应商与模型 → 请求标识」。改完对新聊天立即生效；
+已经打开的聊天在下次重新连接后生效。
+
+这个字段需要协议 2.21；2.20 的后台服务会在 `settings.write` 时丢掉它。
 
 ### 3.3 safe view（`settings.get` / `settings.write` 返回的那份）
 

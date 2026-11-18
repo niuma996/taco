@@ -139,6 +139,7 @@ below).
   "providerHiddenModels": {
     "minimax": ["MiniMax-M2.7-highspeed"]
   },
+  "userAgent": "my-gateway/1.0",
   "mcpServers": [
     {
       "id": "dbx",
@@ -211,6 +212,38 @@ message in `message`.
 The probe is deliberately cheap (one short turn, ≤16 output tokens, no retries,
 20s budget) but it is a real request and costs tokens. Each probe runs in its
 own provider collection and never touches the workspace catalog.
+
+### Custom request identity (`userAgent`)
+
+By default, every request to a model provider carries Taco's identity:
+
+```
+user-agent: taco/<sidecar version>
+x-taco-sidecar-version: <sidecar version>
+```
+
+With `userAgent` set:
+
+- `user-agent` becomes the value you supply;
+- `x-taco-sidecar-version` is **not sent** — that header names Taco outright,
+  so keeping it would defeat the purpose.
+
+Anthropic OAuth on the main conversation path is the exception: pi-ai hardcodes
+a `claude-cli/<version>` identity for those requests (overriding it would cost
+Claude Code's OAuth beta features), so a custom `userAgent` is not applied
+there. Auxiliary calls that bypass the harness (session titles, memory
+extraction, `/v1/models` and provider-test probes) have no such SDK identity and
+always send the configured value.
+
+The value must be printable ASCII (0x20–0x7E) and at most 256 characters — it
+lands in an HTTP header, so writes reject newlines and other control
+characters. An empty value restores the default identity.
+
+The setting lives under Settings → Providers & Models → Request identity. It
+applies to new chats immediately; open chats pick it up on their next
+reconnect.
+
+This field needs protocol 2.21; a 2.20 daemon drops it on `settings.write`.
 
 ### Model lists on built-in providers
 

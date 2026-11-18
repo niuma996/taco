@@ -7,7 +7,7 @@
  */
 import type { LiteThinkingLevel, ThinkingLevel, WorkspaceId } from "@taco-ai/protocol";
 import { LITE_THINKING_LEVELS } from "@taco-ai/protocol";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useSaveConfigPatch } from "../../hooks/primitives/useSaveConfigPatch.ts";
 import { useT } from "../../i18n/useI18n.ts";
 import type { TacoClient } from "../../lib/clients/tacoClient.ts";
@@ -17,6 +17,7 @@ import {
     getGlobalConfig,
     subscribeGlobalConfig,
 } from "../../lib/globalConfig.ts";
+import { TextInput } from "../ui/TextInput";
 import { ModelMenu } from "./ModelMenu";
 import type { ModelOption, ModelSelection } from "./ModelPicker";
 import { ProviderSection } from "./ProviderSection";
@@ -108,6 +109,46 @@ export function ModelTab(props: ModelTabProps) {
             kind: "global",
             patch: { liteThinkingLevel: next as LiteThinkingLevel },
         }).catch(() => {});
+    };
+
+    // The custom User-Agent is a free-text field, so it is committed on blur
+    // or Enter rather than on every keystroke. `savedUserAgent` tracks what
+    // the sidecar holds, so an external change (another window, a CLI edit)
+    // replaces the draft without overwriting what the user is typing.
+    const {
+        save: saveUserAgent,
+        saving: savingUserAgent,
+        error: userAgentSaveError,
+    } = useSaveConfigPatch(props.client);
+    const savedUserAgent = state.global.userAgent ?? "";
+    const [userAgentDraft, setUserAgentDraft] = useState(savedUserAgent);
+    const [userAgentError, setUserAgentError] = useState<string | null>(null);
+    const lastSyncedUserAgent = useRef(savedUserAgent);
+    useEffect(() => {
+        if (savedUserAgent === lastSyncedUserAgent.current) return;
+        lastSyncedUserAgent.current = savedUserAgent;
+        setUserAgentDraft(savedUserAgent);
+    }, [savedUserAgent]);
+
+    const commitUserAgent = () => {
+        const next = userAgentDraft.trim();
+        if (next === savedUserAgent) return;
+        // The value lands in an HTTP header — reject anything that could
+        // break out of it. The sidecar enforces the same rule.
+        if (next.length > 256 || /[^\x20-\x7E]/.test(next)) {
+            setUserAgentError(t("settings.userAgentInvalid"));
+            return;
+        }
+        setUserAgentError(null);
+        lastSyncedUserAgent.current = next;
+        void saveUserAgent({
+            kind: "global",
+            patch: { userAgent: next === "" ? null : next },
+        }).catch(() => {
+            // Roll the draft back to what the sidecar still holds.
+            lastSyncedUserAgent.current = savedUserAgent;
+            setUserAgentDraft(savedUserAgent);
+        });
     };
 
     return (
@@ -212,6 +253,34 @@ export function ModelTab(props: ModelTabProps) {
                         )}
                     </div>
                 )}
+            </fieldset>
+
+            <fieldset className="model-config-card" aria-labelledby="request-identity-title">
+                <h3 id="request-identity-title">{t("settings.requestIdentityTitle")}</h3>
+                <p className="settings-tab-desc">{t("settings.requestIdentityDesc")}</p>
+                <div className="settings-row">
+                    <TextInput
+                        type="text"
+                        value={userAgentDraft}
+                        placeholder={t("settings.userAgentPlaceholder")}
+                        disabled={savingUserAgent}
+                        onChange={(e) => {
+                            setUserAgentDraft(e.target.value);
+                            if (userAgentError) setUserAgentError(null);
+                        }}
+                        onBlur={commitUserAgent}
+                        onKeyDown={(e) => {
+                            if (e.key === "Enter") commitUserAgent();
+                        }}
+                    />
+                    {savingUserAgent && <span className="settings-saving">{t("app.saving")}</span>}
+                </div>
+                {(userAgentError || userAgentSaveError) && (
+                    <div className="error-banner" role="alert">
+                        {userAgentError ?? userAgentSaveError}
+                    </div>
+                )}
+                <p className="settings-tab-desc">{t("settings.userAgentHint")}</p>
             </fieldset>
         </section>
     );

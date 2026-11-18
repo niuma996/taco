@@ -49,6 +49,7 @@ describe("saveGlobalConfig round-trip", () => {
         },
         { name: "extensions", value: ["@taco/ext-a", "@taco/ext-b"] },
         { name: "disabledExtensions", value: ["@taco/ext-b"] },
+        { name: "userAgent", value: "my-gateway/1.0" },
     ];
 
     const clearable: ReadonlySet<keyof TacoGlobalConfigShape> = new Set([
@@ -61,6 +62,7 @@ describe("saveGlobalConfig round-trip", () => {
         "thinkingLevel",
         "anthropicApiKey",
         "openaiApiKey",
+        "userAgent",
     ]);
 
     for (const { name, value } of scalars) {
@@ -99,6 +101,38 @@ describe("saveGlobalConfig round-trip", () => {
         saveGlobalConfig({ compaction: { threshold: 0.6 } });
         const after = readGlobalConfig();
         assert.deepEqual(after.compaction, { enabled: true, threshold: 0.6 });
+    });
+});
+
+describe("userAgent validation", () => {
+    useTempTacoHome("config-useragent");
+
+    // The value goes straight into an HTTP header, so it must not be able to
+    // inject one.
+    it("rejects a UA containing CRLF", () => {
+        assert.throws(
+            () => saveGlobalConfig({ userAgent: "evil/1.0\r\nX-Injected: yes" }),
+            /userAgent/,
+        );
+    });
+
+    it("rejects a UA with control characters", () => {
+        assert.throws(() => saveGlobalConfig({ userAgent: "evil/\t1.0" }), /userAgent/);
+    });
+
+    it("rejects a UA longer than 256 characters", () => {
+        assert.throws(() => saveGlobalConfig({ userAgent: "a".repeat(257) }), /userAgent/);
+    });
+
+    it("trims surrounding whitespace", () => {
+        saveGlobalConfig({ userAgent: "  my-gateway/1.0  " });
+        assert.equal(readGlobalConfig().userAgent, "my-gateway/1.0");
+    });
+
+    it("treats a blank UA as unset", () => {
+        saveGlobalConfig({ userAgent: "   " });
+        assert.equal(readGlobalConfig().userAgent, undefined);
+        assert.ok(!("userAgent" in readGlobalConfig()));
     });
 });
 

@@ -506,7 +506,12 @@
       "restartSidecar": "重启后台服务",
       "restarting": "重启中…"
     },
-    "providerModelCount_one": "{{count}} 个模型"
+    "providerModelCount_one": "{{count}} 个模型",
+    "requestIdentityTitle": "请求标识",
+    "requestIdentityDesc": "自定义发往模型服务的 User-Agent。留空则使用默认标识 taco/<版本号>。",
+    "userAgentPlaceholder": "my-gateway/1.0",
+    "userAgentHint": "设置后模型服务将看到该 User-Agent，且不再收到 taco 版本标识头。用于适配自建网关或中转站,请自行确认符合服务商条款。新聊天立即生效,已打开的聊天在下次重新连接后生效。",
+    "userAgentInvalid": "只能包含可见 ASCII 字符,且不超过 256 个字符"
   },
   "context": {
     "indicatorLabel": "上下文用量",

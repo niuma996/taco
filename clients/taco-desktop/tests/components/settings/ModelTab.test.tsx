@@ -1,6 +1,7 @@
 import type { LiteThinkingLevel } from "@taco-ai/protocol";
 import {
     cleanup,
+    fireEvent,
     render as renderWithoutQueries,
     screen,
     waitFor,
@@ -151,6 +152,71 @@ describe("ModelTab auxiliary model selection", () => {
                 global: { liteModel: "openrouter/anthropic/claude-haiku-4-5" },
             });
         });
+    });
+});
+
+describe("ModelTab request identity", () => {
+    function renderIdentityTab(userAgent?: string) {
+        applyGlobalConfig({ userAgent });
+        const settingsWrite = vi.fn(async () => ({ global: {} }));
+        const client = { settingsWrite } as unknown as TacoClient;
+        const view = render(<ModelTab client={client} workspace={null} options={OPTIONS} />);
+        return {
+            ...view,
+            settingsWrite,
+            input: screen.getByPlaceholderText("settings.userAgentPlaceholder"),
+        };
+    }
+
+    it("shows the configured User-Agent", () => {
+        const { input } = renderIdentityTab("my-gateway/1.0");
+        expect((input as HTMLInputElement).value).toBe("my-gateway/1.0");
+    });
+
+    it("saves the User-Agent on blur", async () => {
+        const { input, settingsWrite } = renderIdentityTab();
+        fireEvent.change(input, { target: { value: "my-gateway/1.0" } });
+        fireEvent.blur(input);
+        await waitFor(() => {
+            expect(settingsWrite).toHaveBeenCalledWith({ global: { userAgent: "my-gateway/1.0" } });
+        });
+    });
+
+    it("saves the User-Agent on Enter", async () => {
+        const { input, settingsWrite } = renderIdentityTab();
+        fireEvent.change(input, { target: { value: "my-gateway/1.0" } });
+        fireEvent.keyDown(input, { key: "Enter" });
+        await waitFor(() => {
+            expect(settingsWrite).toHaveBeenCalledWith({ global: { userAgent: "my-gateway/1.0" } });
+        });
+    });
+
+    it("clears the User-Agent back to the default", async () => {
+        const { input, settingsWrite } = renderIdentityTab("my-gateway/1.0");
+        fireEvent.change(input, { target: { value: "" } });
+        fireEvent.blur(input);
+        await waitFor(() => {
+            expect(settingsWrite).toHaveBeenCalledWith({ global: { userAgent: null } });
+        });
+    });
+
+    it("refuses a User-Agent that could break out of the header", async () => {
+        const { input, settingsWrite } = renderIdentityTab();
+        // A DOM input strips CR/LF on its own, so the control character that
+        // survives the value setter is the one the guard has to catch.
+        fireEvent.change(input, { target: { value: "evil/1.0\u0007" } });
+        fireEvent.blur(input);
+        expect(await screen.findByRole("alert")).toHaveProperty(
+            "textContent",
+            "settings.userAgentInvalid",
+        );
+        expect(settingsWrite).not.toHaveBeenCalled();
+    });
+
+    it("does not write when the value is unchanged", async () => {
+        const { input, settingsWrite } = renderIdentityTab("my-gateway/1.0");
+        fireEvent.blur(input);
+        expect(settingsWrite).not.toHaveBeenCalled();
     });
 });
 

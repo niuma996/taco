@@ -43,6 +43,9 @@ import type { SkillDirInput } from "./workspaceConfigSources.ts";
 
 const configStore = new ConfigStore();
 
+/** Longest accepted custom User-Agent — real UAs are far shorter. */
+const USER_AGENT_MAX_LENGTH = 256;
+
 export { tacoHome };
 
 export interface ResolvedCompaction {
@@ -84,6 +87,8 @@ export interface ResolvedTacoConfig {
     mcpServers?: McpServerConfig[];
     /** Project-context instructions injection (CLAUDE.md / AGENTS.md / DESIGN.md). */
     instructions?: InstructionsConfig;
+    /** Custom outbound User-Agent. `undefined` = default `taco/<version>` identity. */
+    userAgent?: string;
 }
 
 /** pi thinkingLevel value domain whitelist — superset (including `max`) reserved for future-compat. */
@@ -112,6 +117,33 @@ function validateLiteThinkingLevel(value: unknown, source: string): LiteThinking
         throw new Error(`invalid liteThinkingLevel from ${source}: ${JSON.stringify(value)}`);
     }
     return value as LiteThinkingLevel;
+}
+
+/**
+ * Validate and normalise the `userAgent` field.
+ *
+ * The value goes straight into an HTTP header, so it must not be able to
+ * inject one: only visible ASCII (0x20–0x7E) is allowed, which excludes
+ * CR/LF and every control character. An empty or whitespace-only value
+ * means "unset" — the caller then keeps the default identity.
+ */
+function validateUserAgent(value: unknown, source: string): string | undefined {
+    if (value === undefined || value === null) return undefined;
+    if (typeof value !== "string") {
+        throw new Error(`invalid userAgent from ${source}: expected string, got ${typeof value}`);
+    }
+    const trimmed = value.trim();
+    if (trimmed === "") return undefined;
+    if (trimmed.length > USER_AGENT_MAX_LENGTH) {
+        throw new Error(
+            `invalid userAgent from ${source}: longer than ${USER_AGENT_MAX_LENGTH} characters`,
+        );
+    }
+    // Control characters (CR/LF included) are exactly what this rejects.
+    if (/[^\x20-\x7E]/.test(trimmed)) {
+        throw new Error(`invalid userAgent from ${source}: only printable ASCII is allowed`);
+    }
+    return trimmed;
 }
 
 /**
@@ -396,6 +428,7 @@ export function resolveConfig(
         ),
         mcpServers: validateMcpServers(global.mcpServers, "taco.json"),
         memoryEnabled: cliOverrides.memoryEnabled ?? global.memoryEnabled,
+        userAgent: validateUserAgent(global.userAgent, "taco.json"),
     };
 }
 
@@ -901,6 +934,7 @@ function mergeGlobalConfigPatch(
         );
     }
     if ("memoryEnabled" in patch) next.memoryEnabled = patch.memoryEnabled;
+    if ("userAgent" in patch) next.userAgent = validateUserAgent(cleared(patch.userAgent), "patch");
     if ("instructions" in patch) {
         // Nested merge — same semantics as `compaction` above. Per-file
         // switches and override paths are deep-merged so a partial patch

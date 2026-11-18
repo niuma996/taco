@@ -22,7 +22,7 @@ import type {
     ProviderListModelsResult,
 } from "@taco-ai/protocol";
 import { CUSTOM_PROVIDER_APIS, ErrorCodes } from "@taco-ai/protocol";
-import { tacoRequestHeaders } from "../../runtime/runtimeResources.ts";
+import { buildRequestHeaders } from "../../runtime/requestIdentity.ts";
 import { type MethodCtx, RpcHandlerError, registerMethod } from "../methodRegistry.ts";
 
 const HTTP_TIMEOUT_MS = 5_000;
@@ -138,7 +138,7 @@ export async function performModelsRequest(
             method: "GET",
             headers: {
                 ...authHeaders,
-                ...tacoRequestHeaders(),
+                ...buildRequestHeaders(),
             },
             signal,
         });

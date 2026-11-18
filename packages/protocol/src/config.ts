@@ -119,6 +119,17 @@ export interface TacoGlobalConfigShape {
     mcpServers?: McpServerConfig[];
     /** Project-context instructions injection (CLAUDE.md / AGENTS.md / DESIGN.md). */
     instructions?: InstructionsConfig;
+    /**
+     * User-Agent sent to model providers instead of the default `taco/<version>`.
+     * Unset keeps the default identity. A custom value replaces the UA and
+     * suppresses the `x-taco-sidecar-version` header — that header names taco
+     * outright, so keeping it would defeat the point of a custom identity.
+     *
+     * OAuth providers keep their own `claude-cli/<version>` identity: pi-ai
+     * hardcodes it for Anthropic OAuth and overriding it costs the Claude
+     * Code beta features.
+     */
+    userAgent?: string;
 }
 
 export type CommandPermissionMode = "ask" | "auto";

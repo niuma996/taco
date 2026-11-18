@@ -81,6 +81,7 @@ export function toView(raw: TacoGlobalConfigShape): TacoGlobalConfigView {
         channels: raw.channels?.map(channelInstanceToView),
         mcpServers: raw.mcpServers?.map(mcpServerToView),
         instructions: raw.instructions,
+        userAgent: raw.userAgent,
     };
     if (raw.anthropicApiKey !== undefined) v.anthropicApiKey = maskKey(raw.anthropicApiKey);
     if (raw.openaiApiKey !== undefined) v.openaiApiKey = maskKey(raw.openaiApiKey);

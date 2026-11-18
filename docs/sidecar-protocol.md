@@ -117,6 +117,7 @@ because a registered system-service daemon can outlive a desktop upgrade.
 | 2.18 | `memory.read` retrieves a topic by `memoryLayer`, opaque `sourceId`, and `id`. Context summaries and `memory.list` expose usable source references; every read rechecks live source authorization. |
 | 2.19 | `extensions.configGet` / `extensions.configUpdate`; optional `workspace` on `extensions.status`; `ExtensionsStatusResult` adds `workspace` / `disabledEntries` / `pendingRestart`, and `ExtensionStatusEntry` adds `contributions`. |
 | 2.20 | `git.inspect`, `git.init` and `worktree.list`; local Git availability, repository metadata, worktree inventory and uncommitted file status. |
+| 2.21 | Optional `userAgent` on the global config (`settings.get` / `settings.write`); a custom outbound User-Agent replaces `taco/<version>` and suppresses the `x-taco-sidecar-version` header. A 2.20 daemon drops the field on write. |
 
 Adding a value to an existing response enum is potentially breaking: older clients
 may index exhaustive maps with it. Such values require connection-scoped capability

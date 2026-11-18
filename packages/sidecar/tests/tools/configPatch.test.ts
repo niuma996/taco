@@ -6,7 +6,7 @@ import { before, describe, it, mock } from "node:test";
 import type { CommandPermissionConfig } from "@taco-ai/protocol";
 import { COMPACTION_THRESHOLD_MAX, COMPACTION_THRESHOLD_MIN } from "@taco-ai/protocol";
 import { Value } from "typebox/value";
-import { saveGlobalConfig } from "../../src/config/config.ts";
+import { readGlobalConfig, saveGlobalConfig } from "../../src/config/config.ts";
 import { PermissionBroker } from "../../src/permissions/permissionBroker.ts";
 import { registerConfigHandlers } from "../../src/server/handlers/config.ts";
 import { registerSettingsHandlers } from "../../src/server/handlers/settings.ts";
@@ -83,6 +83,27 @@ describe("configPatch tool through handler and persistence", () => {
             assert.deepEqual(diskPermissions(), initial);
         });
     }
+
+    it("refuses to set the outbound User-Agent", async () => {
+        // The UA is the identity every provider request presents — a model
+        // that rewrites it changes how the user is seen by every provider.
+        saveGlobalConfig({ userAgent: "my-gateway/1.0" });
+        let calls = 0;
+        const ctx = context();
+        const call = ctx.call;
+        assert.ok(call);
+        ctx.call = async (method, workspace, params) => {
+            calls++;
+            return call(method, workspace, params);
+        };
+        const { configPatch } = createConfigTools();
+        await assert.rejects(
+            invokeTool(configPatch, { patch: { userAgent: "spoofed/1.0" } }, ctx),
+            /configPatch: userAgent is not settable here/,
+        );
+        assert.equal(calls, 0);
+        assert.equal(readGlobalConfig().userAgent, "my-gateway/1.0");
+    });
 
     for (const [name, patch] of [
         ["mode", { mode: "auto" }],

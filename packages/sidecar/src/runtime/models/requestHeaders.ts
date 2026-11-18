@@ -6,11 +6,11 @@
  * (streamOptions, models, provider) with no session state; `create()` is its
  * only caller. The non-stream callers (`providerModels`, `MemoryExtractorImpl`,
  * `factExtractor`) share the header vocabulary through
- * `runtimeResources.tacoRequestHeaders()`.
+ * `runtime/requestIdentity.buildRequestHeaders()`.
  */
 
 import type { AgentHarnessStreamOptions, Models } from "../pi/types.ts";
-import { sidecarVersion } from "../runtimeResources.ts";
+import { buildRequestHeaders } from "../requestIdentity.ts";
 
 /**
  * Tag provider requests with the sidecar version.
@@ -23,9 +23,9 @@ import { sidecarVersion } from "../runtimeResources.ts";
  * The OAuth check uses `checkAuth` (never triggers a token refresh)
  * rather than `getAuth`.
  *
- * `x-taco-sidecar-version: <version>` — set on EVERY provider. It's
- * metadata, not identity, so it never conflicts with the OAuth UA. On
- * an OAuth call it's the only taco tag that survives, which is enough
+ * `x-taco-sidecar-version: <version>` — set on EVERY provider, unless the
+ * user configured a custom User-Agent (that header names taco outright).
+ * On an OAuth call it is the only taco tag that survives, which is enough
  * to attribute the request to a taco version in the provider's logs.
  *
  * If `checkAuth` cannot classify the provider we skip the UA override
@@ -48,7 +48,6 @@ export async function withTacoUserAgent(
         skipUserAgent = true;
     }
 
-    const version = sidecarVersion();
     // Strip any caller-supplied `user-agent` on the OAuth path. pi-ai
     // hardcodes `claude-cli/<version>` for Anthropic OAuth to keep Claude
     // Code's OAuth beta features enabled, and a caller's UA in
@@ -57,16 +56,11 @@ export async function withTacoUserAgent(
     const callerHeaders = { ...streamOptions.headers };
     if (skipUserAgent) delete callerHeaders["user-agent"];
 
-    const tags: Record<string, string> = {
-        "x-taco-sidecar-version": version,
-        ...(skipUserAgent ? {} : { "user-agent": `taco/${version}` }),
-    };
-
     return {
         ...streamOptions,
         headers: {
             ...callerHeaders,
-            ...tags,
+            ...buildRequestHeaders({ oauth: skipUserAgent }),
         },
     };
 }

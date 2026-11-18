@@ -107,8 +107,10 @@ export type CompactionFailureReason =
  *  `workspace` param on `extensions.status`, and its new result fields; a 2.18
  *  daemon answers `unknown_method` for the config RPCs and rejects the new
  *  `extensions.status` params shape.
- *  2.20 adds git.inspect, git.init and worktree.list for local repository discovery. */
-export const SIDECAR_PROTOCOL_VERSION = { major: 2, minor: 20 } as const;
+ *  2.20 adds git.inspect, git.init and worktree.list for local repository discovery.
+ *  2.21 adds the `userAgent` global config field; a 2.20 daemon silently drops it
+ *  on `settings.write`, so the custom identity would never take effect. */
+export const SIDECAR_PROTOCOL_VERSION = { major: 2, minor: 21 } as const;
 
 /**
  * Client-side gate for a sidecar's advertised protocol version. Semver-ish but

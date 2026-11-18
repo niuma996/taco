@@ -42,6 +42,8 @@ Accepted fields:
 
 **Secrets cannot be set through these tools.** `configPatch` rejects API keys, MCP servers, and channels, because their secret fields are masked on read and a partial write would erase them. When the ask involves one of those — `customProviders` (array of `{ id, name, api, baseUrl, models: [{ id }] }`, `api` is `"chatcomplete"` for OpenAI-compatible endpoints), `mcpServers` (array of `{ id, transport, enabled, command?, args?, url?, env?, alwaysLoaded? }`, `transport` is `"stdio" | "http"`, `alwaysLoaded` lists tool names always in the toolset), or `channels` (array of `{ channelId, manifest: { name, version }, config }`, `channelId` must match `/^[a-z0-9][a-z0-9-]*$/`, credentials live separately at `$TACO_HOME/channels/<channelId>.json`) — stop and point the user at the desktop settings pane. That path writes the secret without echoing it back.
 
+The outbound `userAgent` is not settable through these tools either — it is the identity every provider request presents, so only the user changes it (desktop settings pane, Providers & Models → Request identity). If the ask is "make the provider stop seeing taco", point the user there instead of patching config.
+
 ## Skills: directory choice
 
 Four user-writable directories in priority order (first match by name wins):

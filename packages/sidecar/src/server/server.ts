@@ -97,6 +97,7 @@ import { createQueuedWatch, type QueuedWatch } from "../runtime/harness/queuedWa
 import { resolveProvider, resolveProviderEndpoint } from "../runtime/models/modelRegistry.ts";
 import type { ProviderKeyStore } from "../runtime/models/providerKeyStore.ts";
 import type { ImageContent, TextContent, ThinkingLevel } from "../runtime/pi/types.ts";
+import { setRequestIdentity } from "../runtime/requestIdentity.ts";
 import { resourceRoot } from "../runtime/runtimeResources.ts";
 import type {
     ChannelControl,
@@ -511,6 +512,7 @@ export class SidecarServer implements ServerRpcSurface {
             resolveConfig: resolver,
         };
         this.configSnapshot = config;
+        setRequestIdentity({ userAgent: config.userAgent });
         this.workspaces =
             options.workspaceRegistry ?? new WorkspaceRegistry((cwd) => this.buildWorkspace(cwd));
         this.idempotency = new CommandIdempotencyGate({
@@ -1201,6 +1203,7 @@ export class SidecarServer implements ServerRpcSurface {
         if (changed("defaultThinkingLevel"))
             this.options.defaultThinkingLevel = next.defaultThinkingLevel;
         if (changed("mcpServers")) this.mcpServers = next.mcpServers ?? [];
+        if (changed("userAgent")) setRequestIdentity({ userAgent: next.userAgent });
         if (changed("apiKeys") || catalogChanged) this.broadcastModelsChanged();
         this.configSnapshot = next;
     }

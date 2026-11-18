@@ -506,7 +506,12 @@
       "advancedDesc": "Restart the background service to apply changes that only take effect after a restart (added or removed channels, plugins, MCP servers). Active chats will be interrupted.",
       "restartSidecar": "Restart background service",
       "restarting": "Restarting…"
-    }
+    },
+    "requestIdentityTitle": "Request identity",
+    "requestIdentityDesc": "Custom User-Agent sent to model providers. Leave empty to keep the default identity taco/<version>.",
+    "userAgentPlaceholder": "my-gateway/1.0",
+    "userAgentHint": "With a custom User-Agent, providers no longer receive the taco version header. Intended for self-hosted gateways or relays — make sure it complies with your provider's terms. Applies to new chats immediately; open chats pick it up on their next reconnect.",
+    "userAgentInvalid": "Only printable ASCII characters are allowed, up to 256 characters"
   },
   "context": {
     "indicatorLabel": "Context usage",

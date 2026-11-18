@@ -19,7 +19,8 @@
 import { MEMORY_CONTENT_MAX_CHARS } from "@taco-ai/protocol";
 import { createLogger } from "../../lib/logger.ts";
 import type { Api, Model, Models } from "../../runtime/pi/types.ts";
-import { backgroundThinkingLevel, tacoRequestHeaders } from "../../runtime/runtimeResources.ts";
+import { buildRequestHeaders } from "../../runtime/requestIdentity.ts";
+import { backgroundThinkingLevel } from "../../runtime/runtimeResources.ts";
 import type { LocalMemoryStore } from "../local/store.ts";
 import { readMemorySubmission } from "../submission.ts";
 import { type MemoryEntry, type MemoryUpdateOptions, unionMemorySources } from "../types.ts";
@@ -415,7 +416,7 @@ async function planDream(
                 // never emit a plan. pi falls back to the model's own cap.
                 temperature: LLM_TEMPERATURE,
                 reasoning: backgroundThinkingLevel(deps.model),
-                headers: tacoRequestHeaders(),
+                headers: buildRequestHeaders(),
                 signal: callSignal,
             },
         );
