@@ -984,6 +984,73 @@ describe("SessionRegistry", () => {
         }
     });
 
+    it("applies a queued re-attach's policy and prompt after the first attach wins the slot", async () => {
+        const sr = makeRegistry();
+        const id = uuidv7();
+        await seedSession(sr.repo, id);
+        sr.invalidateListCache();
+
+        const budgets: unknown[] = [];
+        const policies: unknown[] = [];
+        const prompts: string[] = [];
+        const originalCreate = AttachedSession.create;
+        let releaseCreate = (): void => {};
+        const createGate = new Promise<void>((resolve) => {
+            releaseCreate = resolve;
+        });
+        let createStarted = (): void => {};
+        const started = new Promise<void>((resolve) => {
+            createStarted = resolve;
+        });
+        AttachedSession.create = (async (args: Parameters<typeof AttachedSession.create>[0]) => {
+            createStarted();
+            await createGate;
+            return {
+                session: args.session,
+                on: () => undefined,
+                dispose: () => args.session.close(harnessContext),
+                setSubagentBudget: (thunk: () => unknown) => {
+                    budgets.push(thunk());
+                },
+                setToolLoadPolicy: async (policy: unknown) => {
+                    policies.push(policy);
+                    return false;
+                },
+                setSystemPrompt: (prompt: string) => {
+                    prompts.push(prompt);
+                },
+            } as unknown as AttachedSession;
+        }) as typeof AttachedSession.create;
+
+        try {
+            const first = sr.attachChild(asSessionId(id), { thinkingLevel: "off" }, [
+                fakeTool("t"),
+            ]);
+            await started;
+            const secondBudget = { turnsUsed: 3, startedAt: 2 };
+            const second = sr.attachChild(
+                asSessionId(id),
+                {
+                    thinkingLevel: "off",
+                    getSubagentBudget: () => secondBudget,
+                    toolLoadPolicy: agentToolPolicy(["read"], 1),
+                },
+                [fakeTool("t")],
+                undefined,
+                "resumed prompt",
+            );
+            releaseCreate();
+            await Promise.all([first, second]);
+
+            assert.deepEqual(budgets, [secondBudget]);
+            assert.equal(policies.length, 1, "the queued resume must not lose its tool policy");
+            assert.deepEqual(prompts, ["resumed prompt"]);
+        } finally {
+            AttachedSession.create = originalCreate;
+            await sr.detach(asSessionId(id));
+        }
+    });
+
     it("attach waits for an in-flight detached read instead of failing on the open", async () => {
         const sr = makeRegistry();
         const id = uuidv7();

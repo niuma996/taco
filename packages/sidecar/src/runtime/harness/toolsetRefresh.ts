@@ -97,10 +97,10 @@ export function createToolsetRefresher(args: ToolsetRefreshArgs): () => Promise<
  * matches — the prompt then offers `read` while pi rejects the call as
  * unavailable.
  *
- * Add-only on purpose: a persisted name with no definition may be a tool whose
- * load failed this time (an MCP server that is down), and dropping it would
- * lose the tool for good. Returns whether the allowlist changed; an equal list
- * is left untouched so the steady state stays byte-identical.
+ * Add-only on purpose: removing names with no definition is the separate
+ * prune's job, so this alignment cannot hide a session-owned dynamic tool.
+ * Returns whether the allowlist changed; an equal list is left untouched so
+ * the steady state stays byte-identical.
  */
 export function alignActiveTools(
     toolState: SessionToolState,
@@ -140,29 +140,41 @@ export async function pruneLoadRefusedTools(
 }
 
 /**
- * Remove policy-denied file-tool names from the persisted allowlist at attach.
+ * Remove active names whose definitions could not be restored in this process.
  *
- * `restoreTools` refuses to load exactly these names, so without this prune
- * the allowlist would name a tool with no definition behind it — which pi
- * rejects as `configured_tools_unavailable`, failing every turn of the
- * session until the policy flips back. Dropping the name is safe: a later
- * allow flip re-offers the tool in the `<deferred_tools>` catalog and
- * `addTools` re-loads it, so the tool is one model call away, not lost.
+ * The harness rejects a generation when its persisted allowlist names a tool
+ * absent from the current definition set. When the deferred or MCP candidate
+ * still exists it can be loaded again through the catalog, but it cannot remain
+ * active while missing.
+ */
+export function pruneUndefinedTools(toolState: SessionToolState): Promise<boolean> {
+    return toolState.update(({ tools, activeNames }) => {
+        const defined = new Set(tools.map((tool) => tool.name));
+        const unavailable = activeNames.filter((name) => !defined.has(name));
+        if (unavailable.length === 0) return undefined;
+        const removed = new Set(unavailable);
+        return { activeNames: activeNames.filter((name) => !removed.has(name)) };
+    });
+}
+
+/**
+ * Remove policy-denied file-tool names from the active allowlist.
  *
- * Only names with no definition behind them are removed: a denied name that
- * is nonetheless defined (an always-loaded candidate; a tool loaded before a
- * mid-process flip) keeps its entry, and execution-time refusal owns it.
+ * This covers both a deferred tool that restore refused (no definition, which
+ * pi would reject as `configured_tools_unavailable`) and an always or already
+ * loaded tool whose definition is still present. The latter must be hidden too:
+ * extension tools declare file access centrally and need not implement their
+ * own IM refusal. Definitions stay installed so a later allow can reactivate
+ * deferred tools through `addTools`, and static/always tools through alignment,
+ * without loading the candidate again.
  */
 export async function pruneDeniedFsTools(
     toolState: SessionToolState,
     fsToolsDenied: boolean,
 ): Promise<boolean> {
     if (!fsToolsDenied) return false;
-    return toolState.update(({ tools, activeNames }) => {
-        const defined = new Set(tools.map((t) => t.name));
-        const revoked = activeNames.filter(
-            (name) => !defined.has(name) && isFsToolDenied(name, fsToolsDenied),
-        );
+    return toolState.update(({ activeNames }) => {
+        const revoked = activeNames.filter((name) => isFsToolDenied(name, fsToolsDenied));
         if (revoked.length === 0) return undefined;
         const removed = new Set(revoked);
         return { activeNames: activeNames.filter((name) => !removed.has(name)) };

@@ -35,6 +35,21 @@ export interface ToolCandidate {
     load(): Promise<TacoTool>;
 }
 
+/**
+ * Load a candidate without allowing its definition to escape under another
+ * name. The allowlist is keyed by the candidate name; installing a differently
+ * named tool would make the next generation fail as configured_tools_unavailable.
+ */
+export async function loadToolCandidate(candidate: ToolCandidate): Promise<TacoTool> {
+    const tool = await candidate.load();
+    if (tool.name !== candidate.name) {
+        throw new Error(
+            `tool candidate "${candidate.name}" returned a definition named "${tool.name}"`,
+        );
+    }
+    return tool;
+}
+
 export interface DeferredToolRegistry {
     /** All candidates (frozen snapshot, does not change with MCP connect/disconnect). */
     listCandidates(): readonly ToolCandidate[];
@@ -101,7 +116,7 @@ export class DefaultDeferredToolRegistry implements DeferredToolRegistry {
     async load(name: string): Promise<TacoTool | undefined> {
         const candidate = this.byName.get(name);
         if (!candidate) return undefined;
-        return candidate.load();
+        return loadToolCandidate(candidate);
     }
 
     async prepare(): Promise<void> {
@@ -178,7 +193,7 @@ export class CompositeDeferredToolRegistry implements DeferredToolRegistry {
 
     async load(name: string): Promise<TacoTool | undefined> {
         const extension = this.extensionByName.get(name);
-        return extension ? extension.load() : this.base.load(name);
+        return extension ? loadToolCandidate(extension) : this.base.load(name);
     }
 
     async prepare(): Promise<void> {

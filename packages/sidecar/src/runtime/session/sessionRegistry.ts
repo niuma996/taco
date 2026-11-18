@@ -1060,21 +1060,24 @@ export class SessionRegistry extends EventEmitter {
         /** The workspace-owned subset of `tools` — the per-turn refresh's first baseline. */
         workspaceTools?: TacoTool[],
     ): Promise<AttachedSession> {
-        const existing = this.attached.get(sessionId);
-        if (existing) {
-            await existing.syncAgentCommunicationTools?.(tools);
+        const updateExisting = async (attached: AttachedSession): Promise<void> => {
+            await attached.syncAgentCommunicationTools?.(tools);
             // A resume re-attaches to the mounted session. The harness hooks
             // were wired at create time, so any run-scoped control the caller
             // brought must be pushed onto the live handle or it is ignored.
             if (systemPrompt !== undefined) {
-                existing.setSystemPrompt(systemPrompt);
+                attached.setSystemPrompt(systemPrompt);
             }
             if (opts.toolLoadPolicy !== undefined) {
-                await existing.setToolLoadPolicy(opts.toolLoadPolicy);
+                await attached.setToolLoadPolicy(opts.toolLoadPolicy);
             }
             if (opts.getSubagentBudget !== undefined) {
-                existing.setSubagentBudget(opts.getSubagentBudget);
+                attached.setSubagentBudget(opts.getSubagentBudget);
             }
+        };
+        const existing = this.attached.get(sessionId);
+        if (existing) {
+            await updateExisting(existing);
             return existing;
         }
 
@@ -1092,7 +1095,13 @@ export class SessionRegistry extends EventEmitter {
             // A queued read may have attached it, or another attach may have
             // won the slot while this one waited.
             const nowExisting = this.attached.get(sessionId);
-            if (nowExisting) return nowExisting;
+            if (nowExisting) {
+                // The winner may have been a read or an older resume. This
+                // caller's newer policy/prompt/budget still has to reach the
+                // handle; returning it untouched can run with the old allowlist.
+                await updateExisting(nowExisting);
+                return nowExisting;
+            }
 
             const session = await this.openPersistedSession(sessionId);
             let attached: AttachedSession;

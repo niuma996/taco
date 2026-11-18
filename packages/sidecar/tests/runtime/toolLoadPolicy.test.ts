@@ -10,7 +10,10 @@ import {
     loadableCandidates,
 } from "../../src/runtime/harness/sessionToolController.ts";
 import { SessionToolState } from "../../src/runtime/harness/sessionToolState.ts";
-import { pruneLoadRefusedTools } from "../../src/runtime/harness/toolsetRefresh.ts";
+import {
+    pruneDeniedFsTools,
+    pruneLoadRefusedTools,
+} from "../../src/runtime/harness/toolsetRefresh.ts";
 import type { TacoTool } from "../../src/tools/index.ts";
 
 /**
@@ -64,12 +67,18 @@ function fakeCollection() {
     };
 }
 
-function makeController(loadPolicy?: ReturnType<typeof agentToolPolicy>) {
+function makeController(
+    loadPolicy?: ReturnType<typeof agentToolPolicy>,
+    fsToolsDenied: boolean | (() => boolean) = false,
+) {
     const registry = new DefaultDeferredToolRegistry({
         candidates: [candidate("configPatch"), candidate("pdfMerge")],
     });
     const { state, collection } = fakeCollection();
-    const controller = new DefaultSessionToolController(registry, loadPolicy ? { loadPolicy } : {});
+    const controller = new DefaultSessionToolController(registry, {
+        ...(loadPolicy ? { loadPolicy } : {}),
+        fsToolsDenied: typeof fsToolsDenied === "function" ? fsToolsDenied : () => fsToolsDenied,
+    });
     const toolState = new SessionToolState(collection);
     controller.bindHarness(toolState);
     return { controller, state, toolState };
@@ -161,6 +170,96 @@ describe("DefaultSessionToolController — load policy", () => {
     });
 });
 
+describe("DefaultSessionToolController — inactive and stale definitions", () => {
+    it("activates a defined but inactive tool without loading it again", async () => {
+        const { controller, state } = makeController();
+        await controller.addTools(["pdfMerge"]);
+        const definition = state.tools[0];
+        state.active = [];
+
+        const result = await controller.addTools(["pdfMerge"]);
+
+        assert.deepEqual(result.added, ["pdfMerge"]);
+        assert.deepEqual(result.skipped, []);
+        assert.deepEqual(state.active, ["pdfMerge"]);
+        assert.deepEqual(
+            state.tools.map((t) => t.name),
+            ["pdfMerge"],
+        );
+        assert.equal(state.tools[0], definition, "the retained definition must be reused");
+    });
+
+    it("does not activate a defined tool while file tools are denied", async () => {
+        let denied = false;
+        const { controller, state } = makeController(undefined, () => denied);
+        await controller.addTools(["pdfMerge"]);
+        state.active = [];
+        denied = true;
+
+        const result = await controller.addTools(["pdfMerge"]);
+
+        assert.deepEqual(result.added, []);
+        assert.deepEqual(
+            result.blocked.map((entry) => entry.name),
+            ["pdfMerge"],
+        );
+        assert.deepEqual(state.active, []);
+    });
+
+    it("does not activate an arbitrary resident definition it did not load", async () => {
+        const { controller, state } = makeController();
+        state.tools = [tool("read")];
+
+        const result = await controller.addTools(["read"]);
+
+        assert.deepEqual(result.added, []);
+        assert.deepEqual(result.skipped, ["read"]);
+        assert.deepEqual(state.active, []);
+    });
+
+    it("repairs an active name whose definition is missing", async () => {
+        const { controller, state } = makeController();
+        state.active = ["configPatch"];
+
+        const result = await controller.addTools(["configPatch"]);
+
+        assert.deepEqual(result.added, ["configPatch"]);
+        assert.deepEqual(state.active, ["configPatch"]);
+        assert.deepEqual(
+            state.tools.map((t) => t.name),
+            ["configPatch"],
+        );
+    });
+
+    it("rejects a candidate whose factory returns a different tool name", async () => {
+        const registry = new DefaultDeferredToolRegistry({
+            candidates: [
+                {
+                    name: "declared-name",
+                    summary: "mismatched",
+                    loading: "deferred",
+                    source: "extension",
+                    load: async () => tool("actual-name"),
+                },
+            ],
+        });
+        const { state, collection } = fakeCollection();
+        const controller = new DefaultSessionToolController(registry);
+        controller.bindHarness(new SessionToolState(collection));
+
+        const result = await controller.addTools(["declared-name"]);
+
+        assert.deepEqual(result.added, []);
+        assert.deepEqual(
+            result.failed.map((entry) => entry.name),
+            ["declared-name"],
+        );
+        assert.deepEqual(state.tools, []);
+        assert.deepEqual(state.active, []);
+        assert.deepEqual(await controller.restoreTools(["declared-name"]), []);
+    });
+});
+
 describe("setLoadPolicy", () => {
     it("revokes a tool an earlier, looser policy allowed", async () => {
         const { controller, state } = makeController();
@@ -234,6 +333,20 @@ describe("setLoadPolicy", () => {
         assert.equal(changed, true);
         assert.deepEqual(state.active, ["configPatch"]);
     });
+
+    it("does not re-activate a dynamic file tool while file tools are denied", async () => {
+        let denied = false;
+        const { controller, state } = makeController(undefined, () => denied);
+        await controller.addTools(["pdfMerge"]);
+        await controller.setLoadPolicy(agentToolPolicy(["read"], 1));
+        assert.deepEqual(state.active, []);
+
+        denied = true;
+        const changed = await controller.setLoadPolicy(agentToolPolicy(["read", "pdfMerge"], 1));
+
+        assert.equal(changed, false);
+        assert.deepEqual(state.active, []);
+    });
 });
 
 describe("loadableCandidates", () => {
@@ -272,6 +385,35 @@ describe("pruneLoadRefusedTools", () => {
         state.active = ["read"];
         const toolState = new SessionToolState(collection);
         assert.equal(await pruneLoadRefusedTools(toolState, () => false), false);
+        assert.deepEqual(state.active, ["read"]);
+    });
+});
+
+describe("pruneDeniedFsTools", () => {
+    it("deactivates every denied file tool, including one with a definition", async () => {
+        const { collection, state } = fakeCollection();
+        state.tools = [tool("read"), tool("pdfMerge"), tool("shell")];
+        state.active = ["read", "pdfMerge", "shell", "memory"];
+        const toolState = new SessionToolState(collection);
+
+        const changed = await pruneDeniedFsTools(toolState, true);
+
+        assert.equal(changed, true);
+        assert.deepEqual(state.active, ["shell", "memory"]);
+        assert.deepEqual(
+            state.tools.map((t) => t.name),
+            ["read", "pdfMerge", "shell"],
+            "hiding a tool must not discard its definition",
+        );
+    });
+
+    it("writes nothing while file tools are allowed", async () => {
+        const { collection, state } = fakeCollection();
+        state.tools = [tool("read")];
+        state.active = ["read"];
+        const toolState = new SessionToolState(collection);
+
+        assert.equal(await pruneDeniedFsTools(toolState, false), false);
         assert.deepEqual(state.active, ["read"]);
     });
 });
