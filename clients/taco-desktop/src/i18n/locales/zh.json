@@ -1305,7 +1305,6 @@
   "git": {
     "status": "工作区 Git 状态",
     "loading": "正在检查 Git…",
-    "refreshing": "正在刷新…",
     "missing": "尚未安装 Git",
     "notRepository": "尚未创建 Git 仓库",
     "create": "创建仓库",

@@ -1,5 +1,6 @@
+import { focusManager } from "@tanstack/react-query";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { WorkspaceGitStatus } from "../../src/components/WorkspaceGitStatus";
 import * as useI18n from "../../src/i18n/useI18n";
@@ -24,6 +25,7 @@ const repo = {
 afterEach(() => {
     cleanup();
     vi.clearAllMocks();
+    focusManager.setFocused(undefined);
 });
 function mount(data: unknown, notify = vi.fn()) {
     const client = {
@@ -41,6 +43,28 @@ describe("WorkspaceGitStatus", () => {
         expect(await screen.findByText(repo.repository.branch)).toBeTruthy();
         expect(screen.getByText(repo.repository.branch).title).toBe(repo.repository.branch);
         expect(screen.queryByRole("button", { name: "git.create" })).toBeNull();
+    });
+    it("keeps the branch visible without a background refresh indicator", async () => {
+        const { client } = mount(repo);
+        await screen.findByText(repo.repository.branch);
+        let complete: ((value: typeof repo) => void) | undefined;
+        client.gitInspect.mockImplementationOnce(
+            () =>
+                new Promise((resolve) => {
+                    complete = resolve;
+                }),
+        );
+        await act(async () => {
+            focusManager.setFocused(false);
+            focusManager.setFocused(true);
+        });
+        await waitFor(() => expect(client.gitInspect).toHaveBeenCalledTimes(2));
+        expect(screen.getByText(repo.repository.branch)).toBeTruthy();
+        expect(screen.queryByText("git.refreshing")).toBeNull();
+        expect(screen.getByLabelText("git.status").getAttribute("aria-busy")).toBe("false");
+        await act(async () => {
+            complete?.(repo);
+        });
     });
     it("offers explicit initialization only for a non-repository", async () => {
         const { client } = mount({ status: "not_repository" });

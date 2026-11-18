@@ -74,7 +74,7 @@ describe("useGitWorkspace", () => {
         expect(client.gitInspect).not.toHaveBeenCalled();
     });
 
-    it("refreshes every five seconds and on focus", async () => {
+    it("refreshes every ten seconds and on focus", async () => {
         vi.useFakeTimers();
         const client = { gitInspect: vi.fn().mockResolvedValue(repository), gitInit: vi.fn() };
         const { wrapper } = queryWrapper();
@@ -84,7 +84,11 @@ describe("useGitWorkspace", () => {
         });
         expect(client.gitInspect).toHaveBeenCalledTimes(1);
         await act(async () => {
-            await vi.advanceTimersByTimeAsync(5000);
+            await vi.advanceTimersByTimeAsync(9_000);
+        });
+        expect(client.gitInspect).toHaveBeenCalledTimes(1);
+        await act(async () => {
+            await vi.advanceTimersByTimeAsync(1000);
         });
         expect(client.gitInspect).toHaveBeenCalledTimes(2);
         await act(async () => {

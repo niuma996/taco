@@ -20,7 +20,7 @@ export function useGitWorkspace(
         enabled,
         retry: false,
         staleTime: 1000,
-        refetchInterval: 5000,
+        refetchInterval: 10_000,
         refetchOnWindowFocus: "always",
         queryFn: ({ signal }): Promise<GitInspectResult> => {
             signal.throwIfAborted();

@@ -50,16 +50,13 @@ export function WorkspaceGitStatus({ client, cwd, notify }: WorkspaceGitStatusPr
         <div
             className="workspace-git-status"
             aria-label={t("git.status")}
-            aria-busy={git.refreshing || git.initializing}
+            aria-busy={git.loading || git.initializing}
         >
             <div className="workspace-git-status__summary">
                 <GitBranch size={14} aria-hidden="true" />
                 <span className="workspace-git-status__label" title={branch ?? label ?? undefined}>
                     {label}
                 </span>
-                {git.refreshing && result && (
-                    <span className="workspace-git-status__refresh">{t("git.refreshing")}</span>
-                )}
             </div>
             <div className="workspace-git-status__actions">
                 {result?.status === "not_repository" && (

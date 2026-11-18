@@ -423,9 +423,6 @@ footer.input > .ui-collapse[data-open="true"] {
     text-overflow: ellipsis;
     white-space: nowrap;
 }
-.workspace-git-status__refresh {
-    flex-shrink: 0;
-}
 .workspace-git-status__actions {
     display: flex;
     flex-wrap: wrap;
