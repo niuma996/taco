@@ -1300,6 +1300,18 @@ describe("attachedSession.deferredTools", () => {
             );
             await reloaded.prompt("hi");
             await reloaded.abort();
+
+            // The name is not forgotten: the next attach retries it and restores
+            // it once the server is back, without the model asking for it.
+            failLoad = false;
+            const recovered = await AttachedSession.create(opts);
+            assert.ok(
+                ((await recovered.toolController?.activeToolNames()) ?? []).includes(
+                    "flaky-mcp-tool",
+                ),
+                "a pending name is retried and re-activated on recovery",
+            );
+            await recovered.abort();
         });
 
         it("continues after resident renames and MCP disappearance, then reloads MCP on recovery", async () => {
@@ -1361,12 +1373,11 @@ describe("attachedSession.deferredTools", () => {
             await upgraded.prompt("continue");
             await upgraded.abort();
 
-            // A later process discovers the same MCP tool again. It is deliberately
-            // not auto-activated from an old allowlist; addTools performs an
-            // explicit, policy-checked reload and the next generation can use it.
+            // A later process discovers the same MCP tool again: the name kept on
+            // the session is retried at attach, so it returns automatically.
             const recovered = await build([fakeTool("renamedBuiltin")], withMcp);
-            const added = await recovered.toolController?.addTools(["mcp__server__query"]);
-            assert.deepEqual(added?.added, ["mcp__server__query"]);
+            const recoveredActive = (await recovered.toolController?.activeToolNames()) ?? [];
+            assert.ok(recoveredActive.includes("mcp__server__query"));
             await recovered.prompt("continue again");
             await recovered.abort();
         });

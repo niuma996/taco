@@ -143,18 +143,21 @@ export async function pruneLoadRefusedTools(
  * Remove active names whose definitions could not be restored in this process.
  *
  * The harness rejects a generation when its persisted allowlist names a tool
- * absent from the current definition set. When the deferred or MCP candidate
- * still exists it can be loaded again through the catalog, but it cannot remain
- * active while missing.
+ * absent from the current definition set. The caller records the returned names
+ * so a later attach can retry them: an MCP server that was down during
+ * discovery contributes no candidates and is never re-discovered in this
+ * process, so retrying at the next attach is the only recovery path.
  */
-export function pruneUndefinedTools(toolState: SessionToolState): Promise<boolean> {
-    return toolState.update(({ tools, activeNames }) => {
+export async function pruneUndefinedTools(toolState: SessionToolState): Promise<string[]> {
+    let removed: string[] = [];
+    await toolState.update(({ tools, activeNames }) => {
         const defined = new Set(tools.map((tool) => tool.name));
-        const unavailable = activeNames.filter((name) => !defined.has(name));
-        if (unavailable.length === 0) return undefined;
-        const removed = new Set(unavailable);
-        return { activeNames: activeNames.filter((name) => !removed.has(name)) };
+        removed = activeNames.filter((name) => !defined.has(name));
+        if (removed.length === 0) return undefined;
+        const dropped = new Set(removed);
+        return { activeNames: activeNames.filter((name) => !dropped.has(name)) };
     });
+    return removed;
 }
 
 /**

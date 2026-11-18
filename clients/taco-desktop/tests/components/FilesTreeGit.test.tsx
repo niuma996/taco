@@ -87,6 +87,30 @@ describe("Git file tree", () => {
             screen.getAllByRole("treeitem").filter((row) => row.tabIndex === -1),
         ).not.toHaveLength(0);
     });
+    it("moves focus with arrows without snapping back to the first row", () => {
+        const onSelect = vi.fn();
+        render(
+            <FilesTreeView
+                entriesByDir={new Map([["", [entry("a.ts"), entry("b.ts"), entry("c.ts")]]])}
+                expanded={new Set()}
+                selectedRelPath={null}
+                onSelect={onSelect}
+                onToggleExpand={vi.fn()}
+            />,
+        );
+        const [first, second, third] = screen.getAllByRole("treeitem");
+        fireEvent.keyDown(screen.getByRole("tree"), { key: "ArrowDown" });
+        expect(document.activeElement).toBe(first);
+        second.focus();
+        fireEvent.keyDown(second, { key: "ArrowDown" });
+        expect(document.activeElement).toBe(third);
+        fireEvent.keyDown(third, { key: "ArrowUp" });
+        expect(document.activeElement).toBe(second);
+        fireEvent.keyDown(second, { key: "Enter" });
+        expect(onSelect).toHaveBeenCalledWith("b.ts");
+        // Row-level Enter must not hand focus back to the tree root entry row.
+        expect(document.activeElement).toBe(second);
+    });
     it("synthesizes deleted files and missing ancestors without allowing preview", () => {
         const onSelect = vi.fn();
         const snapshot = new Map([["", [entry("live.ts")]]]);

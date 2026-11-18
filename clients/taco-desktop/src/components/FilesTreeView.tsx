@@ -35,6 +35,8 @@ export function FilesTreeView(props: FilesTreeViewProps) {
             role="tree"
             tabIndex={0}
             onKeyDown={(event) => {
+                // Rows handle their own keys; only act when the tree root itself is focused.
+                if (event.target !== event.currentTarget) return;
                 if (event.key !== "ArrowDown" && event.key !== "Enter") return;
                 event.preventDefault();
                 event.currentTarget

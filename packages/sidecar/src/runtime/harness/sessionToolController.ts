@@ -229,7 +229,8 @@ export class DefaultSessionToolController implements SessionToolController {
      * Restores tools persisted in the session branch transcript. Candidates
      * still in the registry are restored; vanished or failed candidates are
      * skipped silently. The attach-time toolset reconciliation removes their
-     * names from the active allowlist so the harness can continue prompting.
+     * names from the active allowlist so the harness can continue prompting,
+     * and records them on the session for a retry on the next attach.
      * A file tool the session's policy denies is skipped too: loading it
      * would install a tool whose every call refuses, so the attach-time
      * prune (`pruneDeniedFsTools` in toolsetRefresh.ts) also drops its name —

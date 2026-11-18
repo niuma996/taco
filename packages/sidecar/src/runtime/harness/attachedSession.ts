@@ -115,6 +115,40 @@ const MEMORY_EXTRACTION_CURSOR = value<string>("taco.memory.extractionCursor");
 const MEMORY_EXTRACTION_GATE = value<import("../../memory/types.ts").MemoryExtractionGateState>(
     "taco.memory.extractionGate",
 );
+/**
+ * Tool names whose definitions were missing when the session attached. They are
+ * removed from the lane allowlist (pi rejects a generation otherwise) but kept
+ * here so the next attach can retry them; bounded so repeated renames cannot
+ * grow the session file without limit.
+ */
+const PENDING_TOOL_NAMES = value<string[]>("taco.toolRestore.pending");
+const PENDING_TOOL_NAMES_LIMIT = 64;
+
+async function readPendingToolNames(session: Session): Promise<string[]> {
+    return (await session.getValue(PENDING_TOOL_NAMES, harnessContext))?.value ?? [];
+}
+
+/**
+ * Record names whose definitions are still missing.
+ *
+ * Only a value that actually changed is written: the steady state must not add
+ * a write to every attach or turn.
+ */
+async function rememberUnavailableTools(
+    session: Session,
+    toolState: SessionToolState,
+    unavailable: readonly string[],
+): Promise<void> {
+    if (unavailable.length === 0) return;
+    const stored = await readPendingToolNames(session);
+    const { tools } = await toolState.read();
+    const defined = new Set(tools.map((tool) => tool.name));
+    const next = [...new Set([...stored, ...unavailable])]
+        .filter((name) => !defined.has(name))
+        .slice(-PENDING_TOOL_NAMES_LIMIT);
+    if (next.length === stored.length && next.every((name, i) => name === stored[i])) return;
+    await session.setValue(PENDING_TOOL_NAMES, next, harnessContext);
+}
 
 const log = createLogger("attachedSession");
 
@@ -502,6 +536,7 @@ export class AttachedSession extends EventEmitter {
         // Dynamic-tool assembly (before harness to avoid construction cycle).
         let toolController: SessionToolController | undefined;
         let initialTools = args.tools;
+        let restored: TacoTool[] = [];
         if (args.toolRegistry) {
             const controller = new DefaultSessionToolController(args.toolRegistry, {
                 // The load-time gate reads the same tool-context signal the
@@ -528,8 +563,17 @@ export class AttachedSession extends EventEmitter {
                 ...args.tools.map((tool) => tool.name),
                 ADD_TOOLS_TOOL_NAME,
             ]);
-            const restored = await controller.restoreTools(
-                persistedActiveNames.filter((name) => !residentRestoreNames.has(name)),
+            // `pendingToolNames` were pruned from the allowlist by an earlier
+            // attach because their definitions were missing then (an MCP server
+            // down during discovery). Discovery never re-runs in a process, so
+            // this attach is the retry.
+            restored = await controller.restoreTools(
+                [
+                    ...new Set([
+                        ...persistedActiveNames,
+                        ...(await readPendingToolNames(args.session)),
+                    ]),
+                ].filter((name) => !residentRestoreNames.has(name)),
             );
 
             // `addTools` is only worth installing when something is loadable.
@@ -732,23 +776,32 @@ export class AttachedSession extends EventEmitter {
         // A resident tool can be renamed or removed by a release, and a deferred
         // or MCP candidate can fail to restore. No persisted name may remain
         // active without a definition: the harness rejects the whole generation.
-        if (await pruneUndefinedTools(toolState)) {
+        const unavailable = await pruneUndefinedTools(toolState);
+        if (unavailable.length > 0) {
             log.info(
                 "pruned tools unavailable in the current process from the persisted allowlist",
                 {
                     sessionId: args.session.metadata.id,
+                    tools: unavailable,
                 },
             );
+            // Keep the names on the session so a later attach can retry them.
+            // Without a registry nothing can ever load them again; the
+            // alignment below restores a resident tool that comes back.
+            if (toolController) {
+                await rememberUnavailableTools(args.session, toolState, unavailable);
+            }
         }
 
         // The lane's persisted allowlist predates this process's toolset;
         // converge it before the first turn rather than waiting on a refresh
-        // that only fires when the workspace set changes mid-process.
+        // that only fires when the workspace set changes mid-process. Restored
+        // pending names are not in the allowlist yet, so they are realigned too.
         if (
-            await alignActiveTools(
-                toolState,
-                args.tools.map((t) => t.name),
-            )
+            await alignActiveTools(toolState, [
+                ...args.tools.map((t) => t.name),
+                ...restored.map((tool) => tool.name),
+            ])
         ) {
             log.info("realigned persisted active tools with the workspace toolset", {
                 sessionId: args.session.metadata.id,
@@ -863,7 +916,12 @@ export class AttachedSession extends EventEmitter {
             }
             // Keep the active-name invariant even if a future dynamic-tool path
             // installs definitions without going through the attach-time prune.
-            await pruneUndefinedTools(toolState);
+            // A workspace tool retired during this process is remembered the
+            // same way, so a later attach retries it.
+            const unavailable = await pruneUndefinedTools(toolState);
+            if (unavailable.length > 0 && toolController) {
+                await rememberUnavailableTools(args.session, toolState, unavailable);
+            }
         };
 
         // Per-session task/plan state must be assigned before wireHarnessHooks —
