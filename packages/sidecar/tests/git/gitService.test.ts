@@ -786,7 +786,7 @@ test("beforeRemove runs inside the queue only after successful validation and ca
         const competing = removeGitWorktree(cwd, created.path, { beforeRemove });
         release?.();
         await removal;
-        await assert.rejects(competing);
+        assert.equal((await competing).removed, true);
         assert.equal(called, 1);
     });
 });

@@ -7,7 +7,8 @@ export interface ManagedWorktreeRecord {
     readonly path: string;
     readonly branch: string;
     readonly managed: true;
-    readonly state?: "removed";
+    readonly state?: "removing" | "removed";
+    readonly removalBranch?: string | null;
     readonly repositoryRoot: string;
     readonly commonDir: string;
     readonly repositoryIdentity: string;
@@ -108,6 +109,24 @@ export class WorktreeMetadataStore {
         );
     }
 
+    async beginRemove(path: string, branch: string | null): Promise<void> {
+        const entries = await this.read();
+        const entry = entries.find((item) => item.path === resolve(path));
+        if (!entry || entry.state === "removed") invalid();
+        await this.write(
+            entries.map((item) =>
+                item === entry
+                    ? {
+                          ...item,
+                          state: "removing",
+                          removalBranch: branch,
+                          lastSeenAt: new Date().toISOString(),
+                      }
+                    : item,
+            ),
+        );
+    }
+
     private validate(value: unknown): asserts value is ManagedWorktreeRecord {
         if (!value || typeof value !== "object") invalid();
         const entry = value as Partial<ManagedWorktreeRecord>;
@@ -117,7 +136,13 @@ export class WorktreeMetadataStore {
             !isSafeWorktreeName(basename(entry.path)) ||
             entry.branch !== `worktree/${basename(entry.path)}` ||
             entry.managed !== true ||
-            (entry.state !== undefined && entry.state !== "removed") ||
+            (entry.state !== undefined &&
+                entry.state !== "removing" &&
+                entry.state !== "removed") ||
+            (entry.removalBranch !== undefined &&
+                entry.removalBranch !== null &&
+                typeof entry.removalBranch !== "string") ||
+            (entry.state === "removing" && entry.removalBranch === undefined) ||
             entry.repositoryRoot !== this.projectRoot ||
             !absolutePath(entry.commonDir) ||
             !absolutePath(entry.gitDir) ||
@@ -143,13 +168,13 @@ export class WorktreeMetadataStore {
             if (
                 paths.has(value.path) ||
                 branches.has(value.branch) ||
-                gitDirs.has(value.gitDir) ||
+                (value.state !== "removed" && gitDirs.has(value.gitDir)) ||
                 (repository !== undefined && repository !== key)
             )
                 invalid();
             paths.add(value.path);
             branches.add(value.branch);
-            gitDirs.add(value.gitDir);
+            if (value.state !== "removed") gitDirs.add(value.gitDir);
             repository = key;
         }
     }

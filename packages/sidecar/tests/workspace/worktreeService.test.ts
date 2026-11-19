@@ -250,7 +250,7 @@ test("missing ordinary paths retain cwd and tombstone resolution never resurrect
         }
         await assert.rejects(inspectGit(created.path));
         await assert.rejects(createGitWorktree(created.path, "cannot-execute", "head"));
-        await assert.rejects(removeGitWorktree(cwd, created.path));
+        assert.equal((await removeGitWorktree(cwd, created.path)).removed, true);
         assert.equal(await readFile(index, "utf8"), before);
         await assert.rejects(lstat(created.path), { code: "ENOENT" });
     });
@@ -295,5 +295,89 @@ test("managed inventory still rejects corrupted ownership metadata", async () =>
         await createGitWorktree(cwd, "owned", "head");
         await writeFile(join(cwd, ".taco", "worktrees", "index.json"), "{broken");
         await assert.rejects(listManagedGitWorktrees(cwd));
+    });
+});
+
+test("removed metadata does not reserve Git admin directory names", async () => {
+    await fixture(async (cwd) => {
+        const external = join(cwd, "same");
+        git(cwd, "worktree", "add", "--detach", external);
+        const first = await createGitWorktree(cwd, "same");
+        const store = new WorktreeMetadataStore(cwd);
+        const old = await store.get(first.path);
+        assert.equal(old?.gitDir, join(cwd, ".git", "worktrees", "same1"));
+        await removeGitWorktree(cwd, first.path);
+        const second = await createGitWorktree(cwd, "same1");
+        assert.equal((await store.get(second.path))?.gitDir, old.gitDir);
+        assert.equal((await store.get(first.path))?.state, "removed");
+        await removeGitWorktree(cwd, second.path);
+    });
+});
+
+test("removal retries finish persisted intent after final metadata write fails", async (t) => {
+    const { resolveGitProjectRoot } = await import("../../src/git/gitService.ts");
+    await fixture(async (cwd) => {
+        const created = await createGitWorktree(cwd, "retry");
+        const remove = t.mock.method(WorktreeMetadataStore.prototype, "remove", async () => {
+            throw new Error("simulated ENOSPC");
+        });
+        await assert.rejects(removeGitWorktree(cwd, created.path), /metadata update failed/);
+        remove.mock.restore();
+        const store = new WorktreeMetadataStore(cwd);
+        assert.equal((await store.get(created.path))?.state, "removing");
+        assert.equal(await resolveGitProjectRoot(created.path), cwd);
+        const beforeRemove = async () =>
+            assert.fail("already removed checkout must not dispose again");
+        assert.equal((await removeGitWorktree(cwd, created.path, { beforeRemove })).removed, true);
+        assert.equal((await store.get(created.path))?.state, "removed");
+        assert.equal(await resolveGitProjectRoot(created.path), cwd);
+        assert.equal((await removeGitWorktree(cwd, created.path)).removed, true);
+        await assert.rejects(removeGitWorktree(cwd, join(cwd, ".taco", "worktrees", "unknown")));
+    });
+});
+
+test("removal intent write failure prevents disposal and Git deletion", async (t) => {
+    await fixture(async (cwd) => {
+        const created = await createGitWorktree(cwd, "intent");
+        const begin = t.mock.method(WorktreeMetadataStore.prototype, "beginRemove", async () => {
+            throw new Error("simulated ENOSPC");
+        });
+        await assert.rejects(
+            removeGitWorktree(cwd, created.path, {
+                beforeRemove: async () => assert.fail("must persist intent before disposal"),
+            }),
+            /simulated ENOSPC/,
+        );
+        begin.mock.restore();
+        assert.equal((await new WorktreeMetadataStore(cwd).get(created.path))?.state, undefined);
+        await removeGitWorktree(cwd, created.path);
+    });
+});
+
+test("pending removal rejects replacement checkouts and retains the actual detached branch", async (t) => {
+    const { resolveGitProjectRoot } = await import("../../src/git/gitService.ts");
+    await fixture(async (cwd) => {
+        const created = await createGitWorktree(cwd, "pending");
+        git(created.path, "checkout", "--detach");
+        const remove = t.mock.method(WorktreeMetadataStore.prototype, "remove", async () => {
+            throw new Error("simulated ENOSPC");
+        });
+        await assert.rejects(removeGitWorktree(cwd, created.path));
+        remove.mock.restore();
+        const record = await new WorktreeMetadataStore(cwd).get(created.path);
+        assert.ok(record);
+        await mkdir(record.gitDir, { recursive: true });
+        assert.equal(await resolveGitProjectRoot(created.path), created.path);
+        await assert.rejects(removeGitWorktree(cwd, created.path));
+        await rm(record.gitDir, { recursive: true });
+        git(cwd, "worktree", "add", "--detach", created.path);
+        await assert.rejects(removeGitWorktree(cwd, created.path), /identity/);
+        git(cwd, "worktree", "remove", created.path);
+        await mkdir(created.path);
+        await assert.rejects(removeGitWorktree(cwd, created.path));
+        await rm(created.path, { recursive: true });
+        const result = await removeGitWorktree(cwd, created.path);
+        assert.equal(result.branch, null);
+        assert.equal((await removeGitWorktree(cwd, created.path)).branch, null);
     });
 });

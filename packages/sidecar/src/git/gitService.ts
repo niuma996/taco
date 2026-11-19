@@ -360,6 +360,16 @@ async function mainCheckout(repository: GitRepositoryInfo, signal: AbortSignal):
     return realpath(mainPath);
 }
 
+async function missingPath(path: string): Promise<boolean> {
+    try {
+        await lstat(path);
+        return false;
+    } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") return true;
+        throw error;
+    }
+}
+
 /** Missing paths can recover history ownership only from an explicit, verified removal record. */
 async function removedWorktreeProjectRoot(
     cwd: string,
@@ -392,7 +402,12 @@ async function removedWorktreeProjectRoot(
         const record = await new WorktreeMetadataStore(projectRoot).get(
             join(projectRoot, ".taco", "worktrees", basename(tree)),
         );
-        if (record?.state !== "removed") return undefined;
+        if (
+            !record ||
+            (record.state !== "removed" &&
+                !(record.state === "removing" && (await missingPath(record.gitDir))))
+        )
+            return undefined;
         const repository = await probe(projectRoot, signal);
         if (
             typeof repository === "string" ||
@@ -820,6 +835,26 @@ export async function removeGitWorktree(
             listing.status === "repository"
                 ? listing.worktrees.find((tree) => tree.path === target)
                 : undefined;
+        if (
+            !entry &&
+            (record.state === "removing" || record.state === "removed") &&
+            record.commonDir === source.commonDir &&
+            record.repositoryIdentity === sourceIdentity
+        ) {
+            // Only a persisted deletion intent can finish without a live checkout to verify.
+            if (
+                (await missingPath(target)) &&
+                (record.state === "removed" || (await missingPath(record.gitDir)))
+            ) {
+                if (record.state !== "removed") await store.remove(target);
+                return {
+                    path: target,
+                    branch:
+                        record.removalBranch === undefined ? record.branch : record.removalBranch,
+                    removed: true,
+                };
+            }
+        }
         if (!entry || entry.locked || entry.bare || entry.prunable)
             throw new GitServiceError("command_failed", "Worktree is unavailable or locked");
         if (!(await matchesOwnership(record, entry, source, projectRoot, signal)))
@@ -828,6 +863,7 @@ export async function removeGitWorktree(
                 "Worktree repository identity does not match Taco metadata",
             );
         await assertClean(target, signal);
+        await store.beginRemove(target, entry.branch);
         await options?.beforeRemove?.();
         try {
             await git(projectRoot, ["worktree", "remove", "--", target], signal);
