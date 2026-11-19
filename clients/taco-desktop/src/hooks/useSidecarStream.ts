@@ -21,6 +21,7 @@ import type {
     ToolCallStartParams,
     ToolCallUpdateParams,
     WorkspaceAssociationKey,
+    WorktreeChangedParams,
 } from "@taco-ai/protocol";
 import { asSessionId, asWorkspaceId, PushMethods } from "@taco-ai/protocol";
 import type { UnlistenFn } from "@tauri-apps/api/event";
@@ -169,6 +170,8 @@ export interface UseSidecarStreamOpts {
      * the pane re-pulls the whole overview.
      */
     onWorkChanged?: () => void;
+    /** Process-level invalidation of Git metadata and worktree inventory. */
+    onWorktreeChanged?: (params: WorktreeChangedParams) => void;
     /**
      * Pre-dispose notice: a policy change is about to interrupt live
      * conversations on `channelId`. Reserved for a future desktop warning —
@@ -469,6 +472,9 @@ export function useSidecarStream(
     );
     const onConversationsChangedRef = useStableCallback(() => opts.onConversationsChanged?.());
     const onWorkChangedRef = useStableCallback(() => opts.onWorkChanged?.());
+    const onWorktreeChangedRef = useStableCallback((params: WorktreeChangedParams) =>
+        opts.onWorktreeChanged?.(params),
+    );
     const onImPolicyChangedRef = useStableCallback((channelId: string) =>
         opts.onImPolicyChanged?.(channelId),
     );
@@ -599,6 +605,10 @@ export function useSidecarStream(
                 onWorkChangedRef();
                 return;
             }
+            if (push.method === PushMethods.WorktreeChanged) {
+                onWorktreeChangedRef(push.params as WorktreeChangedParams);
+                return;
+            }
             if (push.method === PushMethods.ImPolicyChanged) {
                 const params = push.params as { channelId?: string } | undefined;
                 if (params?.channelId) onImPolicyChangedRef(params.channelId);
@@ -686,6 +696,7 @@ export function useSidecarStream(
         onConversationsChangedRef,
         onImPolicyChangedRef,
         onWorkChangedRef,
+        onWorktreeChangedRef,
         onImWorkspacesInvalidatedRef,
         onWorkspaceAssociationsChangedRef,
         onLlmDumpLineRef,

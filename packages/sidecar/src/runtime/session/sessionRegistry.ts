@@ -1233,6 +1233,11 @@ export class SessionRegistry extends EventEmitter {
         return this.attached.get(sessionId);
     }
 
+    /** Attached main and child sessions retain the execution directory until detached. */
+    get attachedCount(): number {
+        return this.attached.size;
+    }
+
     /**
      * Iterate currently-attached sessions and invalidate each compaction cache.
      * Called by the workspace → server chain after `settings.write` updates the

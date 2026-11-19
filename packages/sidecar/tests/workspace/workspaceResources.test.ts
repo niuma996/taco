@@ -24,6 +24,23 @@ test("resource owners preserve local storage, execution and routing identities",
     });
 });
 
+test("worktree resources share project memory and configuration but keep execution checkpoints", async () => {
+    const { resolveWorkspaceResourceOwners } = await import(
+        "../../src/workspace/workspaceResources.ts"
+    );
+    const scope = scopeModule.createWorkspaceScope(
+        asWorkspaceId("/repo/.taco/worktrees/feature"),
+        "/repo/.taco/worktrees/feature",
+        "/repo/.taco/worktrees/feature",
+        "/repo",
+    );
+    assert.deepEqual(resolveWorkspaceResourceOwners(scope), {
+        memory: "/repo",
+        checkpoint: "/repo/.taco/worktrees/feature",
+        configCwd: "/repo",
+    });
+});
+
 test("IM memory identity remains private when storage and execution are shared", async () => {
     const { resolveWorkspaceResourceOwners } = await import(
         "../../src/workspace/workspaceResources.ts"

@@ -12,6 +12,8 @@ type WorkspacePaths = {
     /** Storage partition, preserved when the execution policy changes. */
     readonly sessionCwd: WorkspaceId;
     readonly executionCwd: WorkspaceId;
+    /** Project root that owns shared configuration and memory. */
+    readonly projectRoot: WorkspaceId;
 };
 
 export type WorkspaceScope = WorkspacePaths &
@@ -22,17 +24,23 @@ export function createWorkspaceScope(
     key: WorkspaceId,
     sessionCwd: string = key,
     executionCwd: string = sessionCwd,
+    projectRoot: string = executionCwd,
 ): WorkspaceScope {
     const route = parseImCwd(key);
     if (key.startsWith(IM_CWD_PREFIX) && !route)
         throw new Error(`invalid IM workspace key: ${key}`);
-    if (sessionCwd.startsWith(IM_CWD_PREFIX) || executionCwd.startsWith(IM_CWD_PREFIX)) {
+    if (
+        sessionCwd.startsWith(IM_CWD_PREFIX) ||
+        executionCwd.startsWith(IM_CWD_PREFIX) ||
+        projectRoot.startsWith(IM_CWD_PREFIX)
+    ) {
         throw new Error("IM workspace scope requires filesystem storage and execution directories");
     }
     const paths = {
         key,
         sessionCwd: asWorkspaceId(resolve(sessionCwd)),
         executionCwd: asWorkspaceId(resolve(executionCwd)),
+        projectRoot: asWorkspaceId(resolve(projectRoot)),
     };
     return route ? { ...paths, kind: "im", route } : { ...paths, kind: "local" };
 }

@@ -161,6 +161,7 @@ async function fixture(t: TestContext) {
     let loads = 0;
     const claudeDeps = {
         ...deps,
+        getAllowedCwds: () => [cwd],
         loadClaudeCodeSdk: async () => claudeSdk,
         findClaudeCode: () => join(root, "claude"),
     };
@@ -196,7 +197,7 @@ async function fixture(t: TestContext) {
 }
 
 describe("Claude Code engine adapter", () => {
-    it("advertises nextTurn delivery and validates only an explicit fixed cwd", async (t) => {
+    it("advertises nextTurn delivery and validates fixed and default cwd", async (t) => {
         const f = await fixture(t);
         const engine = createClaudeCodeEngine(f.claudeDeps);
         assert.equal(engine.runtime, "claude-code");
@@ -216,6 +217,76 @@ describe("Claude Code engine adapter", () => {
         const file = join(f.root, "file");
         await writeFile(file, "not a directory");
         await assert.rejects(engine.preflight({ ...def, cwd: file }), /not an existing directory/);
+        assert.equal(f.claudeOptions.length, 0);
+    });
+
+    it("rejects an inherited main-checkout cwd at preflight and start before querying", async (t) => {
+        const f = await fixture(t);
+        const worktree = join(f.cwd, ".taco", "worktrees", "topic");
+        await mkdir(worktree, { recursive: true });
+        const engine = createClaudeCodeEngine({
+            ...f.claudeDeps,
+            executionCwd: () => worktree,
+            getAllowedCwds: () => [worktree],
+        });
+        await assert.rejects(engine.preflight({ ...def, cwd: f.cwd }), /associated directories/);
+        const result = await engine.run(request({ claudeCodeCwd: f.cwd }));
+        assert.equal(result.isError, true);
+        assert.equal(result.subSessionId, childId);
+        assert.match(result.resultText, /associated directories/);
+        assert.equal(f.claudeOptions.length, 0);
+        assert.equal(f.writes.length, 0);
+        assert.equal(await readClaudeCodeState(f.session), undefined);
+    });
+
+    it("canonicalizes cwd and rechecks the current grants at start and resume", async (t) => {
+        const f = await fixture(t);
+        const associated = join(f.root, "associated");
+        const alias = join(f.root, "alias");
+        await mkdir(associated);
+        await symlink(associated, alias, "dir");
+        let allowed = [f.cwd, alias];
+        const engine = createClaudeCodeEngine({ ...f.claudeDeps, getAllowedCwds: () => allowed });
+        const args = request({ claudeCodeCwd: alias });
+        await engine.preflight({ ...def, cwd: alias });
+        allowed = [f.cwd];
+        assert.match((await engine.run(args)).resultText, /associated directories/);
+        assert.equal(f.claudeOptions.length, 0);
+        allowed = [f.cwd, associated];
+        assert.equal((await engine.run(args)).isError, false);
+        assert.equal(f.claudeOptions[0]?.cwd, associated);
+        assert.equal((await readClaudeCodeState(f.session))?.cwd, associated);
+        assert.equal((await engine.run({ ...args, resume: true })).isError, false);
+        allowed = [f.cwd];
+        const resumed = await engine.run({ ...args, resume: true });
+        assert.equal(resumed.isError, true);
+        assert.match(resumed.resultText, /associated directories/);
+        assert.equal(f.claudeOptions.length, 2);
+    });
+
+    it("rejects resume after its original directory grant is revoked", async (t) => {
+        const f = await fixture(t);
+        const associated = join(f.root, "resume-directory");
+        await mkdir(associated);
+        let allowed = [f.cwd, associated];
+        const engine = createClaudeCodeEngine({ ...f.claudeDeps, getAllowedCwds: () => allowed });
+        const args = request({ claudeCodeCwd: associated });
+        assert.equal((await engine.run(args)).isError, false);
+        allowed = [f.cwd];
+        const result = await engine.run({ ...args, resume: true });
+        assert.equal(result.isError, true);
+        assert.match(result.resultText, /associated directories/);
+        assert.equal(f.claudeOptions.length, 1);
+    });
+
+    it("fails closed when the default execution directory disappears before start", async (t) => {
+        const f = await fixture(t);
+        const engine = createClaudeCodeEngine(f.claudeDeps);
+        await engine.preflight(def);
+        await rm(f.cwd, { recursive: true });
+        const result = await engine.run(request());
+        assert.equal(result.isError, true);
+        assert.match(result.resultText, /not an existing directory/);
         assert.equal(f.claudeOptions.length, 0);
     });
 
@@ -251,7 +322,10 @@ describe("Claude Code engine adapter", () => {
 
     it("rejects missing native mappings and changed cwd/tools/mode/storage without a query", async (t) => {
         const f = await fixture(t);
-        const engine = createClaudeCodeEngine(f.claudeDeps);
+        const engine = createClaudeCodeEngine({
+            ...f.claudeDeps,
+            getAllowedCwds: () => [f.cwd, f.root],
+        });
         assert.match(
             (await engine.run(request({ resume: true }))).resultText,
             /mapping was not saved/,

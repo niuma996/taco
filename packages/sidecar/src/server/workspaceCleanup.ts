@@ -15,6 +15,7 @@ import {
     imWorkspacePoliciesPath,
 } from "../channels/imWorkspacePolicyStore.ts";
 import { makeImSessionsRoot } from "../channels/virtualWorkspace.ts";
+import { listGitWorktrees, resolveGitProjectRoot } from "../git/gitService.ts";
 import { harnessContext } from "../lib/harnessContext.ts";
 import { NodeExecutionEnv } from "../runtime/pi/node.ts";
 import type { JsonlSessionMetadata } from "../runtime/pi/types.ts";
@@ -287,7 +288,33 @@ export class WorkspaceCleanupService {
             });
         }
         await add(join(home, "staging", "attachments", hash(cwd, 32)));
-        await add(memoryProjectDir(route ? cwd : storageCwd, home));
+        if (route) {
+            await add(memoryProjectDir(cwd, home));
+        } else {
+            const live = this.options.runtimes().find((runtime) => runtime.workspaceKey === cwd);
+            const projectRoot =
+                live?.scope.projectRoot ?? (await resolveGitProjectRoot(localCwd)) ?? localCwd;
+            const inventory = await listGitWorktrees(localCwd).catch(() => undefined);
+            const shared =
+                projectRoot !== localCwd ||
+                inventory === undefined ||
+                (await exists(join(projectRoot, ".taco", "worktrees", "index.json"))) ||
+                (inventory?.status === "repository" &&
+                    inventory.worktrees.filter((entry) => !entry.bare).length > 1) ||
+                this.options
+                    .runtimes()
+                    .some(
+                        (runtime) =>
+                            runtime.workspaceKey !== cwd &&
+                            runtime.scope?.projectRoot === projectRoot,
+                    );
+            if (shared)
+                retained(
+                    memoryProjectDir(projectRoot, home),
+                    "保留同一项目的共享记忆；工作树清理不删除项目记忆。",
+                );
+            else await add(memoryProjectDir(localCwd, home));
+        }
         if (!route) await add(checkpointStoragePaths(storageCwd, home).root);
         if (route) {
             const chatScratch = join(root, "chats", chatPolicyKey(route), "scratch");

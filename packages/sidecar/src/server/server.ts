@@ -11,7 +11,7 @@ import { disposeInOrder } from "../lib/async.ts";
 
 import { AsyncLocalStorage } from "node:async_hooks";
 import { existsSync, mkdirSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import type { Provider } from "@earendil-works/pi-ai";
 import {
     type AgentMessage,
@@ -87,10 +87,12 @@ import {
 } from "../config/workspaceConfigSources.ts";
 import { activateExtensions } from "../extensions/activation.ts";
 import type { ExtensionRegistry, WorkspaceExtensionSet } from "../extensions/index.ts";
+import { resolveGitProjectRoot } from "../git/gitService.ts";
 import { InboxStore } from "../inbox/inboxStore.ts";
 import { createLogger } from "../lib/logger.ts";
 import { createPrivateMcpLease, McpScope } from "../mcp/mcpScope.ts";
-import { workspaceKey } from "../memory/local/store.ts";
+import { LocalMemoryStore, workspaceKey } from "../memory/local/store.ts";
+import type { MemoryStore } from "../memory/types.ts";
 import { PlanPushAdapter } from "../plan/planPushAdapter.ts";
 import { DefaultDeferredToolRegistry } from "../runtime/harness/deferredToolRegistry.ts";
 import { createQueuedWatch, type QueuedWatch } from "../runtime/harness/queuedWatch.ts";
@@ -119,6 +121,7 @@ import {
     associationAffectsWorkspace,
     WorkspaceAssociationStore,
 } from "../workspace/associationStore.ts";
+import { resolveMemoryRoot } from "../workspace/memoryRoot.ts";
 import {
     createWorkspaceStores,
     resolveWorkspaceResourceOwners,
@@ -157,6 +160,7 @@ import { WorkPushAdapter } from "./workPushAdapter.ts";
 import { WorkspaceCleanupService } from "./workspaceCleanup.ts";
 import { WorkspaceCleanupGate } from "./workspaceCleanupGate.ts";
 import { WorkspaceRegistry } from "./workspaceRegistry.ts";
+import { createWorktreeControl } from "./worktreeControl.ts";
 
 const log = createLogger("sidecar");
 
@@ -311,7 +315,32 @@ export class SidecarServer implements ServerRpcSurface {
     private readonly sessionEvents: SessionEventLog;
     /** Live workspace table + cold-start single-flight — see workspaceRegistry.ts. */
     private readonly workspaces: WorkspaceRegistry;
-    private readonly cleanupGate = new WorkspaceCleanupGate();
+    /** Project-root memory stores live for the sidecar lifetime and are shared by worktree runtimes. */
+    private readonly memoryStores = new Map<string, MemoryStore>();
+    private readonly cleanupGate = new WorkspaceCleanupGate((key) => {
+        const runtime = this.workspaces?.get(asWorkspaceId(key));
+        const route = parseImCwd(key);
+        const policy = route ? this.imPolicyStore.resolve(route) : undefined;
+        return [
+            ...(runtime
+                ? [runtime.executionCwd, ...runtime.associatedRoots()]
+                : this.associationStore.resolve(asWorkspaceId(key)).roots),
+            ...(policy?.executionDir.mode === "custom" && policy.executionDir.path
+                ? [policy.executionDir.path]
+                : []),
+        ];
+    });
+    readonly worktrees = createWorktreeControl({
+        gate: this.cleanupGate,
+        runtimes: () => this.workspaces.list(),
+        hasActiveWork: (key) =>
+            this.work.hasActiveWorkspaceWork(key, true, (workspace) =>
+                this.cleanupGate.accessRoots(workspace),
+            ),
+        dispose: (key) => this.disposeWorkspace(key, { preserveSessionEvents: true }),
+        onChange: (params) =>
+            this.emitPush(PushMethods.WorktreeChanged, WORKSPACE_ANY, undefined, params),
+    });
     private readonly options: SidecarServerOptions & { resolveConfig: () => ResolvedTacoConfig };
     /** Command-idempotency cache + turn gate — see commandIdempotency.ts. */
     private readonly idempotency: CommandIdempotencyGate;
@@ -638,18 +667,32 @@ export class SidecarServer implements ServerRpcSurface {
 
     /** Resolve source identities from local runtimes, never from hashed memory directories. */
     managedGlobalMemoryRoots(): string[] {
-        return this.workspaces
-            .list()
-            .flatMap((workspace) =>
-                workspace.scope.kind === "local" ? [workspace.scope.sessionCwd] : [],
-            );
+        return [
+            ...new Set(
+                this.workspaces
+                    .list()
+                    .flatMap((workspace) =>
+                        workspace.scope.kind === "local" ? [workspace.scope.projectRoot] : [],
+                    ),
+            ),
+        ];
     }
 
-    /** Invalidate the memory pane for a scheduled consolidation workspace. */
-    broadcastMemoryChanged(dirKey: string): void {
-        for (const cwd of this.workspaces.keys()) {
-            if (workspaceKey(cwd) !== dirKey) continue;
-            this.emitPush(PushMethods.MemoryChanged, cwd, undefined, {});
+    /** Notify current and inherited consumers, deriving grants at mutation time. */
+    broadcastMemoryChanged(dirKey?: string): void {
+        for (const workspace of this.workspaces.list()) {
+            if (dirKey !== undefined && workspaceKey(workspace.resourceOwners.memory) !== dirKey) {
+                if (workspace.scope.kind !== "im") continue;
+                const roots = [
+                    ...workspace.associatedRoots(),
+                    ...(workspace.inheritsManagedGlobalMemory()
+                        ? this.managedGlobalMemoryRoots()
+                        : []),
+                ];
+                if (!roots.some((root) => workspaceKey(resolveMemoryRoot(root)) === dirKey))
+                    continue;
+            }
+            this.emitPush(PushMethods.MemoryChanged, workspace.workspaceKey, undefined, {});
         }
     }
 
@@ -988,7 +1031,8 @@ export class SidecarServer implements ServerRpcSurface {
         if (
             typeof cwd !== "string" ||
             req.method === RPC.workspaceCleanup ||
-            req.method === RPC.workspaceCleanupPreview
+            req.method === RPC.workspaceCleanupPreview ||
+            req.method === RPC.worktreeRemove
         ) {
             return this.executeAdmittedRpcRequest(req, reg);
         }
@@ -1028,6 +1072,27 @@ export class SidecarServer implements ServerRpcSurface {
                 }
                 // ensureWorkspace always resolves a runtime (failures throw, caught by outer normalizeError)
                 workspace = await this.ensureWorkspace(cwd);
+                if (
+                    workspace.scope?.kind === "local" &&
+                    workspace.scope.projectRoot !== workspace.executionCwd &&
+                    !existsSync(workspace.executionCwd) &&
+                    [
+                        RPC.sessionCreate,
+                        RPC.sessionAttach,
+                        RPC.sessionPrompt,
+                        RPC.sessionSteer,
+                        RPC.sessionFollowUp,
+                        RPC.sessionSubmitAnswers,
+                        RPC.sessionCompact,
+                        RPC.checkpointsRestore,
+                    ].some((method) => method === req.method)
+                ) {
+                    return err(
+                        req.id,
+                        ErrorCodes.InvalidState,
+                        "工作树目录已移除，仅可查看历史记录。请创建工作树后继续执行。",
+                    );
+                }
             }
             const ctx: MethodCtx<unknown, boolean> = {
                 id: req.id,
@@ -1048,14 +1113,22 @@ export class SidecarServer implements ServerRpcSurface {
      * im:// URL as key and route to an isolated per-channel scratch root;
      * fs workspaces pass through with fs tools enabled.
      */
-    private resolveWorkspacePaths(key: WorkspaceId): {
+    private async resolveWorkspacePaths(key: WorkspaceId): Promise<{
         scope: WorkspaceScope;
         sessionsRoot?: string;
         imPolicy?: ImWorkspacePolicy;
-    } {
+    }> {
         const route = parseImCwd(key);
         if (!route)
-            return { scope: createWorkspaceScope(key), sessionsRoot: this.options.sessionsRoot };
+            return {
+                scope: createWorkspaceScope(
+                    key,
+                    key,
+                    key,
+                    (await resolveGitProjectRoot(resolve(key))) ?? key,
+                ),
+                sessionsRoot: this.options.sessionsRoot,
+            };
         const sessionsRoot = makeImSessionsRoot(tacoHome(), route.channelId);
         const sessionCwd = join(sessionsRoot, "scratch");
         mkdirSync(sessionCwd, { recursive: true });
@@ -1209,9 +1282,12 @@ export class SidecarServer implements ServerRpcSurface {
     }
 
     private async buildWorkspace(cwd: WorkspaceId): Promise<WorkspaceRuntime> {
-        const { scope, sessionsRoot, imPolicy } = this.resolveWorkspacePaths(cwd);
+        const { scope, sessionsRoot, imPolicy } = await this.resolveWorkspacePaths(cwd);
         const resourceOwners = resolveWorkspaceResourceOwners(scope);
-        const configSources = resolveWorkspaceConfigSources(resourceOwners.configCwd);
+        const configSources = resolveWorkspaceConfigSources(
+            scope.executionCwd,
+            resourceOwners.configCwd,
+        );
         const { skills, skillDiagnostics, agents, extensions } = await this.loadWorkspaceAssets(
             scope,
             configSources,
@@ -1266,9 +1342,30 @@ export class SidecarServer implements ServerRpcSurface {
         let ws: WorkspaceRuntime | undefined;
         let stores: WorkspaceStores | undefined;
         try {
+            const sharedMemory =
+                this.options.memoryEnabled === false
+                    ? undefined
+                    : (this.memoryStores.get(resourceOwners.memory) ??
+                      (() => {
+                          const store = new LocalMemoryStore((global) =>
+                              this.broadcastMemoryChanged(
+                                  global ? undefined : workspaceKey(resourceOwners.memory),
+                              ),
+                          );
+                          store.initialize(resourceOwners.memory);
+                          this.memoryStores.set(resourceOwners.memory, store);
+                          return store;
+                      })());
+            if (
+                scope.kind === "local" &&
+                scope.projectRoot !== scope.executionCwd &&
+                sharedMemory instanceof LocalMemoryStore
+            )
+                await sharedMemory.importWorkspaceMemory(scope.executionCwd);
             stores = createWorkspaceStores(resourceOwners, {
                 memoryEnabled: this.options.memoryEnabled,
                 checkpointsEnabled: imPolicy ? imPolicy.tools.fsTools === "allow" : true,
+                memoryStore: sharedMemory,
             });
             ws = new WorkspaceRuntime({
                 scope,
@@ -1317,10 +1414,12 @@ export class SidecarServer implements ServerRpcSurface {
                 // both together is what makes WorkspaceRuntime opt into
                 // watching; omitting either leaves reload off (e.g. tests that
                 // construct WorkspaceRuntime directly without a live server).
-                skillDirs: configSources.skillDirs
-                    .filter((d) => d.source === "user")
-                    .map((d) => d.path),
-                reloadSkills: () => this.loadSkills(scope.executionCwd, configSources),
+                skillDirs: workspaceCwdUsable
+                    ? configSources.skillDirs.filter((d) => d.source === "user").map((d) => d.path)
+                    : undefined,
+                reloadSkills: workspaceCwdUsable
+                    ? () => this.loadSkills(scope.executionCwd, configSources)
+                    : undefined,
                 // IM channel identity for the <im_channel> context tag — the
                 // workspace only calls this for IM workspaces, passing the
                 // route's channelId; peer/chat ids never reach it.

@@ -28,6 +28,10 @@ import type {
     WorkspaceAssociationKey,
     WorkspaceCleanupResult,
     WorkspaceId,
+    WorktreeBase,
+    WorktreeCreateResult,
+    WorktreeListResult,
+    WorktreeRemoveResult,
 } from "@taco-ai/protocol";
 import type { ExtensionRegistry, WorkspaceExtensionSet } from "../extensions/index.ts";
 import type { Actor, Job, JobHistoryEntry, JobRunResult } from "../scheduler/types.ts";
@@ -122,6 +126,11 @@ export interface JobsControl {
 }
 
 export interface ServerRpcSurface {
+    readonly worktrees?: {
+        list(cwd: string): Promise<WorktreeListResult>;
+        create(cwd: string, name: string, base?: WorktreeBase): Promise<WorktreeCreateResult>;
+        remove(cwd: string, path: string): Promise<WorktreeRemoveResult>;
+    };
     /** Whether the active client negotiated a named additive capability. */
     supportsClientCapability?(name: string): boolean;
     workspaceIds(): WorkspaceId[];

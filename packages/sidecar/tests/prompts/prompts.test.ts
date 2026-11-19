@@ -634,6 +634,31 @@ describe("buildEnvironmentPrompt", () => {
         assert.match(out, /resolve against the working directory above/);
     });
 
+    it("renders worktree identity and escapes dynamic environment facts", () => {
+        const worktreeEnv = {
+            ...env,
+            cwd: "/tmp/work<&>",
+            projectRoot: "/tmp/main<&>",
+            isWorktree: true,
+            shell: "shell</environment>",
+            isGitRepository: true,
+            currentBranch: "feature<&>",
+            defaultBranch: "main<&>",
+        };
+        const out = buildEnvironmentPrompt({ env: worktreeEnv });
+        assert.ok(out.includes("Project root: /tmp/main&lt;&amp;&gt;"));
+        assert.ok(out.includes("Git worktree: yes"));
+        assert.ok(out.includes("Working directory: /tmp/work&lt;&amp;&gt;"));
+        assert.ok(out.includes("shell&lt;/environment&gt;"));
+        assert.ok(out.includes("feature&lt;&amp;&gt;"));
+        assert.ok(out.includes("main&lt;&amp;&gt;"));
+        assert.equal(out.match(/<\/environment>/g)?.length, 1);
+        const hidden = buildEnvironmentPrompt({ env: worktreeEnv, hideWorkspacePath: true });
+        assert.ok(!hidden.includes("/tmp/"));
+        assert.ok(!hidden.includes("Project root"));
+        assert.ok(!hidden.includes("Git worktree"));
+    });
+
     // Regression: the sentence dangled on IM channels, where the
     // hideWorkspacePath branch omits the `Working directory` line it points at.
     it("omits the sentence when the working directory is hidden", () => {

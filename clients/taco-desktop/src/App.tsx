@@ -85,7 +85,7 @@ import { onImPolicyChangedEvent } from "./lib/imPolicyEvents.ts";
 import { createLatestRequestGuard } from "./lib/latestRequest";
 import { onMemoryChangedEvent } from "./lib/memoryEvents";
 import { type AppNotification, toastsOnArrival } from "./lib/notifications";
-import { invalidateCatalogQueries } from "./lib/queries/queryClient";
+import { invalidateCatalogQueries, invalidateGitQueries } from "./lib/queries/queryClient";
 import { onWorkChangedEvent } from "./lib/workEvents.ts";
 import { onWorkspaceAssociationsChangedEvent } from "./lib/workspaceAssociationEvents.ts";
 import { getDefaultCwd, persistExpandedWorkspaces } from "./lib/workspaceStorage.js";
@@ -494,6 +494,9 @@ export default function App() {
         // Process-level invalidate: the Work pane may not be mounted yet, so
         // the event goes through its module emitter (see lib/workEvents.ts).
         onWorkChanged: () => onWorkChangedEvent(),
+        onWorktreeChanged: () => {
+            void invalidateGitQueries(queryClient, client);
+        },
         // The ImPolicyDialog confirms before saving, so no active warning is
         // needed here; reserved for a future desktop notice.
         onImWorkspacesInvalidated: (_channelId) => {},

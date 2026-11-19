@@ -109,8 +109,10 @@ export type CompactionFailureReason =
  *  `extensions.status` params shape.
  *  2.20 adds git.inspect, git.init and worktree.list for local repository discovery.
  *  2.21 adds the `userAgent` global config field; a 2.20 daemon silently drops it
- *  on `settings.write`, so the custom identity would never take effect. */
-export const SIDECAR_PROTOCOL_VERSION = { major: 2, minor: 21 } as const;
+ *  on `settings.write`, so the custom identity would never take effect.
+ *  2.22 adds worktree.create/remove, managed inventory metadata and the
+ *  process-level worktree.changed push; a 2.21 daemon lacks these methods. */
+export const SIDECAR_PROTOCOL_VERSION = { major: 2, minor: 22 } as const;
 
 /**
  * Client-side gate for a sidecar's advertised protocol version. Semver-ish but

@@ -175,6 +175,19 @@ test("IM scope rejects virtual paths as filesystem directories and rejects malfo
     );
 });
 
+test("local scope keeps projectRoot separate from the execution worktree", async () => {
+    const { createWorkspaceScope } = await import("../../src/workspace/workspaceScope.ts");
+    const scope = createWorkspaceScope(
+        asWorkspaceId("/repo/.taco/worktrees/feature"),
+        "/repo/.taco/worktrees/feature",
+        "/repo/.taco/worktrees/feature",
+        "/repo",
+    );
+    assert.equal(scope.projectRoot, "/repo");
+    assert.equal(scope.sessionCwd, "/repo/.taco/worktrees/feature");
+    assert.equal(scope.executionCwd, "/repo/.taco/worktrees/feature");
+});
+
 test("IM storage keeps the lexical home path when the home is a symlink", {
     skip: process.platform === "win32" ? "symlink creation requires Windows privileges" : false,
 }, async () => {

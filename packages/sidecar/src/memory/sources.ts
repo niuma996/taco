@@ -9,6 +9,7 @@
  */
 
 import { isAbsolute, resolve } from "node:path";
+import { resolveMemoryRoot } from "../workspace/memoryRoot.ts";
 import { buildMemoryContextBlock } from "./contextBlock.ts";
 import { LocalMemoryStore, workspaceKey } from "./local/store.ts";
 import type { MemoryEntry, MemoryStore } from "./types.ts";
@@ -37,6 +38,8 @@ export interface ResolveMemorySourcesOptions {
     readonly inheritManagedGlobal: boolean;
     /** Explicit filesystem workspace identities supplied by the server registry. */
     readonly managedGlobalRoots?: readonly string[];
+    /** Synchronous verified owner lookup; defaults to read-only Git metadata resolution. */
+    readonly resolveMemoryRoot?: (root: string) => string;
 }
 
 function lastSegment(root: string): string {
@@ -48,8 +51,15 @@ function lastSegment(root: string): string {
     );
 }
 
-function dedupeRoots(roots: readonly string[]): string[] {
-    return Array.from(new Set(roots.filter(isAbsolute).map((root) => resolve(root))));
+function dedupeRoots(roots: readonly string[], owner: (root: string) => string): string[] {
+    return Array.from(
+        new Set(
+            roots
+                .filter(isAbsolute)
+                .map((root) => owner(resolve(root)))
+                .filter(isAbsolute),
+        ),
+    );
 }
 
 // Cache lifetime follows the current store; revoked sources are removed on the
@@ -90,14 +100,20 @@ function readLayers(current: LocalMemoryStore, roots: readonly string[]): Memory
 }
 
 export function resolveMemorySources(options: ResolveMemorySourcesOptions): ResolvedMemorySources {
-    const associatedRoots =
-        options.target === "channel" ? dedupeRoots(options.associatedRoots) : [];
     const current = options.store;
-    const excluded = new Set(associatedRoots.map(workspaceKey));
+    const owner = options.resolveMemoryRoot ?? resolveMemoryRoot;
+    const excluded = new Set<string>();
     if (current instanceof LocalMemoryStore) excluded.add(current.dirKey);
+    const associatedRoots =
+        options.target === "channel"
+            ? dedupeRoots(options.associatedRoots, owner).filter(
+                  (root) => !excluded.has(workspaceKey(root)),
+              )
+            : [];
+    for (const root of associatedRoots) excluded.add(workspaceKey(root));
     const managedRoots =
         options.target === "channel" && options.inheritManagedGlobal
-            ? dedupeRoots(options.managedGlobalRoots ?? []).filter(
+            ? dedupeRoots(options.managedGlobalRoots ?? [], owner).filter(
                   (root) => !excluded.has(workspaceKey(root)),
               )
             : [];

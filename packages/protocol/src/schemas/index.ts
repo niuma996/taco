@@ -10,6 +10,7 @@
 
 export * from "./attachment.js";
 export * from "./channels.js";
+export * from "./git.js";
 export * from "./jobs.js";
 export * from "./memory.js";
 export * from "./session.js";

@@ -45,6 +45,13 @@ export function invalidateClientQueries(queryClient: QueryClient, client: TacoCl
     return refreshQueries(queryClient, { queryKey: clientQueryKey(client) });
 }
 
+export function invalidateGitQueries(queryClient: QueryClient, client: TacoClient) {
+    return refreshQueries(queryClient, {
+        queryKey: clientQueryKey(client),
+        predicate: (query) => query.queryKey[2] === "git" || query.queryKey[2] === "worktrees",
+    });
+}
+
 export async function invalidateCatalogQueries(
     queryClient: QueryClient,
     client: TacoClient,

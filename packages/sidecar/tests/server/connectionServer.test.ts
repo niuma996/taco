@@ -262,16 +262,20 @@ for (const patch of [
             endTurn = done;
         });
         const workspace = {
+            executionCwd: "/running",
+            associatedRoots: () => [],
             dispose: async () => {
                 disposals++;
                 await turn;
             },
         };
-        const registry = new WorkspaceRegistry(async () => workspace as WorkspaceRuntime);
+        const registry = new WorkspaceRegistry(
+            async () => workspace as unknown as WorkspaceRuntime,
+        );
         const cwd = asWorkspaceId("/running");
         const other = asWorkspaceId("/other-running");
-        registry.publish(cwd, workspace as WorkspaceRuntime);
-        registry.publish(other, workspace as WorkspaceRuntime);
+        registry.publish(cwd, workspace as unknown as WorkspaceRuntime);
+        registry.publish(other, workspace as unknown as WorkspaceRuntime);
         const host = new SidecarServer({
             providerKeyStore: new ProviderKeyStore({}),
             workspaceRegistry: registry,
@@ -314,13 +318,15 @@ test("MCP mutation defers workspace disposal until explicit release", async () =
     const { WorkspaceRegistry } = await import("../../src/server/workspaceRegistry.ts");
     let disposed = 0;
     const workspace = {
+        executionCwd: "/running-mcp",
+        associatedRoots: () => [],
         dispose: async () => {
             disposed++;
         },
     };
-    const registry = new WorkspaceRegistry(async () => workspace as WorkspaceRuntime);
+    const registry = new WorkspaceRegistry(async () => workspace as unknown as WorkspaceRuntime);
     const cwd = asWorkspaceId("/running-mcp");
-    registry.publish(cwd, workspace as WorkspaceRuntime);
+    registry.publish(cwd, workspace as unknown as WorkspaceRuntime);
     const host = new SidecarServer({
         providerKeyStore: new ProviderKeyStore({}),
         workspaceRegistry: registry,
@@ -472,6 +478,8 @@ test("cleanup RPCs route by cwd across ConnectionServer and preserve deletion se
     const path = session.metadata.path;
     await session.close(harnessContext);
     const runtime = {
+        scope: { kind: "local", projectRoot: cwd },
+        associatedRoots: () => [],
         workspaceKey: cwd,
         sessionsRoot,
         getAttached: () => undefined,

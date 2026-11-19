@@ -1,11 +1,33 @@
 /** Compile-only checks for payload, result, and routing inference. */
-import { asWorkspaceId, type CreateSessionResult, RPC } from "@taco-ai/protocol";
+import {
+    asWorkspaceId,
+    type CreateSessionResult,
+    RPC,
+    type WorktreeCreateResult,
+    type WorktreeRemoveResult,
+} from "@taco-ai/protocol";
 import type { RpcDispatch } from "../contractDispatch.js";
 import { createContractDispatch } from "../contractDispatch.js";
 
 async function checkDispatch(raw: RpcDispatch) {
     const dispatch = createContractDispatch(raw);
     const workspace = asWorkspaceId("/w");
+    const created: WorktreeCreateResult = await dispatch.call(RPC.worktreeCreate, workspace, {
+        workspace,
+        name: "feature",
+    });
+    const removed: WorktreeRemoveResult = await dispatch.call(RPC.worktreeRemove, workspace, {
+        workspace,
+        path: created.path,
+    });
+    const invalid = { workspace, name: "feature", base: "main" as const };
+    // @ts-expect-error base is restricted to head/default
+    await dispatch.call(RPC.worktreeCreate, workspace, invalid);
+    // @ts-expect-error remove requires a path
+    await dispatch.call(RPC.worktreeRemove, workspace, { workspace });
+    // @ts-expect-error worktree.create routes by workspace
+    await dispatch.callProcess(RPC.worktreeCreate, { workspace, name: "feature" });
+    void removed;
     const result: CreateSessionResult = await dispatch.call(RPC.sessionCreate, workspace, {
         workspace,
     });

@@ -8,9 +8,14 @@
  * the builtin git-context extension.
  */
 
+import { escapeTagText } from "../../tags/builder.ts";
+
 export interface EnvironmentContext {
     /** Absolute working directory. */
     readonly cwd: string;
+    /** Main checkout owning shared configuration when running in a worktree. */
+    readonly projectRoot?: string;
+    readonly isWorktree?: boolean;
     /** Node platform id, e.g. "darwin". */
     readonly platform: string;
     /** User's default shell, e.g. "zsh". */
@@ -34,16 +39,24 @@ export function buildEnvironmentPrompt(options: BuildEnvironmentPromptOptions): 
     const lines = ["<environment>"];
 
     if (hideWorkspacePath) {
-        lines.push(`- Platform: ${platformLabel(env.platform)}, default shell: ${env.shell}`);
+        lines.push(
+            `- Platform: ${escapeTagText(platformLabel(env.platform))}, default shell: ${escapeTagText(env.shell)}`,
+        );
     } else {
-        lines.push(`- Working directory: ${env.cwd}`);
-        lines.push(`- Platform: ${platformLabel(env.platform)}, default shell: ${env.shell}`);
+        lines.push(`- Working directory: ${escapeTagText(env.cwd)}`);
+        if (env.isWorktree) {
+            if (env.projectRoot) lines.push(`- Project root: ${escapeTagText(env.projectRoot)}`);
+            lines.push("- Git worktree: yes");
+        }
+        lines.push(
+            `- Platform: ${escapeTagText(platformLabel(env.platform))}, default shell: ${escapeTagText(env.shell)}`,
+        );
     }
 
     if (env.isGitRepository) {
         lines.push("- Git repository: yes");
-        if (env.currentBranch) lines.push(`- Current branch: ${env.currentBranch}`);
-        if (env.defaultBranch) lines.push(`- Default branch: ${env.defaultBranch}`);
+        if (env.currentBranch) lines.push(`- Current branch: ${escapeTagText(env.currentBranch)}`);
+        if (env.defaultBranch) lines.push(`- Default branch: ${escapeTagText(env.defaultBranch)}`);
     } else {
         lines.push("- Git repository: no");
     }

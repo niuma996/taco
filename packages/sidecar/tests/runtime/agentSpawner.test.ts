@@ -19,7 +19,7 @@
 
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { readFile } from "node:fs/promises";
+import { readFile, realpath } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
@@ -774,11 +774,13 @@ describe("AgentSpawner — runtime: claude-code", () => {
     let cleanup: () => Promise<void>;
     let frames: Frames = readThenAnswer;
     let lastOptions: SdkQueryOptions | undefined;
+    let associatedRoots: string[] = [];
 
     before(() => {
         ({ ws, cwd, cleanup } = createTestWorkspace({
             prefix: "cc",
             agents: defsClaudeCode,
+            resolveAssociatedRoots: () => associatedRoots,
         }));
         const sdk: ClaudeAgentSdk = {
             query({ options }) {
@@ -830,7 +832,7 @@ describe("AgentSpawner — runtime: claude-code", () => {
         assert.equal(r.isError, false, r.resultText);
         assert.equal(r.resultText, "It says hello.");
         assert.ok(r.subSessionId);
-        assert.equal(lastOptions?.cwd, cwd);
+        assert.equal(lastOptions?.cwd, await realpath(cwd));
         assert.equal(lastOptions?.maxTurns, 7);
         assert.equal(lastOptions?.systemPrompt.append, "you read");
 
@@ -1032,8 +1034,27 @@ describe("AgentSpawner — runtime: claude-code", () => {
             return () => ws.agentSpawner.replaceAgents(original);
         }
 
-        it("runs in the directory fixed in the definition", async () => {
+        it("rejects a fixed directory outside the current grants before launching the SDK", async () => {
+            const restore = withCwd(fixedDir);
+            lastOptions = undefined;
+            try {
+                const result = await ws.agentSpawner.spawnSubagent({
+                    parentSessionId: await seedParent(),
+                    parentToolCallId: "call-ungranted-cwd",
+                    agentType: "cc",
+                    prompt: "x",
+                });
+                assert.equal(result.isError, true);
+                assert.match(result.resultText, /associated directories/);
+                assert.equal(lastOptions, undefined);
+            } finally {
+                restore();
+            }
+        });
+
+        it("runs in the associated directory fixed in the definition", async () => {
             frames = readThenAnswer;
+            associatedRoots = [fixedDir];
             const restore = withCwd(fixedDir);
             try {
                 const r = await ws.agentSpawner.spawnSubagent({
@@ -1043,8 +1064,9 @@ describe("AgentSpawner — runtime: claude-code", () => {
                     prompt: "x",
                 });
                 assert.equal(r.isError, false, r.resultText);
-                assert.equal(lastOptions?.cwd, fixedDir);
+                assert.equal(lastOptions?.cwd, await realpath(fixedDir));
             } finally {
+                associatedRoots = [];
                 restore();
             }
         });
@@ -1079,7 +1101,7 @@ describe("AgentSpawner — runtime: claude-code", () => {
                     prompt: "x",
                 });
                 assert.equal(r.isError, false, r.resultText);
-                assert.equal(lastOptions?.cwd, cwd);
+                assert.equal(lastOptions?.cwd, await realpath(cwd));
             } finally {
                 restore();
             }

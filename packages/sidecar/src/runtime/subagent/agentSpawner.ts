@@ -240,6 +240,7 @@ export class AgentSpawner extends EventEmitter {
             }),
             "claude-code": createClaudeCodeEngine({
                 ...nativeDeps,
+                getAllowedCwds: () => this.getAllowedCwds(),
                 loadClaudeCodeSdk: () => this.loadClaudeCodeSdk(),
                 findClaudeCode: () => this.findClaudeCode(),
             }),

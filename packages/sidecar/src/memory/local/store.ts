@@ -38,6 +38,7 @@ import {
 } from "../types.ts";
 
 import { buildTopicFile, decodeTopic, frontmatterValue } from "./topicCodec.ts";
+import { importWorktreeMemory } from "./worktreeImport.ts";
 
 export { parseTopicFrontmatter } from "./topicCodec.ts";
 
@@ -212,7 +213,7 @@ export class LocalMemoryStore implements MemoryStore {
         return join(this.projectsDir, this._dirKey);
     }
 
-    constructor() {
+    constructor(private readonly onChange?: (global: boolean) => void) {
         // Resolve at construction so tests can override TACO_HOME before
         // instantiating. Later `tacoHome()` changes are NOT picked up.
         const paths = memoryStoragePaths();
@@ -264,6 +265,21 @@ export class LocalMemoryStore implements MemoryStore {
         return this._dirKey;
     }
 
+    /** Import an old workspace partition once, preserving primary topics and original files. */
+    importWorkspaceMemory(identity: string): Promise<void> {
+        if (!this.initialized) return Promise.reject(new Error("LocalMemoryStore not initialized"));
+        const next = this.writeChain.then(async () => {
+            const changed = await importWorktreeMemory(
+                join(this.projectsDir, workspaceKey(identity)),
+                this.workspaceDir,
+            );
+            this.topicsCache = undefined;
+            if (changed) this.onChange?.(false);
+        });
+        this.writeChain = next.catch(() => undefined);
+        return next;
+    }
+
     appendEntry(entry: MemoryEntry): Promise<void> {
         if (!this.initialized) {
             return Promise.reject(new Error("LocalMemoryStore not initialized"));
@@ -283,7 +299,7 @@ export class LocalMemoryStore implements MemoryStore {
             this.topicsCache = undefined;
         });
         // Swallow rejections so one failure doesn't poison subsequent writers.
-        this.writeChain = next.catch(() => undefined);
+        this.writeChain = next.then(() => this.onChange?.(false)).catch(() => undefined);
         return next;
     }
 
@@ -340,7 +356,7 @@ export class LocalMemoryStore implements MemoryStore {
             }
             atomicWrite(this.memoryIndex, content);
         });
-        this.writeChain = next.catch(() => undefined);
+        this.writeChain = next.then(() => this.onChange?.(true)).catch(() => undefined);
         return next;
     }
 
@@ -370,7 +386,7 @@ export class LocalMemoryStore implements MemoryStore {
             unlinkSync(join(this.workspaceDir, `${id}.md`));
             this.topicsCache = undefined;
         });
-        this.writeChain = next.catch(() => undefined);
+        this.writeChain = next.then(() => this.onChange?.(false)).catch(() => undefined);
         return next;
     }
 
@@ -414,7 +430,7 @@ export class LocalMemoryStore implements MemoryStore {
             this.topicsCache = undefined;
             return archived;
         });
-        this.writeChain = next.catch(() => undefined);
+        this.writeChain = next.then(() => this.onChange?.(false)).catch(() => undefined);
         return next;
     }
 
@@ -453,7 +469,7 @@ export class LocalMemoryStore implements MemoryStore {
             unlinkSync(from);
             this.topicsCache = undefined;
         });
-        this.writeChain = next.catch(() => undefined);
+        this.writeChain = next.then(() => this.onChange?.(false)).catch(() => undefined);
         return next;
     }
 
@@ -525,7 +541,7 @@ export class LocalMemoryStore implements MemoryStore {
             }
             return { deleted, skipped };
         });
-        this.writeChain = next.catch(() => undefined);
+        this.writeChain = next.then(() => this.onChange?.(false)).catch(() => undefined);
         return next;
     }
 
@@ -596,7 +612,7 @@ export class LocalMemoryStore implements MemoryStore {
             this.topicsCache = undefined;
             return newEntry;
         });
-        this.writeChain = next.catch(() => undefined);
+        this.writeChain = next.then(() => this.onChange?.(false)).catch(() => undefined);
         return next;
     }
 

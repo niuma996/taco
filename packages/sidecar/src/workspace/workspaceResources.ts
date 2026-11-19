@@ -14,9 +14,14 @@ export interface WorkspaceResourceOwners {
 /** Preserve existing partitions; execution-policy changes never merge IM memories. */
 export function resolveWorkspaceResourceOwners(scope: WorkspaceScope): WorkspaceResourceOwners {
     return {
-        memory: scope.kind === "im" ? scope.key : scope.sessionCwd,
+        memory:
+            scope.kind === "im"
+                ? scope.key
+                : scope.projectRoot === scope.executionCwd
+                  ? scope.sessionCwd
+                  : scope.projectRoot,
         checkpoint: scope.executionCwd,
-        configCwd: scope.executionCwd,
+        configCwd: scope.kind === "im" ? scope.executionCwd : scope.projectRoot,
     };
 }
 
@@ -28,9 +33,16 @@ export interface WorkspaceStores {
 
 export function createWorkspaceStores(
     owners: WorkspaceResourceOwners,
-    options: { memoryEnabled?: boolean; checkpointsEnabled?: boolean } = {},
+    options: {
+        memoryEnabled?: boolean;
+        checkpointsEnabled?: boolean;
+        memoryStore?: MemoryStore;
+    } = {},
 ): WorkspaceStores {
-    const memory = options.memoryEnabled !== false ? new LocalMemoryStore() : new NoOpMemoryStore();
+    const memory =
+        options.memoryEnabled !== false
+            ? (options.memoryStore ?? new LocalMemoryStore())
+            : new NoOpMemoryStore();
     memory.initialize(owners.memory);
     return {
         memory,

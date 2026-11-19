@@ -4,16 +4,25 @@ import {
     PushMethods,
     type ServerPush,
     type SessionEventsGetResult,
+    WORKSPACE_ANY,
 } from "@taco-ai/protocol";
-import { act, cleanup, renderHook } from "@testing-library/react";
+import { useQuery } from "@tanstack/react-query";
+import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ToastProvider } from "../../src/components/ToastProvider";
-import { getSessionRecoveryTargets, useSidecarStream } from "../../src/hooks/useSidecarStream";
+import { useGitWorkspace } from "../../src/hooks/useGitWorkspace";
+import {
+    getSessionRecoveryTargets,
+    type UseSidecarStreamOpts,
+    useSidecarStream,
+} from "../../src/hooks/useSidecarStream";
 import { useWorkspaces } from "../../src/hooks/useWorkspaces";
 import { createSessionState, getSessionState } from "../../src/lib/chat/sessionState";
 import { createEmptyWorkspace } from "../../src/lib/chat/workspaceReducer";
 import type { TacoClient } from "../../src/lib/clients/tacoClient";
+import { invalidateGitQueries, resourceQueryKey } from "../../src/lib/queries/queryClient";
+import { queryWrapper } from "../helpers/queryWrapper";
 
 const listeners = vi.hoisted(() => new Map<string, (event: unknown) => void>());
 vi.mock("@tauri-apps/api/event", () => ({
@@ -57,7 +66,10 @@ function frame(sid: string, seq: number): ServerPush {
 function replay(events: ServerPush[]): SessionEventsGetResult {
     return { events, firstSeq: 1, lastSeq: events.at(-1)?.seq ?? 0, resetRequired: false };
 }
-function setup(getEvents = vi.fn(async () => replay([]))) {
+function setup(
+    getEvents = vi.fn(async () => replay([])),
+    overrides: Partial<UseSidecarStreamOpts> = {},
+) {
     let push!: (p: ServerPush) => void;
     let ready!: (instance?: string) => void;
     const client = {
@@ -91,6 +103,7 @@ function setup(getEvents = vi.fn(async () => replay([]))) {
     const onAction = vi.fn();
     const onSnapshotRequired = vi.fn(async () => ({ recovered: false as const }));
     const opts = {
+        ...overrides,
         onAction,
         onSnapshotRequired,
         onLogLine: vi.fn(),
@@ -102,6 +115,7 @@ function setup(getEvents = vi.fn(async () => replay([]))) {
     };
     renderHook(() => useSidecarStream(client, opts));
     return {
+        client,
         push: (p: ServerPush) => push(p),
         ready: () => ready("same-instance"),
         onAction,
@@ -115,6 +129,56 @@ async function flush() {
 }
 
 describe("useSidecarStream isolation", () => {
+    it.each(["created", "removed"] as const)(
+        "refreshes live Git and worktrees on a process-level %s push",
+        async (kind) => {
+            const { queryClient, wrapper } = queryWrapper();
+            const onWorktreeChanged = vi.fn(() => {
+                void invalidateGitQueries(queryClient, h.client);
+            });
+            const h = setup(undefined, { onWorktreeChanged });
+            const gitInspect = vi.fn().mockResolvedValue({ status: "not_repository" });
+            const worktreeList = vi.fn().mockResolvedValue({ worktrees: [] });
+            Object.assign(h.client, { gitInspect, worktreeList });
+            const gitKey = resourceQueryKey(h.client, "git", "/project/sub");
+            const worktreesKey = resourceQueryKey(h.client, "worktrees", "/project");
+            const inactiveKey = resourceQueryKey(h.client, "worktrees", "/other-project");
+            const otherClientKey = resourceQueryKey({}, "git", "/project");
+            const unrelatedKey = resourceQueryKey(h.client, "models", "/project");
+            for (const key of [inactiveKey, otherClientKey, unrelatedKey])
+                queryClient.setQueryData(key, []);
+            renderHook(
+                () => {
+                    useGitWorkspace(h.client, "/project/sub");
+                    useQuery({ queryKey: worktreesKey, queryFn: () => worktreeList() });
+                },
+                { wrapper },
+            );
+            await waitFor(() => expect(queryClient.getQueryState(gitKey)?.status).toBe("success"));
+            await waitFor(() =>
+                expect(queryClient.getQueryState(worktreesKey)?.status).toBe("success"),
+            );
+            gitInspect.mockResolvedValue({ status: "missing" });
+            const params = { projectRoot: "/project", path: "/worktrees/feature", kind };
+            await act(async () =>
+                h.push({
+                    method: PushMethods.WorktreeChanged,
+                    workspace: WORKSPACE_ANY,
+                    params,
+                }),
+            );
+            await waitFor(() => expect(gitInspect).toHaveBeenCalledTimes(2));
+            await waitFor(() => expect(worktreeList).toHaveBeenCalledTimes(2));
+            expect(queryClient.getQueryData(gitKey)).toEqual({ status: "missing" });
+            expect(queryClient.getQueryState(inactiveKey)?.isInvalidated).toBe(true);
+            expect(queryClient.getQueryState(otherClientKey)?.isInvalidated).toBe(false);
+            expect(queryClient.getQueryState(unrelatedKey)?.isInvalidated).toBe(false);
+            expect(onWorktreeChanged).toHaveBeenCalledExactlyOnceWith(params);
+            expect(h.getEvents).not.toHaveBeenCalled();
+            expect(h.onAction).not.toHaveBeenCalled();
+        },
+    );
+
     it("probes live execution through a passive snapshot without attaching", async () => {
         const h = setup();
         h.ready();

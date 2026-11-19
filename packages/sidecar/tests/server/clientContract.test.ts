@@ -153,6 +153,10 @@ test("every facade method serializes a payload accepted by its registered schema
     await client.gitInspect({ workspace });
     await client.gitInit({ workspace });
     await client.worktreeList({ workspace });
+    await client.worktreeCreate({ workspace, name: "feature" });
+    await client.worktreeCreate({ workspace, name: "feature", base: "head" });
+    await client.worktreeCreate({ workspace, name: "feature", base: "default" });
+    await client.worktreeRemove({ workspace, path: "/worktrees/feature" });
     await client.sessionList({ workspace });
     await client.sessionCreate({ workspace });
     await client.sessionAttach({ workspace, sessionId: id });

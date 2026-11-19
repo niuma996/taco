@@ -118,6 +118,7 @@ because a registered system-service daemon can outlive a desktop upgrade.
 | 2.19 | `extensions.configGet` / `extensions.configUpdate`; optional `workspace` on `extensions.status`; `ExtensionsStatusResult` adds `workspace` / `disabledEntries` / `pendingRestart`, and `ExtensionStatusEntry` adds `contributions`. |
 | 2.20 | `git.inspect`, `git.init` and `worktree.list`; local Git availability, repository metadata, worktree inventory and uncommitted file status. |
 | 2.21 | Optional `userAgent` on the global config (`settings.get` / `settings.write`); a custom outbound User-Agent replaces `taco/<version>` and suppresses the `x-taco-sidecar-version` header. A 2.20 daemon drops the field on write. |
+| 2.22 | `worktree.create` / `worktree.remove`, optional `managed` inventory metadata and the process-level `worktree.changed` push; a 2.21 daemon lacks the mutation methods and notification. |
 
 Adding a value to an existing response enum is potentially breaking: older clients
 may index exhaustive maps with it. Such values require connection-scoped capability
@@ -295,6 +296,8 @@ fields of `settings.get` or `settings.write`.
 | `commandPermission.resolve` | commandPermission.* |
 | `config.patch` | config.* |
 | `extensions.status` | extensions.* |
+| `git.init` | git.* |
+| `git.inspect` | git.* |
 | `imPolicy.clearChatOverride` | imPolicy.* |
 | `imPolicy.get` | imPolicy.* |
 | `imPolicy.setChannelDefault` | imPolicy.* |
@@ -369,6 +372,9 @@ fields of `settings.get` or `settings.write`.
 | `workspace.dispose` | workspace.* |
 | `workspace.ensure` | workspace.* |
 | `workspace.list` | workspace.* |
+| `worktree.create` | worktree.* |
+| `worktree.list` | worktree.* |
+| `worktree.remove` | worktree.* |
 <!-- RPC_TABLE_END -->
 
 ### Error Codes
@@ -448,6 +454,7 @@ The server pushes frames asynchronously.  Clients should route by `method`.
 | `im.workspaces_invalidated` | ImWorkspacesInvalidated |
 | `workspace.associations_changed` | WorkspaceAssociationsChanged |
 | `work.changed` | WorkChanged |
+| `worktree.changed` | WorktreeChanged |
 <!-- PUSH_TABLE_END -->
 
 **Push routing note**: `session.tool_call_*` frames carry a deduplication `id` equal to the `toolCallId`.  Clients may use this to merge incremental updates.  Session-scoped push frames should be accumulated by `workspace` + `session`.
@@ -457,6 +464,10 @@ A few frames have no session dimension at all. `models.changed`,
 process-level refresh signals: they carry an empty or near-empty `params` and
 the client re-pulls the corresponding list. `work.changed` additionally has no
 workspace (`workspace` is `"*"`) and never enters a session's replay log.
+`worktree.changed` is also process-level: `workspace` is `"*"`, with no session
+or sequence. Its params are `{ projectRoot: string, path: string,
+kind: "created" | "removed" }`; clients invalidate Git and worktree queries
+instead of applying inventory deltas. It never enters session replay.
 
 ### Session Event Replay (tombstone & capacity)
 
@@ -721,7 +732,8 @@ never enables initialization.
   NUL-delimited Git output preserves whitespace and Unicode filenames.
 - `worktree.list` returns the actual Git inventory, including detached, bare,
   locked and prunable entries. It is independent of `workspace.list`, which
-  enumerates loaded Taco runtimes.
+  enumerates loaded Taco runtimes. Since 2.22, entries may include an additive
+  `managed?: boolean` field; omitted values do not establish Taco ownership.
 - `git.init` is a mutating command with existing `commandId` deduplication.
   The desktop invokes it only after the user clicks **Create Git repository**.
   An existing parent checkout is returned instead of creating a nested repo.
@@ -729,6 +741,52 @@ never enables initialization.
 
 Git discovery is a core read service. The optional `@taco/builtin-git-context`
 plugin controls model context injection; disabling it does not disable desktop
-branch/status display or repository discovery. A future worktree plugin may
-control agent tools and guidance while using this shared service. D1 adds no
-worktree create/remove, source binding, memory sharing or permission grants.
+branch/status display or repository discovery. A worktree plugin may control
+agent tools and guidance while using this shared service.
+
+### Worktree management (2.22)
+
+- `worktree.create` takes `{ workspace, name, base? }`, where `base` is `"head"`
+  or `"default"`. It returns `{ path, branch, headOid, managed: true }`, with a
+  nullable `headOid`.
+- `worktree.remove` takes `{ workspace, path }` and returns
+  `{ path, branch, removed: true }`, with a nullable `branch`. It accepts no
+  force or branch-deletion option.
+- Both methods route by the required workspace. Their exported `*Params`
+  types are derived from the same schemas used by the RPC contract.
+- After creation or removal, `worktree.changed` identifies the project root,
+  affected worktree path and change kind. Desktop handles it before session
+  routing and invalidates all `git` and `worktrees` queries for that client,
+  including cached inactive queries. Active queries re-fetch immediately;
+  other clients' caches are independent. The existing unobtrusive 10-second
+  Git refresh remains as a fallback for external filesystem changes.
+
+Worktree resource ownership is resolved once when the runtime is built. A normal
+filesystem workspace keeps its existing path identity; a verified linked worktree
+uses its main checkout as `projectRoot`. Memory topics belong to that project,
+while transcripts, plans and checkpoints remain partitioned by the execution
+workspace. Closing a runtime or removing a worktree does not delete shared memory
+or transcripts. Removed managed worktrees retain a source record so opening their
+history can resolve the original project without recreating the checkout.
+
+Managed worktrees live at `<projectRoot>/.taco/worktrees/<name>` and start on
+`worktree/<name>`. The container is locally excluded from Git when needed; tracked
+container contents are rejected. `head` uses the selected workspace's current
+commit; `default` requires an existing local `origin/HEAD` reference. Creation
+never fetches, commits, copies local changes or configures Git identity.
+
+Removal requires both Taco ownership metadata and matching Git metadata identity.
+The main checkout, external worktrees, locked trees, local or ignored files, index
+flags that hide changes, attached sessions and active or queued Work prevent
+removal. Branches are retained. Mutations are serialized per repository within a
+sidecar process; cross-process coordination and automatic cleanup are separate
+capabilities.
+
+Configuration lookup uses worktree `.taco` and root files first, then main-checkout
+`.taco` and root files, then user/builtin fallbacks. Skills keep first-match priority;
+Agents keep last-match priority. Inherited Agents are readable but cannot be edited
+or deleted through the worktree; a local definition may override them. Search roots
+are not write grants. File tools and native agents keep the worktree's execution
+boundary. Inherited memory reads resolve project ownership without expanding the
+associated directory grant, and `memory.changed` refreshes current and inherited
+consumers after a successful mutation.

@@ -35,7 +35,31 @@ export function registerGitHandlers(): void {
     registerMethod("gitInit", false, ({ params }) => gitResult(params.workspace, initializeGit), {
         command: true,
     });
-    registerMethod("worktreeList", false, ({ params }) =>
-        gitResult(params.workspace, listGitWorktrees),
+    registerMethod("worktreeList", false, ({ params, server }) =>
+        gitResult(params.workspace, (cwd) =>
+            server.worktrees ? server.worktrees.list(cwd) : listGitWorktrees(cwd),
+        ),
+    );
+    registerMethod(
+        "worktreeCreate",
+        false,
+        ({ params, server }) =>
+            gitResult(params.workspace, (cwd) => {
+                if (!server.worktrees)
+                    throw new RpcHandlerError("invalid_state", "此服务不支持工作树管理。");
+                return server.worktrees.create(cwd, params.name, params.base);
+            }),
+        { command: true },
+    );
+    registerMethod(
+        "worktreeRemove",
+        false,
+        ({ params, server }) =>
+            gitResult(params.workspace, (cwd) => {
+                if (!server.worktrees)
+                    throw new RpcHandlerError("invalid_state", "此服务不支持工作树管理。");
+                return server.worktrees.remove(cwd, params.path);
+            }),
+        { command: true },
     );
 }

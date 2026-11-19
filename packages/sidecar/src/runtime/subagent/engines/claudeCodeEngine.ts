@@ -1,4 +1,4 @@
-import { stat } from "node:fs/promises";
+import { realpath, stat } from "node:fs/promises";
 import { asSessionId } from "@taco-ai/protocol";
 import type { AgentDefinition } from "../../../agents/types.ts";
 import { uuidv7 } from "../../pi/values.ts";
@@ -13,6 +13,7 @@ import { readClaudeCodeState, writeClaudeCodeState } from "../claudeCode/claudeC
 import type { AgentEngine, EngineRunRequest, NativeEngineDeps } from "./types.ts";
 
 export interface ClaudeCodeEngineDeps extends NativeEngineDeps {
+    readonly getAllowedCwds: () => readonly string[];
     readonly loadClaudeCodeSdk?: () => Promise<ClaudeAgentSdk>;
     readonly findClaudeCode?: () => string | undefined;
 }
@@ -22,22 +23,23 @@ export function createClaudeCodeEngine(deps: ClaudeCodeEngineDeps): AgentEngine 
         runtime: "claude-code",
         capabilities: { forkContext: false, delivery: "nextTurn", workLane: false },
         async preflight(def: AgentDefinition): Promise<void> {
-            if (def.cwd === undefined) return;
-            const isDir = await stat(def.cwd)
-                .then((entry) => entry.isDirectory())
-                .catch(() => false);
-            if (!isDir) {
-                throw new Error(
-                    `agent type "${def.agentType}" is set to run in ${def.cwd}, which is not an ` +
-                        "existing directory. Ask the user to fix the subagent's directory in its settings.",
-                );
-            }
+            await resolveClaudeCodeCwd(deps, def.cwd, def.agentType);
         },
         run: (args) => runClaudeCode(deps, args),
     };
 }
 
 async function runClaudeCode(deps: ClaudeCodeEngineDeps, args: EngineRunRequest) {
+    let cwd: string;
+    try {
+        cwd = await resolveClaudeCodeCwd(deps, args.claudeCodeCwd, args.agentType);
+    } catch (error) {
+        return {
+            subSessionId: args.childSessionId,
+            isError: true,
+            resultText: error instanceof Error ? error.message : String(error),
+        };
+    }
     const native = args.resume
         ? await deps.registry.withSession(args.childSessionId, readClaudeCodeState)
         : undefined;
@@ -50,7 +52,6 @@ async function runClaudeCode(deps: ClaudeCodeEngineDeps, args: EngineRunRequest)
         };
     }
 
-    const cwd = args.claudeCodeCwd ?? deps.executionCwd();
     if (
         native &&
         (native.cwd !== cwd ||
@@ -118,6 +119,35 @@ async function runClaudeCode(deps: ClaudeCodeEngineDeps, args: EngineRunRequest)
         findExecutable: deps.findClaudeCode ?? findClaudeExecutable,
         appendMessages: (messages) => deps.appendMessages(args.childSessionId, messages),
     });
+}
+
+async function resolveClaudeCodeCwd(
+    deps: ClaudeCodeEngineDeps,
+    requested: string | undefined,
+    agentType: string,
+): Promise<string> {
+    const path = requested ?? deps.executionCwd();
+    const candidate = await realpath(path).catch(() => undefined);
+    const isDir =
+        candidate !== undefined &&
+        (await stat(candidate)
+            .then((entry) => entry.isDirectory())
+            .catch(() => false));
+    if (!isDir) {
+        throw new Error(
+            `agent type "${agentType}" is set to run in ${path}, which is not an ` +
+                "existing directory. Ask the user to fix the subagent's directory in its settings.",
+        );
+    }
+    const allowed = await Promise.all(
+        deps.getAllowedCwds().map((root) => realpath(root).catch(() => undefined)),
+    );
+    if (!allowed.includes(candidate)) {
+        throw new Error(
+            `Claude Code cwd must be the workspace directory or one of its associated directories: ${candidate}`,
+        );
+    }
+    return candidate;
 }
 
 function createClaudeCommunicationTools(

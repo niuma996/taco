@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
+import { loadAgents } from "../../src/agents/loadAgents.ts";
 import { resolveInstructions } from "../../src/config/instructions.ts";
 import type {
     SkillDirInput,
@@ -165,6 +166,84 @@ describe("workspace configuration sources", () => {
         assert.deepEqual(resolveInstructions({ cwd, sources }).blocks, [
             { name: "CLAUDE.md", source: "user-taco", content: "injected fallback" },
         ]);
+    });
+
+    it("falls back from a worktree .taco directory to the project .taco directory", async () => {
+        const { resolveWorkspaceConfigSources } = await import(
+            "../../src/config/workspaceConfigSources.ts"
+        );
+        const projectRoot = join(root, "project-root");
+        const worktree = join(projectRoot, ".taco", "worktrees", "feature");
+        mkdirSync(worktree, { recursive: true });
+        const sources = resolveWorkspaceConfigSources(worktree, projectRoot);
+        assert.deepEqual(
+            sources.skillDirs.slice(0, 2).map((entry) => entry.path),
+            [fwd(join(worktree, ".taco", "skills")), fwd(join(projectRoot, ".taco", "skills"))],
+        );
+        assert.deepEqual(sources.instructionDirs.slice(0, 4), [
+            { dir: join(worktree, ".taco"), label: "project-taco" },
+            { dir: join(worktree), label: "project" },
+            { dir: join(projectRoot, ".taco"), label: "project-taco" },
+            { dir: join(projectRoot), label: "project" },
+        ]);
+        assert.equal(sources.agentDirs.at(-1), join(worktree, ".taco", "agents"));
+        assert.equal(sources.agentDirs.at(-2), join(projectRoot, ".taco", "agents"));
+    });
+
+    it("falls back through real worktree instructions and rereads changed content", async () => {
+        const { resolveWorkspaceConfigSources } = await import(
+            "../../src/config/workspaceConfigSources.ts"
+        );
+        const main = join(root, "main");
+        const sources = resolveWorkspaceConfigSources(cwd, main);
+        const layers = [join(cwd, ".taco"), cwd, join(main, ".taco"), main, tacoHome];
+        for (const [index, dir] of layers.entries()) write(dir, "CLAUDE.md", `layer ${index}`);
+        for (const [index, dir] of layers.entries()) {
+            assert.equal(resolveInstructions({ cwd, sources }).blocks[0].content, `layer ${index}`);
+            write(dir, "CLAUDE.md", `updated ${index}`);
+            assert.equal(
+                resolveInstructions({ cwd, sources }).blocks[0].content,
+                `updated ${index}`,
+            );
+            rmSync(join(dir, "CLAUDE.md"));
+        }
+    });
+
+    it("loads worktree skills first and agents last, with main and global fallback", async () => {
+        const { resolveWorkspaceConfigSources } = await import(
+            "../../src/config/workspaceConfigSources.ts"
+        );
+        const main = join(root, "main");
+        const sources = resolveWorkspaceConfigSources(cwd, main);
+        const layers = [join(cwd, ".taco"), join(main, ".taco"), tacoHome];
+        for (const [index, dir] of layers.entries()) {
+            writeSkill(join(dir, "skills"), "shared", `layer ${index}`);
+            write(
+                join(dir, "agents"),
+                "shared.md",
+                `---\nname: shared\ndescription: layer ${index}\n---\nBody`,
+            );
+        }
+        for (const [index, dir] of layers.entries()) {
+            for (const scope of [undefined, "workspace"] as const) {
+                if (scope === "workspace" && index === 2) continue;
+                const skills = await loadSkillCatalog(cwd, [], scope, sources);
+                assert.equal(
+                    skills.skills.find((skill) => skill.name === "shared")?.description,
+                    `layer ${index}`,
+                );
+            }
+            const agents = await loadAgents({
+                builtinDir: join(resources, "agents"),
+                userDirs: sources.agentDirs,
+            });
+            assert.equal(
+                agents.find((agent) => agent.agentType === "shared")?.description,
+                `layer ${index}`,
+            );
+            rmSync(join(dir, "skills"), { recursive: true });
+            rmSync(join(dir, "agents"), { recursive: true });
+        }
     });
 
     it("excludes user-claude from AGENTS.md and DESIGN.md even when injected first", () => {

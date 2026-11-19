@@ -6,7 +6,8 @@
  * routing lives here so the controller stays testable with plain fakes.
  */
 
-import { resolve } from "node:path";
+import { realpathSync } from "node:fs";
+import { isAbsolute, relative, resolve, sep } from "node:path";
 import {
     type AgentMessage,
     type CommandPermissionRequest,
@@ -542,11 +543,31 @@ export class WorkService implements BackgroundWorkHooks, ScheduledWorkHooks, Wor
         return { outcome };
     }
 
-    async hasActiveWorkspaceWork(workspace: string): Promise<boolean> {
+    async hasActiveWorkspaceWork(
+        workspace: string,
+        includeDescendants = false,
+        accessRoots: (key: string) => readonly string[] = (key) => [key],
+    ): Promise<boolean> {
+        const canonical = (path: string) => {
+            try {
+                return realpathSync.native(path);
+            } catch {
+                return resolve(path);
+            }
+        };
+        const matchesPath = (key: string) => {
+            if (key.startsWith("im://") || workspace.startsWith("im://")) return key === workspace;
+            const rel = relative(canonical(workspace), canonical(key));
+            return (
+                rel === "" ||
+                (includeDescendants &&
+                    rel !== ".." &&
+                    !rel.startsWith(`..${sep}`) &&
+                    !isAbsolute(rel))
+            );
+        };
         const matches = (key: string) =>
-            key.startsWith("im://") || workspace.startsWith("im://")
-                ? key === workspace
-                : resolve(key) === resolve(workspace);
+            matchesPath(key) || (includeDescendants && accessRoots(key).some(matchesPath));
         if (
             (await this.store.list()).some(
                 (work) =>

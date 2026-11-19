@@ -10,7 +10,7 @@ import {
 } from "../src/index.ts";
 
 test("work controls remain process-scoped methods", () => {
-    assert.deepEqual(SIDECAR_PROTOCOL_VERSION, { major: 2, minor: 21 });
+    assert.deepEqual(SIDECAR_PROTOCOL_VERSION, { major: 2, minor: 22 });
     assert.equal(RPC.workCancel, "work.cancel");
     assert.equal(RPC.workDelete, "work.delete");
     assert.equal(rpcContract.workCancel.scope, "process");

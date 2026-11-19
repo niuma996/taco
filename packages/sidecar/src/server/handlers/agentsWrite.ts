@@ -42,6 +42,8 @@ export function userAgentsDir(): string {
  */
 export interface AgentScopeContext {
     readonly workspaceDir?: string;
+    /** Project agent roots in runtime override order, including read-only fallback layers. */
+    readonly workspaceAgentDirs?: readonly string[];
     /**
      * Directories a claude-code agent may be fixed to: the workspace's
      * execution cwd plus its associated directories, as they are at save time.
@@ -58,6 +60,27 @@ export function agentsDirFor(scope: AgentScope, ctx: AgentScopeContext): string 
         );
     }
     return join(ctx.workspaceDir, ".taco", "agents");
+}
+
+/** Read project definitions with the runtime's last-definition-wins priority. */
+export async function readWorkspaceAgents(ctx: AgentScopeContext): Promise<AgentDefinition[]> {
+    if (ctx.workspaceDir === undefined) return [];
+    const localDir = agentsDirFor("workspace", ctx);
+    const dirs = ctx.workspaceAgentDirs ?? [localDir];
+    const agents = new Map<string, AgentDefinition>();
+    for (const dir of dirs) {
+        for (const def of await loadAgentDir(dir, "user")) agents.set(def.agentType, def);
+    }
+    return [...agents.values()];
+}
+
+/** Scope membership includes inherited project definitions; editability remains local. */
+export function agentReadScopeOf(
+    def: AgentDefinition,
+    ctx: AgentScopeContext,
+): AgentScope | undefined {
+    if (ctx.workspaceAgentDirs?.some((dir) => isInside(dir, def.filePath))) return "workspace";
+    return agentScopeOf(def, ctx);
 }
 
 /** Lowercase-alphanumeric start; the name doubles as the markdown file name. */
@@ -199,8 +222,8 @@ function requireEditable(
  * directory. The caller (the `agents.write` handler) rescans the catalog
  * afterwards via `server.reloadAgents()`.
  *
- * A workspace definition may shadow a global one (the loader gives the
- * project directory the highest priority); nothing else may be shadowed, and
+ * A local definition may shadow a global or inherited project definition
+ * (the loader gives the local directory highest priority), and
  * a file already sitting in the target directory is never overwritten by a
  * create — the catalog only shows the winner, so the file system is the
  * authority on what a scope already holds.
@@ -289,8 +312,12 @@ export async function writeUserAgent(
     // name is the one being edited it is the definition being replaced.
     const existing = currentAgents.find((a) => a.agentType === target);
     if (existing !== undefined && target !== previousType) {
-        const shadowsGlobal = scope === "workspace" && agentScopeOf(existing, ctx) === "global";
-        if (!shadowsGlobal) {
+        const shadowsFallback =
+            scope === "workspace" &&
+            (agentScopeOf(existing, ctx) === "global" ||
+                (agentReadScopeOf(existing, ctx) === "workspace" &&
+                    !isEditableAgent(existing, ctx)));
+        if (!shadowsFallback) {
             throw new AgentWriteError(
                 `agent type "${target}" already exists (${existing.source}) — pick another name`,
             );

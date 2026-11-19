@@ -21,7 +21,10 @@ export interface WorkspaceConfigSources {
 }
 
 /** Skills and instructions are first-wins; agents override earlier entries. */
-export function resolveWorkspaceConfigSources(cwd: string): WorkspaceConfigSources {
+export function resolveWorkspaceConfigSources(
+    cwd: string,
+    projectRoot: string = cwd,
+): WorkspaceConfigSources {
     // pi's relativeEnvPath compares against forward slashes even on Windows.
     const fwd = (path: string) => path.replace(/\\/g, "/");
     const home = homedir();
@@ -29,6 +32,15 @@ export function resolveWorkspaceConfigSources(cwd: string): WorkspaceConfigSourc
     return {
         skillDirs: [
             { path: fwd(resolvePath(cwd, ".taco", "skills")), source: "user", scope: "workspace" },
+            ...(resolvePath(projectRoot) === resolvePath(cwd)
+                ? []
+                : [
+                      {
+                          path: fwd(resolvePath(projectRoot, ".taco", "skills")),
+                          source: "user" as const,
+                          scope: "workspace" as const,
+                      },
+                  ]),
             { path: fwd(resolvePath(userTaco, "skills")), source: "user", scope: "global" },
             { path: fwd(resolvePath(home, ".claude", "skills")), source: "user" },
             { path: fwd(resolvePath(home, ".pi", "skills")), source: "user" },
@@ -38,11 +50,20 @@ export function resolveWorkspaceConfigSources(cwd: string): WorkspaceConfigSourc
             resolvePath(home, ".claude", "agents"),
             resolvePath(home, ".pi", "agents"),
             resolvePath(userTaco, "agents"),
+            ...(resolvePath(projectRoot) === resolvePath(cwd)
+                ? []
+                : [resolvePath(projectRoot, ".taco", "agents")]),
             resolvePath(cwd, ".taco", "agents"),
         ],
         instructionDirs: [
             { dir: resolvePath(cwd, ".taco"), label: "project-taco" },
             { dir: cwd, label: "project" },
+            ...(resolvePath(projectRoot) === resolvePath(cwd)
+                ? []
+                : [
+                      { dir: resolvePath(projectRoot, ".taco"), label: "project-taco" as const },
+                      { dir: projectRoot, label: "project" as const },
+                  ]),
             { dir: userTaco, label: "user-taco" },
             { dir: resolvePath(home, ".claude"), label: "user-claude" },
         ],

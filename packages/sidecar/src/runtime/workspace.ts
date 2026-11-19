@@ -11,6 +11,8 @@ import { disposeInOrder } from "../lib/async.ts";
 
 import { execFileSync } from "node:child_process";
 import { EventEmitter } from "node:events";
+import { realpathSync } from "node:fs";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { createModels } from "@earendil-works/pi-ai/compat";
 import type {
     CustomModelEntry,
@@ -174,6 +176,24 @@ function probeGitEnvironment(
         currentBranch,
         defaultBranch,
     };
+}
+
+// Resolve existing ancestors too, so missing descendants cannot hide behind a symlink.
+function canonicalRoot(path: string): string {
+    const absolute = resolve(path);
+    try {
+        return realpathSync(absolute);
+    } catch {
+        const parent = dirname(absolute);
+        return parent === absolute
+            ? absolute
+            : join(canonicalRoot(parent), relative(parent, absolute));
+    }
+}
+
+function containsRoot(root: string, path: string): boolean {
+    const rel = relative(root, path);
+    return rel === "" || (!isAbsolute(rel) && rel !== ".." && !rel.startsWith(`..${sep}`));
 }
 
 export type { AttachOptions };
@@ -543,7 +563,8 @@ export class WorkspaceRuntime extends EventEmitter {
         this.scope = options.scope ?? createWorkspaceScope(options.cwd);
         this.resourceOwners = options.resourceOwners ?? resolveWorkspaceResourceOwners(this.scope);
         this.configSources =
-            options.configSources ?? resolveWorkspaceConfigSources(this.resourceOwners.configCwd);
+            options.configSources ??
+            resolveWorkspaceConfigSources(this.executionCwd, this.resourceOwners.configCwd);
         const isIm = this.scope.kind === "im";
         const imChannelId = this.scope.kind === "im" ? this.scope.route.channelId : undefined;
         this.sessionsRoot = defaultSessionsRoot(options.sessionsRoot);
@@ -630,7 +651,21 @@ export class WorkspaceRuntime extends EventEmitter {
         // constructor-time value is reused, which is what every non-IM
         // workspace and every test wants.
         this.resolveImPolicy = options.resolveImPolicy ?? (() => imPolicy);
-        this.resolveAssociatedRoots = options.resolveAssociatedRoots ?? (() => []);
+        this.resolveAssociatedRoots = () => {
+            const roots = options.resolveAssociatedRoots?.() ?? [];
+            if (isIm || resolve(this.executionCwd) === resolve(this.scope.projectRoot))
+                return roots;
+            const main = canonicalRoot(this.scope.projectRoot);
+            const worktree = canonicalRoot(this.executionCwd);
+            return roots.filter((root) => {
+                const grant = canonicalRoot(root);
+                // A nested worktree is inside main, but granting that subtree is safe.
+                return (
+                    containsRoot(worktree, grant) ||
+                    (!containsRoot(main, grant) && !containsRoot(grant, main))
+                );
+            });
+        };
         this.resolveManagedGlobalMemoryRoots =
             options.resolveManagedGlobalMemoryRoots ?? (() => []);
         this.permissionBroker = new PermissionBroker(
@@ -1124,6 +1159,9 @@ export class WorkspaceRuntime extends EventEmitter {
             ),
             environmentContext: {
                 cwd: this.executionCwd,
+                ...(!isIm && resolve(this.executionCwd) !== resolve(this.scope.projectRoot)
+                    ? { projectRoot: this.scope.projectRoot, isWorktree: true }
+                    : {}),
                 platform: process.platform,
                 // Windows has no $SHELL; the shell tool runs PowerShell there
                 // (see shellTool.ts), so name that rather than "unknown".

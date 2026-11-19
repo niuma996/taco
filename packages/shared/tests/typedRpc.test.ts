@@ -37,6 +37,41 @@ const TYPED_KEYS = (Object.keys(rpcContract) as RpcContractKey[]).filter(
     (key) => !key.startsWith("jobs") && key !== "configPatch",
 );
 
+test("worktree management methods route by workspace and preserve optional base and results", async () => {
+    const { dispatch, calls } = mock();
+    const created = {
+        path: "/worktrees/feature",
+        branch: "feature",
+        headOid: null,
+        managed: true as const,
+    };
+    const removed = { path: created.path, branch: created.branch, removed: true as const };
+    dispatch.call = async (method, workspace, params) => {
+        calls.push({ method, workspace, params, process: false });
+        return (method === RPC.worktreeCreate ? created : removed) as never;
+    };
+    const rpc = createTypedRpc(dispatch);
+    const workspace = asWorkspaceId("/project/sub");
+    for (const base of [undefined, "head", "default"] as const) {
+        const params = { workspace, name: "feature", ...(base ? { base } : {}) };
+        assert.equal(await rpc.worktreeCreate(params), created);
+        assert.deepEqual(calls.at(-1), {
+            method: "worktree.create",
+            workspace,
+            params,
+            process: false,
+        });
+    }
+    const params = { workspace, path: created.path };
+    assert.equal(await rpc.worktreeRemove(params), removed);
+    assert.deepEqual(calls.at(-1), {
+        method: "worktree.remove",
+        workspace,
+        params,
+        process: false,
+    });
+});
+
 test("每个 contract 方法都生成,按 scope 路由并原样透传 params", async () => {
     const { dispatch, calls } = mock();
     const rpc = createTypedRpc(dispatch) as unknown as Record<

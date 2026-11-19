@@ -161,11 +161,20 @@ export {
 } from "./frames.js";
 export type {
     GitFileChange,
+    GitInitParams,
+    GitInspectParams,
     GitInspectResult,
     GitRepositoryInfo,
     GitUnavailable,
     GitWorktreeInfo,
+    WorktreeBase,
+    WorktreeChangedParams,
+    WorktreeCreateParams,
+    WorktreeCreateResult,
+    WorktreeListParams,
     WorktreeListResult,
+    WorktreeRemoveParams,
+    WorktreeRemoveResult,
 } from "./git.js";
 // jobs.* RPC types — the scheduler's wire contract.
 export type {

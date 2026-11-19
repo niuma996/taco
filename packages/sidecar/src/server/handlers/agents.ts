@@ -29,10 +29,11 @@ import type { WorkspaceRuntime } from "../../runtime/workspace.ts";
 import { registerMethod } from "../methodRegistry.ts";
 import {
     type AgentScopeContext,
+    agentReadScopeOf,
     agentScopeOf,
-    agentsDirFor,
     deleteUserAgent,
     readUserAgent,
+    readWorkspaceAgents,
     userAgentsDir,
     writeUserAgent,
 } from "./agentsWrite.ts";
@@ -56,7 +57,15 @@ function scopeContext(workspace: WorkspaceRuntime): AgentScopeContext {
     const allowedCwds = [workspace.executionCwd, ...workspace.associatedRoots()];
     return workspace.imRouting !== undefined
         ? { allowedCwds }
-        : { workspaceDir: workspace.executionCwd, allowedCwds };
+        : {
+              workspaceDir: workspace.executionCwd,
+              workspaceAgentDirs: workspace.configSources.agentDirs.filter((dir) =>
+                  [workspace.executionCwd, workspace.scope.projectRoot].some(
+                      (root) => dir === join(root, ".taco", "agents"),
+                  ),
+              ),
+              allowedCwds,
+          };
 }
 
 export function registerAgentsHandlers(): void {
@@ -68,12 +77,10 @@ export function registerAgentsHandlers(): void {
                 : params.scope === "global"
                   ? await loadAgentDir(userAgentsDir(), "user")
                   : params.scope === "workspace"
-                    ? ctx.workspaceDir
-                        ? await loadAgentDir(agentsDirFor("workspace", ctx), "user")
-                        : []
+                    ? await readWorkspaceAgents(ctx)
                     : workspace.agents;
         const agents = scopedAgents.map((a: AgentDefinition) => {
-            const scope = agentScopeOf(a, ctx);
+            const scope = agentReadScopeOf(a, ctx);
             return {
                 agentType: a.agentType,
                 description: a.description,
@@ -82,7 +89,7 @@ export function registerAgentsHandlers(): void {
                 runtime: a.runtime,
                 source: a.source,
                 ...(scope !== undefined ? { scope } : {}),
-                editable: scope !== undefined,
+                editable: agentScopeOf(a, ctx) !== undefined,
             };
         });
         return { agents, cwdChoices: [...(ctx.allowedCwds ?? [])] };
@@ -97,13 +104,22 @@ export function registerAgentsHandlers(): void {
                     ? (
                           await loadAgentDir(join(resourceRoot(), "agents", "builtin"), "builtin")
                       ).find((agent) => agent.agentType === params.agentType)
-                    : params.scope
-                      ? await readUserAgent(params.agentType, params.scope, scopeContext(workspace))
-                      : workspace.findAgent(params.agentType);
+                    : params.scope === "workspace"
+                      ? (await readWorkspaceAgents(scopeContext(workspace))).find(
+                            (agent) => agent.agentType === params.agentType,
+                        )
+                      : params.scope
+                        ? await readUserAgent(
+                              params.agentType,
+                              params.scope,
+                              scopeContext(workspace),
+                          )
+                        : workspace.findAgent(params.agentType);
             if (!def) {
                 throw new Error(`agent not found: ${params.agentType}`);
             }
-            const scope = agentScopeOf(def, scopeContext(workspace));
+            const ctx = scopeContext(workspace);
+            const scope = agentReadScopeOf(def, ctx);
             return {
                 agentType: def.agentType,
                 systemPrompt: def.systemPrompt,
@@ -119,7 +135,7 @@ export function registerAgentsHandlers(): void {
                 ...(def.runtime === "codex" && def.codex !== undefined ? { codex: def.codex } : {}),
                 source: def.source,
                 ...(scope !== undefined ? { scope } : {}),
-                editable: scope !== undefined,
+                editable: agentScopeOf(def, ctx) !== undefined,
             };
         },
     );

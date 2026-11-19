@@ -7,6 +7,7 @@
 import type { ChannelStatusChangedParams } from "./channels.js";
 import type { CommandPermissionDenialReason } from "./config.js";
 import type { CompactionFailureReason, SessionId, ToolCallId, WorkspaceId } from "./frames.js";
+import type { WorktreeChangedParams } from "./git.js";
 import type {
     SubagentSettledPayload,
     SubagentSpawnedPayload,
@@ -181,6 +182,8 @@ export const PushMethods = {
      * clients only; it is not forwarded to IM channels.
      */
     WorkChanged: "work.changed",
+    /** Process-level invalidation of Git metadata and worktree inventory. */
+    WorktreeChanged: "worktree.changed",
 } as const;
 
 /**
@@ -493,6 +496,7 @@ export interface PushParamsByMethod {
     [PushMethods.ImWorkspacesInvalidated]: ImWorkspacesInvalidatedParams;
     [PushMethods.WorkspaceAssociationsChanged]: WorkspaceAssociationsChangedParams;
     [PushMethods.WorkChanged]: WorkChangedParams;
+    [PushMethods.WorktreeChanged]: WorktreeChangedParams;
 }
 
 export type PushMethodName = (typeof PushMethods)[keyof typeof PushMethods];

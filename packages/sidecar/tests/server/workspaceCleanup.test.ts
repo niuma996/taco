@@ -441,3 +441,44 @@ for (const reserved of ["im", "scratch", "chats", "--partition--"]) {
         assert.ok(existsSync(sibling));
     });
 }
+
+test("cleanup admission protects nested worktree requests in both directions", async () => {
+    const gate = new WorkspaceCleanupGate();
+    const main = asWorkspaceId("/project");
+    const tree = asWorkspaceId("/project/.taco/worktrees/feature");
+    await gate.run(tree, async () => {
+        await assert.rejects(
+            gate.cleanup(main, async () => undefined),
+            /活动/,
+        );
+    });
+    await gate.cleanup(tree, async () => {
+        await assert.rejects(
+            gate.run(main, async () => undefined),
+            /清理/,
+        );
+        await assert.rejects(
+            gate.run(asWorkspaceId(`${tree}/src`), async () => undefined),
+            /清理/,
+        );
+        await gate.run(asWorkspaceId("/another-project"), async () => undefined);
+    });
+});
+
+test("cleanup gate checks execution aliases for virtual workspaces before and during deletion", async () => {
+    const tree = asWorkspaceId("/project/.taco/worktrees/feature");
+    const im = asWorkspaceId("im://channel/peer/chat");
+    const gate = new WorkspaceCleanupGate((key) => (key === im ? [tree] : []));
+    await gate.run(im, async () => {
+        await assert.rejects(
+            gate.cleanup(tree, async () => undefined),
+            /活动/,
+        );
+    });
+    await gate.cleanup(tree, async () => {
+        await assert.rejects(
+            gate.run(im, async () => undefined),
+            /清理/,
+        );
+    });
+});
