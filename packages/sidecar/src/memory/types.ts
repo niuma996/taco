@@ -232,3 +232,8 @@ export class MemoryConflictError extends Error {
         this.name = "MemoryConflictError";
     }
 }
+
+/** Context sources may prepare inherited partitions before rendering. */
+export interface MemoryContextSource {
+    buildMemoryBlock(): string | Promise<string>;
+}

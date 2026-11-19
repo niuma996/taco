@@ -15,6 +15,7 @@ import type {
 } from "@taco-ai/protocol";
 import { HIDDEN_WINDOWS_SPAWN } from "../lib/hiddenWindowsSpawn.ts";
 import { scrubbedProcessEnv } from "../runtime/models/providerKeyStore.ts";
+import { gitDirectoryIdentity } from "../workspace/gitIdentity.ts";
 import {
     assertWorktreeStorage,
     isSafeWorktreeName,
@@ -332,11 +333,28 @@ async function mainCheckout(repository: GitRepositoryInfo, signal: AbortSignal):
                 await git(repository.checkoutRoot, ["config", "--path", "core.worktree"], signal),
             );
             mainPath = resolve(repository.commonDir, configured);
-        } catch {
-            throw new GitServiceError(
-                "command_failed",
-                "Separate Git directory has no verified main checkout",
-            );
+        } catch (error) {
+            // Git omits a separate checkout's location; only verified Taco provenance can supply it.
+            const candidate = dirname(dirname(dirname(repository.checkoutRoot)));
+            const tree = listing.worktrees.find((tree) => tree.path === repository.checkoutRoot);
+            let owned = false;
+            if ((error as { code?: number }).code === 1 && tree) {
+                try {
+                    const path = managedPath(candidate, repository.checkoutRoot);
+                    const record = await new WorktreeMetadataStore(candidate).get(path);
+                    owned =
+                        !!record &&
+                        (await matchesOwnership(record, tree, repository, candidate, signal));
+                } catch {
+                    owned = false;
+                }
+            }
+            if (!owned)
+                throw new GitServiceError(
+                    "command_failed",
+                    "Separate Git directory has no verified main checkout",
+                );
+            mainPath = candidate;
         }
     }
     let verified: GitRepositoryInfo | "missing" | "not_repository";
@@ -458,10 +476,12 @@ async function withWorktreeMutation<T>(key: string, operation: () => Promise<T>)
 }
 
 async function directoryIdentity(path: string): Promise<string> {
-    const entry = await lstat(path, { bigint: true });
-    if (!entry.isDirectory() || entry.isSymbolicLink())
+    try {
+        return await gitDirectoryIdentity(path);
+    } catch (error) {
+        if ((error as NodeJS.ErrnoException).code) throw error;
         throw new GitServiceError("invalid_path", "Git metadata directory is unsafe");
-    return `${entry.dev}:${entry.ino}:${entry.birthtimeNs}`;
+    }
 }
 
 async function verifySource(
@@ -643,7 +663,7 @@ export async function createGitWorktree(
     cwd: string,
     name: string,
     base: WorktreeBase = "head",
-): Promise<WorktreeCreateResult> {
+): Promise<WorktreeCreateResult & { projectRoot: string }> {
     if (!isSafeWorktreeName(name))
         throw new GitServiceError("invalid_path", "Invalid worktree name");
     if (base !== "head" && base !== "default")
@@ -752,7 +772,7 @@ export async function createGitWorktree(
                 createdAt: now,
                 lastSeenAt: now,
             });
-            return { path, branch, headOid: actual.headOid, managed: true };
+            return { path, branch, headOid: actual.headOid, managed: true, projectRoot };
         } catch {
             const cleanup = requestSignal();
             let removed = false;

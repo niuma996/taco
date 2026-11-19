@@ -38,8 +38,75 @@ export interface ResolveMemorySourcesOptions {
     readonly inheritManagedGlobal: boolean;
     /** Explicit filesystem workspace identities supplied by the server registry. */
     readonly managedGlobalRoots?: readonly string[];
-    /** Synchronous verified owner lookup; defaults to read-only Git metadata resolution. */
+    /** Verified owner lookup for this use; absent means roots are already partition identities. */
     readonly resolveMemoryRoot?: (root: string) => string;
+}
+
+/** Resolve live Git ownership and import old partitions before synchronous reads. */
+export async function prepareMemorySources(
+    input: ResolveMemorySourcesOptions | (() => ResolveMemorySourcesOptions),
+): Promise<ResolveMemorySourcesOptions> {
+    const currentOptions = typeof input === "function" ? input : () => input;
+    const live = currentOptions();
+    const options = {
+        ...live,
+        associatedRoots: [...live.associatedRoots],
+        managedGlobalRoots: [...(live.managedGlobalRoots ?? [])],
+    };
+    if (options.target !== "channel" || !options.store.enabled) return options;
+    const roots = [
+        ...new Set(
+            [
+                ...options.associatedRoots,
+                ...(options.inheritManagedGlobal ? (options.managedGlobalRoots ?? []) : []),
+            ]
+                .filter(isAbsolute)
+                .map((root) => resolve(root)),
+        ),
+    ];
+    const owners = new Map(
+        await Promise.all(
+            roots.map(
+                async (root) =>
+                    [
+                        root,
+                        options.resolveMemoryRoot?.(root) ?? (await resolveMemoryRoot(root)),
+                    ] as const,
+            ),
+        ),
+    );
+    if (options.store instanceof LocalMemoryStore) {
+        for (const [root, owner] of owners) {
+            if (owner === root) continue;
+            const store = new LocalMemoryStore();
+            store.initialize(owner);
+            await store.importWorkspaceMemory(root);
+        }
+    }
+    const authorized = (live: readonly string[], original: readonly string[]) => {
+        const initial = new Set(original.filter(isAbsolute).map((root) => resolve(root)));
+        return live
+            .filter(isAbsolute)
+            .map((root) => resolve(root))
+            .filter((root) => initial.has(root));
+    };
+    return {
+        ...options,
+        // Synchronous consumers recheck grants after all preparation awaits.
+        get associatedRoots() {
+            return authorized(currentOptions().associatedRoots, options.associatedRoots);
+        },
+        get inheritManagedGlobal() {
+            return options.inheritManagedGlobal && currentOptions().inheritManagedGlobal;
+        },
+        get managedGlobalRoots() {
+            return authorized(
+                currentOptions().managedGlobalRoots ?? [],
+                options.managedGlobalRoots ?? [],
+            );
+        },
+        resolveMemoryRoot: (root) => owners.get(root) ?? root,
+    };
 }
 
 function lastSegment(root: string): string {
@@ -101,7 +168,7 @@ function readLayers(current: LocalMemoryStore, roots: readonly string[]): Memory
 
 export function resolveMemorySources(options: ResolveMemorySourcesOptions): ResolvedMemorySources {
     const current = options.store;
-    const owner = options.resolveMemoryRoot ?? resolveMemoryRoot;
+    const owner = options.resolveMemoryRoot ?? ((root: string) => root);
     const excluded = new Set<string>();
     if (current instanceof LocalMemoryStore) excluded.add(current.dirKey);
     const associatedRoots =

@@ -156,6 +156,7 @@ export function registerSessionTurnHandlers(): void {
         "sessionSteer",
         true,
         async ({ workspace, server, params }) => {
+            await workspace.assertExecutionAvailable();
             const attached = requireAttached(workspace, params.sessionId);
             // Same compaction contract as prompt: bounded wait, then a
             // retryable session_busy — never a silent enqueue that sits
@@ -184,6 +185,7 @@ export function registerSessionTurnHandlers(): void {
         "sessionFollowUp",
         true,
         async ({ workspace, server, params }) => {
+            await workspace.assertExecutionAvailable();
             const attached = requireAttached(workspace, params.sessionId);
             await requireCompactionSettled(server, params.workspace, params.sessionId);
             const turn = await composeTurn(

@@ -32,5 +32,6 @@ export async function ensureAttached(
 ): Promise<AttachedSession> {
     let attached = workspace.getAttached(sessionId);
     if (!attached) attached = await workspace.attach(sessionId, opts);
+    else await workspace.assertExecutionAvailable();
     return attached;
 }

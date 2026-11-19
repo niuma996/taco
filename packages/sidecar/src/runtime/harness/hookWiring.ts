@@ -27,8 +27,8 @@ import { withDeadline } from "../../lib/async.ts";
 import { harnessContext } from "../../lib/harnessContext.ts";
 import { createLogger } from "../../lib/logger.ts";
 import { redactString } from "../../lib/secretRedaction.ts";
-import type { MemoryStore } from "../../memory/index.ts";
 import { buildMemoryContextHook } from "../../memory/memoryTag.ts";
+import type { MemoryContextSource } from "../../memory/types.ts";
 import { createMutationGateHook, type PlanWriteApprover } from "../../permissions/mutationGate.ts";
 import { buildSkillReinjector, type SkillReinjectorHandle } from "../../skills/skillReinjector.ts";
 import {
@@ -163,7 +163,7 @@ export interface HookWiringOptions {
     getInstructionsConfig?: () => InstructionsConfig | undefined;
     configSources?: WorkspaceConfigSources;
     /** User-level memory store — injects `<memory>` tag on every context build. */
-    memoryStore?: Pick<MemoryStore, "buildMemoryBlock">;
+    memoryStore?: MemoryContextSource;
     /** Thunk returning the current session's task / plan state, used by the active_tasks hook. */
     getActiveTasksState?: () => ActiveTasksState;
     /**

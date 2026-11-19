@@ -1,6 +1,15 @@
 /** One-time, lossless import of a worktree's old memory partition. */
 import { createHash, randomUUID } from "node:crypto";
-import { link, lstat, mkdir, readdir, readFile, unlink, writeFile } from "node:fs/promises";
+import {
+    link,
+    lstat,
+    mkdir,
+    readdir,
+    readFile,
+    realpath,
+    unlink,
+    writeFile,
+} from "node:fs/promises";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
 
 async function exists(path: string) {
@@ -78,7 +87,8 @@ export async function importWorktreeMemory(source: string, destination: string):
     if (source === destination) return false;
     const projects = dirname(destination);
     if (dirname(source) !== projects) throw new Error("Invalid workspace memory import source");
-    await directory(dirname(dirname(projects)));
+    // The configured home may be an intentional alias; descendants must not be links.
+    await directory(await realpath(dirname(dirname(projects))));
     await directory(dirname(projects));
     await directory(projects);
     await directory(destination);

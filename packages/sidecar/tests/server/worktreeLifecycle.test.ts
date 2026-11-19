@@ -271,6 +271,7 @@ test("memory mutation reaches IM consumers inheriting a worktree source and stop
             content: "Shared source",
             createdAt: new Date().toISOString(),
         });
+        await transport.waitForPushCount(2, 10000);
         assert.ok(
             transport.sent.some(
                 (frame) =>
@@ -384,5 +385,110 @@ test("cold persisted IM work protects its custom worktree execution directory", 
         });
         assert.equal(result.ok, false);
         await access(created.path);
+    });
+});
+
+test("removal protects persisted work running in the main checkout containing the worktree", async () => {
+    await fixture(async (root, server) => {
+        const created = await create(server, root, "ancestor-work");
+        await server.work.store.createIfAbsent({
+            schemaVersion: 1,
+            workId: "w-ancestor-work",
+            revision: 0,
+            kind: "subagent",
+            title: "Parent checkout work",
+            sourceEventId: "ancestor-work",
+            parentSessionId: "p",
+            childSessionId: "c",
+            agentType: "explorer",
+            status: "running",
+            ownerInstanceId: "old",
+            createdAt: 1,
+            updatedAt: 1,
+            workspace: root,
+            attempt: { attemptId: "a-1", startedAt: 1 },
+        });
+        const result = await server.dispatchRpc({
+            id: "ancestor-remove",
+            method: "worktree.remove",
+            params: { workspace: root, path: created.path },
+        });
+        assert.equal(result.ok, false);
+        await access(created.path);
+    });
+});
+
+test("worktree removal retries a completed deletion and notifies the owning project", async () => {
+    await fixture(async (root, server, transport) => {
+        const created = await create(server, root, "retry-removal");
+        const params = { workspace: root, path: created.path };
+        for (const id of ["first-remove", "retry-remove"]) {
+            const result = await server.dispatchRpc({ id, method: "worktree.remove", params });
+            assert.ok(result.ok, JSON.stringify(result));
+        }
+        const changed = transport.sent.filter(
+            (frame) => "method" in frame && frame.method === "worktree.changed",
+        );
+        assert.ok(
+            changed.every(
+                (frame) =>
+                    "params" in frame &&
+                    (frame.params as { projectRoot: string }).projectRoot === root,
+            ),
+        );
+    });
+});
+
+test("removal protects an attached ancestor workspace", async () => {
+    await fixture(async (root, server) => {
+        const created = await create(server, root, "ancestor-session");
+        const session = await server.dispatchRpc({
+            id: "main-session",
+            method: "session.create",
+            params: { workspace: root },
+        });
+        assert.ok(session.ok, JSON.stringify(session));
+        const sessionId = (session.result as { sessionId: string }).sessionId;
+        const attach = await server.dispatchRpc({
+            id: "main-attach",
+            method: "session.attach",
+            params: { workspace: root, sessionId },
+        });
+        assert.ok(attach.ok, JSON.stringify(attach));
+        const result = await server.dispatchRpc({
+            id: "ancestor-attached-remove",
+            method: "worktree.remove",
+            params: { workspace: root, path: created.path },
+        });
+        assert.equal(result.ok, false);
+        await access(created.path);
+    });
+});
+
+test("creation from a separate Git directory reports its committed result and emits one notification", async () => {
+    await fixture(async (root, server, transport) => {
+        const { mkdir } = await import("node:fs/promises");
+        const cwd = join(root, "separate-checkout"),
+            metadata = join(root, "metadata");
+        await mkdir(cwd);
+        git(cwd, "init", "--separate-git-dir", metadata);
+        git(
+            cwd,
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@local",
+            "commit",
+            "--allow-empty",
+            "-m",
+            "initial",
+        );
+        const result = await create(server, cwd, "separate-tree");
+        await access(result.path);
+        const events = transport.sent.filter(
+            (frame) => "method" in frame && frame.method === "worktree.changed",
+        );
+        assert.equal(events.length, 1);
+        assert.equal((events[0] as { params: { projectRoot: string } }).params.projectRoot, cwd);
     });
 });

@@ -14,6 +14,7 @@ import type {
 } from "@taco-ai/protocol";
 import { ErrorCodes } from "@taco-ai/protocol";
 import type { CheckpointMeta } from "../../checkpoints/store.ts";
+import { WorkspaceUnavailableError } from "../../workspace/executionAvailability.ts";
 import { RpcHandlerError, registerMethod } from "../methodRegistry.ts";
 
 function toWire(meta: CheckpointMeta): CheckpointEntry {
@@ -70,6 +71,7 @@ export function registerCheckpointsHandlers(): void {
                     protectionId,
                 };
             } catch (e) {
+                if (e instanceof WorkspaceUnavailableError) throw e;
                 throw new RpcHandlerError(
                     ErrorCodes.CheckpointRestoreFailed,
                     e instanceof Error ? e.message : String(e),

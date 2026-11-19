@@ -121,6 +121,7 @@ import {
     associationAffectsWorkspace,
     WorkspaceAssociationStore,
 } from "../workspace/associationStore.ts";
+import { createExecutionValidator } from "../workspace/executionAvailability.ts";
 import { resolveMemoryRoot } from "../workspace/memoryRoot.ts";
 import {
     createWorkspaceStores,
@@ -678,22 +679,42 @@ export class SidecarServer implements ServerRpcSurface {
         ];
     }
 
-    /** Notify current and inherited consumers, deriving grants at mutation time. */
+    /** Notifications never change the result of an already committed memory write. */
     broadcastMemoryChanged(dirKey?: string): void {
-        for (const workspace of this.workspaces.list()) {
-            if (dirKey !== undefined && workspaceKey(workspace.resourceOwners.memory) !== dirKey) {
-                if (workspace.scope.kind !== "im") continue;
-                const roots = [
-                    ...workspace.associatedRoots(),
-                    ...(workspace.inheritsManagedGlobalMemory()
-                        ? this.managedGlobalMemoryRoots()
-                        : []),
-                ];
-                if (!roots.some((root) => workspaceKey(resolveMemoryRoot(root)) === dirKey))
-                    continue;
-            }
-            this.emitPush(PushMethods.MemoryChanged, workspace.workspaceKey, undefined, {});
-        }
+        void this.notifyMemoryConsumers(dirKey).catch((error) =>
+            log.warn("memory notification failed", error),
+        );
+    }
+
+    private async notifyMemoryConsumers(dirKey?: string): Promise<void> {
+        await Promise.all(
+            this.workspaces.list().map(async (workspace) => {
+                if (
+                    dirKey !== undefined &&
+                    workspaceKey(workspace.resourceOwners.memory) !== dirKey
+                ) {
+                    if (workspace.scope.kind !== "im") return;
+                    const roots = () => [
+                        ...workspace.associatedRoots(),
+                        ...(workspace.inheritsManagedGlobalMemory()
+                            ? this.managedGlobalMemoryRoots()
+                            : []),
+                    ];
+                    const candidates = roots();
+                    const owners = await Promise.all(candidates.map(resolveMemoryRoot));
+                    const current = new Set(roots());
+                    if (
+                        !owners.some(
+                            (owner, index) =>
+                                current.has(candidates[index]) && workspaceKey(owner) === dirKey,
+                        )
+                    )
+                        return;
+                }
+                if (this.workspaces.get(workspace.workspaceKey) === workspace)
+                    this.emitPush(PushMethods.MemoryChanged, workspace.workspaceKey, undefined, {});
+            }),
+        );
     }
 
     getSessionEvents(
@@ -1072,27 +1093,6 @@ export class SidecarServer implements ServerRpcSurface {
                 }
                 // ensureWorkspace always resolves a runtime (failures throw, caught by outer normalizeError)
                 workspace = await this.ensureWorkspace(cwd);
-                if (
-                    workspace.scope?.kind === "local" &&
-                    workspace.scope.projectRoot !== workspace.executionCwd &&
-                    !existsSync(workspace.executionCwd) &&
-                    [
-                        RPC.sessionCreate,
-                        RPC.sessionAttach,
-                        RPC.sessionPrompt,
-                        RPC.sessionSteer,
-                        RPC.sessionFollowUp,
-                        RPC.sessionSubmitAnswers,
-                        RPC.sessionCompact,
-                        RPC.checkpointsRestore,
-                    ].some((method) => method === req.method)
-                ) {
-                    return err(
-                        req.id,
-                        ErrorCodes.InvalidState,
-                        "工作树目录已移除，仅可查看历史记录。请创建工作树后继续执行。",
-                    );
-                }
             }
             const ctx: MethodCtx<unknown, boolean> = {
                 id: req.id,
@@ -1283,6 +1283,7 @@ export class SidecarServer implements ServerRpcSurface {
 
     private async buildWorkspace(cwd: WorkspaceId): Promise<WorkspaceRuntime> {
         const { scope, sessionsRoot, imPolicy } = await this.resolveWorkspacePaths(cwd);
+        const validateExecution = await createExecutionValidator(scope);
         const resourceOwners = resolveWorkspaceResourceOwners(scope);
         const configSources = resolveWorkspaceConfigSources(
             scope.executionCwd,
@@ -1369,6 +1370,7 @@ export class SidecarServer implements ServerRpcSurface {
             });
             ws = new WorkspaceRuntime({
                 scope,
+                validateExecution,
                 resourceOwners,
                 stores,
                 configSources,

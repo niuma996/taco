@@ -144,7 +144,15 @@ export function registerAgentsHandlers(): void {
         "agentsWrite",
         true,
         async ({ server, workspace, params }): Promise<AgentsWriteResult> => {
-            await writeUserAgent(params, workspace.agents, scopeContext(workspace));
+            const ctx = scopeContext(workspace);
+            const previous = workspace.agents.find(
+                (agent) => agent.agentType === params.previousAgentType,
+            );
+            const previousScope = params.previousScope ?? (previous && agentScopeOf(previous, ctx));
+            if ((params.scope ?? previousScope) === "workspace" || previousScope === "workspace") {
+                await workspace.assertExecutionAvailable();
+            }
+            await writeUserAgent(params, workspace.agents, ctx);
             await reloadAgents(server);
             return { ok: true };
         },
@@ -154,6 +162,11 @@ export function registerAgentsHandlers(): void {
         "agentsDelete",
         true,
         async ({ server, workspace, params }): Promise<AgentsDeleteResult> => {
+            const ctx = scopeContext(workspace);
+            const existing = workspace.agents.find((agent) => agent.agentType === params.agentType);
+            if ((params.scope ?? (existing && agentScopeOf(existing, ctx))) === "workspace") {
+                await workspace.assertExecutionAvailable();
+            }
             await deleteUserAgent(
                 params.agentType,
                 workspace.agents,

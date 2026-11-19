@@ -6,8 +6,6 @@
  * routing lives here so the controller stays testable with plain fakes.
  */
 
-import { realpathSync } from "node:fs";
-import { isAbsolute, relative, resolve, sep } from "node:path";
 import {
     type AgentMessage,
     type CommandPermissionRequest,
@@ -30,6 +28,7 @@ import { textBlocks } from "../lib/textBlocks.ts";
 import { withManagedOperation } from "../runtime/harness/operationExecution.ts";
 import type { WaitingInteraction } from "../runtime/session/waitingInteraction.ts";
 import { resolveWaitingInteraction } from "../runtime/session/waitingInteraction.ts";
+import { workspaceAccessPath, workspacePathsOverlap } from "../workspace/pathIdentity.ts";
 import { type SettleWorkArgs, WorkController } from "./workController.ts";
 import { type DeliveryClock, systemClock, WorkDeliverer } from "./workDelivery.ts";
 import { WorkExecution } from "./workExecution.ts";
@@ -545,29 +544,18 @@ export class WorkService implements BackgroundWorkHooks, ScheduledWorkHooks, Wor
 
     async hasActiveWorkspaceWork(
         workspace: string,
-        includeDescendants = false,
+        includeOverlapping = false,
         accessRoots: (key: string) => readonly string[] = (key) => [key],
     ): Promise<boolean> {
-        const canonical = (path: string) => {
-            try {
-                return realpathSync.native(path);
-            } catch {
-                return resolve(path);
-            }
-        };
+        const target = workspaceAccessPath(workspace);
         const matchesPath = (key: string) => {
-            if (key.startsWith("im://") || workspace.startsWith("im://")) return key === workspace;
-            const rel = relative(canonical(workspace), canonical(key));
-            return (
-                rel === "" ||
-                (includeDescendants &&
-                    rel !== ".." &&
-                    !rel.startsWith(`..${sep}`) &&
-                    !isAbsolute(rel))
-            );
+            const candidate = workspaceAccessPath(key);
+            return includeOverlapping
+                ? workspacePathsOverlap(target, candidate)
+                : target === candidate;
         };
         const matches = (key: string) =>
-            matchesPath(key) || (includeDescendants && accessRoots(key).some(matchesPath));
+            matchesPath(key) || (includeOverlapping && accessRoots(key).some(matchesPath));
         if (
             (await this.store.list()).some(
                 (work) =>

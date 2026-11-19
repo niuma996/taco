@@ -12,6 +12,7 @@ import {
     mkdirSync,
     readdirSync,
     readFileSync,
+    realpathSync,
     renameSync,
     statSync,
     unlinkSync,
@@ -189,6 +190,9 @@ export function workspaceKey(workspaceId: string): string {
     return memoryPartitionKey(workspaceId);
 }
 
+// Imports await filesystem I/O, so every store for a destination must share ordering.
+const writeQueues = new Map<string, Promise<unknown>>();
+
 // ─── LocalMemoryStore ─────────────────────────────────────────────────────────
 
 export class LocalMemoryStore implements MemoryStore {
@@ -199,8 +203,22 @@ export class LocalMemoryStore implements MemoryStore {
     private _workspaceId?: string;
     /** Project dir name; set by initialize (hash of the id) or openByKey. */
     private _dirKey?: string;
-    /** Serialises read-modify-write on topic files (concurrent appends would lose entries). */
-    private writeChain: Promise<unknown> = Promise.resolve();
+    private get writeQueueKey(): string {
+        // Resolve only the configured home: partition identity remains lexical.
+        return join(realpathSync(dirname(this.memoryDir)), "memory", "projects", this.dirKey);
+    }
+
+    private get writeChain(): Promise<unknown> {
+        return writeQueues.get(this.writeQueueKey) ?? Promise.resolve();
+    }
+
+    private set writeChain(next: Promise<unknown>) {
+        const key = this.writeQueueKey;
+        writeQueues.set(key, next);
+        void next.finally(() => {
+            if (writeQueues.get(key) === next) writeQueues.delete(key);
+        });
+    }
     /** Cached topic list, keyed by every topic file's mtime and size and
      *  cleared by any mutating write. buildMemoryBlock is called on every LLM
      *  context build, so reading + parsing every topic file each time is O(n)

@@ -596,11 +596,11 @@ describe("IM memory context", () => {
             assert.equal(bob.memoryStore.getTopic(topic.id), undefined);
             assert.equal(otherChat.memoryStore.getTopic(topic.id), undefined);
             assert.doesNotMatch(
-                bob.memoryContextStore.buildMemoryBlock(),
+                await bob.memoryContextStore.buildMemoryBlock(),
                 /private-note|ambiguous-legacy-note/,
             );
             assert.doesNotMatch(
-                alice.memoryContextStore.buildMemoryBlock(),
+                await alice.memoryContextStore.buildMemoryBlock(),
                 /ambiguous-legacy-note/,
             );
             assert.equal(legacy.getTopic("ambiguous-legacy-note")?.content, topic.content);
@@ -643,11 +643,14 @@ describe("IM memory context", () => {
             resolveManagedGlobalMemoryRoots: () => roots,
         });
         try {
-            const block = workspace.memoryContextStore.buildMemoryBlock();
+            const block = await workspace.memoryContextStore.buildMemoryBlock();
             assert.match(block, /registered-note/);
             assert.doesNotMatch(block, /private-channel-note/);
             roots = [];
-            assert.doesNotMatch(workspace.memoryContextStore.buildMemoryBlock(), /registered-note/);
+            assert.doesNotMatch(
+                await workspace.memoryContextStore.buildMemoryBlock(),
+                /registered-note/,
+            );
         } finally {
             await workspace.dispose();
             rmSync(sessionsRoot, { recursive: true, force: true });
@@ -677,7 +680,7 @@ describe("IM memory context", () => {
             resolveAssociatedRoots: () => [workspaceRoot],
         });
         try {
-            const block = workspace.memoryContextStore.buildMemoryBlock();
+            const block = await workspace.memoryContextStore.buildMemoryBlock();
             assert.match(block, /Associated workspace memory/);
             assert.match(block, /linked-decision/);
             assert.equal(workspace.memoryStore.getTopic("linked-decision"), undefined);

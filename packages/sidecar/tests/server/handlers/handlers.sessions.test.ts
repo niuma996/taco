@@ -43,7 +43,10 @@ describe("session.compactionHandlers", () => {
     function makeNotAttachedCtx(): Parameters<
         NonNullable<ReturnType<typeof getRegisteredMethod>>["handler"]
     >[0] {
-        const workspace = { getAttached: () => undefined };
+        const workspace = {
+            assertExecutionAvailable: async () => {},
+            getAttached: () => undefined,
+        };
         return {
             id: "test-id",
             workspace,
@@ -84,6 +87,7 @@ describe("session.compactionHandlers", () => {
                 },
             };
             const workspace = {
+                assertExecutionAvailable: async () => {},
                 getAttached() {
                     return attached;
                 },
@@ -123,6 +127,7 @@ describe("session.compactionHandlers", () => {
                 },
             };
             const workspace = {
+                assertExecutionAvailable: async () => {},
                 getAttached() {
                     return attached;
                 },
@@ -162,6 +167,7 @@ describe("session.compactionHandlers", () => {
                 },
             };
             const workspace = {
+                assertExecutionAvailable: async () => {},
                 getAttached() {
                     return attached;
                 },
@@ -194,6 +200,7 @@ describe("session.compactionHandlers", () => {
                 },
             };
             const workspace = {
+                assertExecutionAvailable: async () => {},
                 getAttached() {
                     return attached;
                 },
@@ -870,6 +877,7 @@ describe("session.taskHistoryGet", () => {
             let attachCalls = 0;
             const attached = { taskStore: store };
             const workspace = {
+                assertExecutionAvailable: async () => {},
                 getAttached(_sid: string) {
                     return undefined;
                 },
@@ -900,6 +908,7 @@ describe("session.taskHistoryGet", () => {
             const store: TaskStore = createTaskStore("/ws");
             const attached = { taskStore: store };
             const workspace = {
+                assertExecutionAvailable: async () => {},
                 getAttached(_sid: string) {
                     return attached;
                 },
@@ -927,6 +936,7 @@ describe("session.taskHistoryGet", () => {
             const store: TaskStore = createTaskStore("/ws");
             const attached = { taskStore: store };
             const workspace = {
+                assertExecutionAvailable: async () => {},
                 getAttached(_sid: string) {
                     return attached;
                 },
@@ -996,6 +1006,7 @@ describe("session.turnBusy", () => {
             },
         };
         const workspace = {
+            assertExecutionAvailable: async () => {},
             getAttached: () => attached,
             attach: async () => attached,
             invalidateListCache: () => undefined,

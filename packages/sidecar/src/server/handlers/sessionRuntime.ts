@@ -35,6 +35,7 @@ export function registerSessionRuntimeHandlers(): void {
         "sessionCompact",
         true,
         async ({ workspace, params }) => {
+            await workspace.assertExecutionAvailable();
             const attached = requireAttached(workspace, params.sessionId);
             return await attached.compact(params.customInstructions);
         },

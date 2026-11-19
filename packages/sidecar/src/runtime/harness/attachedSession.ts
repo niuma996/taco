@@ -1,3 +1,4 @@
+import type { MemoryContextSource } from "../../memory/types.ts";
 /**
  * AttachedSession — binds one session to an AgentHarness.
  * Forwards harness events/errors as "event"/"error", wraps prompt / steer /
@@ -234,7 +235,7 @@ export interface AttachedSessionOptions {
     /** User-level memory store — drives extraction + context injection. */
     memoryStore?: MemoryStore;
     /** Read-through store for inherited context; defaults to `memoryStore`. */
-    memoryContextStore?: Pick<MemoryStore, "buildMemoryBlock">;
+    memoryContextStore?: MemoryContextSource;
     /** True for IM workspaces; disables title summarization and channel-unsafe path hints. */
     isIm?: boolean;
     /**

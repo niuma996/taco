@@ -10,6 +10,7 @@
 import { ErrorCodes, type RpcResponse } from "@taco-ai/protocol";
 import { isAbortedTurn } from "../runtime/harness/harnessErrors.ts";
 import { SessionNotFoundError } from "../runtime/session/sessionLookup.ts";
+import { WorkspaceUnavailableError } from "../workspace/executionAvailability.ts";
 import { RpcHandlerError } from "./methodRegistry.ts";
 
 /**
@@ -81,6 +82,9 @@ export function normalizeError(id: string, e: unknown): RpcResponse {
         return err(id, "queue_recovery_required", "accepted Work operation needs recovery");
     if (e instanceof RpcHandlerError) {
         return err(id, e.code, e.message, e.data);
+    }
+    if (e instanceof WorkspaceUnavailableError) {
+        return err(id, ErrorCodes.InvalidState, e.message);
     }
     if (e instanceof SessionNotFoundError) {
         return err(id, ErrorCodes.NotFound, e.message);

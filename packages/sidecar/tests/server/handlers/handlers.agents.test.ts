@@ -935,7 +935,11 @@ describe("attachGuard", () => {
         it("returns the existing attached session without re-attaching", async () => {
             let attachCalls = 0;
             const existing = { id: "sess-3" };
+            let validationCalls = 0;
             const workspace = {
+                async assertExecutionAvailable() {
+                    validationCalls++;
+                },
                 getAttached: () => existing,
                 async attach() {
                     attachCalls++;
@@ -945,6 +949,7 @@ describe("attachGuard", () => {
             const result = await ensureAttached(workspace as never, asSessionId("sess-3"));
             assert.equal(result, existing);
             assert.equal(attachCalls, 0, "attach must not be called when already attached");
+            assert.equal(validationCalls, 1);
         });
 
         it("propagates workspace.attach failures as-is", async () => {

@@ -1,6 +1,7 @@
 import type { AgentChatArgs, AgentChatResult } from "../../agents/agentConversationTypes.ts";
 import type { WorkspaceConfigSources } from "../../config/workspaceConfigSources.ts";
 import { disposeInOrder } from "../../lib/async.ts";
+import type { MemoryContextSource } from "../../memory/types.ts";
 import { createChatToAgentTool } from "../../tools/chatToAgent.ts";
 import { createListAgentSessionsTool } from "../../tools/listAgentSessions.ts";
 /**
@@ -206,7 +207,7 @@ export interface SessionRegistryOptions {
     /** Current-target memory store — drives extraction and writable operations. */
     readonly memoryStore?: MemoryStore;
     /** Read-through store used only by the context hook; may include inherited layers. */
-    readonly memoryContextStore?: Pick<MemoryStore, "buildMemoryBlock">;
+    readonly memoryContextStore?: MemoryContextSource;
     /** True for IM workspaces; disables turn title summaries there. */
     readonly isIm?: boolean;
     /**
@@ -439,7 +440,7 @@ export class SessionRegistry extends EventEmitter {
     private skills: readonly TacoSkill[];
     private readonly skillAuthoringGuidance?: string;
     private readonly memoryStore?: MemoryStore;
-    private readonly memoryContextStore?: Pick<MemoryStore, "buildMemoryBlock">;
+    private readonly memoryContextStore?: MemoryContextSource;
     private readonly isIm?: boolean;
     private readonly getLiteModel?: (scenario: LiteScenario) => Model<Api> | undefined;
 

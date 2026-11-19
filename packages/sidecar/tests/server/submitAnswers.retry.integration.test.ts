@@ -92,6 +92,7 @@ async function fixture(toolName: "askUser" | "planExit" = "askUser") {
         server.ensureWorkspace = async () =>
             ({
                 workspaceKey: asWorkspaceId(root),
+                assertExecutionAvailable: async () => {},
                 getAttached: () => attached,
                 invalidateListCache: () => {},
                 publishCurrentPlanSnapshot: () => {},

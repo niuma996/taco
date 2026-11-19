@@ -6,7 +6,11 @@ import { describe, it } from "node:test";
 import { asWorkspaceId } from "@taco-ai/protocol";
 import { LocalMemoryStore, workspaceKey } from "../../src/memory/local/store.ts";
 import { readScopedMemoryTopic } from "../../src/memory/scopedRead.ts";
-import { buildLayeredMemoryBlock, resolveMemorySources } from "../../src/memory/sources.ts";
+import {
+    buildLayeredMemoryBlock,
+    prepareMemorySources,
+    resolveMemorySources,
+} from "../../src/memory/sources.ts";
 import { ProviderKeyStore } from "../../src/runtime/models/providerKeyStore.ts";
 import { WorkspaceRuntime } from "../../src/runtime/workspace.ts";
 import { registerMemoryHandlers } from "../../src/server/handlers/memory.ts";
@@ -62,45 +66,117 @@ function options(store: LocalMemoryStore, associatedRoots: string[]) {
 }
 
 describe("associated worktree memory", () => {
-    it("preserves ordinary partitions and stops at nested repository boundaries", () => {
+    it("preserves ordinary partitions and stops at nested repository boundaries", async () => {
         const repo = repository("ordinary");
         const child = join(repo.root, "src");
         mkdirSync(child);
-        assert.equal(resolveMemoryRoot(repo.root), repo.root);
-        assert.equal(resolveMemoryRoot(child), child);
+        assert.equal(await resolveMemoryRoot(repo.root), repo.root);
+        assert.equal(await resolveMemoryRoot(child), child);
         const tree = repo.linked(join(realpathSync(home), "boundary-external"));
         const nested = join(tree, "nested");
         mkdirSync(nested);
         git(nested, "init");
-        assert.equal(resolveMemoryRoot(nested), nested);
-        assert.equal(resolveMemoryRoot(join(tree, "missing")), join(tree, "missing"));
+        assert.equal(await resolveMemoryRoot(nested), nested);
+        assert.equal(await resolveMemoryRoot(join(tree, "missing")), join(tree, "missing"));
     });
 
-    it("rejects a main checkout whose config redirects execution elsewhere", () => {
+    it("preserves non-repository and missing roots during preparation", async () => {
+        const plain = join(home, "plain-directory");
+        const missing = join(home, "missing-directory");
+        mkdirSync(plain);
+        await memory(plain);
+        await memory(missing);
+        const current = new LocalMemoryStore();
+        current.initialize("im://mock/peer/ordinary");
+        const sources = resolveMemorySources(
+            await prepareMemorySources(options(current, [plain, missing])),
+        );
+        assert.deepEqual(
+            sources.associatedWorkspaces.map((layer) => layer.key),
+            [plain, missing],
+        );
+        assert.deepEqual(
+            sources.associatedWorkspaces.map((layer) => layer.entries[0]?.id),
+            ["shared", "shared"],
+        );
+    });
+
+    it("rejects a main checkout whose config redirects execution elsewhere", async () => {
         const repo = repository("redirected");
         const tree = repo.linked(join(realpathSync(home), "redirected-external"));
         const other = join(realpathSync(home), "other-checkout");
         mkdirSync(other);
         git(repo.root, "config", "core.worktree", other);
-        assert.equal(resolveMemoryRoot(tree), tree);
+        assert.equal(await resolveMemoryRoot(tree), tree);
     });
 
-    it("falls back without throwing for unsupported ownership config syntax", () => {
+    it("falls back without throwing for invalid ownership config", async () => {
         const repo = repository("config-subset");
         const tree = repo.linked(join(realpathSync(home), "config-subset-external"));
         const config = join(repo.root, ".git", "config");
         const original = readFileSync(config, "utf8");
         for (const extra of [
             "[core] # ownership\nworktree = elsewhere\n",
-            "[include]\npath = extra-config\n",
-            "[extensions]\nworktreeConfig = true\n",
             "[core]\nworktree = elsewhere\\\ncontinued\n",
         ]) {
             writeFileSync(config, original + extra);
-            assert.equal(resolveMemoryRoot(tree), tree, extra);
+            assert.equal(await resolveMemoryRoot(tree), tree, extra);
         }
         writeFileSync(config, original);
-        assert.equal(resolveMemoryRoot(tree), repo.root);
+        assert.equal(await resolveMemoryRoot(tree), repo.root);
+    });
+
+    it("uses Git ownership with includes and per-worktree config on every context read", async () => {
+        const repo = repository("included-owner");
+        const tree = repo.linked(join(realpathSync(home), "included-tree"));
+        await memory(repo.root);
+        const execution = join(home, "included-im");
+        mkdirSync(execution);
+        const runtime = new WorkspaceRuntime({
+            scope: createWorkspaceScope(asWorkspaceId("im://mock/peer/includes"), execution),
+            providerKeyStore: new ProviderKeyStore({}),
+            tools: [],
+            resolveAssociatedRoots: () => [tree],
+        });
+        try {
+            for (const extra of [
+                "[include]\npath = extra-config\n",
+                "[extensions]\nworktreeConfig = true\n",
+            ]) {
+                const config = join(repo.root, ".git", "config");
+                writeFileSync(config, readFileSync(config, "utf8") + extra);
+                writeFileSync(join(repo.root, ".git", "extra-config"), "[user]\nname = Test\n");
+                assert.match(await runtime.memoryContextStore.buildMemoryBlock(), /Shared/);
+            }
+        } finally {
+            await runtime.dispose();
+        }
+    });
+
+    it("migrates old worktree topics before cold IM context reads", async () => {
+        const repo = repository("cold-migration");
+        const tree = repo.linked(join(realpathSync(home), "cold-migration-tree"));
+        await memory(tree);
+        const execution = join(home, "cold-migration-im");
+        mkdirSync(execution);
+        let roots = [tree];
+        const runtime = new WorkspaceRuntime({
+            scope: createWorkspaceScope(asWorkspaceId("im://mock/peer/migration"), execution),
+            providerKeyStore: new ProviderKeyStore({}),
+            tools: [],
+            resolveAssociatedRoots: () => roots,
+        });
+        try {
+            assert.match(await runtime.memoryContextStore.buildMemoryBlock(), /Shared/);
+            assert.equal(
+                LocalMemoryStore.openByKey(workspaceKey(repo.root)).getTopic("shared")?.content,
+                "Shared full body",
+            );
+            roots = [];
+            assert.doesNotMatch(await runtime.memoryContextStore.buildMemoryBlock(), /Shared/);
+        } finally {
+            await runtime.dispose();
+        }
     });
 
     it("reads cold managed and external worktrees with one owner source id and rechecks grants", async () => {
@@ -119,7 +195,7 @@ describe("associated worktree memory", () => {
             inheritManagedGlobal: true,
             managedGlobalRoots: [external, repo.root],
         };
-        const sources = resolveMemorySources(args);
+        const sources = resolveMemorySources(await prepareMemorySources(args));
         assert.equal(sources.associatedWorkspaces.length, 1);
         assert.equal(sources.associatedWorkspaces[0]?.key, repo.root);
         assert.equal(sources.associatedWorkspaces[0]?.entries[0]?.content, "Shared full body");
@@ -130,15 +206,28 @@ describe("associated worktree memory", () => {
             id: "shared",
         };
         assert.ok(buildLayeredMemoryBlock(sources).includes(JSON.stringify(reference)));
-        assert.equal(readScopedMemoryTopic(args, reference).content, "Shared full body");
+        assert.equal(
+            readScopedMemoryTopic(await prepareMemorySources(args), reference).content,
+            "Shared full body",
+        );
         args.associatedRoots = [external];
-        assert.equal(readScopedMemoryTopic(args, reference).content, "Shared full body");
+        assert.equal(
+            readScopedMemoryTopic(await prepareMemorySources(args), reference).content,
+            "Shared full body",
+        );
         args.associatedRoots = [];
         args.inheritManagedGlobal = false;
-        assert.throws(() => readScopedMemoryTopic(args, reference), /not available/);
+        await assert.rejects(
+            async () => readScopedMemoryTopic(await prepareMemorySources(args), reference),
+            /not available/,
+        );
         args.associatedRoots = [nested];
-        assert.throws(
-            () => readScopedMemoryTopic(args, { ...reference, sourceId: workspaceKey(external) }),
+        await assert.rejects(
+            async () =>
+                readScopedMemoryTopic(await prepareMemorySources(args), {
+                    ...reference,
+                    sourceId: workspaceKey(external),
+                }),
             /not available/,
         );
     });
@@ -146,7 +235,10 @@ describe("associated worktree memory", () => {
     it("uses the same owner in memory.list and memory.read without a live project runtime", async () => {
         const repo = repository("rpc");
         const tree = repo.linked(join(realpathSync(home), "rpc-external"));
-        const project = await memory(repo.root);
+        await memory(tree);
+        git(repo.root, "config", "include.path", "extra-config");
+        writeFileSync(join(repo.root, ".git", "extra-config"), "[user]\nname = Test\n");
+        const project = LocalMemoryStore.openByKey(workspaceKey(repo.root));
         const current = new LocalMemoryStore();
         current.initialize("im://mock/peer/rpc");
         let roots = [tree];
@@ -193,11 +285,11 @@ describe("associated worktree memory", () => {
             resolveAssociatedRoots: () => roots,
         });
         try {
-            const block = runtime.memoryContextStore.buildMemoryBlock();
+            const block = await runtime.memoryContextStore.buildMemoryBlock();
             assert.match(block, /Shared/);
             assert.ok(block.includes(project.dirKey));
             roots = [];
-            assert.doesNotMatch(runtime.memoryContextStore.buildMemoryBlock(), /Shared/);
+            assert.doesNotMatch(await runtime.memoryContextStore.buildMemoryBlock(), /Shared/);
         } finally {
             await runtime.dispose();
         }
@@ -208,16 +300,18 @@ describe("associated worktree memory", () => {
         const tree = repo.linked(join(realpathSync(home), "separate-external"));
         const gitDir = git(tree, "rev-parse", "--absolute-git-dir");
         writeFileSync(join(tree, ".git"), `gitdir: ${relative(tree, gitDir)}\n`);
-        writeFileSync(join(gitDir, "gitdir"), `${relative(gitDir, join(tree, ".git"))}\n`);
+        writeFileSync(join(gitDir, "gitdir"), `${join(tree, ".git")}\n`);
         await memory(repo.root);
         const current = new LocalMemoryStore();
         current.initialize("im://mock/peer/separate");
         assert.equal(
-            resolveMemorySources(options(current, [tree])).associatedWorkspaces[0]?.key,
+            resolveMemorySources(await prepareMemorySources(options(current, [tree])))
+                .associatedWorkspaces[0]?.key,
             repo.root,
         );
         assert.equal(
-            resolveMemorySources(options(current, [tree])).associatedWorkspaces[0]?.entries[0]?.id,
+            resolveMemorySources(await prepareMemorySources(options(current, [tree])))
+                .associatedWorkspaces[0]?.entries[0]?.id,
             "shared",
         );
     });
@@ -232,15 +326,54 @@ describe("associated worktree memory", () => {
         const args = options(current, [tree]);
         const originalBacklink = readFileSync(join(gitDir, "gitdir"));
         writeFileSync(join(gitDir, "gitdir"), `${join(repo.root, ".git")}\n`);
-        assert.deepEqual(resolveMemorySources(args).associatedWorkspaces[0]?.entries, []);
+        assert.deepEqual(
+            resolveMemorySources(await prepareMemorySources(args)).associatedWorkspaces[0]?.entries,
+            [],
+        );
         writeFileSync(join(gitDir, "gitdir"), originalBacklink);
         const originalCommon = readFileSync(join(gitDir, "commondir"));
         writeFileSync(join(gitDir, "commondir"), `${join(repo.root, "..", "unrelated")}\n`);
-        assert.deepEqual(resolveMemorySources(args).associatedWorkspaces[0]?.entries, []);
+        assert.deepEqual(
+            resolveMemorySources(await prepareMemorySources(args)).associatedWorkspaces[0]?.entries,
+            [],
+        );
         writeFileSync(join(gitDir, "commondir"), originalCommon);
-        assert.equal(resolveMemorySources(args).associatedWorkspaces[0]?.entries[0]?.id, "shared");
+        assert.equal(
+            resolveMemorySources(await prepareMemorySources(args)).associatedWorkspaces[0]
+                ?.entries[0]?.id,
+            "shared",
+        );
         rmSync(join(repo.root, ".git"), { recursive: true });
-        assert.deepEqual(resolveMemorySources(args).associatedWorkspaces[0]?.entries, []);
+        assert.deepEqual(
+            resolveMemorySources(await prepareMemorySources(args)).associatedWorkspaces[0]?.entries,
+            [],
+        );
+    });
+
+    it("rechecks grants after asynchronous preparation and before a scoped read", async () => {
+        const repo = repository("revoked-during-prepare");
+        const tree = repo.linked(join(realpathSync(home), "revoked-during-prepare-tree"));
+        const project = await memory(repo.root);
+        const current = new LocalMemoryStore();
+        current.initialize("im://mock/peer/revoked");
+        let roots = [tree];
+        const prepared = prepareMemorySources(() => options(current, roots));
+        roots = [];
+        const snapshot = await prepared;
+        assert.deepEqual(resolveMemorySources(snapshot).associatedWorkspaces, []);
+        assert.throws(
+            () =>
+                readScopedMemoryTopic(snapshot, {
+                    memoryLayer: "workspace",
+                    sourceId: project.dirKey,
+                    id: "shared",
+                }),
+            /not available/,
+        );
+        roots = [tree];
+        const allowed = await prepareMemorySources(() => options(current, roots));
+        roots = [];
+        assert.deepEqual(resolveMemorySources(allowed).associatedWorkspaces, []);
     });
 
     it("allows an injected owner resolver while retaining live grant enforcement", async () => {
@@ -253,13 +386,13 @@ describe("associated worktree memory", () => {
             ...options(current, [grant, owner]),
             resolveMemoryRoot: (root: string) => (root === grant ? owner : root),
         };
-        const sources = resolveMemorySources(args);
+        const sources = resolveMemorySources(await prepareMemorySources(args));
         assert.equal(sources.associatedWorkspaces.length, 1);
         assert.equal(sources.associatedWorkspaces[0]?.entries[0]?.id, "shared");
         args.associatedRoots = [];
-        assert.throws(
-            () =>
-                readScopedMemoryTopic(args, {
+        await assert.rejects(
+            async () =>
+                readScopedMemoryTopic(await prepareMemorySources(args), {
                     memoryLayer: "workspace",
                     sourceId: project.dirKey,
                     id: "shared",

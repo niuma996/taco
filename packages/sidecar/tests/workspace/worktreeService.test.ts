@@ -381,3 +381,43 @@ test("pending removal rejects replacement checkouts and retains the actual detac
         assert.equal((await removeGitWorktree(cwd, created.path)).branch, null);
     });
 });
+
+test("managed separate-git-dir provenance resolves the main checkout without core.worktree", async () => {
+    const { resolveGitProjectRoot, listManagedGitWorktrees } = await import(
+        "../../src/git/gitService.ts"
+    );
+    await fixture(async (cwd) => {
+        git(cwd, "init", "--separate-git-dir", join(cwd, "repository-metadata"));
+        assert.throws(() => git(cwd, "config", "--get", "core.worktree"));
+        const created = await createGitWorktree(cwd, "provenance");
+        assert.equal(await resolveGitProjectRoot(created.path), cwd);
+        const child = join(created.path, "src");
+        await mkdir(child);
+        assert.equal(await resolveGitProjectRoot(child), cwd);
+        const listing = await listManagedGitWorktrees(created.path);
+        assert.equal(listing.status, "repository");
+        if (listing.status === "repository")
+            assert.equal(
+                listing.worktrees.find((tree) => tree.path === created.path)?.managed,
+                true,
+            );
+        const sibling = await createGitWorktree(child, "sibling");
+        await removeGitWorktree(created.path, sibling.path);
+        await removeGitWorktree(cwd, created.path);
+        assert.equal(await resolveGitProjectRoot(created.path), cwd);
+    });
+});
+
+test("separate-git-dir provenance never trusts an unowned or replaced managed path", async () => {
+    const { resolveGitProjectRoot } = await import("../../src/git/gitService.ts");
+    await fixture(async (cwd) => {
+        git(cwd, "init", "--separate-git-dir", join(cwd, "repository-metadata"));
+        const created = await createGitWorktree(cwd, "provenance");
+        const unowned = join(cwd, ".taco", "worktrees", "external");
+        git(cwd, "worktree", "add", "--detach", unowned);
+        await assert.rejects(resolveGitProjectRoot(unowned));
+        git(cwd, "worktree", "remove", created.path);
+        git(cwd, "worktree", "add", "--detach", created.path);
+        await assert.rejects(resolveGitProjectRoot(created.path));
+    });
+});

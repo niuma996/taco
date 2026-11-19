@@ -19,7 +19,7 @@ import type { ContextEvent, ContextResult } from "../extensions/types.ts";
 import { createLogger } from "../lib/logger.ts";
 import { appendUserTag } from "../tags/appendUserTag.ts";
 import { escapeTagText, tagWrap } from "../tags/builder.ts";
-import type { MemoryStore } from "./types.ts";
+import type { MemoryContextSource } from "./types.ts";
 
 const log = createLogger("memory:hook");
 
@@ -40,12 +40,12 @@ const MEMORY_FRAMING =
  * Returns an empty function when MEMORY.md is empty or unreadable.
  */
 export function buildMemoryContextHook(
-    store: Pick<MemoryStore, "buildMemoryBlock">,
+    store: MemoryContextSource,
 ): (event: ContextEvent) => Promise<ContextResult | undefined> {
     return async (event: ContextEvent): Promise<ContextResult | undefined> => {
         let content: string;
         try {
-            content = store.buildMemoryBlock();
+            content = await store.buildMemoryBlock();
         } catch (err) {
             log.error("failed to read MEMORY.md:", err);
             return undefined;

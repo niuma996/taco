@@ -790,3 +790,23 @@ are not write grants. File tools and native agents keep the worktree's execution
 boundary. Inherited memory reads resolve project ownership without expanding the
 associated directory grant, and `memory.changed` refreshes current and inherited
 consumers after a successful mutation.
+
+A checkout removal records its intent before invoking Git. If Git removal succeeds
+but the final metadata write fails, retrying `worktree.remove` finishes the retained
+record; it never interprets an unrelated missing directory as a completed removal.
+The record remains usable for history ownership. Released Git administration names
+may be reused without conflicting with historical removal records.
+
+Checkout execution validity is checked at runtime entry points, including operations
+that implicitly attach a session. Recreating an ordinary directory at a removed
+worktree path does not make that history executable. Workspace Agent writes and
+checkpoint restores use the same validity boundary; passive history reads remain
+available. Directory activity checks include overlapping ancestor grants as well as
+descendants, since a task running in the main checkout can reach a nested worktree.
+
+Inherited memory preparation uses the same Git owner resolver as runtime construction,
+including Git configuration includes and worktree configuration. Legacy topics are
+imported before the first inherited read, even when no local runtime was opened.
+Configuration-home aliases remain supported; import storage descendants must not be
+symlinks. Permission roots are rechecked after asynchronous preparation, and memory
+notifications cannot change the outcome of a committed write.

@@ -136,17 +136,15 @@ test("reuses an imported collision after primary deletion during an interrupted 
 test("rejects symlinked storage ancestors before publishing any file", {
     skip: process.platform === "win32",
 }, async () => {
-    for (const level of ["home", "memory", "projects", "destination"]) {
+    for (const level of ["memory", "projects", "destination"]) {
         const f = await fixture(`ancestor-${level}`);
         await writeFile(join(f.source, "user_role.md"), legacy);
         const path =
-            level === "home"
-                ? home
-                : level === "memory"
-                  ? join(home, "memory")
-                  : level === "projects"
-                    ? join(home, "memory", "projects")
-                    : f.destination;
+            level === "memory"
+                ? join(home, "memory")
+                : level === "projects"
+                  ? join(home, "memory", "projects")
+                  : f.destination;
         const moved = `${path}-saved`;
         await rename(path, moved);
         await symlink(moved, path, "dir");
@@ -269,4 +267,45 @@ test("never follows source or destination symlinks", {
     await nested.store.importWorkspaceMemory(nested.identity);
     assert.deepEqual(await readdir(join(nested.destination, "archive")), ["history"]);
     assert.deepEqual(await readdir(join(nested.destination, "archive", "history")), ["real.md"]);
+});
+
+test("imports through a configured home symlink while retaining lexical storage paths", {
+    skip: process.platform === "win32",
+}, async () => {
+    const actual = join(home, "configured-home");
+    const alias = join(home, "configured-home-alias");
+    await mkdir(actual);
+    await symlink(actual, alias, "dir");
+    const previous = process.env.TACO_HOME;
+    process.env.TACO_HOME = alias;
+    try {
+        const f = await fixture("configured-home-import");
+        await writeFile(join(f.source, "user_role.md"), legacy);
+        await f.store.importWorkspaceMemory(f.identity);
+        assert.ok(f.store.topicDir.startsWith(alias));
+        assert.equal(await readFile(join(f.destination, "user_role.md"), "utf8"), legacy);
+        await f.store.importWorkspaceMemory(join(home, "absent-old-partition"));
+    } finally {
+        process.env.TACO_HOME = previous;
+    }
+});
+
+test("serializes imports against writes from another store for the same partition", async () => {
+    const f = await fixture("shared-queue");
+    await writeFile(join(f.source, "user_role.md"), legacy);
+    const writer = LocalMemoryStore.openByKey(f.store.dirKey);
+    const results = await Promise.allSettled([
+        f.store.importWorkspaceMemory(f.identity),
+        writer.appendEntry({
+            id: "user_role",
+            name: "New",
+            description: "Conflict",
+            type: "project",
+            content: "Must not replace imported memory",
+            createdAt: "2026-11-20T00:00:00.000Z",
+        }),
+    ]);
+    assert.equal(results[0].status, "fulfilled");
+    assert.equal(results[1].status, "rejected");
+    assert.equal(await readFile(join(f.destination, "user_role.md"), "utf8"), legacy);
 });

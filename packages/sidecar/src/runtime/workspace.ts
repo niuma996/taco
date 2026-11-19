@@ -1,4 +1,6 @@
 import { disposeInOrder } from "../lib/async.ts";
+import type { MemoryContextSource } from "../memory/types.ts";
+
 /**
  * WorkspaceRuntime — facade for a single workspace's runtime.
  *
@@ -11,8 +13,7 @@ import { disposeInOrder } from "../lib/async.ts";
 
 import { execFileSync } from "node:child_process";
 import { EventEmitter } from "node:events";
-import { realpathSync } from "node:fs";
-import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { resolve } from "node:path";
 import { createModels } from "@earendil-works/pi-ai/compat";
 import type {
     CustomModelEntry,
@@ -51,7 +52,11 @@ import {
 import type { WorkspaceExtensionSet } from "../extensions/index.ts";
 import { createLogger } from "../lib/logger.ts";
 import type { MemoryStore } from "../memory/index.ts";
-import { buildLayeredMemoryBlock, resolveMemorySources } from "../memory/sources.ts";
+import {
+    buildLayeredMemoryBlock,
+    prepareMemorySources,
+    resolveMemorySources,
+} from "../memory/sources.ts";
 import { PermissionBroker } from "../permissions/permissionBroker.ts";
 import {
     NoopPlanPushAdapter,
@@ -94,6 +99,7 @@ import { isFsToolDenied, registerExtensionFileAccess } from "../tools/fileAccess
 import { defaultToolsWithTasks, type TacoTool } from "../tools/index.ts";
 import { orderTools, toolNamesKey } from "../tools/toolOrder.ts";
 import type { BackgroundWorkHooks } from "../work/workHooks.ts";
+import { containsWorkspacePath, workspaceAccessPath } from "../workspace/pathIdentity.ts";
 import {
     createWorkspaceStores,
     resolveWorkspaceResourceOwners,
@@ -178,30 +184,14 @@ function probeGitEnvironment(
     };
 }
 
-// Resolve existing ancestors too, so missing descendants cannot hide behind a symlink.
-function canonicalRoot(path: string): string {
-    const absolute = resolve(path);
-    try {
-        return realpathSync(absolute);
-    } catch {
-        const parent = dirname(absolute);
-        return parent === absolute
-            ? absolute
-            : join(canonicalRoot(parent), relative(parent, absolute));
-    }
-}
-
-function containsRoot(root: string, path: string): boolean {
-    const rel = relative(root, path);
-    return rel === "" || (!isAbsolute(rel) && rel !== ".." && !rel.startsWith(`..${sep}`));
-}
-
 export type { AttachOptions };
 
 export type WorkspaceRuntimeOptions = WorkspaceRuntimeConfig &
     ({ scope: WorkspaceScope; cwd?: never } | { cwd: WorkspaceId; scope?: never });
 
 interface WorkspaceRuntimeConfig {
+    /** Optional host policy checked before execution; history reads remain available. */
+    validateExecution?: () => Promise<void>;
     /** Session persistence root; defaults to $TACO_HOME/sessions (~/.taco/sessions). */
     sessionsRoot?: string;
     /** Default model — either a string id or a Model object. */
@@ -371,6 +361,7 @@ export class WorkspaceRuntime extends EventEmitter {
     get workspaceKey(): WorkspaceId {
         return this.scope.key;
     }
+    private readonly validateExecution?: () => Promise<void>;
     readonly sessionsRoot: string;
     /** Execution environment — cwd is executionCwd. */
     readonly env: NodeExecutionEnv;
@@ -485,7 +476,7 @@ export class WorkspaceRuntime extends EventEmitter {
     /** User-level memory store. */
     readonly memoryStore: MemoryStore;
     /** Context-hook view; IM workspaces may read current + inherited layers. */
-    readonly memoryContextStore: Pick<MemoryStore, "buildMemoryBlock">;
+    readonly memoryContextStore: MemoryContextSource;
     /** Pre-write snapshots for this workspace; undefined when FS tools are off. */
     readonly checkpointStore: CheckpointStore | undefined;
     readonly permissionBroker: PermissionBroker;
@@ -560,6 +551,7 @@ export class WorkspaceRuntime extends EventEmitter {
 
     constructor(options: WorkspaceRuntimeOptions) {
         super();
+        this.validateExecution = options.validateExecution;
         this.scope = options.scope ?? createWorkspaceScope(options.cwd);
         this.resourceOwners = options.resourceOwners ?? resolveWorkspaceResourceOwners(this.scope);
         this.configSources =
@@ -655,14 +647,14 @@ export class WorkspaceRuntime extends EventEmitter {
             const roots = options.resolveAssociatedRoots?.() ?? [];
             if (isIm || resolve(this.executionCwd) === resolve(this.scope.projectRoot))
                 return roots;
-            const main = canonicalRoot(this.scope.projectRoot);
-            const worktree = canonicalRoot(this.executionCwd);
+            const main = workspaceAccessPath(this.scope.projectRoot);
+            const worktree = workspaceAccessPath(this.executionCwd);
             return roots.filter((root) => {
-                const grant = canonicalRoot(root);
+                const grant = workspaceAccessPath(root);
                 // A nested worktree is inside main, but granting that subtree is safe.
                 return (
-                    containsRoot(worktree, grant) ||
-                    (!containsRoot(main, grant) && !containsRoot(grant, main))
+                    containsWorkspacePath(worktree, grant) ||
+                    (!containsWorkspacePath(main, grant) && !containsWorkspacePath(grant, main))
                 );
             });
         };
@@ -740,15 +732,17 @@ export class WorkspaceRuntime extends EventEmitter {
         this.memoryContextStore =
             isIm && this.memoryStore.enabled
                 ? {
-                      buildMemoryBlock: () =>
+                      buildMemoryBlock: async () =>
                           buildLayeredMemoryBlock(
-                              resolveMemorySources({
-                                  store: this.memoryStore,
-                                  target: "channel",
-                                  associatedRoots: this.resolveAssociatedRoots(),
-                                  inheritManagedGlobal: this.inheritsManagedGlobalMemory(),
-                                  managedGlobalRoots: this.managedGlobalMemoryRoots(),
-                              }),
+                              resolveMemorySources(
+                                  await prepareMemorySources(() => ({
+                                      store: this.memoryStore,
+                                      target: "channel",
+                                      associatedRoots: this.resolveAssociatedRoots(),
+                                      inheritManagedGlobal: this.inheritsManagedGlobalMemory(),
+                                      managedGlobalRoots: this.managedGlobalMemoryRoots(),
+                                  })),
+                              ),
                           ),
                   }
                 : this.memoryStore;
@@ -1300,7 +1294,13 @@ export class WorkspaceRuntime extends EventEmitter {
         return await this.sessionRegistry.listSessions();
     }
 
+    /** Validate the host execution boundary without preventing detached history reads. */
+    async assertExecutionAvailable(): Promise<void> {
+        await this.validateExecution?.();
+    }
+
     async createSession(sessionId: SessionId): Promise<JsonlSessionMetadata> {
+        await this.assertExecutionAvailable();
         return await this.sessionRegistry.createSession(sessionId, undefined, async () => {});
     }
 
@@ -1380,6 +1380,7 @@ export class WorkspaceRuntime extends EventEmitter {
     // ─────────── attach / detach (delegates to SessionRegistry) ───────────
 
     async attach(sessionId: SessionId, opts: AttachOptions = {}): Promise<AttachedSession> {
+        await this.assertExecutionAvailable();
         await this.toolRegistry.prepare?.();
         this.refreshSystemPromptIfNeeded();
         return await this.sessionRegistry.attach(sessionId, opts);
@@ -1450,6 +1451,7 @@ export class WorkspaceRuntime extends EventEmitter {
         checkpointId: string,
         sessionId: SessionId,
     ): Promise<{ outcome: RestoreOutcome; protectionId?: string }> {
+        await this.assertExecutionAvailable();
         if (!sessionId) {
             throw new Error("sessionId is required for restoreCheckpoint");
         }

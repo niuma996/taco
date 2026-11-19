@@ -49,3 +49,16 @@ describe("buildMemoryContextHook", () => {
         assert.ok(!text.includes("</memory><instructions"), "no raw breakout sequence");
     });
 });
+
+it("awaits asynchronous memory preparation and contains rejected reads", async () => {
+    const hook = buildMemoryContextHook({ buildMemoryBlock: async () => "Prepared note" });
+    const result = await hook({ messages: [memUserMsg("hi")] });
+    assert.ok(result?.messages);
+    assert.match(memTextOf(result.messages[1] as AgentMessage), /Prepared note/);
+    const failing = buildMemoryContextHook({
+        buildMemoryBlock: async () => {
+            throw new Error("unavailable");
+        },
+    });
+    assert.equal(await failing({ messages: [] }), undefined);
+});
