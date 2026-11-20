@@ -3,11 +3,12 @@ import { test } from "node:test";
 import { Check } from "typebox/value";
 import * as protocol from "../src/index.ts";
 
-test("worktree management uses the 2.22 contract and a distinct process push", () => {
-    assert.deepEqual(protocol.SIDECAR_PROTOCOL_VERSION, { major: 2, minor: 22 });
+test("worktree management uses the 2.23 contract and a distinct process push", () => {
+    assert.deepEqual(protocol.SIDECAR_PROTOCOL_VERSION, { major: 2, minor: 23 });
     assert.equal(protocol.isCompatibleSidecarProtocol({ major: 2, minor: 20 }), false);
     assert.equal(protocol.isCompatibleSidecarProtocol({ major: 2, minor: 21 }), false);
-    assert.equal(protocol.isCompatibleSidecarProtocol({ major: 2, minor: 22 }), true);
+    assert.equal(protocol.isCompatibleSidecarProtocol({ major: 2, minor: 22 }), false);
+    assert.equal(protocol.isCompatibleSidecarProtocol({ major: 2, minor: 23 }), true);
     assert.equal(protocol.isCompatibleClientProtocol({ major: 2, minor: 21 }), true);
     assert.equal(protocol.PushMethods.WorktreeChanged, "worktree.changed");
 });
@@ -54,4 +55,24 @@ test("remove requires workspace and path without force or branch options", () =>
         { ...params, branch: "feature" },
     ])
         assert.equal(Check(protocol.worktreeRemoveSchema, invalid), false);
+});
+
+test("cleanup accepts bounded positive thresholds only", () => {
+    assert.equal(Check(protocol.worktreeCleanupSchema, { workspace: "/project" }), true);
+    assert.equal(
+        Check(protocol.worktreeCleanupSchema, {
+            workspace: "/project",
+            maxAgeDays: 14,
+            maxCount: 15,
+        }),
+        true,
+    );
+    for (const invalid of [
+        { workspace: "/project", maxAgeDays: 0 },
+        { workspace: "/project", maxCount: 0 },
+        { workspace: "/project", maxAgeDays: 1.5 },
+        { workspace: "/project", maxCount: 10001 },
+        { workspace: "/project", force: true },
+    ])
+        assert.equal(Check(protocol.worktreeCleanupSchema, invalid), false);
 });

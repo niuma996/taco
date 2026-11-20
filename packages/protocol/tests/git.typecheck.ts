@@ -5,8 +5,11 @@ import type {
     GitWorktreeInfo,
     PushParams,
     RpcMethodParams,
+    RpcMethodResult,
     WorktreeBase,
     WorktreeChangedParams,
+    WorktreeCleanupParams,
+    WorktreeCleanupResult,
     WorktreeCreateParams,
     WorktreeListParams,
     WorktreeRemoveParams,
@@ -21,8 +24,11 @@ export type GitContractChecks = [
     Assert<Equal<WorktreeListParams, RpcMethodParams<"worktree.list">>>,
     Assert<Equal<WorktreeCreateParams, RpcMethodParams<"worktree.create">>>,
     Assert<Equal<WorktreeRemoveParams, RpcMethodParams<"worktree.remove">>>,
+    Assert<Equal<WorktreeCleanupParams, RpcMethodParams<"worktree.cleanup">>>,
+    Assert<Equal<WorktreeCleanupResult, RpcMethodResult<"worktree.cleanup">>>,
     Assert<Equal<WorktreeBase, NonNullable<WorktreeCreateParams["base"]>>>,
     Assert<Equal<GitWorktreeInfo["managed"], boolean | undefined>>,
+    Assert<Equal<GitWorktreeInfo["orphaned"], boolean | undefined>>,
     Assert<
         Equal<
             WorktreeChangedParams,

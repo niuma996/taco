@@ -1,6 +1,7 @@
 /** Git discovery does not require constructing a workspace runtime. */
 import type {
     GitInspectResult,
+    WorktreeCleanupResult,
     WorktreeCreateResult,
     WorktreeListResult,
     WorktreeRemoveResult,
@@ -8,6 +9,7 @@ import type {
 import {
     gitInitSchema,
     gitInspectSchema,
+    worktreeCleanupSchema,
     worktreeCreateSchema,
     worktreeListSchema,
     worktreeRemoveSchema,
@@ -27,6 +29,11 @@ const gitRows = {
         "worktree.remove",
         "workspace",
         worktreeRemoveSchema,
+    ),
+    worktreeCleanup: row<WorktreeCleanupResult>()(
+        "worktree.cleanup",
+        "workspace",
+        worktreeCleanupSchema,
     ),
 };
 export const gitMethods = domainMethods(gitRows);

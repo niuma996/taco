@@ -3,6 +3,7 @@ import type { ParamsOf } from "./rpcContract/types.js";
 import type {
     gitInitSchema,
     gitInspectSchema,
+    worktreeCleanupSchema,
     worktreeCreateSchema,
     worktreeListSchema,
     worktreeRemoveSchema,
@@ -13,6 +14,7 @@ export type GitInitParams = ParamsOf<typeof gitInitSchema>;
 export type WorktreeListParams = ParamsOf<typeof worktreeListSchema>;
 export type WorktreeCreateParams = ParamsOf<typeof worktreeCreateSchema>;
 export type WorktreeRemoveParams = ParamsOf<typeof worktreeRemoveSchema>;
+export type WorktreeCleanupParams = ParamsOf<typeof worktreeCleanupSchema>;
 
 export interface GitRepositoryInfo {
     checkoutRoot: string | null;
@@ -52,6 +54,7 @@ export interface GitWorktreeInfo {
     prunable: boolean;
     pruneReason?: string;
     managed?: boolean;
+    orphaned?: boolean;
 }
 export type WorktreeListResult =
     | GitUnavailable
@@ -81,4 +84,10 @@ export interface WorktreeRemoveResult {
     path: string;
     branch: string | null;
     removed: true;
+}
+
+export interface WorktreeCleanupResult {
+    removed: WorktreeRemoveResult[];
+    skipped: { path: string; reason: string }[];
+    failed: { path: string; error: string }[];
 }

@@ -169,6 +169,8 @@ export type {
     GitWorktreeInfo,
     WorktreeBase,
     WorktreeChangedParams,
+    WorktreeCleanupParams,
+    WorktreeCleanupResult,
     WorktreeCreateParams,
     WorktreeCreateResult,
     WorktreeListParams,
