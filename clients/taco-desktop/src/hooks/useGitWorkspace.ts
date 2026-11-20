@@ -41,6 +41,12 @@ export function useGitWorkspace(
             await queryClient.cancelQueries({ queryKey, exact: true });
             queryClient.setQueryData(queryKey, result);
             await refreshQueries(queryClient, { queryKey, exact: true });
+            if (client && cwd) {
+                await refreshQueries(queryClient, {
+                    queryKey: resourceQueryKey(client, "worktrees", cwd),
+                    exact: true,
+                });
+            }
         },
     });
 

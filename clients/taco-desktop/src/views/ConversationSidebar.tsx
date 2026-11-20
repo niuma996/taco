@@ -20,7 +20,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { SessionList } from "../components/SessionList";
 import { IconButton } from "../components/ui/IconButton";
 import type { WorkspaceMode } from "../components/WorkspaceModeTabs";
+import { WorkspaceWorktreeLinks } from "../components/WorkspaceWorktreeLinks";
 import type { UseSessionSearchesResult } from "../hooks/useSessionSearch";
+import type { WorktreesClient } from "../hooks/useWorktrees";
 import { useT } from "../i18n/useI18n";
 import { summarizeConversationActivity } from "../lib/chat/conversationActivity";
 import {
@@ -33,6 +35,7 @@ import { Sidebar } from "./Sidebar";
 
 export interface ConversationSidebarProps {
     mode: WorkspaceMode;
+    client?: WorktreesClient;
     workspaces: Record<string, WorkspaceState>;
     activeCwd: string;
     expandedWorkspaces?: readonly string[];
@@ -279,27 +282,53 @@ export function ConversationSidebar(props: ConversationSidebarProps) {
         const searching = search.query.trim() !== "";
         if ((!workspace || workspace.sessions.length === 0) && !searching)
             return (
-                <div className="conversation-group-empty">
-                    {t("conversationNav.noConversations")}
-                </div>
+                <>
+                    {props.client && (
+                        <WorkspaceWorktreeLinks
+                            client={props.client}
+                            cwd={group.cwd}
+                            activeCwd={props.activeCwd}
+                            active
+                            onSelect={props.onNewSession}
+                        />
+                    )}
+                    <div className="conversation-group-empty">
+                        {t("conversationNav.noConversations")}
+                    </div>
+                </>
             );
         return (
-            <Sidebar
-                embedded
-                showHeader={false}
-                activeSessionId={group.cwd === props.activeCwd ? workspace?.activeSession : null}
-                ws={workspace}
-                unread={props.unread}
-                onAttach={(sessionId) => props.onOpenSession({ workspace: group.cwd, sessionId })}
-                onDelete={(sessionId) => props.onDelete({ cwd: group.cwd, sessionId })}
-                onRename={(sessionId) => props.onRename({ cwd: group.cwd, sessionId })}
-                onLoadMore={() => void loadMoreGroup(group)}
-                isLoadingMore={loadingMoreGroups.has(group.key)}
-                loadMoreError={failedMoreGroups.has(group.key)}
-                onNewSession={() => props.onNewSession(group.cwd)}
-                newSessionDisabled={false}
-                search={search}
-            />
+            <>
+                {props.client && (
+                    <WorkspaceWorktreeLinks
+                        client={props.client}
+                        cwd={group.cwd}
+                        activeCwd={props.activeCwd}
+                        active
+                        onSelect={props.onNewSession}
+                    />
+                )}
+                <Sidebar
+                    embedded
+                    showHeader={false}
+                    activeSessionId={
+                        group.cwd === props.activeCwd ? workspace?.activeSession : null
+                    }
+                    ws={workspace}
+                    unread={props.unread}
+                    onAttach={(sessionId) =>
+                        props.onOpenSession({ workspace: group.cwd, sessionId })
+                    }
+                    onDelete={(sessionId) => props.onDelete({ cwd: group.cwd, sessionId })}
+                    onRename={(sessionId) => props.onRename({ cwd: group.cwd, sessionId })}
+                    onLoadMore={() => void loadMoreGroup(group)}
+                    isLoadingMore={loadingMoreGroups.has(group.key)}
+                    loadMoreError={failedMoreGroups.has(group.key)}
+                    onNewSession={() => props.onNewSession(group.cwd)}
+                    newSessionDisabled={false}
+                    search={search}
+                />
+            </>
         );
     };
 

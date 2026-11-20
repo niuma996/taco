@@ -272,7 +272,8 @@
     "skillsNoMatch": "No skills match your filter.",
     "systemPromptLabel": "System Prompt",
     "loading": "Loading…",
-    "badgeUpdateAvailable": "Update available"
+    "badgeUpdateAvailable": "Update available",
+    "worktrees": "Worktrees"
   },
   "configChange": {
     "risk": "Config change"
@@ -1329,5 +1330,34 @@
     "conflict": "Conflict",
     "renamedFrom": "Renamed from",
     "deletedNoPreview": "Deleted file — preview unavailable"
+  },
+  "worktrees": {
+    "title": "Worktrees",
+    "loading": "Loading worktrees…",
+    "loadFailed": "Cannot load worktrees: {{error}}",
+    "refresh": "Refresh worktrees",
+    "empty": "No worktrees in this repository.",
+    "local": "Local checkout",
+    "current": "Current",
+    "locked": "Locked",
+    "switch": "Switch local checkout or worktree",
+    "manage": "Manage worktrees",
+    "open": "Open",
+    "create": "New worktree",
+    "createTitle": "Create a worktree",
+    "createDescription": "Create an isolated checkout in .taco/worktrees.",
+    "name": "Name",
+    "base": "Base",
+    "baseHint": "Use the current checkout or the repository default branch.",
+    "baseHead": "Current HEAD",
+    "baseDefault": "Default branch",
+    "createConfirm": "Create worktree",
+    "creating": "Creating…",
+    "cancel": "Cancel",
+    "remove": "Remove",
+    "removeTitle": "Remove worktree?",
+    "removeDescription": "Remove {{path}}? Its branch and conversation history will be kept.",
+    "removeConfirm": "Remove worktree",
+    "removing": "Removing…"
   }
 }

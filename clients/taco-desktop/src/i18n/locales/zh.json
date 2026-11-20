@@ -272,7 +272,8 @@
     "skillsNoMatch": "没有匹配的技能。",
     "systemPromptLabel": "系统提示词",
     "loading": "加载中…",
-    "badgeUpdateAvailable": "有可用更新"
+    "badgeUpdateAvailable": "有可用更新",
+    "worktrees": "工作树"
   },
   "configChange": {
     "risk": "配置变更"
@@ -1329,5 +1330,34 @@
     "conflict": "冲突",
     "renamedFrom": "原路径",
     "deletedNoPreview": "文件已删除，无法预览"
+  },
+  "worktrees": {
+    "title": "工作树",
+    "loading": "正在加载工作树…",
+    "loadFailed": "无法加载工作树：{{error}}",
+    "refresh": "刷新工作树",
+    "empty": "此仓库还没有工作树。",
+    "local": "本地目录",
+    "current": "当前",
+    "locked": "已锁定",
+    "switch": "切换本地目录或工作树",
+    "manage": "管理工作树",
+    "open": "打开",
+    "create": "新建工作树",
+    "createTitle": "创建工作树",
+    "createDescription": "在 .taco/worktrees 中创建独立工作目录。",
+    "name": "名称",
+    "base": "基础分支",
+    "baseHint": "从当前目录或仓库默认分支创建。",
+    "baseHead": "当前 HEAD",
+    "baseDefault": "默认分支",
+    "createConfirm": "创建工作树",
+    "creating": "正在创建…",
+    "cancel": "取消",
+    "remove": "删除",
+    "removeTitle": "删除工作树？",
+    "removeDescription": "删除 {{path}}？对应分支和会话历史将保留。",
+    "removeConfirm": "删除工作树",
+    "removing": "正在删除…"
   }
 }

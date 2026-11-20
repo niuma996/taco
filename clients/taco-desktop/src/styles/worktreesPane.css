@@ -1,0 +1,159 @@
+/* worktreesPane.css — repository inventory and directory navigation. */
+
+.worktrees-pane {
+    display: flex;
+    flex: 1;
+    min-height: 0;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.worktrees-pane .pane-header-title {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+}
+
+.worktrees-list {
+    flex: 1;
+    min-height: 0;
+    margin: 0;
+    padding: var(--space-3);
+    overflow-y: auto;
+    list-style: none;
+}
+
+.worktree-item {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    border-bottom: 1px solid var(--border-subtle);
+}
+
+.worktree-item[data-current="true"] {
+    background: var(--accent-bg-hover);
+}
+
+.worktree-open {
+    display: flex;
+    flex: 1;
+    align-items: center;
+    gap: var(--space-3);
+    min-width: 0;
+    padding: var(--space-3);
+    border: 0;
+    color: var(--fg);
+    background: transparent;
+    text-align: left;
+    cursor: pointer;
+}
+
+.worktree-open:hover {
+    background: var(--accent-bg-hover);
+}
+
+.worktree-open:focus-visible,
+.workspace-worktree-picker:focus-visible,
+.workspace-worktree-link:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
+    border-radius: var(--radius-sm);
+}
+
+.worktree-copy {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    gap: var(--space-1);
+    min-width: 0;
+}
+
+.worktree-name {
+    font-weight: var(--weight-title);
+}
+
+.worktree-path {
+    overflow: hidden;
+    color: var(--fg-dim);
+    font-size: var(--text-xs);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.worktree-current,
+.worktree-state {
+    flex: none;
+    color: var(--accent);
+    font-size: var(--text-xs);
+}
+
+.worktree-state {
+    color: var(--warning);
+}
+
+.workspace-worktree-picker {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1);
+    min-width: 0;
+    max-width: 12rem;
+    padding: var(--space-1) var(--space-2);
+    border: 0;
+    border-radius: var(--radius-sm);
+    color: var(--fg-dim);
+    background: transparent;
+    font: inherit;
+    font-size: var(--text-xs);
+    cursor: pointer;
+}
+
+.workspace-worktree-picker > span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.workspace-worktree-picker:hover {
+    color: var(--fg);
+    background: var(--accent-bg-hover);
+}
+
+.workspace-worktree-links {
+    display: flex;
+    flex-direction: column;
+    margin: 0 var(--space-2) var(--space-1);
+}
+
+.workspace-worktree-link {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    min-width: 0;
+    padding: var(--space-1) var(--space-2);
+    border: 0;
+    border-radius: var(--radius-sm);
+    color: var(--fg-dim);
+    background: transparent;
+    font: inherit;
+    font-size: var(--text-xs);
+    text-align: left;
+    cursor: pointer;
+}
+
+.workspace-worktree-link > span:first-of-type {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.workspace-worktree-link:hover,
+.workspace-worktree-link[data-active="true"] {
+    color: var(--fg);
+    background: var(--accent-bg-hover);
+}
+
+.workspace-worktree-link-current {
+    color: var(--accent);
+    font-size: var(--text-2xs);
+}

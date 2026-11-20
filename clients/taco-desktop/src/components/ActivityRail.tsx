@@ -2,7 +2,7 @@
  * ActivityRail — narrow left icon column spanning the full window height.
  *
  * Entries: chat (default) then agents/skills/tools/plugins/channels in
- * the top group, work right above the "more" button, a single "more" button
+ * the top group, work and worktrees above the "more" button, a single "more" button
  * collapsing memory/checkpoints/schedules/mcp, and settings pinned to the
  * bottom group. Top padding is driven by --rail-top-padding (36px on macOS
  * to align with the traffic-light center).
@@ -18,6 +18,7 @@ import {
     Check,
     ClipboardList,
     Ellipsis,
+    GitFork,
     MessageSquare,
     MessagesCircle,
     NotebookDot,
@@ -40,6 +41,7 @@ type ActivityView =
     | "plugins"
     | "channels"
     | "work"
+    | "worktrees"
     | "memory"
     | "checkpoints"
     | "schedules"
@@ -59,7 +61,7 @@ const CHAT_ITEM: ItemDef = { type: "chat", icon: MessageSquare, labelKey: "activ
 
 // Ordered by daily-use frequency, not by subsystem. Work (the daemon's
 // activity feed) keeps a fixed slot so background runs stay visible at a
-// glance, but sits right above "more" rather than claiming the prime
+// glance, without claiming the prime
 // position under Chat. MCP is a configuration surface and lives behind "more".
 const TOP_ITEMS: ReadonlyArray<ItemDef> = [
     { type: "agents", icon: Bot, labelKey: "activity.agents" },
@@ -68,6 +70,7 @@ const TOP_ITEMS: ReadonlyArray<ItemDef> = [
     { type: "plugins", icon: Puzzle, labelKey: "activity.plugins" },
     { type: "channels", icon: MessagesCircle, labelKey: "activity.channels" },
     { type: "work", icon: ClipboardList, labelKey: "activity.work" },
+    { type: "worktrees", icon: GitFork, labelKey: "activity.worktrees" },
 ];
 
 const OVERFLOW_ITEMS: ReadonlyArray<ItemDef> = [

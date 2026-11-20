@@ -136,6 +136,7 @@ export interface ChatPaneProps {
     llmDumpDock?: ReactNode;
     /** Current workspace/channel identity shown in SessionInfo. */
     workspaceContext?: ReactNode;
+    worktreePicker?: ReactNode;
 }
 
 /** Stable fallback so the message window's callbacks don't churn with no workspace. */
@@ -636,6 +637,7 @@ export function ChatPane(props: ChatPaneProps) {
                             client={props.client}
                             cwd={ws.cwd}
                             notify={props.notify}
+                            worktreePicker={props.worktreePicker}
                         />
                     )}
                     {llmDumpDock}

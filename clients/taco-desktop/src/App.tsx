@@ -40,6 +40,7 @@ import { WindowControls } from "./components/WindowControls";
 import { WorkspaceAssociationsDialog } from "./components/WorkspaceAssociationsDialog";
 import { type WorkspaceMode, WorkspaceModeTabs } from "./components/WorkspaceModeTabs";
 import { WorkspaceRemovalDialog } from "./components/WorkspaceRemovalDialog";
+import { WorkspaceWorktreePicker } from "./components/WorkspaceWorktreePicker";
 import { useChatInputState } from "./hooks/primitives/useChatInputState";
 import { useStableCallback } from "./hooks/primitives/useStableCallback";
 import { useTheme } from "./hooks/primitives/useTheme";
@@ -93,6 +94,7 @@ import { ChatPane } from "./views/ChatPane";
 import { CheckpointsPane } from "./views/CheckpointsPane";
 import { ConversationSidebar } from "./views/ConversationSidebar";
 import { WorkPane } from "./views/WorkPane";
+import { WorktreesPane } from "./views/WorktreesPane";
 
 const EMPTY_MESSAGES: UiMessage[] = [];
 const EMPTY_BACKGROUND_SUBAGENTS: SessionState["backgroundSubagents"] = {};
@@ -134,6 +136,7 @@ export default function App() {
         | "plugins"
         | "channels"
         | "work"
+        | "worktrees"
         | "memory"
         | "checkpoints"
         | "schedules"
@@ -189,6 +192,10 @@ export default function App() {
     );
 
     const activeSid = ws?.activeSession;
+    const worktreeCwd =
+        activeCwd && !activeCwd.startsWith(IM_CWD_PREFIX)
+            ? activeCwd
+            : Object.keys(workspaces).find((cwd) => !cwd.startsWith(IM_CWD_PREFIX));
     const activeRuntime = activeSid ? getSessionState(ws, activeSid) : undefined;
     const messages = activeRuntime?.messages ?? EMPTY_MESSAGES;
     const backgroundSubagents = activeRuntime?.backgroundSubagents ?? EMPTY_BACKGROUND_SUBAGENTS;
@@ -843,6 +850,17 @@ export default function App() {
                         updateError={lifecycle.updateStatus.error}
                         onCheckUpdate={lifecycle.runUpdateCheck}
                     />
+                    {mainView === "worktrees" && worktreeCwd && (
+                        <WorktreesPane
+                            client={client}
+                            cwd={worktreeCwd}
+                            activeCwd={activeCwd}
+                            onOpenWorkspace={(cwd) => {
+                                void startNewSession(cwd);
+                                setMainView("chat");
+                            }}
+                        />
+                    )}
                     {mainView === "chat" ? (
                         <>
                             {/* Always mounted — collapse is a CSS width
@@ -850,6 +868,7 @@ export default function App() {
                                 .layout, so the list wipes in/out instead of
                                 popping and keeps its scroll position. */}
                             <ConversationSidebar
+                                client={client}
                                 mode={conversationMode}
                                 workspaces={workspaces}
                                 unread={{ ...conversationActivity.unread, ...restoredUnread }}
@@ -909,6 +928,19 @@ export default function App() {
                                     >
                                         <ChatPane
                                             client={client}
+                                            worktreePicker={
+                                                activeCwd &&
+                                                !activeCwd.startsWith(IM_CWD_PREFIX) ? (
+                                                    <WorkspaceWorktreePicker
+                                                        client={client}
+                                                        cwd={activeCwd}
+                                                        onSelect={(cwd) =>
+                                                            void startNewSession(cwd)
+                                                        }
+                                                        onManage={() => setMainView("worktrees")}
+                                                    />
+                                                ) : undefined
+                                            }
                                             notify={pushNotification}
                                             ws={ws}
                                             checkpoints={(

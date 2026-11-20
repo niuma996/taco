@@ -1,6 +1,6 @@
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { GitBranch } from "lucide-react";
-import { useState } from "react";
+import { type ReactNode, useState } from "react";
 import { type GitWorkspaceClient, useGitWorkspace } from "../hooks/useGitWorkspace";
 import { useT } from "../i18n/useI18n";
 import { queryError } from "../lib/queries/queryClient";
@@ -10,9 +10,15 @@ export interface WorkspaceGitStatusProps {
     client: GitWorkspaceClient;
     cwd: string;
     notify?: (message: string) => void;
+    worktreePicker?: ReactNode;
 }
 
-export function WorkspaceGitStatus({ client, cwd, notify }: WorkspaceGitStatusProps) {
+export function WorkspaceGitStatus({
+    client,
+    cwd,
+    notify,
+    worktreePicker,
+}: WorkspaceGitStatusProps) {
     const { t } = useT();
     const git = useGitWorkspace(client, cwd);
     const [actionError, setActionError] = useState<string | null>(null);
@@ -53,6 +59,7 @@ export function WorkspaceGitStatus({ client, cwd, notify }: WorkspaceGitStatusPr
             aria-busy={git.loading || git.initializing}
         >
             <div className="workspace-git-status__summary">
+                {worktreePicker}
                 <GitBranch size={14} aria-hidden="true" />
                 <span className="workspace-git-status__label" title={branch ?? label ?? undefined}>
                     {label}
