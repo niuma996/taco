@@ -43,8 +43,8 @@ afterEach(() => {
     cleanup();
     vi.clearAllMocks();
 });
-function setup(cwd = "/project") {
-    const client = { worktreeList: vi.fn().mockResolvedValue(list) };
+function setup(cwd = "/project", response: typeof list & { projectRoot?: string } = list) {
+    const client = { worktreeList: vi.fn().mockResolvedValue(response) };
     const onSelect = vi.fn(),
         onManage = vi.fn();
     const { wrapper } = queryWrapper();
@@ -73,8 +73,49 @@ describe("WorkspaceWorktreePicker", () => {
         fireEvent.click(await screen.findByRole("menuitemradio", { name: /worktree-review/ }));
         expect(onSelect).toHaveBeenCalledExactlyOnceWith("/project/.taco/worktrees/review");
     });
+    it("navigates to the checkout instead of a separate Git directory", async () => {
+        const linked = list.worktrees[1].path;
+        const commonDir = "/metadata";
+        const { onSelect } = setup(linked, {
+            ...list,
+            projectRoot: "/project",
+            repository: { ...list.repository, commonDir, checkoutRoot: linked },
+            worktrees: [{ ...list.worktrees[0], path: commonDir }, list.worktrees[1]],
+        });
+        fireEvent.pointerDown(await screen.findByRole("button", { name: "worktrees.switch" }), {
+            button: 0,
+            ctrlKey: false,
+        });
+        fireEvent.click(await screen.findByRole("menuitemradio", { name: "worktrees.local" }));
+        expect(onSelect).toHaveBeenCalledExactlyOnceWith("/project");
+    });
+    it.each(["bare", "prunable", "orphaned"] as const)(
+        "disables %s destinations",
+        async (state) => {
+            const { onSelect } = setup("/project", {
+                ...list,
+                worktrees: [list.worktrees[0], { ...list.worktrees[1], [state]: true }],
+            });
+            fireEvent.pointerDown(await screen.findByRole("button", { name: "worktrees.switch" }), {
+                button: 0,
+                ctrlKey: false,
+            });
+            const item = await screen.findByRole("menuitemradio", { name: /worktree-review/ });
+            expect(item.getAttribute("aria-disabled")).toBe("true");
+            fireEvent.click(item);
+            expect(onSelect).not.toHaveBeenCalled();
+        },
+    );
     it("opens the management view and labels the current worktree", async () => {
-        const { onManage } = setup("/project/.taco/worktrees/review");
+        const { onManage } = setup("/project/.taco/worktrees/review", {
+            ...list,
+            repository: {
+                ...list.repository,
+                checkoutRoot: "/project/.taco/worktrees/review",
+                gitDir: "/project/.git/worktrees/review",
+                branch: "worktree-review",
+            },
+        });
         expect(await screen.findByText("review")).toBeTruthy();
         fireEvent.pointerDown(screen.getByRole("button", { name: "worktrees.switch" }), {
             button: 0,

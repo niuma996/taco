@@ -1,6 +1,6 @@
 import { asWorkspaceId, type GitWorktreeInfo, type WorktreeBase } from "@taco-ai/protocol";
 import { GitBranch, GitFork, Plus, RefreshCw, Trash2 } from "lucide-react";
-import { type KeyboardEvent, useRef, useState } from "react";
+import { type KeyboardEvent, useEffect, useRef, useState } from "react";
 import { ConfirmModal } from "../components/ConfirmModal";
 import { Button } from "../components/ui/Button";
 import { FormField } from "../components/ui/FormField";
@@ -12,7 +12,8 @@ import { WorkspaceGitStatus } from "../components/WorkspaceGitStatus";
 import { useWorktrees, type WorktreesClient } from "../hooks/useWorktrees";
 import { useT } from "../i18n/useI18n";
 import type { TacoClient } from "../lib/clients/tacoClient";
-import { queryError } from "../lib/queries/queryClient";
+import { clientQueryKey, queryError } from "../lib/queries/queryClient";
+import { mainWorktreePath, navigationWorktrees, worktreeAvailable } from "../lib/worktrees";
 
 type WorktreesClientWithActions = WorktreesClient &
     Pick<TacoClient, "worktreeCreate" | "worktreeRemove" | "gitInspect" | "gitInit">;
@@ -24,7 +25,16 @@ export interface WorktreesPaneProps {
     onOpenWorkspace: (cwd: string) => void;
 }
 
-export function WorktreesPane({ client, cwd, activeCwd, onOpenWorkspace }: WorktreesPaneProps) {
+export function WorktreesPane(props: WorktreesPaneProps) {
+    return (
+        <WorktreesPaneContent
+            key={JSON.stringify([...clientQueryKey(props.client), props.cwd, props.activeCwd])}
+            {...props}
+        />
+    );
+}
+
+function WorktreesPaneContent({ client, cwd, activeCwd, onOpenWorkspace }: WorktreesPaneProps) {
     const { t } = useT();
     const inventory = useWorktrees(client, cwd);
     const [creating, setCreating] = useState(false);
@@ -38,7 +48,15 @@ export function WorktreesPane({ client, cwd, activeCwd, onOpenWorkspace }: Workt
     const listRef = useRef<HTMLUListElement>(null);
     const result = inventory.data;
     const repository = result?.status === "repository" ? result.repository : null;
-    const worktrees = result?.status === "repository" ? result.worktrees : [];
+    const worktrees = result?.status === "repository" ? navigationWorktrees(result) : [];
+    const mainPath = result?.status === "repository" ? mainWorktreePath(result) : null;
+    const current = useRef(false);
+    useEffect(() => {
+        current.current = true;
+        return () => {
+            current.current = false;
+        };
+    }, []);
 
     function openCreate() {
         setName("");
@@ -58,13 +76,14 @@ export function WorktreesPane({ client, cwd, activeCwd, onOpenWorkspace }: Workt
                 name: trimmed,
                 base,
             });
+            if (!current.current) return;
             setCreating(false);
             onOpenWorkspace(created.path);
             await inventory.refresh();
         } catch (cause) {
-            setCreateError(queryError(cause)?.message ?? String(cause));
+            if (current.current) setCreateError(queryError(cause)?.message ?? String(cause));
         } finally {
-            setCreateBusy(false);
+            if (current.current) setCreateBusy(false);
         }
     }
 
@@ -74,21 +93,27 @@ export function WorktreesPane({ client, cwd, activeCwd, onOpenWorkspace }: Workt
         setRemoveError(null);
         try {
             await client.worktreeRemove({ workspace: asWorkspaceId(cwd), path: removing.path });
-            const returnTo = removing.path === activeCwd ? repository?.checkoutRoot : null;
+            if (!current.current) return;
+            const removingCurrent =
+                removing.path === activeCwd ||
+                (cwd === activeCwd && removing.path === repository?.checkoutRoot);
+            const returnTo = removingCurrent ? mainPath : null;
             setRemoving(null);
-            if (returnTo) onOpenWorkspace(returnTo);
-            await inventory.refresh();
+            if (returnTo && returnTo !== removing.path) onOpenWorkspace(returnTo);
+            if (removing.path !== repository?.checkoutRoot) await inventory.refresh();
         } catch (cause) {
-            setRemoveError(queryError(cause)?.message ?? String(cause));
+            if (current.current) setRemoveError(queryError(cause)?.message ?? String(cause));
         } finally {
-            setRemoveBusy(false);
+            if (current.current) setRemoveBusy(false);
         }
     }
 
     function navigate(event: KeyboardEvent<HTMLUListElement>) {
         if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
         const rows = Array.from(
-            listRef.current?.querySelectorAll<HTMLButtonElement>("[data-worktree-open]") ?? [],
+            listRef.current?.querySelectorAll<HTMLButtonElement>(
+                "[data-worktree-open]:not(:disabled)",
+            ) ?? [],
         );
         if (rows.length === 0) return;
         event.preventDefault();
@@ -150,7 +175,7 @@ export function WorktreesPane({ client, cwd, activeCwd, onOpenWorkspace }: Workt
                 ) : (
                     <ul className="worktrees-list" ref={listRef} onKeyDown={navigate}>
                         {worktrees.map((tree) => {
-                            const primary = tree.path === repository.checkoutRoot;
+                            const primary = tree.path === mainPath;
                             const label = primary
                                 ? t("worktrees.local")
                                 : (tree.branch ?? tree.headOid?.slice(0, 7) ?? tree.path);
@@ -165,6 +190,7 @@ export function WorktreesPane({ client, cwd, activeCwd, onOpenWorkspace }: Workt
                                         className="worktree-open"
                                         data-worktree-open={tree.path}
                                         aria-label={`${t("worktrees.open")} ${label}`}
+                                        disabled={!worktreeAvailable(tree)}
                                         onClick={() => onOpenWorkspace(tree.path)}
                                     >
                                         <GitBranch size={15} aria-hidden="true" />
@@ -185,6 +211,11 @@ export function WorktreesPane({ client, cwd, activeCwd, onOpenWorkspace }: Workt
                                             {t("worktrees.locked")}
                                         </span>
                                     )}
+                                    {!worktreeAvailable(tree) && (
+                                        <span className="worktree-state" title={tree.pruneReason}>
+                                            {t(tree.bare ? "git.bare" : "worktrees.unavailable")}
+                                        </span>
+                                    )}
                                     {!primary && tree.managed && (
                                         <IconButton
                                             aria-label={`${t("worktrees.remove")} ${label}`}
@@ -194,7 +225,7 @@ export function WorktreesPane({ client, cwd, activeCwd, onOpenWorkspace }: Workt
                                                     : t("worktrees.remove")
                                             }
                                             tone="danger"
-                                            disabled={tree.locked}
+                                            disabled={tree.locked || !worktreeAvailable(tree)}
                                             onClick={() => {
                                                 setRemoving(tree);
                                                 setRemoveError(null);

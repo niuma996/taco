@@ -1340,6 +1340,7 @@
     "local": "Local checkout",
     "current": "Current",
     "locked": "Locked",
+    "unavailable": "Unavailable",
     "switch": "Switch local checkout or worktree",
     "manage": "Manage worktrees",
     "open": "Open",

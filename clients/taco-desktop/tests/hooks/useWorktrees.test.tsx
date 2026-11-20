@@ -50,6 +50,32 @@ describe("useWorktrees", () => {
         expect(client.worktreeList).toHaveBeenCalledTimes(1);
     });
 
+    it("keeps the new workspace inventory when an older request resolves last", async () => {
+        let complete!: (value: typeof result) => void;
+        const newer = { ...result, repository: { ...result.repository, checkoutRoot: "/other" } };
+        const client = {
+            worktreeList: vi
+                .fn()
+                .mockImplementationOnce(
+                    () =>
+                        new Promise<typeof result>((resolve) => {
+                            complete = resolve;
+                        }),
+                )
+                .mockResolvedValue(newer),
+        };
+        const { wrapper } = queryWrapper();
+        const view = renderHook(({ cwd }) => useWorktrees(client, cwd), {
+            wrapper,
+            initialProps: { cwd: "/project" },
+        });
+        await waitFor(() => expect(client.worktreeList).toHaveBeenCalledTimes(1));
+        view.rerender({ cwd: "/other" });
+        await waitFor(() => expect(view.result.current.data).toEqual(newer));
+        await act(async () => complete(result));
+        expect(view.result.current.data).toEqual(newer);
+    });
+
     it("keeps loaded inventory visible during a background refresh", async () => {
         const client = { worktreeList: vi.fn().mockResolvedValue(result) };
         const { wrapper } = queryWrapper();

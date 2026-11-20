@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as useI18n from "../../src/i18n/useI18n";
 import { WorktreesPane } from "../../src/views/WorktreesPane";
@@ -34,7 +34,18 @@ const repository = {
         tree("/project/.taco/worktrees/review", "worktree-review", true),
     ],
 };
-function setup(overrides: { list?: unknown } = {}) {
+const linkedPath = "/project/.taco/worktrees/review";
+const linkedRepository = {
+    ...repository,
+    repository: {
+        ...repository.repository,
+        checkoutRoot: linkedPath,
+        gitDir: "/project/.git/worktrees/review",
+        branch: "worktree-review",
+    },
+};
+
+function setup(overrides: { list?: unknown; cwd?: string; activeCwd?: string } = {}) {
     const client = {
         worktreeList: vi.fn().mockResolvedValue(overrides.list ?? repository),
         worktreeCreate: vi.fn().mockResolvedValue({
@@ -53,16 +64,14 @@ function setup(overrides: { list?: unknown } = {}) {
     };
     const onOpenWorkspace = vi.fn<(cwd: string) => void>();
     const { wrapper } = queryWrapper();
-    render(
-        <WorktreesPane
-            client={client}
-            cwd="/project"
-            activeCwd="/project/.taco/worktrees/review"
-            onOpenWorkspace={onOpenWorkspace}
-        />,
-        { wrapper },
-    );
-    return { client, onOpenWorkspace };
+    const props = {
+        client,
+        cwd: overrides.cwd ?? "/project",
+        activeCwd: overrides.activeCwd ?? linkedPath,
+        onOpenWorkspace,
+    };
+    const view = render(<WorktreesPane {...props} />, { wrapper });
+    return { client, onOpenWorkspace, props, view };
 }
 afterEach(() => {
     cleanup();
@@ -127,6 +136,214 @@ describe("WorktreesPane", () => {
         fireEvent.click(await screen.findByRole("button", { name: "worktrees.removeConfirm" }));
         await waitFor(() => expect(onOpenWorkspace).toHaveBeenCalledExactlyOnceWith("/project"));
         expect(screen.queryByRole("dialog")).toBeNull();
+    });
+
+    it("labels the main checkout and allows removing the queried linked worktree", async () => {
+        const { client, onOpenWorkspace } = setup({ list: linkedRepository, cwd: linkedPath });
+        const local = await screen.findByRole("button", { name: "worktrees.open worktrees.local" });
+        expect(local.getAttribute("data-worktree-open")).toBe("/project");
+        fireEvent.click(screen.getByRole("button", { name: "worktrees.remove worktree-review" }));
+        fireEvent.click(screen.getByRole("button", { name: "worktrees.removeConfirm" }));
+        await waitFor(() => expect(onOpenWorkspace).toHaveBeenCalledExactlyOnceWith("/project"));
+        expect(client.worktreeRemove).toHaveBeenCalledExactlyOnceWith({
+            workspace: linkedPath,
+            path: linkedPath,
+        });
+        expect(client.worktreeList).toHaveBeenCalledTimes(1);
+    });
+
+    it("returns from a subdirectory of the removed current worktree", async () => {
+        const { onOpenWorkspace } = setup({
+            list: linkedRepository,
+            cwd: `${linkedPath}/src`,
+            activeCwd: `${linkedPath}/src`,
+        });
+        fireEvent.click(
+            await screen.findByRole("button", { name: "worktrees.remove worktree-review" }),
+        );
+        fireEvent.click(screen.getByRole("button", { name: "worktrees.removeConfirm" }));
+        await waitFor(() => expect(onOpenWorkspace).toHaveBeenCalledExactlyOnceWith("/project"));
+    });
+
+    it("prefers the verified projectRoot over a separate Git directory inventory entry", async () => {
+        const { onOpenWorkspace } = setup({
+            cwd: linkedPath,
+            list: {
+                ...linkedRepository,
+                projectRoot: "/project",
+                repository: { ...linkedRepository.repository, commonDir: "/git-data" },
+                worktrees: [tree("/git-data", "main"), linkedRepository.worktrees[1]],
+            },
+        });
+        fireEvent.click(
+            await screen.findByRole("button", { name: "worktrees.remove worktree-review" }),
+        );
+        fireEvent.click(screen.getByRole("button", { name: "worktrees.removeConfirm" }));
+        await waitFor(() => expect(onOpenWorkspace).toHaveBeenCalledExactlyOnceWith("/project"));
+    });
+
+    it.each(["bare", "prunable", "orphaned"] as const)(
+        "disables navigation and removal for a %s entry",
+        async (state) => {
+            const { onOpenWorkspace, client } = setup({
+                list: {
+                    ...repository,
+                    worktrees: [
+                        repository.worktrees[0],
+                        {
+                            ...repository.worktrees[1],
+                            [state]: true,
+                        },
+                    ],
+                },
+            });
+            const open = await screen.findByRole("button", {
+                name: "worktrees.open worktree-review",
+            });
+            expect(open).toHaveProperty("disabled", true);
+            const remove = screen.queryByRole("button", {
+                name: "worktrees.remove worktree-review",
+            });
+            if (remove) expect(remove).toHaveProperty("disabled", true);
+            fireEvent.click(open);
+            expect(onOpenWorkspace).not.toHaveBeenCalled();
+            expect(client.worktreeRemove).not.toHaveBeenCalled();
+        },
+    );
+
+    it("skips unavailable entries during keyboard navigation", async () => {
+        setup({
+            list: {
+                ...repository,
+                worktrees: [
+                    repository.worktrees[0],
+                    { ...tree("/missing", "missing"), prunable: true },
+                    repository.worktrees[1],
+                ],
+            },
+        });
+        const local = await screen.findByRole("button", { name: "worktrees.open worktrees.local" });
+        local.focus();
+        fireEvent.keyDown(local, { key: "ArrowDown" });
+        expect(document.activeElement).toBe(
+            screen.getByRole("button", { name: "worktrees.open worktree-review" }),
+        );
+    });
+
+    it("preserves a locked live tree for navigation while preventing removal", async () => {
+        setup({
+            list: {
+                ...repository,
+                worktrees: [
+                    repository.worktrees[0],
+                    {
+                        ...repository.worktrees[1],
+                        locked: true,
+                        lockReason: "in use",
+                    },
+                ],
+            },
+        });
+        expect(
+            await screen.findByRole("button", { name: "worktrees.open worktree-review" }),
+        ).toHaveProperty("disabled", false);
+        expect(
+            screen.getByRole("button", { name: "worktrees.remove worktree-review" }),
+        ).toHaveProperty("disabled", true);
+    });
+
+    it.each(["create", "remove"] as const)(
+        "ignores a delayed %s result after switching workspace",
+        async (action) => {
+            const { client, onOpenWorkspace, props, view } = setup();
+            let complete!: () => void;
+            if (action === "create") {
+                client.worktreeCreate.mockImplementationOnce(
+                    () =>
+                        new Promise((resolve) => {
+                            complete = () =>
+                                resolve({
+                                    path: linkedPath,
+                                    branch: "worktree-review",
+                                    headOid: "abc",
+                                    managed: true,
+                                });
+                        }),
+                );
+                await screen.findByText("/project");
+                fireEvent.click(screen.getByRole("button", { name: "worktrees.create" }));
+                fireEvent.change(await screen.findByLabelText("worktrees.name"), {
+                    target: { value: "review" },
+                });
+                fireEvent.click(screen.getByRole("button", { name: "worktrees.createConfirm" }));
+            } else {
+                client.worktreeRemove.mockImplementationOnce(
+                    () =>
+                        new Promise((resolve) => {
+                            complete = () =>
+                                resolve({
+                                    path: linkedPath,
+                                    branch: "worktree-review",
+                                    removed: true,
+                                });
+                        }),
+                );
+                fireEvent.click(
+                    await screen.findByRole("button", { name: "worktrees.remove worktree-review" }),
+                );
+                fireEvent.click(screen.getByRole("button", { name: "worktrees.removeConfirm" }));
+            }
+            await waitFor(() => expect(complete).toBeTypeOf("function"));
+            view.rerender(<WorktreesPane {...props} cwd="/other" activeCwd="/other" />);
+            expect(screen.queryByRole("dialog")).toBeNull();
+            await act(async () => complete());
+            expect(onOpenWorkspace).not.toHaveBeenCalled();
+        },
+    );
+
+    it("does not return to a removed tree when the active workspace changes during removal", async () => {
+        const { client, onOpenWorkspace, props, view } = setup();
+        let complete!: () => void;
+        client.worktreeRemove.mockImplementationOnce(
+            () =>
+                new Promise((resolve) => {
+                    complete = () =>
+                        resolve({ path: linkedPath, branch: "worktree-review", removed: true });
+                }),
+        );
+        fireEvent.click(
+            await screen.findByRole("button", { name: "worktrees.remove worktree-review" }),
+        );
+        fireEvent.click(screen.getByRole("button", { name: "worktrees.removeConfirm" }));
+        view.rerender(<WorktreesPane {...props} activeCwd="/other" />);
+        await act(async () => complete());
+        expect(onOpenWorkspace).not.toHaveBeenCalled();
+    });
+
+    it("does not navigate when a create finishes after the pane unmounts", async () => {
+        const { client, onOpenWorkspace, view } = setup();
+        let complete!: () => void;
+        client.worktreeCreate.mockImplementationOnce(
+            () =>
+                new Promise((resolve) => {
+                    complete = () =>
+                        resolve({
+                            path: linkedPath,
+                            branch: "worktree-review",
+                            headOid: "abc",
+                            managed: true,
+                        });
+                }),
+        );
+        await screen.findByText("/project");
+        fireEvent.click(screen.getByRole("button", { name: "worktrees.create" }));
+        fireEvent.change(await screen.findByLabelText("worktrees.name"), {
+            target: { value: "review" },
+        });
+        fireEvent.click(screen.getByRole("button", { name: "worktrees.createConfirm" }));
+        view.unmount();
+        await act(async () => complete());
+        expect(onOpenWorkspace).not.toHaveBeenCalled();
     });
 
     it("keeps the removal dialog open when the server refuses removal", async () => {

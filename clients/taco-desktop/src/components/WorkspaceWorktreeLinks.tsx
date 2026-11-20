@@ -2,6 +2,7 @@ import { GitFork } from "lucide-react";
 import { useWorktrees, type WorktreesClient } from "../hooks/useWorktrees";
 import { useT } from "../i18n/useI18n";
 import { lastSegment } from "../lib/workspaceStorage";
+import { mainWorktreePath, worktreeAvailable } from "../lib/worktrees";
 
 export interface WorkspaceWorktreeLinksProps {
     client: WorktreesClient | undefined;
@@ -18,7 +19,7 @@ export function WorkspaceWorktreeLinks(props: WorkspaceWorktreeLinksProps) {
     const data = inventory.data;
     if (data?.status !== "repository") return null;
     const worktrees = data.worktrees.filter(
-        (tree) => tree.managed && tree.path !== data.repository.checkoutRoot,
+        (tree) => tree.managed && tree.path !== mainWorktreePath(data),
     );
     if (worktrees.length === 0) return null;
     return (
@@ -30,6 +31,7 @@ export function WorkspaceWorktreeLinks(props: WorkspaceWorktreeLinksProps) {
                     data-active={tree.path === props.activeCwd}
                     title={tree.path}
                     key={tree.path}
+                    disabled={!worktreeAvailable(tree)}
                     onClick={() => props.onSelect(tree.path)}
                 >
                     <GitFork size={12} aria-hidden="true" />

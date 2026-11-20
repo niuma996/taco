@@ -47,6 +47,55 @@ describe("new-chat navigation", () => {
         return { promise, resolve };
     }
 
+    it("registers a previously unopened worktree before selecting its new draft", async () => {
+        const client = {
+            start: vi.fn(async () => {}),
+            sessionList: vi.fn(async () => ({ sessions: [], total: 0 })),
+            onConnectionReady: vi.fn(() => () => {}),
+            onWorkspaceEpochChanged: vi.fn(() => () => {}),
+        } as unknown as TacoClient;
+        const { result } = renderHook(() => useWorkspaces(client));
+        const path = "/repo/.taco/worktrees/new";
+        await act(async () => {
+            assert.equal(await result.current.openNewSession(path), true);
+        });
+        assert.equal(result.current.activeCwd, path);
+        assert.ok(result.current.workspaces[path]?.draftId);
+        assert.equal(result.current.workspaces[path].active, true);
+        assert.equal(vi.mocked(client.start).mock.calls[0]?.[0], path);
+    });
+
+    it("does not select a newly registered worktree after newer navigation", async () => {
+        const list = deferred<{ sessions: []; total: number }>();
+        const client = {
+            start: vi.fn(async () => {}),
+            sessionList: vi.fn(() => list.promise),
+            onConnectionReady: vi.fn(() => () => {}),
+            onWorkspaceEpochChanged: vi.fn(() => () => {}),
+        } as unknown as TacoClient;
+        const { result } = renderHook(() => useWorkspaces(client));
+        const path = "/repo/.taco/worktrees/new";
+        act(() => {
+            const other = createEmptyWorkspace("/other");
+            other.listTotal = 0;
+            result.current.dispatchWs({ type: "INIT", workspaces: { "/other": other } });
+        });
+        let opening!: Promise<boolean>;
+        act(() => {
+            opening = result.current.openNewSession(path);
+        });
+        await waitFor(() => assert.equal(vi.mocked(client.sessionList).mock.calls.length, 1));
+        await act(async () => {
+            await result.current.switchWorkspace("/other");
+        });
+        await act(async () => {
+            list.resolve({ sessions: [], total: 0 });
+            assert.equal(await opening, false);
+        });
+        assert.equal(result.current.activeCwd, "/other");
+        assert.equal(result.current.workspaces[path]?.draftId, undefined);
+    });
+
     it.each(["start", "sessionList"] as const)(
         "keeps a local new draft usable when %s rejects",
         async (method) => {

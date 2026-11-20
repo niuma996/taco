@@ -1340,6 +1340,7 @@
     "local": "本地目录",
     "current": "当前",
     "locked": "已锁定",
+    "unavailable": "不可用",
     "switch": "切换本地目录或工作树",
     "manage": "管理工作树",
     "open": "打开",

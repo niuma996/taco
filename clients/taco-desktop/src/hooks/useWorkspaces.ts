@@ -994,7 +994,9 @@ export function useWorkspaces(client: TacoClient): UseWorkspacesApi {
         },
         openNewSession: async (cwd) => {
             const version = ++navigationVersion.current;
-            const current = await lifecycle.switchWorkspace(cwd);
+            const current = workspacesRef.current[cwd]
+                ? await lifecycle.switchWorkspace(cwd)
+                : await lifecycle.openWorkspace(cwd);
             if (!current || version !== navigationVersion.current) return false;
             beginPendingNewSession(cwd);
             return true;

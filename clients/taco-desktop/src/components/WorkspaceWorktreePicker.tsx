@@ -3,6 +3,7 @@ import { Check, ChevronDown, Folder, GitFork, Settings2 } from "lucide-react";
 import { useWorktrees, type WorktreesClient } from "../hooks/useWorktrees";
 import { useT } from "../i18n/useI18n";
 import { lastSegment } from "../lib/workspaceStorage";
+import { mainWorktreePath, navigationWorktrees, worktreeAvailable } from "../lib/worktrees";
 
 export interface WorkspaceWorktreePickerProps {
     client: WorktreesClient;
@@ -17,8 +18,9 @@ export function WorkspaceWorktreePicker(props: WorkspaceWorktreePickerProps) {
     const inventory = useWorktrees(props.client, props.cwd);
     const data = inventory.data;
     if (data?.status !== "repository" || data.repository.isBare) return null;
-    const worktrees = data.worktrees;
-    const local = props.cwd === data.repository.checkoutRoot;
+    const worktrees = navigationWorktrees(data);
+    const mainPath = mainWorktreePath(data);
+    const local = data.repository.checkoutRoot === mainPath;
     return (
         <DropdownMenu.Root>
             <DropdownMenu.Trigger asChild>
@@ -47,7 +49,7 @@ export function WorkspaceWorktreePicker(props: WorkspaceWorktreePickerProps) {
                 >
                     <DropdownMenu.RadioGroup value={props.cwd} onValueChange={props.onSelect}>
                         {worktrees.map((tree) => {
-                            const isLocal = tree.path === data.repository.checkoutRoot;
+                            const isLocal = tree.path === mainPath;
                             const label = isLocal
                                 ? t("worktrees.local")
                                 : (tree.branch ?? lastSegment(tree.path));
@@ -56,6 +58,7 @@ export function WorkspaceWorktreePicker(props: WorkspaceWorktreePickerProps) {
                                     className="ui-menu-item"
                                     value={tree.path}
                                     key={tree.path}
+                                    disabled={!worktreeAvailable(tree)}
                                 >
                                     {isLocal ? (
                                         <Folder size={14} aria-hidden="true" />

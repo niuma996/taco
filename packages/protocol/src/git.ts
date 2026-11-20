@@ -61,6 +61,8 @@ export type WorktreeListResult =
     | {
           status: "repository";
           repository: GitRepositoryInfo;
+          /** Verified main checkout; checkoutRoot describes the requested checkout. */
+          projectRoot?: string;
           worktrees: GitWorktreeInfo[];
       };
 
