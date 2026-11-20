@@ -16,6 +16,7 @@ import type {
 import { HIDDEN_WINDOWS_SPAWN } from "../lib/hiddenWindowsSpawn.ts";
 import { scrubbedProcessEnv } from "../runtime/models/providerKeyStore.ts";
 import { gitDirectoryIdentity } from "../workspace/gitIdentity.ts";
+import { withWorktreeMutationLock } from "../workspace/worktreeLock.ts";
 import {
     assertWorktreeStorage,
     isSafeWorktreeName,
@@ -466,7 +467,9 @@ export async function resolveGitProjectRoot(cwd: string): Promise<string | undef
 
 async function withWorktreeMutation<T>(key: string, operation: () => Promise<T>): Promise<T> {
     const previous = worktreeMutations.get(key) ?? Promise.resolve();
-    const next = previous.catch(() => undefined).then(operation);
+    const next = previous
+        .catch(() => undefined)
+        .then(() => withWorktreeMutationLock(key, operation));
     worktreeMutations.set(key, next);
     try {
         return await next;
