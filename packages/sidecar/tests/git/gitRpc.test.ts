@@ -50,3 +50,24 @@ test("Git inspection, initialization and worktree inventory route without constr
         await rm(root, { recursive: true, force: true });
     }
 });
+
+test("worktree cleanup rejects invalid thresholds at the RPC boundary", async () => {
+    const server = new SidecarServer({ providerKeyStore: new ProviderKeyStore({}) });
+    try {
+        for (const params of [
+            { workspace: "/project", maxAgeDays: 0 },
+            { workspace: "/project", maxCount: 0 },
+            { workspace: "/project", maxCount: 10001 },
+        ]) {
+            const result = await server.dispatchRpc({
+                id: "invalid-cleanup",
+                method: "worktree.cleanup",
+                params,
+            });
+            assert.equal(result.ok, false);
+            if (!result.ok) assert.equal(result.error.code, "invalid_params");
+        }
+    } finally {
+        await server.stop();
+    }
+});

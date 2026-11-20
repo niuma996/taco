@@ -157,6 +157,8 @@ test("every facade method serializes a payload accepted by its registered schema
     await client.worktreeCreate({ workspace, name: "feature", base: "head" });
     await client.worktreeCreate({ workspace, name: "feature", base: "default" });
     await client.worktreeRemove({ workspace, path: "/worktrees/feature" });
+    await client.worktreeCleanup({ workspace });
+    await client.worktreeCleanup({ workspace, maxAgeDays: 14, maxCount: 15 });
     await client.sessionList({ workspace });
     await client.sessionCreate({ workspace });
     await client.sessionAttach({ workspace, sessionId: id });

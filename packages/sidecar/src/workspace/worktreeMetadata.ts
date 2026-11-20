@@ -80,13 +80,18 @@ export class WorktreeMetadataStore {
         return (await this.read()).find((entry) => entry.path === resolve(path));
     }
 
-    async markManaged(entry: ManagedWorktreeRecord): Promise<void> {
+    async entries(): Promise<ManagedWorktreeRecord[]> {
+        return this.read();
+    }
+
+    async markManaged(entry: ManagedWorktreeRecord, replaceIdentity?: string): Promise<void> {
         this.validate(entry);
         const entries = await this.read();
         const previous = entries.find((item) => item.path === entry.path);
         if (
             previous &&
             previous.state !== "removed" &&
+            previous.gitDirIdentity !== replaceIdentity &&
             (previous.gitDirIdentity !== entry.gitDirIdentity || previous.branch !== entry.branch)
         )
             invalid();

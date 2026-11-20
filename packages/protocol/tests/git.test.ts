@@ -20,6 +20,7 @@ test("Git schemas are exported and shared with workspace-routed contract rows", 
         worktreeList: protocol.worktreeListSchema,
         worktreeCreate: protocol.worktreeCreateSchema,
         worktreeRemove: protocol.worktreeRemoveSchema,
+        worktreeCleanup: protocol.worktreeCleanupSchema,
     };
     for (const key of Object.keys(schemas) as (keyof typeof schemas)[]) {
         assert.equal(protocol.rpcSchemas[key], schemas[key]);

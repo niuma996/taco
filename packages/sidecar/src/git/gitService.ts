@@ -16,7 +16,11 @@ import type {
 import { HIDDEN_WINDOWS_SPAWN } from "../lib/hiddenWindowsSpawn.ts";
 import { scrubbedProcessEnv } from "../runtime/models/providerKeyStore.ts";
 import { gitDirectoryIdentity } from "../workspace/gitIdentity.ts";
-import { withWorktreeMutationLock } from "../workspace/worktreeLock.ts";
+import {
+    WorktreeLockError,
+    withWorktreeGitCommand,
+    withWorktreeMutationLock,
+} from "../workspace/worktreeLock.ts";
 import {
     assertWorktreeStorage,
     isSafeWorktreeName,
@@ -56,17 +60,15 @@ function gitEnv(): Record<string, string> {
 
 async function git(cwd: string, args: string[], signal: AbortSignal): Promise<string> {
     signal.throwIfAborted();
-    const { stdout } = await exec(
-        "git",
-        ["--no-pager", "-c", "core.fsmonitor=false", "-C", cwd, ...args],
-        {
+    const { stdout } = await withWorktreeGitCommand(() =>
+        exec("git", ["--no-pager", "-c", "core.fsmonitor=false", "-C", cwd, ...args], {
             timeout: COMMAND_TIMEOUT_MS,
             signal,
             maxBuffer: 16 * 1024 * 1024,
             env: gitEnv(),
             encoding: "utf8",
             ...HIDDEN_WINDOWS_SPAWN,
-        },
+        }),
     );
     return stdout;
 }
@@ -389,7 +391,7 @@ async function missingPath(path: string): Promise<boolean> {
     }
 }
 
-/** Missing paths can recover history ownership only from an explicit, verified removal record. */
+/** Missing checkouts recover history ownership only from verified Taco provenance. */
 async function removedWorktreeProjectRoot(
     cwd: string,
     signal: AbortSignal,
@@ -421,12 +423,7 @@ async function removedWorktreeProjectRoot(
         const record = await new WorktreeMetadataStore(projectRoot).get(
             join(projectRoot, ".taco", "worktrees", basename(tree)),
         );
-        if (
-            !record ||
-            (record.state !== "removed" &&
-                !(record.state === "removing" && (await missingPath(record.gitDir))))
-        )
-            return undefined;
+        if (!record) return undefined;
         const repository = await probe(projectRoot, signal);
         if (
             typeof repository === "string" ||
@@ -473,6 +470,10 @@ async function withWorktreeMutation<T>(key: string, operation: () => Promise<T>)
     worktreeMutations.set(key, next);
     try {
         return await next;
+    } catch (error) {
+        if (error instanceof WorktreeLockError)
+            throw new GitServiceError("command_failed", error.message);
+        throw error;
     } finally {
         if (worktreeMutations.get(key) === next) worktreeMutations.delete(key);
     }
@@ -550,36 +551,104 @@ async function matchesOwnership(
 }
 
 /** Enrich Git inventory only when both Taco ownership and current repository identity agree. */
-export async function listManagedGitWorktrees(cwd: string): Promise<WorktreeListResult> {
+export async function readWorktreeInventory(
+    cwd: string,
+): Promise<{ inventory: WorktreeListResult; records: ManagedWorktreeRecord[] }> {
     const listing = await listGitWorktrees(cwd);
-    if (listing.status !== "repository") return listing;
+    if (listing.status !== "repository") return { inventory: listing, records: [] };
     const unmanaged = () => ({
         ...listing,
         worktrees: listing.worktrees.map((tree) => ({ ...tree, managed: false })),
     });
-    if (listing.repository.isBare) return unmanaged();
-    const signal = requestSignal();
+    if (listing.repository.isBare) return { inventory: unmanaged(), records: [] };
+    const sourceIdentity = await directoryIdentity(listing.repository.commonDir);
     let projectRoot: string;
     try {
-        projectRoot = await mainCheckout(listing.repository, signal);
+        projectRoot = await mainCheckout(listing.repository, requestSignal());
     } catch (error) {
         // Ownership enrichment is optional; valid Git inventory does not require a known main checkout.
-        if (error instanceof GitServiceError) return unmanaged();
+        if (error instanceof GitServiceError) return { inventory: unmanaged(), records: [] };
         throw error;
     }
-    const store = new WorktreeMetadataStore(projectRoot);
-    // Read even an empty inventory through the strict validator.
-    await store.get(projectRoot);
-    const worktrees = await Promise.all(
-        listing.worktrees.map(async (tree) => {
-            const record = await store.get(tree.path);
-            const managed =
-                !!record &&
-                (await matchesOwnership(record, tree, listing.repository, projectRoot, signal));
-            return { ...tree, managed };
-        }),
-    );
-    return { ...listing, worktrees };
+    const snapshot = async (repair: boolean): ReturnType<typeof readWorktreeInventory> => {
+        const signal = requestSignal();
+        const current = repair ? await listGitWorktrees(cwd, { signal }) : listing;
+        if (
+            current.status !== "repository" ||
+            (repair &&
+                (current.repository.gitDir !== listing.repository.gitDir ||
+                    current.repository.commonDir !== listing.repository.commonDir ||
+                    (await directoryIdentity(current.repository.commonDir)) !== sourceIdentity ||
+                    (await mainCheckout(current.repository, signal)) !== projectRoot))
+        )
+            throw new GitServiceError("command_failed", "Source repository identity changed");
+        const store = new WorktreeMetadataStore(projectRoot);
+        const records = await store.entries();
+        if (
+            records.some(
+                (record) =>
+                    record.commonDir !== current.repository.commonDir ||
+                    record.repositoryIdentity !== sourceIdentity,
+            )
+        )
+            throw new GitServiceError(
+                "command_failed",
+                "Worktree repository identity does not match Taco metadata",
+            );
+        const repairs: ManagedWorktreeRecord[] = [];
+        for (const record of records) {
+            if (
+                record.state === "removing" &&
+                !current.worktrees.some((tree) => tree.path === record.path) &&
+                (await missingPath(record.path)) &&
+                (await missingPath(record.gitDir))
+            )
+                repairs.push(record);
+        }
+        if (!repair && repairs.length > 0)
+            return withWorktreeMutation(listing.repository.commonDir, () => snapshot(true));
+        for (const record of repairs) await store.remove(record.path);
+        const refreshed = repairs.length > 0 ? await store.entries() : records;
+        const byPath = new Map(refreshed.map((record) => [record.path, record]));
+        const managedRoot = join(projectRoot, ".taco", "worktrees");
+        const worktrees = await Promise.all(
+            current.worktrees.map(async (tree) => {
+                const record = byPath.get(tree.path);
+                const managed =
+                    !!record &&
+                    (await matchesOwnership(record, tree, current.repository, projectRoot, signal));
+                const insideManagedRoot =
+                    dirname(tree.path) === managedRoot && isSafeWorktreeName(basename(tree.path));
+                return {
+                    ...tree,
+                    managed,
+                    ...(insideManagedRoot && !managed ? { orphaned: true } : {}),
+                };
+            }),
+        );
+        const listed = new Set(current.worktrees.map((tree) => tree.path));
+        for (const record of refreshed) {
+            if (record.state === "removed" || listed.has(record.path)) continue;
+            // Git can prune a missing checkout; the ownership record still needs attention.
+            worktrees.push({
+                path: record.path,
+                headOid: null,
+                branch: null,
+                detached: false,
+                bare: false,
+                locked: false,
+                prunable: true,
+                managed: false,
+                orphaned: true,
+            });
+        }
+        return { inventory: { ...current, projectRoot, worktrees }, records: refreshed };
+    };
+    return snapshot(false);
+}
+
+export async function listManagedGitWorktrees(cwd: string): Promise<WorktreeListResult> {
+    return (await readWorktreeInventory(cwd)).inventory;
 }
 
 async function excludeManagedContainer(
@@ -695,9 +764,10 @@ export async function createGitWorktree(
         const previous = await store.get(path);
         if (
             previous &&
-            (previous.state !== "removed" ||
-                previous.commonDir !== source.commonDir ||
-                previous.repositoryIdentity !== sourceIdentity)
+            (previous.commonDir !== source.commonDir ||
+                previous.repositoryIdentity !== sourceIdentity ||
+                (previous.state !== "removed" &&
+                    (!(await missingPath(path)) || !(await missingPath(previous.gitDir)))))
         )
             throw new GitServiceError(
                 "command_failed",
@@ -763,18 +833,22 @@ export async function createGitWorktree(
             created = actual;
             createdIdentity = await directoryIdentity(actual.gitDir);
             const now = new Date().toISOString();
-            await store.markManaged({
-                path,
-                branch,
-                managed: true,
-                repositoryRoot: projectRoot,
-                commonDir: source.commonDir,
-                repositoryIdentity: sourceIdentity,
-                gitDir: actual.gitDir,
-                gitDirIdentity: createdIdentity,
-                createdAt: now,
-                lastSeenAt: now,
-            });
+            // Replace missing provenance only after Git accepted the exclusive path and branch.
+            await store.markManaged(
+                {
+                    path,
+                    branch,
+                    managed: true,
+                    repositoryRoot: projectRoot,
+                    commonDir: source.commonDir,
+                    repositoryIdentity: sourceIdentity,
+                    gitDir: actual.gitDir,
+                    gitDirIdentity: createdIdentity,
+                    createdAt: now,
+                    lastSeenAt: now,
+                },
+                previous?.gitDirIdentity,
+            );
             return { path, branch, headOid: actual.headOid, managed: true, projectRoot };
         } catch {
             const cleanup = requestSignal();
@@ -832,7 +906,7 @@ export async function createGitWorktree(
 export async function removeGitWorktree(
     cwd: string,
     path: string,
-    options?: { beforeRemove?: () => Promise<void> },
+    options?: { beforeRemove?: () => Promise<void>; expectedGitDirIdentity?: string },
 ): Promise<WorktreeRemoveResult> {
     const source = await probe(cwd, requestSignal());
     if (typeof source === "string" || source.isBare)
@@ -853,6 +927,11 @@ export async function removeGitWorktree(
                 "command_failed",
                 "Worktree has no verified Taco ownership metadata",
             );
+        if (
+            options?.expectedGitDirIdentity !== undefined &&
+            record.gitDirIdentity !== options.expectedGitDirIdentity
+        )
+            throw new GitServiceError("command_failed", "Selected worktree identity changed");
         const listing = await listGitWorktrees(cwd, { signal });
         const entry =
             listing.status === "repository"
@@ -880,6 +959,11 @@ export async function removeGitWorktree(
         }
         if (!entry || entry.locked || entry.bare || entry.prunable)
             throw new GitServiceError("command_failed", "Worktree is unavailable or locked");
+        if (options?.expectedGitDirIdentity !== undefined && entry.detached)
+            throw new GitServiceError(
+                "command_failed",
+                "Cleanup cannot remove a detached worktree",
+            );
         if (!(await matchesOwnership(record, entry, source, projectRoot, signal)))
             throw new GitServiceError(
                 "command_failed",

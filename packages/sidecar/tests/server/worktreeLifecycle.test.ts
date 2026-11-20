@@ -7,6 +7,7 @@ import { test } from "node:test";
 import { asWorkspaceId } from "@taco-ai/protocol";
 import { ProviderKeyStore } from "../../src/runtime/models/providerKeyStore.ts";
 import { SidecarServer } from "../../src/server/server.ts";
+import { WorktreeMetadataStore } from "../../src/workspace/worktreeMetadata.ts";
 import { InMemoryTransport } from "../_helpers/inMemoryTransport.ts";
 import { useTempTacoHome } from "../_helpers/tempTacoHome.ts";
 
@@ -78,6 +79,58 @@ test("worktree RPCs create managed inventory and remove clean trees while preser
         );
         assert.equal(events.length, 2);
         assert.equal(server.workspaceIds().length, 0);
+    });
+});
+
+test("explicit cleanup removes old managed trees and preserves recent trees and branches", async () => {
+    await fixture(async (root, server) => {
+        const old = await create(server, root, "old");
+        const recent = await create(server, root, "recent");
+        const store = new WorktreeMetadataStore(root);
+        const record = await store.get(old.path);
+        assert.ok(record);
+        await store.markManaged({
+            ...record,
+            createdAt: "2020-01-01T00:00:00.000Z",
+            lastSeenAt: "2020-01-01T00:00:00.000Z",
+        });
+        const result = await server.dispatchRpc({
+            id: "cleanup",
+            method: "worktree.cleanup",
+            params: { workspace: root, maxAgeDays: 14, maxCount: 15 },
+        });
+        assert.ok(result.ok, JSON.stringify(result));
+        assert.deepEqual(
+            (result.result as { removed: { path: string }[] }).removed.map((entry) => entry.path),
+            [old.path],
+        );
+        await assert.rejects(access(old.path));
+        await access(recent.path);
+        assert.equal(git(root, "rev-parse", old.branch).trim().length, 40);
+    });
+});
+
+test("cleanup reports dirty candidates as failed and preserves their files", async () => {
+    await fixture(async (root, server) => {
+        const dirty = await create(server, root, "cleanup-dirty");
+        const store = new WorktreeMetadataStore(root);
+        const record = await store.get(dirty.path);
+        assert.ok(record);
+        await store.markManaged({
+            ...record,
+            createdAt: "2020-01-01T00:00:00.000Z",
+            lastSeenAt: "2020-01-01T00:00:00.000Z",
+        });
+        await writeFile(join(dirty.path, "keep.txt"), "keep");
+        const result = await server.dispatchRpc({
+            id: "cleanup-dirty",
+            method: "worktree.cleanup",
+            params: { workspace: root, maxAgeDays: 14 },
+        });
+        assert.ok(result.ok, JSON.stringify(result));
+        assert.equal((result.result as { failed: unknown[] }).failed.length, 1);
+        await access(dirty.path);
+        assert.equal(await readFile(join(dirty.path, "keep.txt"), "utf8"), "keep");
     });
 });
 
@@ -490,5 +543,135 @@ test("creation from a separate Git directory reports its committed result and em
         );
         assert.equal(events.length, 1);
         assert.equal((events[0] as { params: { projectRoot: string } }).params.projectRoot, cwd);
+    });
+});
+
+test("cleanup from a linked checkout applies count limits to the owning project", async () => {
+    await fixture(async (root, server) => {
+        const first = await create(server, root, "count-first");
+        const second = await create(server, root, "count-second");
+        const store = new WorktreeMetadataStore(root);
+        const record = await store.get(first.path);
+        assert.ok(record);
+        const yesterday = new Date(Date.now() - 86_400_000).toISOString();
+        await store.markManaged({ ...record, createdAt: yesterday, lastSeenAt: yesterday });
+        const response = await server.dispatchRpc({
+            id: "linked-cleanup-count",
+            method: "worktree.cleanup",
+            params: { workspace: first.path, maxCount: 1, maxAgeDays: 14 },
+        });
+        assert.ok(response.ok, JSON.stringify(response));
+        assert.deepEqual(
+            (response.result as { removed: { path: string }[] }).removed.map((x) => x.path),
+            [first.path],
+        );
+        await access(second.path);
+    });
+});
+
+test("cleanup refuses a target with an in-flight request", async () => {
+    await fixture(async (root, server) => {
+        const created = await create(server, root, "busy-request");
+        const store = new WorktreeMetadataStore(root);
+        const record = await store.get(created.path);
+        assert.ok(record);
+        await store.markManaged({ ...record, createdAt: "2020-01-01T00:00:00.000Z" });
+        await server.withWorkspaceAdmission(created.path, async () => {
+            const response = await server.dispatchRpc({
+                id: "busy-cleanup",
+                method: "worktree.cleanup",
+                params: { workspace: created.path },
+            });
+            assert.ok(response.ok, JSON.stringify(response));
+            assert.equal((response.result as { removed: unknown[] }).removed.length, 0);
+            await access(created.path);
+        });
+    });
+});
+
+test("cleanup from a repository subdirectory removes old trees through the same admission gate", async () => {
+    await fixture(async (root, server) => {
+        const tree = await create(server, root, "subdir-cleanup");
+        const store = new WorktreeMetadataStore(root);
+        const record = await store.get(tree.path);
+        assert.ok(record);
+        await store.markManaged({ ...record, createdAt: "2020-01-01T00:00:00.000Z" });
+        const { mkdir } = await import("node:fs/promises");
+        const subdir = join(root, "src");
+        await mkdir(subdir);
+        const response = await server.dispatchRpc({
+            id: "subdir-cleanup",
+            method: "worktree.cleanup",
+            params: { workspace: subdir },
+        });
+        assert.ok(response.ok, JSON.stringify(response));
+        assert.deepEqual(
+            (response.result as { removed: { path: string }[] }).removed.map((x) => x.path),
+            [tree.path],
+        );
+    });
+});
+
+test("cleanup skips locked and orphaned trees and retries a live persisted removal intent", async () => {
+    await fixture(async (root, server) => {
+        const pending = await create(server, root, "pending-cleanup");
+        const locked = await create(server, root, "locked-cleanup");
+        git(root, "worktree", "lock", locked.path);
+        const orphan = join(root, ".taco", "worktrees", "external-cleanup");
+        git(root, "worktree", "add", "--detach", orphan);
+        await new WorktreeMetadataStore(root).beginRemove(pending.path, pending.branch);
+        const response = await server.dispatchRpc({
+            id: "retry-cleanup",
+            method: "worktree.cleanup",
+            params: { workspace: root },
+        });
+        assert.ok(response.ok, JSON.stringify(response));
+        const result = response.result as {
+            removed: { path: string }[];
+            skipped: { path: string; reason: string }[];
+        };
+        assert.deepEqual(
+            result.removed.map((x) => x.path),
+            [pending.path],
+        );
+        assert.ok(result.skipped.some((x) => x.path === locked.path && x.reason === "locked"));
+        assert.ok(result.skipped.some((x) => x.path === orphan && x.reason === "orphaned"));
+        await access(orphan);
+        await access(locked.path);
+    });
+});
+
+test("cleanup preserves detached commits even when the checkout is clean and old", async () => {
+    await fixture(async (root, server) => {
+        const created = await create(server, root, "detached-cleanup");
+        git(created.path, "checkout", "--detach");
+        git(
+            created.path,
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@local",
+            "commit",
+            "--allow-empty",
+            "-m",
+            "unreferenced work",
+        );
+        const store = new WorktreeMetadataStore(root);
+        const record = await store.get(created.path);
+        assert.ok(record);
+        await store.markManaged({ ...record, createdAt: "2020-01-01T00:00:00.000Z" });
+        const response = await server.dispatchRpc({
+            id: "detached-cleanup",
+            method: "worktree.cleanup",
+            params: { workspace: root },
+        });
+        assert.ok(response.ok, JSON.stringify(response));
+        const result = response.result as {
+            removed: unknown[];
+            skipped: { path: string; reason: string }[];
+        };
+        assert.equal(result.removed.length, 0);
+        assert.ok(result.skipped.some((x) => x.path === created.path && x.reason === "detached"));
+        await access(created.path);
     });
 });

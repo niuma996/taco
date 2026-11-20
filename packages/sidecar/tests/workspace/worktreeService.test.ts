@@ -282,6 +282,7 @@ for (const shape of ["bare", "separate-checkout", "separate-linked"]) {
             const enriched = await listManagedGitWorktrees(requested);
             assert.deepEqual(enriched, {
                 ...inventory,
+                ...(shape === "separate-checkout" ? { projectRoot: cwd } : {}),
                 worktrees: inventory.worktrees.map((tree) => ({ ...tree, managed: false })),
             });
             assert.deepEqual(await readdir(cwd, { recursive: true }), before);
@@ -315,7 +316,9 @@ test("removed metadata does not reserve Git admin directory names", async () => 
 });
 
 test("removal retries finish persisted intent after final metadata write fails", async (t) => {
-    const { resolveGitProjectRoot } = await import("../../src/git/gitService.ts");
+    const { listManagedGitWorktrees, resolveGitProjectRoot } = await import(
+        "../../src/git/gitService.ts"
+    );
     await fixture(async (cwd) => {
         const created = await createGitWorktree(cwd, "retry");
         const remove = t.mock.method(WorktreeMetadataStore.prototype, "remove", async () => {
@@ -326,6 +329,14 @@ test("removal retries finish persisted intent after final metadata write fails",
         const store = new WorktreeMetadataStore(cwd);
         assert.equal((await store.get(created.path))?.state, "removing");
         assert.equal(await resolveGitProjectRoot(created.path), cwd);
+        const inventory = await listManagedGitWorktrees(cwd);
+        assert.equal(
+            inventory.status === "repository"
+                ? inventory.worktrees.some((entry) => entry.path === created.path)
+                : true,
+            false,
+        );
+        assert.equal((await store.get(created.path))?.state, "removed");
         const beforeRemove = async () =>
             assert.fail("already removed checkout must not dispose again");
         assert.equal((await removeGitWorktree(cwd, created.path, { beforeRemove })).removed, true);
@@ -333,6 +344,21 @@ test("removal retries finish persisted intent after final metadata write fails",
         assert.equal(await resolveGitProjectRoot(created.path), cwd);
         assert.equal((await removeGitWorktree(cwd, created.path)).removed, true);
         await assert.rejects(removeGitWorktree(cwd, join(cwd, ".taco", "worktrees", "unknown")));
+    });
+});
+
+test("inventory marks unowned managed-root checkouts as orphaned without claiming them", async () => {
+    const { listManagedGitWorktrees } = await import("../../src/git/gitService.ts");
+    await fixture(async (cwd) => {
+        const path = join(cwd, ".taco", "worktrees", "external");
+        git(cwd, "worktree", "add", "--detach", path);
+        const inventory = await listManagedGitWorktrees(cwd);
+        assert.equal(inventory.status, "repository");
+        if (inventory.status === "repository") {
+            const entry = inventory.worktrees.find((tree) => tree.path === path);
+            assert.equal(entry?.managed, false);
+            assert.equal(entry?.orphaned, true);
+        }
     });
 });
 
@@ -367,7 +393,7 @@ test("pending removal rejects replacement checkouts and retains the actual detac
         const record = await new WorktreeMetadataStore(cwd).get(created.path);
         assert.ok(record);
         await mkdir(record.gitDir, { recursive: true });
-        assert.equal(await resolveGitProjectRoot(created.path), created.path);
+        assert.equal(await resolveGitProjectRoot(created.path), cwd);
         await assert.rejects(removeGitWorktree(cwd, created.path));
         await rm(record.gitDir, { recursive: true });
         git(cwd, "worktree", "add", "--detach", created.path);
@@ -396,11 +422,13 @@ test("managed separate-git-dir provenance resolves the main checkout without cor
         assert.equal(await resolveGitProjectRoot(child), cwd);
         const listing = await listManagedGitWorktrees(created.path);
         assert.equal(listing.status, "repository");
-        if (listing.status === "repository")
+        if (listing.status === "repository") {
+            assert.equal(listing.projectRoot, cwd);
             assert.equal(
                 listing.worktrees.find((tree) => tree.path === created.path)?.managed,
                 true,
             );
+        }
         const sibling = await createGitWorktree(child, "sibling");
         await removeGitWorktree(created.path, sibling.path);
         await removeGitWorktree(cwd, created.path);

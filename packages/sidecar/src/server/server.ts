@@ -1053,7 +1053,8 @@ export class SidecarServer implements ServerRpcSurface {
             typeof cwd !== "string" ||
             req.method === RPC.workspaceCleanup ||
             req.method === RPC.workspaceCleanupPreview ||
-            req.method === RPC.worktreeRemove
+            req.method === RPC.worktreeRemove ||
+            req.method === RPC.worktreeCleanup
         ) {
             return this.executeAdmittedRpcRequest(req, reg);
         }

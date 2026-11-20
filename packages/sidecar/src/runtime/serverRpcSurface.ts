@@ -29,6 +29,8 @@ import type {
     WorkspaceCleanupResult,
     WorkspaceId,
     WorktreeBase,
+    WorktreeCleanupParams,
+    WorktreeCleanupResult,
     WorktreeCreateResult,
     WorktreeListResult,
     WorktreeRemoveResult,
@@ -130,6 +132,10 @@ export interface ServerRpcSurface {
         list(cwd: string): Promise<WorktreeListResult>;
         create(cwd: string, name: string, base?: WorktreeBase): Promise<WorktreeCreateResult>;
         remove(cwd: string, path: string): Promise<WorktreeRemoveResult>;
+        cleanup(
+            cwd: string,
+            options?: Omit<WorktreeCleanupParams, "workspace">,
+        ): Promise<WorktreeCleanupResult>;
     };
     /** Whether the active client negotiated a named additive capability. */
     supportsClientCapability?(name: string): boolean;

@@ -26,7 +26,8 @@ async function managedCheckout(cwd: string) {
             continue;
         const store = new WorktreeMetadataStore(await realpath(dirname(taco)));
         const record = await store.get(tree);
-        if (record) return { store, record };
+        if (!record) throw new WorkspaceUnavailableError();
+        return { store, record };
     }
     return undefined;
 }

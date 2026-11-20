@@ -1,6 +1,6 @@
 # Taco Sidecar Protocol
 
-> **版本**: 0.4.1
+> **版本**: 0.4.3
 > **传输**: NDJSON over stdio 或 daemon data socket
 > **来源**: 源码为唯一权威来源——`packages/protocol/src/rpcContract/`（RPC method 名、参数、返回值与 schema）和 `packages/protocol/src/push.ts`（PushMethods）。v2 起客户端走 `initialize` 拿 server capabilities。
 
@@ -119,6 +119,7 @@ because a registered system-service daemon can outlive a desktop upgrade.
 | 2.20 | `git.inspect`, `git.init` and `worktree.list`; local Git availability, repository metadata, worktree inventory and uncommitted file status. |
 | 2.21 | Optional `userAgent` on the global config (`settings.get` / `settings.write`); a custom outbound User-Agent replaces `taco/<version>` and suppresses the `x-taco-sidecar-version` header. A 2.20 daemon drops the field on write. |
 | 2.22 | `worktree.create` / `worktree.remove`, optional `managed` inventory metadata and the process-level `worktree.changed` push; a 2.21 daemon lacks the mutation methods and notification. |
+| 2.23 | Explicit `worktree.cleanup`, verified inventory `projectRoot` and optional `orphaned` markers for stale or unowned paths. |
 
 Adding a value to an existing response enum is potentially breaking: older clients
 may index exhaustive maps with it. Such values require connection-scoped capability
@@ -295,6 +296,8 @@ fields of `settings.get` or `settings.write`.
 | `checkpoints.restore` | checkpoints.* |
 | `commandPermission.resolve` | commandPermission.* |
 | `config.patch` | config.* |
+| `extensions.configGet` | extensions.* |
+| `extensions.configUpdate` | extensions.* |
 | `extensions.status` | extensions.* |
 | `git.init` | git.* |
 | `git.inspect` | git.* |
@@ -372,6 +375,7 @@ fields of `settings.get` or `settings.write`.
 | `workspace.dispose` | workspace.* |
 | `workspace.ensure` | workspace.* |
 | `workspace.list` | workspace.* |
+| `worktree.cleanup` | worktree.* |
 | `worktree.create` | worktree.* |
 | `worktree.list` | worktree.* |
 | `worktree.remove` | worktree.* |
@@ -778,9 +782,14 @@ never fetches, commits, copies local changes or configures Git identity.
 Removal requires both Taco ownership metadata and matching Git metadata identity.
 The main checkout, external worktrees, locked trees, local or ignored files, index
 flags that hide changes, attached sessions and active or queued Work prevent
-removal. Branches are retained. Mutations are serialized per repository within a
-sidecar process; cross-process coordination and automatic cleanup are separate
-capabilities.
+removal. Branches are retained. Create, remove and metadata reconciliation share a
+per-repository process queue and an inter-process token lock in the Git common
+directory (`<commonDir>/.taco-worktree.lock`). Lock publication is atomic; dead owners can be reclaimed, while a live
+PID is never displaced just because it is slow. Before each Git command, a durable
+command marker is recorded. A sidecar crash or ambiguous Git cancellation retains
+the lock: an operator must verify that Git and its filters have stopped before
+removing the lock directory. A dead owner without a command marker is reclaimed
+automatically. Contention times out after ten seconds. The lock coordinates Taco writers; external Git commands do not acquire it.
 
 Configuration lookup uses worktree `.taco` and root files first, then main-checkout
 `.taco` and root files, then user/builtin fallbacks. Skills keep first-match priority;
@@ -810,3 +819,47 @@ imported before the first inherited read, even when no local runtime was opened.
 Configuration-home aliases remain supported; import storage descendants must not be
 symlinks. Permission roots are rechecked after asynchronous preparation, and memory
 notifications cannot change the outcome of a committed write.
+
+
+### Worktree reconciliation and cleanup (2.23)
+
+`worktree.list` exposes `projectRoot` only when the main checkout was verified.
+`repository.checkoutRoot` continues to identify the requested checkout, including
+a linked worktree; it must not be used to label the main checkout or select a
+return directory. Desktop navigation uses the verified project root and disables
+bare, prunable and orphaned destinations.
+
+Ordinary inventory reads do not take the mutation lock. When a metadata repair
+is needed, reconciliation reacquires the inventory and rechecks the source repository and main
+checkout under that lock. A persisted `removing` record is
+finalized only when both its checkout and Git administration directory are absent
+and Git no longer lists it. Missing or replaced records and unowned checkouts
+inside the managed container are reported with `orphaned: true`, without claiming
+ownership or deleting files. Records missing from Git are included as prunable
+orphan entries. Invalid metadata fails closed and remains available for repair.
+Passive history can still resolve a missing recorded checkout's verified project;
+execution validators reject removed, replaced and unowned checkouts in the managed
+container. An explicit create can reuse a missing orphan's name only after its
+old checkout and admin directory are gone and its branch name is free.
+
+`worktree.cleanup` takes `{ workspace, maxAgeDays?, maxCount? }` and returns
+`{ removed, skipped, failed }`. `removed` contains successful worktree removal
+results; `skipped` contains `{ path, reason }`; `failed` contains `{ path, error }`.
+The defaults are fourteen days and fifteen retained managed checkouts. Age accepts
+integers from 1 to 3650; count accepts integers from 1 to 10000. Among live managed
+checkouts, those older than the age limit or outside the newest retained count
+are considered. Locked, orphaned, prunable and detached checkouts are retained;
+detached commits have no branch that cleanup can promise to preserve.
+
+Each candidate passes through the same per-directory admission gate, attached
+session and active Work checks, identity validation and dirty/ignored-file refusal
+as explicit removal. A stale selection cannot delete a checkout recreated at the
+same path. Persisted removal intents remain retryable even if the caller changes
+the thresholds. Failures are reported per candidate and preserve the data needed
+for retry. Cleanup retains branches, transcripts, plans outside removed checkouts,
+shared memory and checkpoints. It never force-removes local files or deletes Git
+branches. Each successful removal emits the existing `worktree.changed` push.
+
+Cleanup runs only when explicitly requested. Startup and inventory access never
+run a destructive sweep or scan unrelated repositories. There is no automatic
+age/count deletion policy enabled in the background.

@@ -1,127 +1,146 @@
-/** Cross-process lease lock for mutations of one repository's shared Git metadata. */
+/** Token locks serialize Git and Taco metadata mutations across local Taco processes. */
+import { AsyncLocalStorage } from "node:async_hooks";
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { lstat, mkdir, readdir, rename, rmdir, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { createLogger } from "../lib/logger.ts";
 
-const DEFAULT_LEASE_MS = 30_000;
+const mutationContext = new AsyncLocalStorage<{ path: string; token: string }>();
+
+const log = createLogger("worktree:lock");
 const DEFAULT_TIMEOUT_MS = 10_000;
 const DEFAULT_RETRY_MS = 25;
 
-interface Owner {
-    pid: number;
-    token: string;
-    expiresAt: string;
-}
-
 export interface WorktreeLockOptions {
-    readonly leaseMs?: number;
     readonly timeoutMs?: number;
     readonly retryMs?: number;
 }
 
-function lockPath(commonDir: string): string {
-    return join(commonDir, ".taco-worktree.lock");
+export class WorktreeLockError extends Error {}
+
+function missing(error: unknown): boolean {
+    return (error as NodeJS.ErrnoException).code === "ENOENT";
 }
 
-function isExpired(owner: Owner, now = Date.now()): boolean {
-    const expires = Date.parse(owner.expiresAt);
-    return !Number.isFinite(expires) || expires <= now;
+async function removeOwner(path: string, token: string): Promise<void> {
+    // A successor has a different token: a late release cannot unlink its owner.
+    await unlink(join(path, token)).catch((error) => {
+        if (!missing(error)) throw error;
+    });
+    await rmdir(path).catch((error) => {
+        const code = (error as NodeJS.ErrnoException).code;
+        if (code !== "ENOENT" && code !== "ENOTEMPTY" && code !== "EEXIST") throw error;
+    });
 }
 
-function ownerIsAlive(pid: number): boolean {
-    if (!Number.isInteger(pid) || pid <= 0 || pid === process.pid) return pid === process.pid;
+async function reclaimDeadOwners(path: string): Promise<void> {
+    let owners: string[];
     try {
-        process.kill(pid, 0);
-        return true;
+        const entry = await lstat(path);
+        if (!entry.isDirectory() || entry.isSymbolicLink())
+            throw new WorktreeLockError("Worktree repository lock storage is unsafe");
+        owners = await readdir(path);
     } catch (error) {
-        return (error as NodeJS.ErrnoException).code !== "ESRCH";
+        if (missing(error)) return;
+        throw error;
     }
-}
-
-async function readOwner(path: string): Promise<Owner | undefined> {
-    try {
-        const value: unknown = JSON.parse(await readFile(join(path, "owner.json"), "utf8"));
-        if (
-            !value ||
-            typeof value !== "object" ||
-            typeof (value as Owner).pid !== "number" ||
-            typeof (value as Owner).token !== "string" ||
-            typeof (value as Owner).expiresAt !== "string"
-        )
-            return undefined;
-        return value as Owner;
-    } catch (error) {
-        if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
-        return undefined;
-    }
-}
-
-async function reclaimIfStale(path: string, leaseMs: number): Promise<void> {
-    const owner = await readOwner(path);
-    if (owner && !isExpired(owner) && ownerIsAlive(owner.pid)) return;
-    if (!owner) {
-        const metadata = await stat(path).catch(() => undefined);
-        if (metadata && Date.now() - metadata.mtimeMs < leaseMs) return;
-    }
-    await rm(path, { recursive: true, force: true });
-}
-
-async function acquire(
-    commonDir: string,
-    options: Required<WorktreeLockOptions>,
-): Promise<{ path: string; owner: Owner }> {
-    const path = lockPath(commonDir);
-    const owner: Owner = {
-        pid: process.pid,
-        token: randomUUID(),
-        expiresAt: new Date(Date.now() + options.leaseMs).toISOString(),
-    };
-    const deadline = Date.now() + options.timeoutMs;
-    for (;;) {
+    // A killed sidecar may leave a Git child (and filters) running. Require manual
+    // verification after an interrupted command rather than guessing from the parent PID.
+    if (owners.some((owner) => owner.startsWith("git-active-"))) return;
+    for (const owner of owners) {
+        const pid = Number(/^(\d+)-[a-f0-9-]{36}$/.exec(owner)?.[1]);
+        if (!Number.isSafeInteger(pid) || pid <= 0) continue;
         try {
-            await mkdir(path);
-            await writeFile(join(path, "owner.json"), JSON.stringify(owner), {
-                encoding: "utf8",
-                mode: 0o600,
-                flag: "wx",
-            });
-            return { path, owner };
+            process.kill(pid, 0);
         } catch (error) {
-            if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-            await reclaimIfStale(path, options.leaseMs);
-            if (Date.now() >= deadline)
-                throw new Error("Timed out acquiring the worktree repository lock");
-            await new Promise((resolve) => setTimeout(resolve, options.retryMs));
+            // Age and missed heartbeats never prove a paused owner's Git child has stopped.
+            if ((error as NodeJS.ErrnoException).code !== "ESRCH") continue;
+            // A command may have started between our first listing and the owner dying.
+            const final = await readdir(path).catch((error: unknown) => {
+                if (missing(error)) return [];
+                throw error;
+            });
+            if (!final.some((name) => name.startsWith(`git-active-${owner}-`)))
+                await removeOwner(path, owner);
         }
     }
+    if (owners.length === 0)
+        await rmdir(path).catch((error) => {
+            const code = (error as NodeJS.ErrnoException).code;
+            if (code !== "ENOENT" && code !== "ENOTEMPTY" && code !== "EEXIST") throw error;
+        });
 }
 
 export async function withWorktreeMutationLock<T>(
     commonDir: string,
     operation: () => Promise<T>,
-    suppliedOptions: WorktreeLockOptions = {},
+    options: WorktreeLockOptions = {},
 ): Promise<T> {
-    const options: Required<WorktreeLockOptions> = {
-        leaseMs: suppliedOptions.leaseMs ?? DEFAULT_LEASE_MS,
-        timeoutMs: suppliedOptions.timeoutMs ?? DEFAULT_TIMEOUT_MS,
-        retryMs: suppliedOptions.retryMs ?? DEFAULT_RETRY_MS,
-    };
-    const { path, owner } = await acquire(commonDir, options);
-    const heartbeat = setInterval(
-        () => {
-            owner.expiresAt = new Date(Date.now() + options.leaseMs).toISOString();
-            void writeFile(join(path, "owner.json"), JSON.stringify(owner), "utf8").catch(
-                () => undefined,
-            );
-        },
-        Math.max(1, Math.floor(options.leaseMs / 3)),
-    );
-    heartbeat.unref?.();
+    const path = join(commonDir, ".taco-worktree.lock");
+    const token = `${process.pid}-${randomUUID()}`;
+    const candidate = `${path}-${token}`;
+    const deadline = performance.now() + (options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
+    await mkdir(candidate, { mode: 0o700 });
+    let acquired = false;
     try {
-        return await operation();
+        await writeFile(join(candidate, token), "", { mode: 0o600, flag: "wx" });
+        for (;;) {
+            try {
+                // Publish owner and lock together; there is no ownerless acquisition window.
+                await rename(candidate, path);
+                acquired = true;
+                break;
+            } catch (error) {
+                const code = (error as NodeJS.ErrnoException).code;
+                if (!["EEXIST", "ENOTEMPTY", "EPERM", "EACCES"].includes(code ?? "")) throw error;
+                await reclaimDeadOwners(path);
+                if (performance.now() >= deadline)
+                    throw new WorktreeLockError("Timed out acquiring the worktree repository lock");
+                await new Promise((resolve) =>
+                    setTimeout(resolve, options.retryMs ?? DEFAULT_RETRY_MS),
+                );
+            }
+        }
+        return await mutationContext.run({ path, token }, operation);
     } finally {
-        clearInterval(heartbeat);
-        const current = await readOwner(path);
-        if (current?.token === owner.token) await rm(path, { recursive: true, force: true });
+        const interrupted =
+            acquired &&
+            (
+                await readdir(path).catch((error: unknown) => {
+                    if (missing(error)) return [];
+                    throw error;
+                })
+            ).some((name) => name.startsWith(`git-active-${token}-`));
+        if (interrupted)
+            log.warn(
+                "interrupted Git command retained repository lock; verify Git processes before manual recovery",
+            );
+        else
+            await removeOwner(acquired ? path : candidate, token).catch((error) =>
+                log.warn("worktree repository lock release failed", String(error)),
+            );
+    }
+}
+
+/** Keep uncertain subprocess lifetimes visible after a sidecar crash or timeout. */
+export async function withWorktreeGitCommand<T>(operation: () => Promise<T>): Promise<T> {
+    const owner = mutationContext.getStore();
+    if (!owner) return operation();
+    const marker = join(owner.path, `git-active-${owner.token}-${randomUUID()}`);
+    await writeFile(marker, "", { flag: "wx", mode: 0o600 });
+    let settled = false;
+    try {
+        const result = await operation();
+        settled = true;
+        return result;
+    } catch (error) {
+        // Numeric exit codes mean Git and its inherited stdio have closed. Abort/timeout
+        // can leave children behind, so the marker must outlive this rejected request.
+        settled =
+            typeof (error as { code?: unknown }).code === "number" ||
+            (error as { code?: unknown }).code === "ENOENT";
+        throw error;
+    } finally {
+        if (settled) await unlink(marker);
     }
 }

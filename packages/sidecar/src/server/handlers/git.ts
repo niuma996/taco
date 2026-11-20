@@ -62,4 +62,15 @@ export function registerGitHandlers(): void {
             }),
         { command: true },
     );
+    registerMethod(
+        "worktreeCleanup",
+        false,
+        ({ params, server }) =>
+            gitResult(params.workspace, (cwd) => {
+                if (!server.worktrees)
+                    throw new RpcHandlerError("invalid_state", "此服务不支持工作树管理。");
+                return server.worktrees.cleanup(cwd, params);
+            }),
+        { command: true },
+    );
 }
