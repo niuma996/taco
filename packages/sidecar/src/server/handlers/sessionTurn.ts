@@ -13,8 +13,9 @@ import type {
     SteerResult,
 } from "@taco-ai/protocol";
 import { asSessionId, asWorkspaceId, ErrorCodes } from "@taco-ai/protocol";
-
+import { parseAttachmentsTags } from "../../attachments/attachmentsTag.ts";
 import { composeForSession } from "../../attachments/composePrompt.ts";
+import { viewUserContent } from "../../attachments/userMessageView.ts";
 import { createLogger } from "../../lib/logger.ts";
 import { exitPlanMode } from "../../plan/planModeState.ts";
 import { isBusyError } from "../../runtime/harness/harnessErrors.ts";
@@ -27,6 +28,7 @@ import {
     wrapAskUserContext,
 } from "../../tools/askUserInjectionText.ts";
 import { PLAN_APPROVAL_LABEL, PLAN_APPROVAL_QUESTION } from "../../tools/planExit.ts";
+import { withWorktreeTurn } from "../../worktree/turnContext.ts";
 import { type MethodCtx, RpcHandlerError, registerMethod } from "../methodRegistry.ts";
 import { ensureAttached, requireAttached } from "./attachGuard.ts";
 import { rethrowAttachmentError } from "./attachment.ts";
@@ -142,9 +144,21 @@ export function registerSessionTurnHandlers(): void {
                     log.error("setPlaceholderTitle failed:", e);
                 }
             }
-            const assistantMessage = await attached
-                .prompt(turn.text, turn.images, params.uiLocale)
-                .catch(rethrowBusyAsSessionBusy);
+            const attachments = parseAttachmentsTags(turn.text);
+            const inlineCount = attachments.filter((attachment) => attachment.inlined).length;
+            const sourceText = viewUserContent(turn.text).content;
+            const assistantMessage = await withWorktreeTurn(
+                {
+                    sourceSessionId: params.sessionId,
+                    text: typeof sourceText === "string" ? sourceText : params.text,
+                    images: turn.images?.slice(0, Math.max(0, turn.images.length - inlineCount)),
+                    attachments,
+                },
+                () =>
+                    attached
+                        .prompt(turn.text, turn.images, params.uiLocale)
+                        .catch(rethrowBusyAsSessionBusy),
+            );
             workspace.invalidateListCache();
             const result: PromptResult = { assistantMessage };
             return result;
@@ -162,6 +176,7 @@ export function registerSessionTurnHandlers(): void {
             // retryable session_busy — never a silent enqueue that sits
             // unconsumed behind a compaction.
             await requireCompactionSettled(server, params.workspace, params.sessionId);
+            await attached.prepareQueuedMessage();
             const turn = await composeTurn(
                 workspace,
                 attached,
@@ -188,6 +203,7 @@ export function registerSessionTurnHandlers(): void {
             await workspace.assertExecutionAvailable();
             const attached = requireAttached(workspace, params.sessionId);
             await requireCompactionSettled(server, params.workspace, params.sessionId);
+            await attached.prepareQueuedMessage();
             const turn = await composeTurn(
                 workspace,
                 attached,

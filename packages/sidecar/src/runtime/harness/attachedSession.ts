@@ -300,7 +300,9 @@ export interface AttachedSessionOptions {
      * together: offering a tool the prompt says you lack — or the reverse —
      * is worse than either being stale.
      */
-    refreshToolset?: () => { tools: TacoTool[]; systemPrompt: string };
+    refreshToolset?: () =>
+        | { tools: TacoTool[]; systemPrompt: string }
+        | Promise<{ tools: TacoTool[]; systemPrompt: string }>;
     /**
      * The workspace-owned subset of `tools` — what `refreshToolset` replaces,
      * as opposed to the session-bound agent / skill tools. Defaults to `tools`.
@@ -1254,6 +1256,12 @@ export class AttachedSession extends EventEmitter {
         return await enqueueLaneMessage(this.lane, kind, text, images);
     }
 
+    /** A queued user message refreshes Git/policy capabilities before its next model request. */
+    async prepareQueuedMessage(): Promise<void> {
+        await this.awaitRecovery();
+        await this.applyToolsetRefresh?.();
+    }
+
     /** Remove one not-yet-consumed queue entry. "already_consumed" / "not_found" are normal outcomes. */
     async cancelQueued(entryId: string): Promise<CancelQueuedKind> {
         return await cancelLaneQueued(this.lane, entryId);
@@ -1309,6 +1317,11 @@ export class AttachedSession extends EventEmitter {
      */
     getThinkingLevel(): ThinkingLevel {
         return this.thinkingLevel;
+    }
+
+    /** Preserve the source session's model when a worktree handoff creates its successor. */
+    async getModel() {
+        return await this.lane.getModel(harnessContext);
     }
 
     /** Source recovery snapshot; the caller owns and must unsubscribe the watch. */

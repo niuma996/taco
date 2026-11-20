@@ -7,7 +7,7 @@
 import type { ChannelStatusChangedParams } from "./channels.js";
 import type { CommandPermissionDenialReason } from "./config.js";
 import type { CompactionFailureReason, SessionId, ToolCallId, WorkspaceId } from "./frames.js";
-import type { WorktreeChangedParams } from "./git.js";
+import type { WorktreeChangedParams, WorktreeHandoffParams } from "./git.js";
 import type {
     SubagentSettledPayload,
     SubagentSpawnedPayload,
@@ -184,6 +184,8 @@ export const PushMethods = {
     WorkChanged: "work.changed",
     /** Process-level invalidation of Git metadata and worktree inventory. */
     WorktreeChanged: "worktree.changed",
+    /** Process-level desktop navigation; the source session remains intact. */
+    WorktreeHandoff: "worktree.handoff",
 } as const;
 
 /**
@@ -497,6 +499,7 @@ export interface PushParamsByMethod {
     [PushMethods.WorkspaceAssociationsChanged]: WorkspaceAssociationsChangedParams;
     [PushMethods.WorkChanged]: WorkChangedParams;
     [PushMethods.WorktreeChanged]: WorktreeChangedParams;
+    [PushMethods.WorktreeHandoff]: WorktreeHandoffParams;
 }
 
 export type PushMethodName = (typeof PushMethods)[keyof typeof PushMethods];

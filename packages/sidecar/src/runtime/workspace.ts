@@ -50,6 +50,7 @@ import {
     type WorkspaceConfigSources,
 } from "../config/workspaceConfigSources.ts";
 import type { WorkspaceExtensionSet } from "../extensions/index.ts";
+import { listGitWorktrees } from "../git/gitService.ts";
 import { createLogger } from "../lib/logger.ts";
 import type { MemoryStore } from "../memory/index.ts";
 import {
@@ -98,6 +99,7 @@ import type { SelfRpcCall, TacoToolContextBase } from "../tools/context.ts";
 import { isFsToolDenied, registerExtensionFileAccess } from "../tools/fileAccess.ts";
 import { defaultToolsWithTasks, type TacoTool } from "../tools/index.ts";
 import { orderTools, toolNamesKey } from "../tools/toolOrder.ts";
+import { createWorktreeStartTool } from "../tools/worktreeStart.ts";
 import type { BackgroundWorkHooks } from "../work/workHooks.ts";
 import { containsWorkspacePath, workspaceAccessPath } from "../workspace/pathIdentity.ts";
 import {
@@ -107,6 +109,8 @@ import {
     type WorkspaceStores,
 } from "../workspace/workspaceResources.ts";
 import { createWorkspaceScope, type WorkspaceScope } from "../workspace/workspaceScope.ts";
+import { buildWorktreeGuidance, worktreeCapabilityFromInventory } from "../worktree/capability.ts";
+import type { WorktreeStart } from "../worktree/handoff.ts";
 import type { AttachedSession } from "./harness/attachedSession.ts";
 import type { DeferredToolRegistry } from "./harness/deferredToolRegistry.ts";
 import {
@@ -317,6 +321,8 @@ interface WorkspaceRuntimeConfig {
      * (they throw on execute — see `tools/context.ts`).
      */
     dispatchRpc?: (req: RpcRequest) => Promise<RpcResponse>;
+    /** Server-owned managed handoff. Its presence opts local main sessions into per-turn probing. */
+    worktreeStart?: WorktreeStart;
     /**
      * Dynamic-tool candidate directory. When provided, each attached session wires
      * a resident AddTools tool and can load deferred candidates on demand.
@@ -418,6 +424,9 @@ export class WorkspaceRuntime extends EventEmitter {
         sessionId: SessionId,
         taskState: SessionTaskState,
     ) => TacoTool[];
+    private readonly worktreeStart?: WorktreeStart;
+    private worktreeAvailable = false;
+    private worktreeProbe: Promise<void> | undefined;
     /** NOT readonly: `reloadSkillsNow()` swaps in a freshly-scanned skill list. */
     resources: AgentHarnessResources<TacoSkill, PromptTemplate>;
     readonly streamOptions: AgentHarnessStreamOptions;
@@ -552,6 +561,7 @@ export class WorkspaceRuntime extends EventEmitter {
     constructor(options: WorkspaceRuntimeOptions) {
         super();
         this.validateExecution = options.validateExecution;
+        this.worktreeStart = options.worktreeStart;
         this.scope = options.scope ?? createWorkspaceScope(options.cwd);
         this.resourceOwners = options.resourceOwners ?? resolveWorkspaceResourceOwners(this.scope);
         this.configSources =
@@ -806,10 +816,13 @@ export class WorkspaceRuntime extends EventEmitter {
             toolsBuilder,
             // Pair the refreshed toolset with the prompt rebuilt from it, so a
             // session can never install one without the other.
-            refreshToolset: (sessionId, taskState) => ({
-                tools: this.refreshToolset(sessionId, taskState),
-                systemPrompt: this.systemPrompt,
-            }),
+            refreshToolset: async (sessionId, taskState) => {
+                await this.prepareWorktreeTurn();
+                return {
+                    tools: this.refreshToolset(sessionId, taskState),
+                    systemPrompt: this.systemPrompt,
+                };
+            },
             // Thunk reads the current value of `instructionsConfig` — bound
             // to the workspace field, so `updateInstructionsConfig()` can
             // hot-reload without re-constructing the registry. `undefined`
@@ -1033,6 +1046,7 @@ export class WorkspaceRuntime extends EventEmitter {
             // Re-resolved per evaluation, like tool assembly: a deferred fs
             // tool already loaded in an IM session must see a revocation.
             ...(this.resolveImPolicy()?.tools.fsTools === "deny" ? { fsToolsDenied: true } : {}),
+            ...(this.worktreeStart ? { worktreeStart: this.worktreeStart } : {}),
         });
     }
 
@@ -1075,7 +1089,9 @@ export class WorkspaceRuntime extends EventEmitter {
             // after construction must reach the next turn's assembly.
             const policy = this.resolveImPolicy();
             const filtered = policy ? filterToolsForImPolicy(merged, policy) : merged;
-            return orderTools(filtered);
+            return orderTools(
+                this.worktreeAvailable ? [...filtered, createWorktreeStartTool()] : filtered,
+            );
         };
         const ephemeralTaskState: SessionTaskState = {
             taskStore: { currentListId: null, lists: new Map() },
@@ -1175,6 +1191,7 @@ export class WorkspaceRuntime extends EventEmitter {
      */
     private rebuildSystemPrompt(skills: readonly TacoSkill[]): string {
         const contributors = [...this.baseSystemPromptContributors];
+        if (this.worktreeAvailable) contributors.push({ append: buildWorktreeGuidance() });
         // Only append the <available_skills> section when skills is
         // non-empty; formatSkillsForSystemPrompt already filters
         // disableModelInvocation and returns "" for an empty array.
@@ -1285,6 +1302,32 @@ export class WorkspaceRuntime extends EventEmitter {
             removed: before.filter((n) => !after.includes(n)),
         });
         return next;
+    }
+
+    /** Re-probe on each user turn; failures fail closed without blocking ordinary chat. */
+    private async prepareWorktreeTurn(): Promise<void> {
+        if (
+            !this.worktreeStart ||
+            this.scope.kind !== "local" ||
+            this.resolveImPolicy()?.tools.fsTools === "deny"
+        ) {
+            this.worktreeAvailable = false;
+            return;
+        }
+        if (!this.worktreeProbe) {
+            this.worktreeProbe = (async () => {
+                try {
+                    this.worktreeAvailable = worktreeCapabilityFromInventory(
+                        await listGitWorktrees(this.executionCwd),
+                    );
+                } catch {
+                    this.worktreeAvailable = false;
+                } finally {
+                    this.worktreeProbe = undefined;
+                }
+            })();
+        }
+        await this.worktreeProbe;
     }
 
     // ─────────── session list / history (delegates to SessionRegistry) ───────────

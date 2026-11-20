@@ -162,6 +162,7 @@ import { WorkspaceCleanupService } from "./workspaceCleanup.ts";
 import { WorkspaceCleanupGate } from "./workspaceCleanupGate.ts";
 import { WorkspaceRegistry } from "./workspaceRegistry.ts";
 import { createWorktreeControl } from "./worktreeControl.ts";
+import { createWorktreeHandoff } from "./worktreeHandoff.ts";
 
 const log = createLogger("sidecar");
 
@@ -341,6 +342,13 @@ export class SidecarServer implements ServerRpcSurface {
         dispose: (key) => this.disposeWorkspace(key, { preserveSessionEvents: true }),
         onChange: (params) =>
             this.emitPush(PushMethods.WorktreeChanged, WORKSPACE_ANY, undefined, params),
+    });
+    private readonly worktreeHandoff = createWorktreeHandoff({
+        ensureWorkspace: (cwd) => this.ensureWorkspace(cwd),
+        create: (cwd, name, base) => this.worktrees.create(cwd, name, base),
+        run: (cwd, operation) => this.cleanupGate.run(cwd, operation),
+        emit: (params) =>
+            this.emitPush(PushMethods.WorktreeHandoff, WORKSPACE_ANY, undefined, params),
     });
     private readonly options: SidecarServerOptions & { resolveConfig: () => ResolvedTacoConfig };
     /** Command-idempotency cache + turn gate — see commandIdempotency.ts. */
@@ -1431,6 +1439,7 @@ export class SidecarServer implements ServerRpcSurface {
                 // In-process self-RPC entry — used by the memory tool (and future
                 // self-RPC tools).
                 dispatchRpc: (req) => this.handleRpcRequest(req),
+                worktreeStart: this.worktreeHandoff,
                 // Pushes tasks.updated to the desktop TaskPanel — shares
                 // emitPush with CompactionPushAdapter; sessionKind routing is
                 // handled by emitPush's lookup of AttachedSession.sessionKind.

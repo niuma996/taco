@@ -7,7 +7,13 @@
  */
 
 import { strict as assert } from "node:assert";
-import { asSessionId, ErrorCodes, type SessionSnapshot } from "@taco-ai/protocol";
+import {
+    asSessionId,
+    asWorkspaceId,
+    ErrorCodes,
+    type SessionSnapshot,
+    type WorktreeHandoffParams,
+} from "@taco-ai/protocol";
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { type ReactNode, useEffect } from "react";
 import { afterEach, beforeEach, describe, it, type Mock, vi } from "vitest";
@@ -46,6 +52,58 @@ describe("new-chat navigation", () => {
         });
         return { promise, resolve };
     }
+
+    function handoffClient() {
+        return {
+            start: vi.fn(async () => {}),
+            sessionList: vi.fn(async ({ workspace }: { workspace: string }) => ({
+                sessions: [{ id: "target", createdAt: "2026-01-01T00:00:00Z" }],
+                total: 1,
+                workspace,
+            })),
+            sessionAttach: vi.fn(async () => ({ execution: "running" })),
+            sessionHistory: vi.fn(async () => ({ entries: [] })),
+            onConnectionReady: vi.fn(() => () => {}),
+            onWorkspaceEpochChanged: vi.fn(() => () => {}),
+        } as unknown as TacoClient;
+    }
+
+    const handoff: WorktreeHandoffParams = {
+        sourceWorkspace: asWorkspaceId("/repo"),
+        sourceSessionId: asSessionId("source"),
+        workspace: asWorkspaceId("/repo/.taco/worktrees/isolated"),
+        sessionId: asSessionId("target"),
+        path: "/repo/.taco/worktrees/isolated",
+        branch: "worktree/isolated",
+    };
+
+    it("opens a live worktree handoff in its new target session", async () => {
+        const client = handoffClient();
+        const { result } = renderHook(() => useWorkspaces(client));
+        const source = createEmptyWorkspace("/repo", true);
+        source.sessions = [{ id: "source", createdAt: "2026-01-01T00:00:00Z" }];
+        source.activeSession = "source";
+        source.listTotal = 1;
+        act(() => result.current.dispatchWs({ type: "INIT", workspaces: { "/repo": source } }));
+        await act(async () => result.current.switchWorkspace("/repo"));
+        await act(async () => result.current.acceptWorktreeHandoff(handoff));
+        assert.equal(result.current.activeCwd, handoff.workspace);
+        assert.equal(result.current.workspaces[handoff.workspace]?.activeSession, "target");
+        assert.equal(vi.mocked(client.sessionAttach).mock.calls[0]?.[0].sessionId, "target");
+    });
+
+    it("ignores a handoff after the user leaves its source conversation", async () => {
+        const client = handoffClient();
+        const { result } = renderHook(() => useWorkspaces(client));
+        const other = createEmptyWorkspace("/other", true);
+        other.listTotal = 0;
+        act(() => result.current.dispatchWs({ type: "INIT", workspaces: { "/other": other } }));
+        await act(async () => result.current.switchWorkspace("/other"));
+        await act(async () => result.current.acceptWorktreeHandoff(handoff));
+        assert.equal(result.current.activeCwd, "/other");
+        assert.equal(result.current.workspaces[handoff.workspace], undefined);
+        assert.equal(vi.mocked(client.start).mock.calls.length, 0);
+    });
 
     it("registers a previously unopened worktree before selecting its new draft", async () => {
         const client = {

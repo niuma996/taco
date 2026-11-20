@@ -22,6 +22,7 @@ import type {
     ToolCallUpdateParams,
     WorkspaceAssociationKey,
     WorktreeChangedParams,
+    WorktreeHandoffParams,
 } from "@taco-ai/protocol";
 import { asSessionId, asWorkspaceId, PushMethods } from "@taco-ai/protocol";
 import type { UnlistenFn } from "@tauri-apps/api/event";
@@ -172,6 +173,8 @@ export interface UseSidecarStreamOpts {
     onWorkChanged?: () => void;
     /** Process-level invalidation of Git metadata and worktree inventory. */
     onWorktreeChanged?: (params: WorktreeChangedParams) => void;
+    /** Open a server-created target only while its source conversation is still selected. */
+    onWorktreeHandoff?: (params: WorktreeHandoffParams) => void;
     /**
      * Pre-dispose notice: a policy change is about to interrupt live
      * conversations on `channelId`. Reserved for a future desktop warning —
@@ -475,6 +478,9 @@ export function useSidecarStream(
     const onWorktreeChangedRef = useStableCallback((params: WorktreeChangedParams) =>
         opts.onWorktreeChanged?.(params),
     );
+    const onWorktreeHandoffRef = useStableCallback((params: WorktreeHandoffParams) =>
+        opts.onWorktreeHandoff?.(params),
+    );
     const onImPolicyChangedRef = useStableCallback((channelId: string) =>
         opts.onImPolicyChanged?.(channelId),
     );
@@ -609,6 +615,10 @@ export function useSidecarStream(
                 onWorktreeChangedRef(push.params as WorktreeChangedParams);
                 return;
             }
+            if (push.method === PushMethods.WorktreeHandoff) {
+                onWorktreeHandoffRef(push.params as WorktreeHandoffParams);
+                return;
+            }
             if (push.method === PushMethods.ImPolicyChanged) {
                 const params = push.params as { channelId?: string } | undefined;
                 if (params?.channelId) onImPolicyChangedRef(params.channelId);
@@ -697,6 +707,7 @@ export function useSidecarStream(
         onImPolicyChangedRef,
         onWorkChangedRef,
         onWorktreeChangedRef,
+        onWorktreeHandoffRef,
         onImWorkspacesInvalidatedRef,
         onWorkspaceAssociationsChangedRef,
         onLlmDumpLineRef,

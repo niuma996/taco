@@ -173,6 +173,7 @@ export type {
     WorktreeCleanupResult,
     WorktreeCreateParams,
     WorktreeCreateResult,
+    WorktreeHandoffParams,
     WorktreeListParams,
     WorktreeListResult,
     WorktreeRemoveParams,

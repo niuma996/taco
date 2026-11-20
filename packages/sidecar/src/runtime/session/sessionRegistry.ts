@@ -229,7 +229,9 @@ export interface SessionRegistryOptions {
     readonly refreshToolset?: (
         sessionId: SessionId,
         taskState: SessionTaskState,
-    ) => { tools: TacoTool[]; systemPrompt: string };
+    ) =>
+        | { tools: TacoTool[]; systemPrompt: string }
+        | Promise<{ tools: TacoTool[]; systemPrompt: string }>;
     /** Dynamic-tool candidate directory; forwarded to AttachedSession.create to wire AddTools and restore. */
     readonly toolRegistry?: DeferredToolRegistry;
     /**
@@ -430,12 +432,7 @@ export class SessionRegistry extends EventEmitter {
     private readonly toolsBuilder:
         | ((sessionId: SessionId, taskState: SessionTaskState) => TacoTool[])
         | undefined;
-    private readonly refreshToolset:
-        | ((
-              sessionId: SessionId,
-              taskState: SessionTaskState,
-          ) => { tools: TacoTool[]; systemPrompt: string })
-        | undefined;
+    private readonly refreshToolset: SessionRegistryOptions["refreshToolset"];
     /** NOT readonly: `updateSkills()` swaps this in on hot reload. */
     private skills: readonly TacoSkill[];
     private readonly skillAuthoringGuidance?: string;

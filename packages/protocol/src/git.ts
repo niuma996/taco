@@ -1,4 +1,6 @@
 /** Git repository facts and worktree inventory; paths retain filesystem spelling. */
+
+import type { SessionId, WorkspaceId } from "./frames.js";
 import type { ParamsOf } from "./rpcContract/types.js";
 import type {
     gitInitSchema,
@@ -67,6 +69,16 @@ export type WorktreeListResult =
       };
 
 export type WorktreeBase = NonNullable<WorktreeCreateParams["base"]>;
+
+/** A local main session transferred its task to a managed checkout. */
+export interface WorktreeHandoffParams {
+    sourceWorkspace: WorkspaceId;
+    sourceSessionId: SessionId;
+    workspace: WorkspaceId;
+    sessionId: SessionId;
+    path: string;
+    branch: string;
+}
 
 /** Process-level invalidation after worktree creation or removal. */
 export interface WorktreeChangedParams {

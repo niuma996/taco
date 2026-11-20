@@ -3,6 +3,7 @@ import type {
     ImageInput,
     SessionTarget,
     ThinkingLevel,
+    WorktreeHandoffParams,
 } from "@taco-ai/protocol";
 import type { ModelSelection } from "../components/settings/ModelPicker";
 import type { StagedAttachment, StageInput } from "../lib/attachments";
@@ -77,6 +78,8 @@ export interface UseWorkspacesApi {
     browseAndOpen: () => Promise<void>;
     switchWorkspace: (cwd: string) => Promise<void>;
     attachSession: (cwd: string, sid: string) => Promise<void>;
+    /** Navigate a live source conversation to its managed handoff; stale notices are ignored. */
+    acceptWorktreeHandoff: (params: WorktreeHandoffParams) => Promise<void>;
     /**
      * Open an IM conversation (a passive im:// cwd the sidecar surfaced via
      * channels.listConversations). Unlike openWorkspace, this does NOT call

@@ -504,6 +504,7 @@ export default function App() {
         onWorktreeChanged: () => {
             void invalidateGitQueries(queryClient, client);
         },
+        onWorktreeHandoff: (params) => void wsApi.acceptWorktreeHandoff(params),
         // The ImPolicyDialog confirms before saving, so no active warning is
         // needed here; reserved for a future desktop notice.
         onImWorkspacesInvalidated: (_channelId) => {},

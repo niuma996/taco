@@ -7,7 +7,12 @@
  * Drafts are owned by useConversationDrafts; modal state stays in App.
  */
 
-import type { ImageInput, SessionTarget, SupportedLocale } from "@taco-ai/protocol";
+import type {
+    ImageInput,
+    SessionTarget,
+    SupportedLocale,
+    WorktreeHandoffParams,
+} from "@taco-ai/protocol";
 import {
     asSessionId,
     asToolCallId,
@@ -497,6 +502,42 @@ export function useWorkspaces(client: TacoClient): UseWorkspacesApi {
     ): Promise<boolean> {
         return sendToTarget(target, text, images, attachments, "allowed");
     }
+
+    const acceptWorktreeHandoff = useCallback(
+        async (params: WorktreeHandoffParams): Promise<void> => {
+            if (
+                activeCwdRef.current !== params.sourceWorkspace ||
+                workspacesRef.current[params.sourceWorkspace]?.activeSession !==
+                    params.sourceSessionId
+            )
+                return;
+            const version = ++navigationVersion.current;
+            const target: ConversationTarget = {
+                kind: "session",
+                workspace: params.workspace,
+                sessionId: params.sessionId,
+            };
+            selectedTargetsRef.current.set(params.workspace, target);
+            try {
+                const current = workspacesRef.current[params.workspace]
+                    ? await lifecycle.switchWorkspace(params.workspace)
+                    : await lifecycle.openWorkspace(params.workspace);
+                if (!current || version !== navigationVersion.current) return;
+                await lifecycle.attachSession(
+                    params.workspace,
+                    params.sessionId,
+                    () => version === navigationVersion.current,
+                );
+            } finally {
+                if (
+                    version === navigationVersion.current &&
+                    selectedTargetsRef.current.get(params.workspace) === target
+                )
+                    selectedTargetsRef.current.delete(params.workspace);
+            }
+        },
+        [lifecycle],
+    );
 
     async function sendToTarget(
         target: ConversationTarget,
@@ -1015,6 +1056,7 @@ export function useWorkspaces(client: TacoClient): UseWorkspacesApi {
                     selectedTargetsRef.current.delete(cwd);
             }
         },
+        acceptWorktreeHandoff,
         restoreSessionSnapshot: lifecycle.restoreSessionSnapshot,
         deleteSession: lifecycle.deleteSession,
         renameSession: lifecycle.renameSession,

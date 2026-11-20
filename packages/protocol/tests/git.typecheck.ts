@@ -11,6 +11,7 @@ import type {
     WorktreeCleanupParams,
     WorktreeCleanupResult,
     WorktreeCreateParams,
+    WorktreeHandoffParams,
     WorktreeListParams,
     WorktreeRemoveParams,
 } from "../src/index.js";
@@ -40,4 +41,18 @@ export type GitContractChecks = [
         >
     >,
     Assert<Equal<PushParams<"worktree.changed">, WorktreeChangedParams>>,
+    Assert<Equal<PushParams<"worktree.handoff">, WorktreeHandoffParams>>,
+    Assert<
+        Equal<
+            WorktreeHandoffParams,
+            {
+                sourceWorkspace: import("../src/index.js").WorkspaceId;
+                sourceSessionId: import("../src/index.js").SessionId;
+                workspace: import("../src/index.js").WorkspaceId;
+                sessionId: import("../src/index.js").SessionId;
+                path: string;
+                branch: string;
+            }
+        >
+    >,
 ];

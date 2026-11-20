@@ -120,6 +120,7 @@ because a registered system-service daemon can outlive a desktop upgrade.
 | 2.21 | Optional `userAgent` on the global config (`settings.get` / `settings.write`); a custom outbound User-Agent replaces `taco/<version>` and suppresses the `x-taco-sidecar-version` header. A 2.20 daemon drops the field on write. |
 | 2.22 | `worktree.create` / `worktree.remove`, optional `managed` inventory metadata and the process-level `worktree.changed` push; a 2.21 daemon lacks the mutation methods and notification. |
 | 2.23 | Explicit `worktree.cleanup`, verified inventory `projectRoot` and optional `orphaned` markers for stale or unowned paths. |
+| 2.24 | Process-level `worktree.handoff` notification for agent-created managed worktree sessions. |
 
 Adding a value to an existing response enum is potentially breaking: older clients
 may index exhaustive maps with it. Such values require connection-scoped capability
@@ -459,6 +460,7 @@ The server pushes frames asynchronously.  Clients should route by `method`.
 | `workspace.associations_changed` | WorkspaceAssociationsChanged |
 | `work.changed` | WorkChanged |
 | `worktree.changed` | WorktreeChanged |
+| `worktree.handoff` | WorktreeHandoff |
 <!-- PUSH_TABLE_END -->
 
 **Push routing note**: `session.tool_call_*` frames carry a deduplication `id` equal to the `toolCallId`.  Clients may use this to merge incremental updates.  Session-scoped push frames should be accumulated by `workspace` + `session`.
@@ -863,3 +865,31 @@ branches. Each successful removal emits the existing `worktree.changed` push.
 Cleanup runs only when explicitly requested. Startup and inventory access never
 run a destructive sweep or scan unrelated repositories. There is no automatic
 age/count deletion policy enabled in the background.
+
+### Agent-driven isolation and handoff (2.24)
+
+Before each local main-session prompt, the runtime probes Git and refreshes the
+workspace toolset and system prompt together. `worktreeStart` and its guidance
+are available only for a non-bare repository with a commit. Missing Git,
+repositories without commits, inspection failures, IM sessions, subagents and
+filesystem-denied policies do not receive the tool. A later probe removes a
+stale tool and its guidance together.
+
+The guidance selects isolation for substantial cross-module, high-risk or
+parallel-conflicting writes, and for explicit user requests. Questions,
+read-only investigation, small low-risk edits and sessions already in a linked
+worktree stay in place. Creation starts from committed content and never
+commits, stashes or copies source changes. A task that depends on uncommitted
+source changes must not hand off as though those changes were present.
+
+The built-in tool calls the existing managed create service; it is not a public
+RPC and never runs `git worktree add` through the model's shell. The server
+creates a target session, copies the source turn's attachments, preserves its
+model, thinking level and reply locale, and admits the target workspace against
+cleanup before execution. The source workspace and session cwd never change.
+
+`worktree.handoff` carries `sourceWorkspace`, `sourceSessionId`, `workspace`,
+`sessionId`, `path` and `branch`. It is process-level. Desktop opens the target
+only while that exact source conversation remains selected; a stale notice does
+not steal focus. The target session and worktree survive execution failures for
+inspection and retry. No background deletion is introduced.

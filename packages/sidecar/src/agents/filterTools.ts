@@ -36,6 +36,7 @@ export const MAIN_SESSION_ONLY_TOOL_NAMES: ReadonlySet<string> = new Set([
     "askUser",
     "planEnter",
     "planExit",
+    "worktreeStart",
 ]);
 
 export function filterToolsForAgent(

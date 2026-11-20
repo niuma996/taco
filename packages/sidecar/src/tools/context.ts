@@ -24,6 +24,7 @@ import type {
 } from "@taco-ai/protocol";
 import type { NodeExecutionEnv } from "../runtime/pi/node.ts";
 import type { Actor } from "../scheduler/types.ts";
+import type { WorktreeStart } from "../worktree/handoff.ts";
 
 /**
  * In-process self-RPC outbound. Mirrors the shape of every cross-process
@@ -61,6 +62,8 @@ export interface TacoToolContextBase {
      * and for IM workspaces that allow fs tools.
      */
     fsToolsDenied?: boolean;
+    /** Present only when the server supports managed, session-preserving handoff. */
+    worktreeStart?: WorktreeStart;
 }
 
 export interface TacoToolContext extends TacoToolContextBase {

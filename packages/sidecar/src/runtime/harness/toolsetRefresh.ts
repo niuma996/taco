@@ -21,7 +21,9 @@ export interface ToolsetRefreshArgs {
      */
     readonly installed: { readonly tools: readonly TacoTool[]; readonly systemPrompt: string };
     /** Workspace-supplied re-assembly for this session, with the prompt built from it. */
-    readonly refresh: () => { tools: TacoTool[]; systemPrompt: string };
+    readonly refresh: () =>
+        | { tools: TacoTool[]; systemPrompt: string }
+        | Promise<{ tools: TacoTool[]; systemPrompt: string }>;
     /** Write the rebuilt prompt into the cell the harness's systemPrompt thunk reads. */
     readonly setSystemPrompt: (prompt: string) => void;
 }
@@ -45,8 +47,8 @@ export function createToolsetRefresher(args: ToolsetRefreshArgs): () => Promise<
     return async () => {
         let next: { tools: TacoTool[]; systemPrompt: string } | undefined;
         await toolState.update(
-            (current) => {
-                next = refresh();
+            async (current) => {
+                next = await refresh();
                 // Steady state: no writes, so no lane config entry.
                 if (toolNamesKey(next.tools) === toolNamesKey(baseline)) return undefined;
                 const nextNames = new Set(next.tools.map((t) => t.name));

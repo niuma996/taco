@@ -156,6 +156,16 @@ const BUILTIN_TAG_REGISTRY = {
         description: "Files attached to the user's message — absolute paths on disk",
     }),
 
+    /** Marks the isolation request as already satisfied in a handed-off user task. */
+    worktree_handoff: defineTag({
+        name: "worktree_handoff",
+        scope: "user-context",
+        compression: { kind: "summarize" },
+        tuiVisibility: "hidden",
+        parser: { kind: "xml-balanced" },
+        description: "Managed worktree handoff provenance; prevents recursive isolation requests",
+    }),
+
     /** Runtime envelope for collaboration data, never new user authorization. */
     agent_message: defineTag({
         name: "agent_message",
