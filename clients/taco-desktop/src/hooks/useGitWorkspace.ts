@@ -1,5 +1,6 @@
 import { asWorkspaceId, type GitInspectResult, IM_CWD_PREFIX } from "@taco-ai/protocol";
 import {
+    type Query,
     useIsMutating,
     useMutation,
     useQueries,
@@ -76,6 +77,8 @@ export function useGitWorkspace(
 /**
  * Classifies only the directories themselves. Repository-wide worktree inventories
  * stay scoped to the picker; these identity queries are cached and do not poll.
+ * A transient failure is retried and, while it persists, re-checked on a slow
+ * interval so a worktree is never pinned as an ordinary workspace for the session.
  */
 export function useLinkedWorktreePaths(
     client: Pick<GitWorkspaceClient, "gitInspect"> | undefined,
@@ -86,9 +89,11 @@ export function useLinkedWorktreePaths(
         queries: cwds.map((cwd) => ({
             queryKey: resourceQueryKey(client ?? disabledClient, "git", cwd),
             enabled: Boolean(client),
-            retry: false,
+            retry: 2,
             staleTime: Number.POSITIVE_INFINITY,
-            refetchInterval: false,
+            // Failed classifications stay on the error path until an external push or
+            // reconnect repairs them; poll slowly so an in-flight startup race heals itself.
+            refetchInterval: (query: Query) => (query.state.status === "error" ? 10_000 : false),
             refetchOnWindowFocus: false,
             refetchOnReconnect: false,
             queryFn: ({ signal }: { signal: AbortSignal }): Promise<GitInspectResult> => {

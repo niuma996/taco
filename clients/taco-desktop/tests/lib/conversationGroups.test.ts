@@ -26,6 +26,33 @@ describe("conversation navigation models", () => {
         );
     });
 
+    it("keeps linked worktrees out of top-level groups even when they have history", () => {
+        const treeCwd = "/repo/main/.taco/worktrees/settings-visual-refinement";
+        const groups = buildWorkspaceGroups(
+            {
+                "/repo/main": createEmptyWorkspace("/repo/main"),
+                [treeCwd]: {
+                    ...createEmptyWorkspace(treeCwd),
+                    listTotal: 1,
+                    sessions: [
+                        {
+                            id: "tree-1",
+                            createdAt: "2026-03-01",
+                            updatedAt: "2026-03-02",
+                        },
+                    ],
+                },
+            },
+            {},
+            new Set([treeCwd]),
+        );
+
+        assert.deepEqual(
+            groups.map((group) => group.cwd),
+            ["/repo/main"],
+        );
+    });
+
     it("preserves the persisted workspace order independently of session activity", () => {
         const groups = buildWorkspaceGroups({
             "/repo/two": {
