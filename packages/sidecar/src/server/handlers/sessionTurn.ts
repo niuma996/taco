@@ -13,9 +13,7 @@ import type {
     SteerResult,
 } from "@taco-ai/protocol";
 import { asSessionId, asWorkspaceId, ErrorCodes } from "@taco-ai/protocol";
-import { parseAttachmentsTags } from "../../attachments/attachmentsTag.ts";
 import { composeForSession } from "../../attachments/composePrompt.ts";
-import { viewUserContent } from "../../attachments/userMessageView.ts";
 import { createLogger } from "../../lib/logger.ts";
 import { exitPlanMode } from "../../plan/planModeState.ts";
 import { isBusyError } from "../../runtime/harness/harnessErrors.ts";
@@ -144,15 +142,12 @@ export function registerSessionTurnHandlers(): void {
                     log.error("setPlaceholderTitle failed:", e);
                 }
             }
-            const attachments = parseAttachmentsTags(turn.text);
-            const inlineCount = attachments.filter((attachment) => attachment.inlined).length;
-            const sourceText = viewUserContent(turn.text).content;
             const assistantMessage = await withWorktreeTurn(
                 {
                     sourceSessionId: params.sessionId,
-                    text: typeof sourceText === "string" ? sourceText : params.text,
-                    images: turn.images?.slice(0, Math.max(0, turn.images.length - inlineCount)),
-                    attachments,
+                    text: params.text,
+                    images: params.images,
+                    attachments: turn.attachments,
                 },
                 () =>
                     attached

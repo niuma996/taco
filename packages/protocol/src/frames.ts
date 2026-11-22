@@ -113,8 +113,9 @@ export type CompactionFailureReason =
  *  2.22 adds worktree.create/remove, managed inventory metadata and the
  *  process-level worktree.changed push; a 2.21 daemon lacks these methods.
  *  2.23 adds explicit worktree cleanup and orphaned inventory markers.
- *  2.24 adds the process-level worktree.handoff desktop notification. */
-export const SIDECAR_PROTOCOL_VERSION = { major: 2, minor: 24 } as const;
+ *  2.24 adds the process-level worktree.handoff desktop notification.
+ *  2.25 adds metadata-only removal for verified missing checkouts. */
+export const SIDECAR_PROTOCOL_VERSION = { major: 2, minor: 25 } as const;
 
 /**
  * Client-side gate for a sidecar's advertised protocol version. Semver-ish but

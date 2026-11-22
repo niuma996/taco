@@ -75,6 +75,9 @@ describe("associated worktree memory", () => {
         const tree = repo.linked(join(realpathSync(home), "boundary-external"));
         const nested = join(tree, "nested");
         mkdirSync(nested);
+        const alias = join(home, "aliased-child");
+        symlinkSync(nested, alias, "dir");
+        assert.equal(await resolveMemoryRoot(alias), repo.root);
         git(nested, "init");
         assert.equal(await resolveMemoryRoot(nested), nested);
         assert.equal(await resolveMemoryRoot(join(tree, "missing")), join(tree, "missing"));
@@ -177,6 +180,20 @@ describe("associated worktree memory", () => {
         } finally {
             await runtime.dispose();
         }
+    });
+
+    it("reimports when the destination partition is restored without its completion marker", async () => {
+        const repo = repository("restore-import");
+        const tree = repo.linked(join(realpathSync(home), "restore-import-tree"));
+        await memory(tree);
+        const current = new LocalMemoryStore();
+        current.initialize("im://mock/peer/restore-import");
+        const args = options(current, [tree]);
+        await prepareMemorySources(args);
+        const owner = LocalMemoryStore.openByKey(workspaceKey(repo.root));
+        rmSync(owner.topicDir, { recursive: true });
+        await prepareMemorySources(args);
+        assert.equal(owner.getTopic("shared")?.content, "Shared full body");
     });
 
     it("reads cold managed and external worktrees with one owner source id and rechecks grants", async () => {
@@ -300,7 +317,7 @@ describe("associated worktree memory", () => {
         const tree = repo.linked(join(realpathSync(home), "separate-external"));
         const gitDir = git(tree, "rev-parse", "--absolute-git-dir");
         writeFileSync(join(tree, ".git"), `gitdir: ${relative(tree, gitDir)}\n`);
-        writeFileSync(join(gitDir, "gitdir"), `${join(tree, ".git")}\n`);
+        writeFileSync(join(gitDir, "gitdir"), `${relative(gitDir, join(tree, ".git"))}\n`);
         await memory(repo.root);
         const current = new LocalMemoryStore();
         current.initialize("im://mock/peer/separate");

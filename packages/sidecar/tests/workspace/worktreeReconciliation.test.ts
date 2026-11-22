@@ -106,22 +106,11 @@ for (const shape of ["missing", "prunable", "replacement", "unowned"]) {
             assert.equal(orphan.managed, false);
             assert.equal(orphan.orphaned, true);
             assert.equal(orphan.prunable, shape === "missing" || shape === "prunable");
+            assert.equal(
+                orphan.stale,
+                shape === "missing" || shape === "prunable" ? true : undefined,
+            );
             assert.equal(await readFile(index, "utf8"), before);
-            await assert.rejects(removeGitWorktree(cwd, created.path));
-            if (shape === "replacement")
-                assert.equal(await readFile(join(created.path, "keep"), "utf8"), "local data");
-            if (shape === "unowned") {
-                const validate = await createExecutionValidator(
-                    createWorkspaceScope(
-                        asWorkspaceId(created.path),
-                        created.path,
-                        created.path,
-                        cwd,
-                    ),
-                );
-                assert.ok(validate);
-                await assert.rejects(validate());
-            }
             if (shape === "missing" || shape === "prunable") {
                 assert.equal(await resolveGitProjectRoot(created.path), cwd);
                 assert.equal(await resolveGitProjectRoot(join(created.path, "nested")), cwd);
@@ -137,10 +126,77 @@ for (const shape of ["missing", "prunable", "replacement", "unowned"]) {
                 await assert.rejects(validate());
                 await assert.rejects(inspectGit(created.path));
                 await assert.rejects(lstat(created.path), { code: "ENOENT" });
+                // A verified record may forget a checkout deleted outside Taco.
+                assert.equal(
+                    (await removeGitWorktree(cwd, created.path, { forgetMissing: true })).removed,
+                    true,
+                );
+                assert.equal(
+                    (await new WorktreeMetadataStore(cwd).get(created.path))?.state,
+                    "removed",
+                );
+                assert.equal(
+                    (await removeGitWorktree(cwd, created.path, { forgetMissing: true })).removed,
+                    true,
+                );
+                const after = await listManagedGitWorktrees(cwd);
+                assert.equal(after.status, "repository");
+                if (after.status === "repository")
+                    assert.equal(
+                        after.worktrees.some((tree) => tree.path === created.path),
+                        false,
+                    );
+                return;
+            }
+            await assert.rejects(removeGitWorktree(cwd, created.path));
+            if (shape === "replacement")
+                assert.equal(await readFile(join(created.path, "keep"), "utf8"), "local data");
+            if (shape === "unowned") {
+                const validate = await createExecutionValidator(
+                    createWorkspaceScope(
+                        asWorkspaceId(created.path),
+                        created.path,
+                        created.path,
+                        cwd,
+                    ),
+                );
+                assert.ok(validate);
+                await assert.rejects(validate());
             }
         });
     });
 }
+
+test("forgetting cannot delete a live checkout or claim a moved or replaced path", async () => {
+    await fixture(async (cwd) => {
+        const created = await createGitWorktree(cwd, "moved");
+        const forget = () => removeGitWorktree(cwd, created.path, { forgetMissing: true });
+        await assert.rejects(forget());
+        git(cwd, "worktree", "move", created.path, join(cwd, "elsewhere"));
+        for (const replacement of [false, true]) {
+            if (replacement) await mkdir(created.path);
+            const inventory = await listManagedGitWorktrees(cwd);
+            assert.equal(inventory.status, "repository");
+            if (inventory.status !== "repository") return;
+            const entry = inventory.worktrees.find((tree) => tree.path === created.path);
+            assert.ok(entry?.orphaned);
+            assert.equal(entry.stale, undefined);
+            await assert.rejects(forget());
+        }
+    });
+});
+
+test("forgetting a missing checkout never deletes a recreated directory", async () => {
+    await fixture(async (cwd) => {
+        const created = await createGitWorktree(cwd, "forgotten");
+        await rm(created.path, { recursive: true });
+        await removeGitWorktree(cwd, created.path, { forgetMissing: true });
+        await mkdir(created.path, { recursive: true });
+        await writeFile(join(created.path, "keep"), "local data");
+        await assert.rejects(removeGitWorktree(cwd, created.path));
+        assert.equal(await readFile(join(created.path, "keep"), "utf8"), "local data");
+    });
+});
 
 test("reconciliation retries failed tombstone writes and then leaves removed records untouched", async (t) => {
     await fixture(async (cwd) => {

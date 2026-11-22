@@ -57,6 +57,8 @@ export interface GitWorktreeInfo {
     pruneReason?: string;
     managed?: boolean;
     orphaned?: boolean;
+    /** Taco still verifies this checkout's ownership record although the directory is gone. */
+    stale?: boolean;
 }
 export type WorktreeListResult =
     | GitUnavailable

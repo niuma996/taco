@@ -12,7 +12,7 @@ const home = useTempTacoHome("worktree-handoff");
 
 test("managed handoff preserves source identity, model and attachments", async () => {
     const root = await mkdtemp(join(tmpdir(), "taco-handoff-test-"));
-    const sourcePath = join(root, "source.txt");
+    const sourcePath = join(root, "storage-prefix-source.txt");
     await writeFile(sourcePath, "attachment contents");
     const events: string[] = [];
     let promptText = "";
@@ -86,7 +86,7 @@ test("managed handoff preserves source identity, model and attachments", async (
         assert.match(promptText, /inspect the attachment/);
         assert.match(promptText, /<worktree_handoff>/);
         assert.match(promptText, /original request for isolation is satisfied/);
-        assert.match(promptText, /source\.txt/);
+        assert.match(promptText, /name="source\.txt"/);
         assert.ok(!promptText.includes(sourcePath), "target tag must not reference source storage");
         assert.deepEqual(promptImages, [{ type: "image", data: "aGk=", mimeType: "image/png" }]);
         const match = promptText.match(/path="([^"]+)"/);
@@ -166,4 +166,33 @@ test("target execution failure reports the retained worktree and session", async
         },
     );
     assert.equal(emitted, true);
+});
+
+test("cancellation before or during creation reports only resources actually created", async () => {
+    const controller = new AbortController();
+    let creates = 0;
+    const start = createWorktreeHandoff({
+        ensureWorkspace: async () =>
+            ({
+                scope: { kind: "local" },
+                getAttached: () => ({ sessionKind: "main" }),
+            }) as unknown as WorkspaceRuntime,
+        create: async () => {
+            creates++;
+            controller.abort();
+            return { path: "/repo/tree", branch: "worktree/one" };
+        },
+        run: async (_cwd, operation) => operation(),
+        emit: () => assert.fail("cancelled"),
+    });
+    const request = {
+        sourceWorkspace: asWorkspaceId("/repo"),
+        sourceSessionId: asSessionId("source"),
+        name: "one",
+        task: "work",
+        signal: controller.signal,
+    };
+    await assert.rejects(start(request), /retained \/repo\/tree: AbortError/);
+    await assert.rejects(start(request), { name: "AbortError" });
+    assert.equal(creates, 1);
 });

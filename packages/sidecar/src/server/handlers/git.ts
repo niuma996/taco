@@ -58,7 +58,7 @@ export function registerGitHandlers(): void {
             gitResult(params.workspace, (cwd) => {
                 if (!server.worktrees)
                     throw new RpcHandlerError("invalid_state", "此服务不支持工作树管理。");
-                return server.worktrees.remove(cwd, params.path);
+                return server.worktrees.remove(cwd, params.path, params.forgetMissing);
             }),
         { command: true },
     );

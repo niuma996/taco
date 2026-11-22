@@ -9,12 +9,14 @@
  */
 
 import { readFile } from "node:fs/promises";
-import { ATTACHMENT_MAX_COUNT, type ImageInput } from "@taco-ai/protocol";
+import { ATTACHMENT_MAX_COUNT, type ImageInput, type MessageAttachment } from "@taco-ai/protocol";
 
 import { AttachmentError, commitAttachments } from "./attachmentStore.ts";
 import { buildAttachmentsTag } from "./attachmentsTag.ts";
 
 export interface ComposedPrompt {
+    /** Files committed from this call's staging IDs, independent of the rendered text. */
+    attachments?: MessageAttachment[];
     text: string;
     images: ImageInput[] | undefined;
 }
@@ -71,7 +73,11 @@ export async function composePrompt(opts: ComposeOptions): Promise<ComposedPromp
     const tag = buildAttachmentsTag(described);
     const withTag = text === "" ? tag : `${text}\n\n${tag}`;
     const merged = [...(images ?? []), ...inline];
-    return { text: withTag, images: merged.length > 0 ? merged : undefined };
+    return {
+        text: withTag,
+        images: merged.length > 0 ? merged : undefined,
+        attachments: committed,
+    };
 }
 
 /** What a composer needs from an attached session. */

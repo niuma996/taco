@@ -131,7 +131,7 @@ export interface ServerRpcSurface {
     readonly worktrees?: {
         list(cwd: string): Promise<WorktreeListResult>;
         create(cwd: string, name: string, base?: WorktreeBase): Promise<WorktreeCreateResult>;
-        remove(cwd: string, path: string): Promise<WorktreeRemoveResult>;
+        remove(cwd: string, path: string, forgetMissing?: boolean): Promise<WorktreeRemoveResult>;
         cleanup(
             cwd: string,
             options?: Omit<WorktreeCleanupParams, "workspace">,

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { access, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { access, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -79,6 +79,28 @@ test("worktree RPCs create managed inventory and remove clean trees while preser
         );
         assert.equal(events.length, 2);
         assert.equal(server.workspaceIds().length, 0);
+    });
+});
+
+test("an alias does not authorize removing another checkout; forgetting cannot remove it either", {
+    skip: process.platform === "win32",
+}, async () => {
+    await fixture(async (root, server) => {
+        const created = await create(server, root);
+        const alias = join(root, ".taco", "worktrees", "alias");
+        await symlink(created.path, alias, "dir");
+        for (const params of [
+            { workspace: root, path: alias },
+            { workspace: root, path: created.path, forgetMissing: true },
+        ]) {
+            const response = await server.dispatchRpc({
+                id: params.path,
+                method: "worktree.remove",
+                params,
+            });
+            assert.equal(response.ok, false);
+            await access(created.path);
+        }
     });
 });
 

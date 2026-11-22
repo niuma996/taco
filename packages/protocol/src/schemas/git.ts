@@ -16,7 +16,11 @@ export const worktreeCreateSchema = Type.Object(
     { additionalProperties: false },
 );
 export const worktreeRemoveSchema = Type.Object(
-    { workspace: workspaceIdSchema, path: Type.String({ minLength: 1 }) },
+    {
+        workspace: workspaceIdSchema,
+        path: Type.String({ minLength: 1 }),
+        forgetMissing: Type.Optional(Type.Boolean()),
+    },
     { additionalProperties: false },
 );
 export const worktreeCleanupSchema = Type.Object(

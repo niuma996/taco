@@ -33,7 +33,7 @@ export function createWorktreeControl(options: WorktreeControlOptions) {
     async function remove(
         cwd: string,
         path: string,
-        expectedGitDirIdentity?: string,
+        optionsForRemoval: { expectedGitDirIdentity?: string; forgetMissing?: boolean } = {},
     ): Promise<WorktreeRemoveResult> {
         if (!isAbsolute(path))
             throw new RpcHandlerError("invalid_params", "工作树路径必须是绝对路径。");
@@ -70,8 +70,8 @@ export function createWorktreeControl(options: WorktreeControlOptions) {
             };
             await assertIdle();
             const projectRoot = await resolveGitProjectRoot(target);
-            const result = await removeGitWorktree(cwd, target, {
-                expectedGitDirIdentity,
+            const result = await removeGitWorktree(cwd, path, {
+                ...optionsForRemoval,
                 beforeRemove: async () => {
                     await assertIdle();
                     for (const runtime of affected) await options.dispose(runtime.workspaceKey);
@@ -89,7 +89,8 @@ export function createWorktreeControl(options: WorktreeControlOptions) {
             options.onChange({ projectRoot, path: result.path, kind: "created" });
             return result;
         },
-        remove: (cwd: string, path: string) => remove(cwd, path),
+        remove: (cwd: string, path: string, forgetMissing?: boolean) =>
+            remove(cwd, path, { forgetMissing }),
         async cleanup(
             cwd: string,
             settings: Omit<WorktreeCleanupParams, "workspace"> = {},
@@ -131,7 +132,9 @@ export function createWorktreeControl(options: WorktreeControlOptions) {
                     continue;
                 try {
                     result.removed.push(
-                        await remove(projectRoot, tree.path, record.gitDirIdentity),
+                        await remove(projectRoot, tree.path, {
+                            expectedGitDirIdentity: record.gitDirIdentity,
+                        }),
                     );
                 } catch (error) {
                     result.failed.push({

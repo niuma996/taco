@@ -19,6 +19,7 @@ import {
 import { registerBuiltinMethods } from "../../src/server/methods.ts";
 import type { CommandOutcome } from "../../src/server/rpcResponse.ts";
 import { SidecarServer } from "../../src/server/server.ts";
+import { getWorktreeTurn } from "../../src/worktree/turnContext.ts";
 import { callMethod } from "../_helpers/handlerCall.ts";
 
 describe("methods.sessionCreate", () => {
@@ -205,6 +206,31 @@ describe("methods.sessionCreate", () => {
             assert.ok(
                 tail.includes("workspace.deleteEmptySession(sess-1)"),
                 "rollback failure must not replace the original prompt error",
+            );
+        });
+
+        it("preserves the first user message and image for an isolated handoff", async () => {
+            const stub = makeStub();
+            const images = [{ type: "image", data: "AA", mimeType: "image/png" }];
+            stub.attach = async () => ({
+                prompt: async (text) => {
+                    assert.deepEqual(getWorktreeTurn(), {
+                        sourceSessionId: "sess-1",
+                        text,
+                        images,
+                        attachments: undefined,
+                    });
+                    return { role: "assistant", text };
+                },
+            });
+            const handler = getRegisteredMethod("session.create");
+            assert.ok(handler);
+            await handler.handler(
+                makeCtx(stub, "session.create", {
+                    sessionId: "sess-1",
+                    initialPrompt: "inspect",
+                    initialImages: images,
+                }),
             );
         });
 

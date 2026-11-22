@@ -316,6 +316,11 @@ export async function listGitWorktrees(
     }
 }
 
+async function checkoutBacklink(gitDir: string): Promise<string> {
+    const pointer = outputLine(await readFile(join(gitDir, "gitdir"), "utf8"));
+    return resolve(gitDir, pointer);
+}
+
 /** Find the main checkout from Git inventory, then verify both ends against actual Git metadata. */
 async function mainCheckout(repository: GitRepositoryInfo, signal: AbortSignal): Promise<string> {
     if (repository.isBare || !repository.checkoutRoot)
@@ -363,7 +368,7 @@ async function mainCheckout(repository: GitRepositoryInfo, signal: AbortSignal):
     let verified: GitRepositoryInfo | "missing" | "not_repository";
     try {
         verified = await probe(mainPath, signal);
-        const backlink = outputLine(await readFile(join(repository.gitDir, "gitdir"), "utf8"));
+        const backlink = await checkoutBacklink(repository.gitDir);
         if ((await realpath(backlink)) !== (await realpath(join(repository.checkoutRoot, ".git"))))
             throw new Error("invalid backlink");
     } catch {
@@ -550,6 +555,35 @@ async function matchesOwnership(
     }
 }
 
+/**
+ * Ownership evidence that survives a missing checkout.
+ * Git can no longer prove the path, so the record and the source repository must.
+ */
+async function ownsMissingCheckout(
+    record: ManagedWorktreeRecord,
+    projectRoot: string,
+    repository: GitRepositoryInfo,
+    repositoryIdentity: string,
+    listed: boolean,
+): Promise<boolean> {
+    if (
+        record.repositoryRoot !== projectRoot ||
+        record.commonDir !== repository.commonDir ||
+        record.repositoryIdentity !== repositoryIdentity ||
+        !(await missingPath(record.path))
+    )
+        return false;
+    if (await missingPath(record.gitDir)) return !listed;
+    try {
+        return (
+            (await directoryIdentity(record.gitDir)) === record.gitDirIdentity &&
+            (await checkoutBacklink(record.gitDir)) === join(record.path, ".git")
+        );
+    } catch {
+        return false;
+    }
+}
+
 /** Enrich Git inventory only when both Taco ownership and current repository identity agree. */
 export async function readWorktreeInventory(
     cwd: string,
@@ -611,21 +645,29 @@ export async function readWorktreeInventory(
         const refreshed = repairs.length > 0 ? await store.entries() : records;
         const byPath = new Map(refreshed.map((record) => [record.path, record]));
         const managedRoot = join(projectRoot, ".taco", "worktrees");
-        const worktrees = await Promise.all(
-            current.worktrees.map(async (tree) => {
+        const missingOwned = (record: ManagedWorktreeRecord, listed: boolean) =>
+            ownsMissingCheckout(record, projectRoot, current.repository, sourceIdentity, listed);
+        const rows = await Promise.all(
+            current.worktrees.map(async (tree): Promise<GitWorktreeInfo | undefined> => {
                 const record = byPath.get(tree.path);
                 const managed =
                     !!record &&
                     (await matchesOwnership(record, tree, current.repository, projectRoot, signal));
-                const insideManagedRoot =
-                    dirname(tree.path) === managedRoot && isSafeWorktreeName(basename(tree.path));
+                const orphaned =
+                    !managed &&
+                    dirname(tree.path) === managedRoot &&
+                    isSafeWorktreeName(basename(tree.path));
+                const missing = orphaned && record && (await missingOwned(record, true));
+                if (missing && record.state === "removed" && tree.prunable) return undefined;
                 return {
                     ...tree,
                     managed,
-                    ...(insideManagedRoot && !managed ? { orphaned: true } : {}),
+                    ...(orphaned ? { orphaned: true } : {}),
+                    ...(missing && record.state !== "removed" ? { stale: true } : {}),
                 };
             }),
         );
+        const worktrees = rows.filter((tree): tree is GitWorktreeInfo => tree !== undefined);
         const listed = new Set(current.worktrees.map((tree) => tree.path));
         for (const record of refreshed) {
             if (record.state === "removed" || listed.has(record.path)) continue;
@@ -640,6 +682,7 @@ export async function readWorktreeInventory(
                 prunable: true,
                 managed: false,
                 orphaned: true,
+                ...((await missingOwned(record, false)) ? { stale: true } : {}),
             });
         }
         return { inventory: { ...current, projectRoot, worktrees }, records: refreshed };
@@ -906,7 +949,11 @@ export async function createGitWorktree(
 export async function removeGitWorktree(
     cwd: string,
     path: string,
-    options?: { beforeRemove?: () => Promise<void>; expectedGitDirIdentity?: string },
+    options?: {
+        beforeRemove?: () => Promise<void>;
+        expectedGitDirIdentity?: string;
+        forgetMissing?: boolean;
+    },
 ): Promise<WorktreeRemoveResult> {
     const source = await probe(cwd, requestSignal());
     if (typeof source === "string" || source.isBare)
@@ -957,6 +1004,30 @@ export async function removeGitWorktree(
                 };
             }
         }
+        if (
+            options?.forgetMissing &&
+            !entry?.bare &&
+            !entry?.locked &&
+            (await ownsMissingCheckout(record, projectRoot, source, sourceIdentity, !!entry))
+        ) {
+            // The checkout was deleted outside Taco; only its verified record can be forgotten.
+            const branch = entry
+                ? entry.branch
+                : record.removalBranch === undefined
+                  ? record.branch
+                  : record.removalBranch;
+            if (record.state !== "removed") {
+                await options?.beforeRemove?.();
+                await store.beginRemove(target, branch);
+                await store.remove(target);
+            }
+            return { path: target, branch, removed: true };
+        }
+        if (options?.forgetMissing)
+            throw new GitServiceError(
+                "command_failed",
+                "The missing worktree record can no longer be forgotten",
+            );
         if (!entry || entry.locked || entry.bare || entry.prunable)
             throw new GitServiceError("command_failed", "Worktree is unavailable or locked");
         if (options?.expectedGitDirIdentity !== undefined && entry.detached)

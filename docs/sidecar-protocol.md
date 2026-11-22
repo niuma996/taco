@@ -121,6 +121,7 @@ because a registered system-service daemon can outlive a desktop upgrade.
 | 2.22 | `worktree.create` / `worktree.remove`, optional `managed` inventory metadata and the process-level `worktree.changed` push; a 2.21 daemon lacks the mutation methods and notification. |
 | 2.23 | Explicit `worktree.cleanup`, verified inventory `projectRoot` and optional `orphaned` markers for stale or unowned paths. |
 | 2.24 | Process-level `worktree.handoff` notification for agent-created managed worktree sessions. |
+| 2.25 | Verified missing checkouts support metadata-only removal with `forgetMissing`. |
 
 Adding a value to an existing response enum is potentially breaking: older clients
 may index exhaustive maps with it. Such values require connection-scoped capability
@@ -755,7 +756,7 @@ agent tools and guidance while using this shared service.
 - `worktree.create` takes `{ workspace, name, base? }`, where `base` is `"head"`
   or `"default"`. It returns `{ path, branch, headOid, managed: true }`, with a
   nullable `headOid`.
-- `worktree.remove` takes `{ workspace, path }` and returns
+- `worktree.remove` takes `{ workspace, path, forgetMissing? }` and returns
   `{ path, branch, removed: true }`, with a nullable `branch`. It accepts no
   force or branch-deletion option.
 - Both methods route by the required workspace. Their exported `*Params`
@@ -838,7 +839,11 @@ finalized only when both its checkout and Git administration directory are absen
 and Git no longer lists it. Missing or replaced records and unowned checkouts
 inside the managed container are reported with `orphaned: true`, without claiming
 ownership or deleting files. Records missing from Git are included as prunable
-orphan entries. Invalid metadata fails closed and remains available for repair.
+orphan entries. A record whose checkout is gone while its repository identity
+still verifies is also marked `stale: true`; `worktree.remove` with `forgetMissing: true` then forgets that
+record. This mode cannot delete a live checkout, including one recreated after
+the inventory was read. Git admin entries and branches are retained. Invalid metadata fails closed and remains
+available for repair.
 Passive history can still resolve a missing recorded checkout's verified project;
 execution validators reject removed, replaced and unowned checkouts in the managed
 container. An explicit create can reuse a missing orphan's name only after its
@@ -884,9 +889,10 @@ source changes must not hand off as though those changes were present.
 
 The built-in tool calls the existing managed create service; it is not a public
 RPC and never runs `git worktree add` through the model's shell. The server
-creates a target session, copies the source turn's attachments, preserves its
+creates a target session, copies only files committed from the source turn's staging IDs, preserves its
 model, thinking level and reply locale, and admits the target workspace against
-cleanup before execution. The source workspace and session cwd never change.
+cleanup before execution. Both an initial prompt on `session.create` and a
+`session.prompt` carry the original user text and images. The source workspace and session cwd never change.
 
 `worktree.handoff` carries `sourceWorkspace`, `sourceSessionId`, `workspace`,
 `sessionId`, `path` and `branch`. It is process-level. Desktop opens the target

@@ -212,6 +212,10 @@ describe("composePrompt", () => {
 
         const parsed = parseAttachmentsTags(out.text);
         assert.equal(parsed.length, 2);
+        assert.deepEqual(
+            out.attachments?.map((file) => file.name),
+            ["a.pdf", "b.png"],
+        );
         assert.ok(out.text.startsWith("hello\n\n<attachments>"));
         assert.equal(out.images?.length, 1);
         assert.equal(parsed.find((x) => x.kind === "image")?.inlined, true);

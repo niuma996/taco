@@ -3,13 +3,14 @@ import { test } from "node:test";
 import { Check } from "typebox/value";
 import * as protocol from "../src/index.ts";
 
-test("worktree management uses the 2.24 contract and distinct process pushes", () => {
-    assert.deepEqual(protocol.SIDECAR_PROTOCOL_VERSION, { major: 2, minor: 24 });
+test("worktree management uses the 2.25 contract and distinct process pushes", () => {
+    assert.deepEqual(protocol.SIDECAR_PROTOCOL_VERSION, { major: 2, minor: 25 });
     assert.equal(protocol.isCompatibleSidecarProtocol({ major: 2, minor: 20 }), false);
     assert.equal(protocol.isCompatibleSidecarProtocol({ major: 2, minor: 21 }), false);
     assert.equal(protocol.isCompatibleSidecarProtocol({ major: 2, minor: 22 }), false);
     assert.equal(protocol.isCompatibleSidecarProtocol({ major: 2, minor: 23 }), false);
-    assert.equal(protocol.isCompatibleSidecarProtocol({ major: 2, minor: 24 }), true);
+    assert.equal(protocol.isCompatibleSidecarProtocol({ major: 2, minor: 24 }), false);
+    assert.equal(protocol.isCompatibleSidecarProtocol({ major: 2, minor: 25 }), true);
     assert.equal(protocol.isCompatibleClientProtocol({ major: 2, minor: 21 }), true);
     assert.equal(protocol.PushMethods.WorktreeChanged, "worktree.changed");
     assert.equal(protocol.PushMethods.WorktreeHandoff, "worktree.handoff");
@@ -50,6 +51,8 @@ test("create accepts optional head/default base and rejects malformed or extra p
 test("remove requires workspace and path without force or branch options", () => {
     const params = { workspace: "/project", path: "/worktrees/feature" };
     assert.equal(Check(protocol.worktreeRemoveSchema, params), true);
+    assert.equal(Check(protocol.worktreeRemoveSchema, { ...params, forgetMissing: true }), true);
+    assert.equal(Check(protocol.worktreeRemoveSchema, { ...params, forgetMissing: "yes" }), false);
     for (const invalid of [
         { workspace: params.workspace },
         { path: params.path },

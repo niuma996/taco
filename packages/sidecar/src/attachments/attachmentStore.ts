@@ -116,6 +116,7 @@ async function classify(path: string, declaredMime: string | undefined, name: st
 export async function stageFromPath(
     workspaceId: string,
     sourcePath: string,
+    displayName: string = sourcePath,
 ): Promise<AttachmentStageResult> {
     let info: Awaited<ReturnType<typeof stat>>;
     try {
@@ -133,7 +134,7 @@ export async function stageFromPath(
         );
     }
     const id = randomUUID();
-    const name = safeFileName(sourcePath);
+    const name = safeFileName(displayName);
     const dir = join(stagingRoot(workspaceId), id);
     await mkdir(dir, { recursive: true, mode: 0o700 });
     await restrictOwner(dir, 0o700);

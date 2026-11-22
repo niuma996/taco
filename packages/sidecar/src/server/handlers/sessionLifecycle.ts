@@ -31,6 +31,7 @@ import type { JsonlSessionMetadata } from "../../runtime/pi/types.ts";
 import { uuidv7 } from "../../runtime/pi/values.ts";
 import { isHiddenSubagentSession, type SessionFacts } from "../../runtime/session/sessionFacts.ts";
 import type { WorkspaceRuntime } from "../../runtime/workspace.ts";
+import { withWorktreeTurn } from "../../worktree/turnContext.ts";
 import { RpcHandlerError, registerMethod } from "../methodRegistry.ts";
 import { rethrowAttachmentError } from "./attachment.ts";
 
@@ -143,10 +144,14 @@ export function registerSessionLifecycleHandlers(): void {
                         params.initialImages,
                         params.initialAttachments,
                     ).catch(rethrowAttachmentError);
-                    assistantMessage = await attached.prompt(
-                        turn.text,
-                        turn.images,
-                        params.uiLocale,
+                    assistantMessage = await withWorktreeTurn(
+                        {
+                            sourceSessionId: asSessionId(meta.id),
+                            text: params.initialPrompt ?? "",
+                            images: params.initialImages,
+                            attachments: turn.attachments,
+                        },
+                        () => attached.prompt(turn.text, turn.images, params.uiLocale),
                     );
                     workspace.invalidateListCache();
                 } catch (e) {
