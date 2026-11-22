@@ -1,6 +1,7 @@
 import { focusManager } from "@tanstack/react-query";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { WorkspaceGitStatus } from "../../src/components/WorkspaceGitStatus";
 import * as useI18n from "../../src/i18n/useI18n";
@@ -27,16 +28,31 @@ afterEach(() => {
     vi.clearAllMocks();
     focusManager.setFocused(undefined);
 });
-function mount(data: unknown, notify = vi.fn()) {
+function mount(data: unknown, notify = vi.fn(), worktreePicker?: ReactNode) {
     const client = {
         gitInspect: vi.fn().mockResolvedValue(data),
         gitInit: vi.fn().mockResolvedValue(repo),
     };
     const { wrapper } = queryWrapper();
-    render(<WorkspaceGitStatus client={client} cwd="/proj" notify={notify} />, { wrapper });
+    render(
+        <WorkspaceGitStatus
+            client={client}
+            cwd="/proj"
+            notify={notify}
+            worktreePicker={worktreePicker}
+        />,
+        { wrapper },
+    );
     return { client, notify };
 }
 describe("WorkspaceGitStatus", () => {
+    it("renders the worktree picker beside the current branch", async () => {
+        mount(repo, vi.fn(), <span>worktree picker</span>);
+
+        expect(await screen.findByText(repo.repository.branch)).toBeTruthy();
+        expect(screen.getByText("worktree picker")).toBeTruthy();
+    });
+
     it("shows loading then the full branch in its title", async () => {
         mount(repo);
         expect(screen.getByText("git.loading")).toBeTruthy();

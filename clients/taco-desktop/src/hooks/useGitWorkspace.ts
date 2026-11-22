@@ -1,7 +1,14 @@
 import { asWorkspaceId, type GitInspectResult, IM_CWD_PREFIX } from "@taco-ai/protocol";
-import { useIsMutating, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+    useIsMutating,
+    useMutation,
+    useQueries,
+    useQuery,
+    useQueryClient,
+} from "@tanstack/react-query";
 import type { TacoClient } from "../lib/clients/tacoClient";
 import { queryError, refreshQueries, resourceQueryKey } from "../lib/queries/queryClient";
+import { isLinkedWorktree } from "../lib/worktrees";
 
 export type GitWorkspaceClient = Pick<TacoClient, "gitInspect" | "gitInit">;
 const disabledClient = {};
@@ -64,4 +71,36 @@ export function useGitWorkspace(
             if (enabled) await refreshQueries(queryClient, { queryKey, exact: true });
         },
     };
+}
+
+/**
+ * Classifies only the directories themselves. Repository-wide worktree inventories
+ * stay scoped to the picker; these identity queries are cached and do not poll.
+ */
+export function useLinkedWorktreePaths(
+    client: Pick<GitWorkspaceClient, "gitInspect"> | undefined,
+    workspaces: Readonly<Record<string, unknown>>,
+): ReadonlySet<string> {
+    const cwds = Object.keys(workspaces).filter((cwd) => !cwd.startsWith(IM_CWD_PREFIX));
+    const queries = useQueries({
+        queries: cwds.map((cwd) => ({
+            queryKey: resourceQueryKey(client ?? disabledClient, "git", cwd),
+            enabled: Boolean(client),
+            retry: false,
+            staleTime: Number.POSITIVE_INFINITY,
+            refetchInterval: false,
+            refetchOnWindowFocus: false,
+            refetchOnReconnect: false,
+            queryFn: ({ signal }: { signal: AbortSignal }): Promise<GitInspectResult> => {
+                signal.throwIfAborted();
+                if (!client) throw new Error("No workspace client");
+                return client.gitInspect({ workspace: asWorkspaceId(cwd) });
+            },
+        })),
+    });
+    return new Set(
+        queries.flatMap((query, index) =>
+            query.data && isLinkedWorktree(query.data) ? [cwds[index]] : [],
+        ),
+    );
 }

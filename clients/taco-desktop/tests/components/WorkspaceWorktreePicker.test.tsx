@@ -1,6 +1,8 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { WorkspaceWorktreePicker } from "../../src/components/WorkspaceWorktreePicker";
+import en from "../../src/i18n/locales/en.json";
+import zh from "../../src/i18n/locales/zh.json";
 import * as useI18n from "../../src/i18n/useI18n";
 import { queryWrapper } from "../helpers/queryWrapper";
 
@@ -60,6 +62,59 @@ function setup(cwd = "/project", response: typeof list & { projectRoot?: string 
     return { onSelect, onManage };
 }
 describe("WorkspaceWorktreePicker", () => {
+    it("has localized labels for the switcher", () => {
+        expect(typeof en.worktrees.switch).toBe("string");
+        expect(typeof zh.worktrees.switch).toBe("string");
+    });
+
+    it("queries only the current workspace", async () => {
+        const client = { worktreeList: vi.fn().mockResolvedValue(list) };
+        const view = render(
+            <WorkspaceWorktreePicker
+                client={client}
+                cwd="/project"
+                onSelect={vi.fn()}
+                onManage={vi.fn()}
+            />,
+            { wrapper: queryWrapper().wrapper },
+        );
+        await screen.findByRole("button", { name: "worktrees.switch" });
+
+        view.rerender(
+            <WorkspaceWorktreePicker
+                client={client}
+                cwd="/other"
+                onSelect={vi.fn()}
+                onManage={vi.fn()}
+            />,
+        );
+
+        await waitFor(() =>
+            expect(client.worktreeList).toHaveBeenLastCalledWith({ workspace: "/other" }),
+        );
+        expect(client.worktreeList).toHaveBeenCalledTimes(2);
+        expect(client.worktreeList).toHaveBeenNthCalledWith(1, { workspace: "/project" });
+    });
+
+    it.each(["not_repository", "missing"] as const)(
+        "stays hidden when the current workspace has no usable Git repository: %s",
+        async (status) => {
+            const client = { worktreeList: vi.fn().mockResolvedValue({ status }) };
+            render(
+                <WorkspaceWorktreePicker
+                    client={client}
+                    cwd="/other"
+                    onSelect={vi.fn()}
+                    onManage={vi.fn()}
+                />,
+                { wrapper: queryWrapper().wrapper },
+            );
+
+            await waitFor(() => expect(client.worktreeList).toHaveBeenCalledTimes(1));
+            expect(screen.queryByRole("button", { name: "worktrees.switch" })).toBeNull();
+        },
+    );
+
     it("switches between the local checkout and worktrees", async () => {
         const { onSelect } = setup();
         expect(await screen.findByRole("button", { name: "worktrees.switch" })).toHaveProperty(
@@ -73,6 +128,17 @@ describe("WorkspaceWorktreePicker", () => {
         fireEvent.click(await screen.findByRole("menuitemradio", { name: /worktree-review/ }));
         expect(onSelect).toHaveBeenCalledExactlyOnceWith("/project/.taco/worktrees/review");
     });
+    it("leaves the current draft intact when reselecting its checkout", async () => {
+        const { onSelect } = setup();
+        fireEvent.pointerDown(await screen.findByRole("button", { name: "worktrees.switch" }), {
+            button: 0,
+            ctrlKey: false,
+        });
+        fireEvent.click(await screen.findByRole("menuitemradio", { name: "worktrees.local" }));
+
+        expect(onSelect).not.toHaveBeenCalled();
+    });
+
     it("navigates to the checkout instead of a separate Git directory", async () => {
         const linked = list.worktrees[1].path;
         const commonDir = "/metadata";

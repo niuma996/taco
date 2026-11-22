@@ -68,6 +68,7 @@ function setup(overrides: { list?: unknown; cwd?: string; activeCwd?: string } =
         client,
         cwd: overrides.cwd ?? "/project",
         activeCwd: overrides.activeCwd ?? linkedPath,
+        onOpenFolder: vi.fn(),
         onOpenWorkspace,
     };
     const view = render(<WorktreesPane {...props} />, { wrapper });
@@ -79,6 +80,31 @@ afterEach(() => {
 });
 
 describe("WorktreesPane", () => {
+    it("does not infer a repository while the active conversation is a channel", () => {
+        const onOpenFolder = vi.fn();
+        const client = {
+            worktreeList: vi.fn(),
+            worktreeCreate: vi.fn(),
+            worktreeRemove: vi.fn(),
+            gitInspect: vi.fn(),
+            gitInit: vi.fn(),
+        };
+        render(
+            <WorktreesPane
+                client={client}
+                cwd={null}
+                activeCwd="im://channel/chat"
+                onOpenFolder={onOpenFolder}
+                onOpenWorkspace={vi.fn()}
+            />,
+            { wrapper: queryWrapper().wrapper },
+        );
+        expect(screen.getByText("worktrees.noLocalWorkspace")).toBeTruthy();
+        expect(client.worktreeList).not.toHaveBeenCalled();
+        fireEvent.click(screen.getByRole("button", { name: "worktrees.openLocalWorkspace" }));
+        expect(onOpenFolder).toHaveBeenCalledOnce();
+    });
+
     it("lists the checkout and managed worktrees and opens either location", async () => {
         const { onOpenWorkspace } = setup();
         expect(await screen.findByText("/project")).toBeTruthy();
@@ -180,6 +206,55 @@ describe("WorktreesPane", () => {
         );
         fireEvent.click(screen.getByRole("button", { name: "worktrees.removeConfirm" }));
         await waitFor(() => expect(onOpenWorkspace).toHaveBeenCalledExactlyOnceWith("/project"));
+    });
+
+    it("allows forgetting a stale record without enabling navigation", async () => {
+        const { client, onOpenWorkspace } = setup({
+            list: {
+                ...repository,
+                worktrees: [
+                    repository.worktrees[0],
+                    {
+                        ...tree("/missing", "worktree-missing"),
+                        prunable: true,
+                        orphaned: true,
+                        stale: true,
+                    },
+                ],
+            },
+        });
+        const open = await screen.findByRole("button", {
+            name: "worktrees.open worktree-missing",
+        });
+        expect(open).toHaveProperty("disabled", true);
+        const remove = screen.getByRole("button", { name: "worktrees.forget worktree-missing" });
+        expect(remove).toHaveProperty("disabled", false);
+        fireEvent.click(remove);
+        fireEvent.click(await screen.findByRole("button", { name: "worktrees.forget" }));
+        await waitFor(() =>
+            expect(client.worktreeRemove).toHaveBeenCalledExactlyOnceWith({
+                workspace: "/project",
+                path: "/missing",
+                forgetMissing: true,
+            }),
+        );
+        expect(onOpenWorkspace).not.toHaveBeenCalled();
+    });
+
+    it("keeps a prunable entry without a verified record unremovable", async () => {
+        setup({
+            list: {
+                ...repository,
+                worktrees: [
+                    repository.worktrees[0],
+                    { ...tree("/missing", "worktree-missing"), prunable: true, orphaned: true },
+                ],
+            },
+        });
+        await screen.findByRole("button", { name: "worktrees.open worktree-missing" });
+        expect(
+            screen.queryByRole("button", { name: "worktrees.remove worktree-missing" }),
+        ).toBeNull();
     });
 
     it.each(["bare", "prunable", "orphaned"] as const)(
@@ -356,6 +431,16 @@ describe("WorktreesPane", () => {
         expect((await screen.findByRole("alert")).textContent).toContain("active session");
         expect(screen.getByRole("dialog")).toBeTruthy();
         expect(screen.getByRole("button", { name: "worktrees.removeConfirm" })).toBeTruthy();
+    });
+
+    it("requires a first commit before offering worktree creation", async () => {
+        setup({ list: { ...repository, repository: { ...repository.repository, headOid: null } } });
+        await screen.findByRole("button", { name: "worktrees.open worktrees.local" });
+        expect(screen.getByRole("button", { name: "worktrees.create" })).toHaveProperty(
+            "disabled",
+            true,
+        );
+        expect(screen.getByTitle("worktrees.commitFirst")).toBeTruthy();
     });
 
     it("enables creation immediately after initializing the repository", async () => {

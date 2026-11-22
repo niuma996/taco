@@ -20,7 +20,7 @@
     "submitAnswersFailed": "Submitting your answer failed: {{error}}",
     "newInWorkspace": "New chat in this workspace",
     "newChat": "New chat",
-    "switchWorkspace": "Switch workspace",
+    "switchWorkspace": "Choose a working directory for the new chat",
     "searching": "Searching…",
     "noSearchResults": "No matching chats",
     "searchFailed": "Search failed",
@@ -1337,11 +1337,13 @@
     "loadFailed": "Cannot load worktrees: {{error}}",
     "refresh": "Refresh worktrees",
     "empty": "No worktrees in this repository.",
-    "local": "Local checkout",
+    "local": "Main checkout",
     "current": "Current",
     "locked": "Locked",
     "unavailable": "Unavailable",
-    "switch": "Switch local checkout or worktree",
+    "switch": "Switch main checkout or worktree",
+    "noLocalWorkspace": "No local workspace is selected. Open a local directory before managing its worktrees.",
+    "openLocalWorkspace": "Open local workspace",
     "manage": "Manage worktrees",
     "open": "Open",
     "create": "New worktree",
@@ -1359,6 +1361,9 @@
     "removeTitle": "Remove worktree?",
     "removeDescription": "Remove {{path}}? Its branch and conversation history will be kept.",
     "removeConfirm": "Remove worktree",
-    "removing": "Removing…"
+    "removing": "Removing…",
+    "commitFirst": "Make a Git commit before creating a worktree",
+    "forget": "Forget missing checkout",
+    "forgetDescription": "The checkout at {{path}} is missing. Forget its Taco record and keep the Git branch and chat history."
   }
 }

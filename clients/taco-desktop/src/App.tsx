@@ -52,6 +52,7 @@ import { useConversationActivity } from "./hooks/useConversationActivity";
 import { useConversationDrafts } from "./hooks/useConversationDrafts";
 import { useConversationsPane } from "./hooks/useConversationsPane";
 import { FilePreviewOpenerProvider } from "./hooks/useFilePreviewOpener";
+import { useLinkedWorktreePaths } from "./hooks/useGitWorkspace";
 import { useLlmDump } from "./hooks/useLlmDump";
 import { useManagementQuerySync } from "./hooks/useManagementQuerySync";
 import { useProviders } from "./hooks/useProviders";
@@ -68,6 +69,7 @@ import { SubagentProvider } from "./hooks/useSubagent";
 import { useWorkOverview } from "./hooks/useWorkOverview";
 import { useWorkspaceModels } from "./hooks/useWorkspaceModels";
 import { useWorkspaces } from "./hooks/useWorkspaces";
+import { useOwningWorkspaceCwd } from "./hooks/useWorktrees";
 import { useT } from "./i18n/useI18n";
 import { onChannelStatusChangedEvent } from "./lib/channelEvents";
 import type { UiMessage } from "./lib/chat/chatUtils";
@@ -105,6 +107,7 @@ export default function App() {
     const queryClient = useQueryClient();
     useManagementQuerySync(client);
     const wsApi = useWorkspaces(client);
+    const hiddenWorkspaceCwds = useLinkedWorktreePaths(client, wsApi.workspaces);
     const drafts = useConversationDrafts(wsApi.composerTarget);
     const { input, setInput, attachments, setAttachments } = drafts;
     const pendingNewDraft = useRef<ConversationTarget | null>(null);
@@ -192,10 +195,8 @@ export default function App() {
     );
 
     const activeSid = ws?.activeSession;
-    const worktreeCwd =
-        activeCwd && !activeCwd.startsWith(IM_CWD_PREFIX)
-            ? activeCwd
-            : Object.keys(workspaces).find((cwd) => !cwd.startsWith(IM_CWD_PREFIX));
+    const worktreeCwd = activeCwd && !activeCwd.startsWith(IM_CWD_PREFIX) ? activeCwd : null;
+    const owningWorkspaceCwd = useOwningWorkspaceCwd(client, activeCwd);
     const activeRuntime = activeSid ? getSessionState(ws, activeSid) : undefined;
     const messages = activeRuntime?.messages ?? EMPTY_MESSAGES;
     const backgroundSubagents = activeRuntime?.backgroundSubagents ?? EMPTY_BACKGROUND_SUBAGENTS;
@@ -704,25 +705,25 @@ export default function App() {
         }
     }
 
-    // Shared by the topbar chip and the session-info-bar button. Lazy
-    // creation: the new session id is allocated by the server on the first
-    // real send, not here. Only confirm when there's unsent content to
-    // discard.
-    // Tasks and subagents belong to the session being left; the file tree
-    // belongs to the workspace, which the new chat shares, so it stays.
-    async function startNewSession(cwd: string): Promise<void> {
+    // A failed or superseded navigation must leave the original draft intact.
+    async function startNewSession(
+        cwd: string,
+        discard?: ConversationTarget | null,
+    ): Promise<void> {
         if (!(await openNewSession(cwd))) return;
+        if (discard) drafts.release(discard);
         if (rightPanel.panel === "tasks" || rightPanel.panel === "subagents") rightPanel.close();
+        setMainView("chat");
     }
 
-    function handleNewSession(): void {
+    function requestNewSession(cwd: string): void {
         if (input.trim() !== "" || attachments.length > 0) {
             pendingNewDraft.current = wsApi.composerTarget;
-            setPendingNewSessionCwd(activeCwd);
+            setPendingNewSessionCwd(cwd);
             setConfirmNewSession(true);
             return;
         }
-        void startNewSession(activeCwd);
+        void startNewSession(cwd);
     }
 
     async function submitComposer(): Promise<void> {
@@ -851,15 +852,13 @@ export default function App() {
                         updateError={lifecycle.updateStatus.error}
                         onCheckUpdate={lifecycle.runUpdateCheck}
                     />
-                    {mainView === "worktrees" && worktreeCwd && (
+                    {mainView === "worktrees" && (
                         <WorktreesPane
                             client={client}
                             cwd={worktreeCwd}
                             activeCwd={activeCwd}
-                            onOpenWorkspace={(cwd) => {
-                                void startNewSession(cwd);
-                                setMainView("chat");
-                            }}
+                            onOpenWorkspace={requestNewSession}
+                            onOpenFolder={() => void browseAndOpen()}
                         />
                     )}
                     {mainView === "chat" ? (
@@ -869,13 +868,13 @@ export default function App() {
                                 .layout, so the list wipes in/out instead of
                                 popping and keeps its scroll position. */}
                             <ConversationSidebar
-                                client={client}
                                 mode={conversationMode}
                                 workspaces={workspaces}
                                 unread={{ ...conversationActivity.unread, ...restoredUnread }}
                                 expandedWorkspaces={expandedWorkspaces}
                                 onExpandedWorkspacesChange={updateExpandedWorkspaces}
                                 activeCwd={activeCwd}
+                                hiddenWorkspaceCwds={hiddenWorkspaceCwds}
                                 conversations={conversations}
                                 conversationsLoading={conversationsLoading}
                                 conversationsError={conversationsError}
@@ -900,10 +899,7 @@ export default function App() {
                                         currentName: currentName ?? current?.name ?? "",
                                     });
                                 }}
-                                onNewSession={(cwd) => {
-                                    if (cwd === activeCwd) handleNewSession();
-                                    else void startNewSession(cwd);
-                                }}
+                                onNewSession={requestNewSession}
                                 onOpenFolder={() => void browseAndOpen()}
                                 onManageAssociations={setAssociationsTarget}
                                 onRetryConversations={() => void refreshConversations()}
@@ -935,9 +931,7 @@ export default function App() {
                                                     <WorkspaceWorktreePicker
                                                         client={client}
                                                         cwd={activeCwd}
-                                                        onSelect={(cwd) =>
-                                                            void startNewSession(cwd)
-                                                        }
+                                                        onSelect={requestNewSession}
                                                         onManage={() => setMainView("worktrees")}
                                                     />
                                                 ) : undefined
@@ -1021,22 +1015,21 @@ export default function App() {
                                             onToggleSubagents={() => rightPanel.toggle("subagents")}
                                             subagentsOpen={rightPanel.panel === "subagents"}
                                             subagentDot={subagentDotState(subagentEntries)}
-                                            onNewSession={handleNewSession}
+                                            onNewSession={() => requestNewSession(activeCwd)}
                                             newSessionDisabled={
                                                 !ws || Boolean(activeCwd?.startsWith(IM_CWD_PREFIX))
                                             }
                                             isIm={Boolean(activeCwd?.startsWith(IM_CWD_PREFIX))}
                                             workspaceContext={
                                                 <ChatWorkspaceContext
-                                                    cwd={activeCwd}
+                                                    cwd={owningWorkspaceCwd}
                                                     workspaces={workspaces}
+                                                    hiddenWorkspaceCwds={hiddenWorkspaceCwds}
                                                     switchable={
                                                         !activeSid &&
                                                         !activeCwd.startsWith(IM_CWD_PREFIX)
                                                     }
-                                                    onSelect={(cwd) => {
-                                                        void startNewSession(cwd);
-                                                    }}
+                                                    onSelect={requestNewSession}
                                                 />
                                             }
                                             llmDumpDock={
@@ -1192,11 +1185,12 @@ export default function App() {
                     setConfirmNewSession(false);
                     const cwd = pendingNewSessionCwd ?? activeCwd;
                     setPendingNewSessionCwd(null);
-                    if (pendingNewDraft.current) drafts.release(pendingNewDraft.current);
+                    const discard = pendingNewDraft.current;
                     pendingNewDraft.current = null;
-                    void startNewSession(cwd);
+                    void startNewSession(cwd, discard);
                 }}
                 onCancel={() => {
+                    pendingNewDraft.current = null;
                     setConfirmNewSession(false);
                     setPendingNewSessionCwd(null);
                 }}

@@ -9,6 +9,7 @@ import { lastSegment } from "../lib/workspaceStorage";
 export interface ChatWorkspaceContextProps {
     cwd: string;
     workspaces: Record<string, WorkspaceState>;
+    hiddenWorkspaceCwds?: ReadonlySet<string>;
     /** Only a filesystem new-chat draft offers workspace switching. */
     switchable: boolean;
     onSelect: (cwd: string) => void;
@@ -20,7 +21,8 @@ export function ChatWorkspaceContext(props: ChatWorkspaceContextProps) {
     const im = parseImCwd(props.cwd);
     const label = im ? `${im.channelId} / ${im.chatId}` : lastSegment(props.cwd);
     const options = Object.values(props.workspaces).filter(
-        (workspace) => !workspace.cwd.startsWith("im://"),
+        (workspace) =>
+            !workspace.cwd.startsWith("im://") && !props.hiddenWorkspaceCwds?.has(workspace.cwd),
     );
     const canSwitch = !im && props.switchable && options.length > 1;
     const content = (
@@ -62,7 +64,12 @@ export function ChatWorkspaceContext(props: ChatWorkspaceContextProps) {
                     sideOffset={6}
                     collisionPadding={8}
                 >
-                    <DropdownMenu.RadioGroup value={props.cwd} onValueChange={props.onSelect}>
+                    <DropdownMenu.RadioGroup
+                        value={props.cwd}
+                        onValueChange={(path) => {
+                            if (path !== props.cwd) props.onSelect(path);
+                        }}
+                    >
                         {options.map((workspace) => (
                             <DropdownMenu.RadioItem
                                 className="ui-menu-item"

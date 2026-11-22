@@ -20,9 +20,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { SessionList } from "../components/SessionList";
 import { IconButton } from "../components/ui/IconButton";
 import type { WorkspaceMode } from "../components/WorkspaceModeTabs";
-import { WorkspaceWorktreeLinks } from "../components/WorkspaceWorktreeLinks";
 import type { UseSessionSearchesResult } from "../hooks/useSessionSearch";
-import type { WorktreesClient } from "../hooks/useWorktrees";
 import { useT } from "../i18n/useI18n";
 import { summarizeConversationActivity } from "../lib/chat/conversationActivity";
 import {
@@ -35,9 +33,9 @@ import { Sidebar } from "./Sidebar";
 
 export interface ConversationSidebarProps {
     mode: WorkspaceMode;
-    client?: WorktreesClient;
     workspaces: Record<string, WorkspaceState>;
     activeCwd: string;
+    hiddenWorkspaceCwds?: ReadonlySet<string>;
     expandedWorkspaces?: readonly string[];
     onExpandedWorkspacesChange?: (workspaces: string[]) => void;
     unread?: Readonly<Record<string, true>>;
@@ -100,7 +98,11 @@ export function ConversationSidebar(props: ConversationSidebarProps) {
     const nextWorkspaceOrderRef = useRef(0);
 
     const workspaceGroups = useMemo(() => {
-        const groups = buildWorkspaceGroups(props.workspaces, props.unread);
+        const groups = buildWorkspaceGroups(
+            props.workspaces,
+            props.unread,
+            props.hiddenWorkspaceCwds,
+        );
         // Freeze the mount-time order for this run. Lazy history, selection
         // and newer session activity never move a directory under the pointer.
         // A workspace opened later is appended without disturbing existing rows.
@@ -115,7 +117,7 @@ export function ConversationSidebar(props: ConversationSidebarProps) {
                 (workspaceOrderRef.current.get(b.cwd) ?? 0),
         );
         return groups;
-    }, [props.workspaces, props.unread]);
+    }, [props.workspaces, props.unread, props.hiddenWorkspaceCwds]);
 
     const channelItems = useMemo(
         () =>
@@ -282,53 +284,27 @@ export function ConversationSidebar(props: ConversationSidebarProps) {
         const searching = search.query.trim() !== "";
         if ((!workspace || workspace.sessions.length === 0) && !searching)
             return (
-                <>
-                    {props.client && (
-                        <WorkspaceWorktreeLinks
-                            client={props.client}
-                            cwd={group.cwd}
-                            activeCwd={props.activeCwd}
-                            active
-                            onSelect={props.onNewSession}
-                        />
-                    )}
-                    <div className="conversation-group-empty">
-                        {t("conversationNav.noConversations")}
-                    </div>
-                </>
+                <div className="conversation-group-empty">
+                    {t("conversationNav.noConversations")}
+                </div>
             );
         return (
-            <>
-                {props.client && (
-                    <WorkspaceWorktreeLinks
-                        client={props.client}
-                        cwd={group.cwd}
-                        activeCwd={props.activeCwd}
-                        active
-                        onSelect={props.onNewSession}
-                    />
-                )}
-                <Sidebar
-                    embedded
-                    showHeader={false}
-                    activeSessionId={
-                        group.cwd === props.activeCwd ? workspace?.activeSession : null
-                    }
-                    ws={workspace}
-                    unread={props.unread}
-                    onAttach={(sessionId) =>
-                        props.onOpenSession({ workspace: group.cwd, sessionId })
-                    }
-                    onDelete={(sessionId) => props.onDelete({ cwd: group.cwd, sessionId })}
-                    onRename={(sessionId) => props.onRename({ cwd: group.cwd, sessionId })}
-                    onLoadMore={() => void loadMoreGroup(group)}
-                    isLoadingMore={loadingMoreGroups.has(group.key)}
-                    loadMoreError={failedMoreGroups.has(group.key)}
-                    onNewSession={() => props.onNewSession(group.cwd)}
-                    newSessionDisabled={false}
-                    search={search}
-                />
-            </>
+            <Sidebar
+                embedded
+                showHeader={false}
+                activeSessionId={group.cwd === props.activeCwd ? workspace?.activeSession : null}
+                ws={workspace}
+                unread={props.unread}
+                onAttach={(sessionId) => props.onOpenSession({ workspace: group.cwd, sessionId })}
+                onDelete={(sessionId) => props.onDelete({ cwd: group.cwd, sessionId })}
+                onRename={(sessionId) => props.onRename({ cwd: group.cwd, sessionId })}
+                onLoadMore={() => void loadMoreGroup(group)}
+                isLoadingMore={loadingMoreGroups.has(group.key)}
+                loadMoreError={failedMoreGroups.has(group.key)}
+                onNewSession={() => props.onNewSession(group.cwd)}
+                newSessionDisabled={false}
+                search={search}
+            />
         );
     };
 

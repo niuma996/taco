@@ -20,21 +20,44 @@ type WorktreesClientWithActions = WorktreesClient &
 
 export interface WorktreesPaneProps {
     client: WorktreesClientWithActions;
-    cwd: string;
+    cwd: string | null;
     activeCwd: string;
+    onOpenFolder?: () => void;
     onOpenWorkspace: (cwd: string) => void;
 }
 
 export function WorktreesPane(props: WorktreesPaneProps) {
+    const { t } = useT();
+    if (!props.cwd) {
+        return (
+            <div className="worktrees-pane worktrees-pane-empty-scope">
+                <div className="pane-empty">
+                    <GitFork size={24} aria-hidden="true" />
+                    <p>{t("worktrees.noLocalWorkspace")}</p>
+                    {props.onOpenFolder && (
+                        <Button size="sm" variant="primary" onClick={props.onOpenFolder}>
+                            {t("worktrees.openLocalWorkspace")}
+                        </Button>
+                    )}
+                </div>
+            </div>
+        );
+    }
     return (
         <WorktreesPaneContent
             key={JSON.stringify([...clientQueryKey(props.client), props.cwd, props.activeCwd])}
             {...props}
+            cwd={props.cwd}
         />
     );
 }
 
-function WorktreesPaneContent({ client, cwd, activeCwd, onOpenWorkspace }: WorktreesPaneProps) {
+function WorktreesPaneContent({
+    client,
+    cwd,
+    activeCwd,
+    onOpenWorkspace,
+}: WorktreesPaneProps & { cwd: string }) {
     const { t } = useT();
     const inventory = useWorktrees(client, cwd);
     const [creating, setCreating] = useState(false);
@@ -92,7 +115,11 @@ function WorktreesPaneContent({ client, cwd, activeCwd, onOpenWorkspace }: Workt
         setRemoveBusy(true);
         setRemoveError(null);
         try {
-            await client.worktreeRemove({ workspace: asWorkspaceId(cwd), path: removing.path });
+            await client.worktreeRemove({
+                workspace: asWorkspaceId(cwd),
+                path: removing.path,
+                ...(removing.stale ? { forgetMissing: true } : {}),
+            });
             if (!current.current) return;
             const removingCurrent =
                 removing.path === activeCwd ||
@@ -150,7 +177,12 @@ function WorktreesPaneContent({ client, cwd, activeCwd, onOpenWorkspace }: Workt
                     <Button
                         size="sm"
                         variant="primary"
-                        disabled={!repository || repository.isBare}
+                        disabled={!repository?.headOid || repository.isBare}
+                        title={
+                            repository && !repository.headOid
+                                ? t("worktrees.commitFirst")
+                                : undefined
+                        }
                         onClick={openCreate}
                     >
                         <Plus size={14} aria-hidden="true" />
@@ -216,16 +248,23 @@ function WorktreesPaneContent({ client, cwd, activeCwd, onOpenWorkspace }: Workt
                                             {t(tree.bare ? "git.bare" : "worktrees.unavailable")}
                                         </span>
                                     )}
-                                    {!primary && tree.managed && (
+                                    {!primary && (tree.managed || tree.stale) && (
                                         <IconButton
-                                            aria-label={`${t("worktrees.remove")} ${label}`}
+                                            aria-label={`${t(tree.stale ? "worktrees.forget" : "worktrees.remove")} ${label}`}
                                             title={
                                                 tree.locked
                                                     ? tree.lockReason
-                                                    : t("worktrees.remove")
+                                                    : t(
+                                                          tree.stale
+                                                              ? "worktrees.forget"
+                                                              : "worktrees.remove",
+                                                      )
                                             }
                                             tone="danger"
-                                            disabled={tree.locked || !worktreeAvailable(tree)}
+                                            disabled={
+                                                tree.locked ||
+                                                (!tree.stale && !worktreeAvailable(tree))
+                                            }
                                             onClick={() => {
                                                 setRemoving(tree);
                                                 setRemoveError(null);
@@ -293,9 +332,16 @@ function WorktreesPaneContent({ client, cwd, activeCwd, onOpenWorkspace }: Workt
             </Modal>
             <ConfirmModal
                 open={removing !== null}
-                title={t("worktrees.removeTitle")}
-                message={t("worktrees.removeDescription", { path: removing?.path ?? "" })}
-                confirmLabel={removeBusy ? t("worktrees.removing") : t("worktrees.removeConfirm")}
+                title={t(removing?.stale ? "worktrees.forget" : "worktrees.removeTitle")}
+                message={t(
+                    removing?.stale ? "worktrees.forgetDescription" : "worktrees.removeDescription",
+                    { path: removing?.path ?? "" },
+                )}
+                confirmLabel={
+                    removeBusy
+                        ? t("worktrees.removing")
+                        : t(removing?.stale ? "worktrees.forget" : "worktrees.removeConfirm")
+                }
                 cancelLabel={t("worktrees.cancel")}
                 tone="danger"
                 busy={removeBusy}

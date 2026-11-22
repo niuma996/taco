@@ -8,6 +8,24 @@ import {
 import { createEmptyWorkspace } from "../../src/lib/chat/workspaceReducer";
 
 describe("conversation navigation models", () => {
+    it("keeps confirmed linked worktrees out of top-level workspace groups", () => {
+        const groups = buildWorkspaceGroups(
+            {
+                "/repo/main": createEmptyWorkspace("/repo/main"),
+                "/repo/main/.taco/worktrees/settings-visual-refinement": createEmptyWorkspace(
+                    "/repo/main/.taco/worktrees/settings-visual-refinement",
+                ),
+            },
+            {},
+            new Set(["/repo/main/.taco/worktrees/settings-visual-refinement"]),
+        );
+
+        assert.deepEqual(
+            groups.map((group) => group.cwd),
+            ["/repo/main"],
+        );
+    });
+
     it("preserves the persisted workspace order independently of session activity", () => {
         const groups = buildWorkspaceGroups({
             "/repo/two": {

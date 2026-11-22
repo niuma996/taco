@@ -1,4 +1,10 @@
-import type { GitWorktreeInfo, WorktreeListResult } from "@taco-ai/protocol";
+import type { GitInspectResult, GitWorktreeInfo, WorktreeListResult } from "@taco-ai/protocol";
+
+/** Git canonicalizes both paths; linked checkouts have per-worktree metadata. */
+export function isLinkedWorktree(data: GitInspectResult): boolean {
+    if (data.status !== "repository" || data.repository.isBare) return false;
+    return data.repository.gitDir !== data.repository.commonDir;
+}
 
 export function mainWorktreePath(data: Extract<WorktreeListResult, { status: "repository" }>) {
     // Git lists the main entry first; checkoutRoot belongs to the queried checkout.

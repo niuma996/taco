@@ -47,7 +47,12 @@ export function WorkspaceWorktreePicker(props: WorkspaceWorktreePickerProps) {
                     sideOffset={6}
                     collisionPadding={8}
                 >
-                    <DropdownMenu.RadioGroup value={props.cwd} onValueChange={props.onSelect}>
+                    <DropdownMenu.RadioGroup
+                        value={props.cwd}
+                        onValueChange={(path) => {
+                            if (path !== props.cwd) props.onSelect(path);
+                        }}
+                    >
                         {worktrees.map((tree) => {
                             const isLocal = tree.path === mainPath;
                             const label = isLocal

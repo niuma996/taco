@@ -20,7 +20,7 @@
     "submitAnswersFailed": "提交回答失败：{{error}}",
     "newInWorkspace": "新建此工作区的聊天",
     "newChat": "新聊天",
-    "switchWorkspace": "切换工作区",
+    "switchWorkspace": "选择新会话的工作目录",
     "searching": "搜索中…",
     "noSearchResults": "没有匹配的聊天",
     "searchFailed": "搜索失败",
@@ -1337,11 +1337,13 @@
     "loadFailed": "无法加载工作树：{{error}}",
     "refresh": "刷新工作树",
     "empty": "此仓库还没有工作树。",
-    "local": "本地目录",
+    "local": "主工作目录",
     "current": "当前",
     "locked": "已锁定",
     "unavailable": "不可用",
-    "switch": "切换本地目录或工作树",
+    "switch": "切换主工作目录或工作树",
+    "noLocalWorkspace": "当前没有选中的本地工作区。请先打开一个本地目录，再管理它的工作树。",
+    "openLocalWorkspace": "打开本地工作区",
     "manage": "管理工作树",
     "open": "打开",
     "create": "新建工作树",
@@ -1359,6 +1361,9 @@
     "removeTitle": "删除工作树？",
     "removeDescription": "删除 {{path}}？对应分支和会话历史将保留。",
     "removeConfirm": "删除工作树",
-    "removing": "正在删除…"
+    "removing": "正在删除…",
+    "commitFirst": "先创建一次 Git 提交，再新建工作树",
+    "forget": "清除缺失记录",
+    "forgetDescription": "{{path}} 的工作目录已不存在。仅清除 Taco 中的记录，保留 Git 分支和会话历史。"
   }
 }

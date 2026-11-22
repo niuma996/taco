@@ -433,3 +433,42 @@ footer.input > .ui-collapse[data-open="true"] {
     color: var(--danger);
     overflow-wrap: anywhere;
 }
+
+.workspace-worktree-picker {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    flex: 0 1 auto;
+    min-width: 0;
+    max-width: min(46%, 220px);
+    padding: 0;
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--fg-dim);
+    font: inherit;
+    line-height: inherit;
+    white-space: nowrap;
+    cursor: pointer;
+}
+.workspace-worktree-picker span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.workspace-worktree-picker svg {
+    flex: 0 0 auto;
+    opacity: 0.75;
+}
+.workspace-worktree-picker svg:last-child {
+    opacity: 0.5;
+}
+.workspace-worktree-picker:hover,
+.workspace-worktree-picker[data-state="open"] {
+    background: transparent;
+    color: var(--fg);
+}
+.workspace-worktree-picker:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+}

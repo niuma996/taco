@@ -42,9 +42,11 @@ function workspaceLabel(cwd: string): string {
 export function buildWorkspaceGroups(
     workspaces: Record<string, WorkspaceState>,
     unread: Readonly<Record<string, true>> = {},
+    hiddenWorkspaceCwds: ReadonlySet<string> = new Set(),
 ): WorkspaceConversationGroup[] {
     return Object.values(workspaces)
         .filter((workspace) => !workspace.cwd.startsWith("im://"))
+        .filter((workspace) => !hiddenWorkspaceCwds.has(workspace.cwd))
         .map<WorkspaceConversationGroup>((workspace) => ({
             key: `workspace:${workspace.cwd}`,
             kind: "workspace",
