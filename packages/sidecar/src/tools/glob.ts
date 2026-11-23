@@ -17,6 +17,7 @@ import type {
     TextContent,
 } from "../runtime/pi/types.ts";
 import { getOrThrow } from "../runtime/pi/values.ts";
+import { statPathTarget } from "./pathTarget.ts";
 import { BASE_SAFE_DEFAULT_IGNORES } from "./safeDefaults.ts";
 
 export type GlobTool = AgentHarnessTool<ExecutionToolContext>;
@@ -31,7 +32,8 @@ const globSchema = Type.Object({
     pattern: Type.String({ description: "Glob pattern, e.g. 'src/**/*.ts'." }),
     path: Type.Optional(
         Type.String({
-            description: "Root dir to search (relative to cwd or absolute). Defaults to cwd.",
+            description:
+                "Directory to search in (relative to cwd or absolute). Must be a directory. Defaults to cwd.",
         }),
     ),
 });
@@ -62,8 +64,12 @@ export function createGlobTool(): GlobTool {
             // pi 0.85 carries cancellation on the Context rather than a
             // dedicated parameter.
             const signal = piContext.abortSignal;
-            const cwdResult = await env.absolutePath(params.path ?? ".", piContext);
-            const root = getOrThrow(cwdResult);
+            const resolved = getOrThrow(await env.absolutePath(params.path ?? ".", piContext));
+            const target = await statPathTarget(resolved);
+            if (target.kind === "file") {
+                throw new Error(`glob path must be a directory: ${resolved}`);
+            }
+            const root = target.root;
 
             let matches = await fg(params.pattern, {
                 cwd: root,

@@ -27,6 +27,7 @@ import type {
     TextContent,
 } from "../runtime/pi/types.ts";
 import { getOrThrow } from "../runtime/pi/values.ts";
+import { type PathTarget, statPathTarget } from "./pathTarget.ts";
 import { BASE_SAFE_DEFAULT_IGNORES } from "./safeDefaults.ts";
 
 export type GrepTool = AgentHarnessTool<ExecutionToolContext>;
@@ -76,12 +77,13 @@ const grepSchema = Type.Object({
     path: Type.Optional(
         Type.String({
             description:
-                "Root directory to search in (relative to cwd or absolute). Defaults to cwd.",
+                "Directory to search in, or a single file to search (relative to cwd or absolute). Defaults to cwd.",
         }),
     ),
     glob: Type.Optional(
         Type.String({
-            description: "Filename filter in gitignore-style glob, e.g. '*.ts' or 'src/**/*.js'.",
+            description:
+                "Filename filter in gitignore-style glob, e.g. '*.ts' or 'src/**/*.js'. Ignored when `path` is a file.",
         }),
     ),
     ignoreCase: Type.Optional(Type.Boolean({ description: "Case-insensitive match." })),
@@ -146,11 +148,12 @@ async function buildRipgrepIgnoreContent(
 }
 
 async function runRipgrep(
-    root: string,
+    target: PathTarget,
     params: GrepToolInput,
     ignoreContent: string,
     piContext: Context,
 ): Promise<SearchResult> {
+    const root = target.root;
     const tempDir = await mkdtemp(join(tmpdir(), "taco-grep-ignore-"));
     try {
         const ignorePath = join(tempDir, "ignore");
@@ -171,12 +174,17 @@ async function runRipgrep(
             "--max-columns-preview",
         ];
         if (params.ignoreCase) args.push("--ignore-case");
-        if (params.glob) args.push("--glob", params.glob);
+        // An explicit file is the whole search target; a glob filter can only
+        // subtract it, and the tool contract says the glob is ignored there.
+        if (params.glob && target.kind === "directory") args.push("--glob", params.glob);
         // ripgrep prints `src\a.ts` on Windows; the tool contract (and the
         // fallback path) report forward slashes, so pin the separator. POSIX
         // already defaults to "/", so this only changes Windows output.
         if (process.platform === "win32") args.push("--path-separator=/");
-        args.push("--", params.pattern, ".");
+        // With an explicit file argument ripgrep omits the filename prefix by
+        // default, which would break the `file:line: text` contract.
+        if (target.kind === "file") args.push("--with-filename");
+        args.push("--", params.pattern, target.kind === "file" ? target.name : ".");
         const result = searchResult();
         const child = spawn("rg", args, {
             cwd: root,
@@ -190,7 +198,12 @@ async function runRipgrep(
             stderr += chunk.slice(0, 8_192 - stderr.length);
         });
         const completion = new Promise<void>((resolve, reject) => {
-            child.once("error", reject);
+            // Spawn failures arrive on this event with a bare errno (e.g.
+            // "spawn rg ENOENT" when root vanished between stat and spawn).
+            // Attach the path so the model can tell what to fix.
+            child.once("error", (error) =>
+                reject(new Error(`failed to start ripgrep in ${root}: ${error.message}`)),
+            );
             child.once("close", (code, signal) => {
                 if (code === null || code > 1) {
                     reject(new Error(stderr || `ripgrep failed${signal ? ` (${signal})` : ""}`));
@@ -261,25 +274,55 @@ async function readSearchFile(
     }
 }
 
+async function searchFileInto(
+    result: SearchResult,
+    rel: string,
+    absPath: string,
+    buffer: Buffer,
+    re: RegExp,
+    piContext: Context,
+): Promise<void> {
+    const { text, oversized } = await readSearchFile(absPath, buffer);
+    if (oversized) result.skippedLarge++;
+    if (text === undefined) return;
+    if (piContext.abortSignal?.aborted) throw new Error("Operation aborted");
+    // Split on CRLF too. Not platform-gated: a CRLF file reaches a POSIX
+    // checkout as well (an autocrlf checkout, a file copied from Windows),
+    // and the trailing `\r` would ride along in every match row and break
+    // `$` anchors.
+    const lines = text.split(/\r?\n/);
+    for (let i = 0; i < lines.length; i++) {
+        if (re.test(lines[i])) appendMatch(result, `${rel}:${i + 1}:${lines[i]}`);
+    }
+}
+
 async function runFallback(
     env: ExecutionToolContext["env"],
-    root: string,
+    target: PathTarget,
     params: GrepToolInput,
     piContext: Context,
 ): Promise<SearchResult> {
-    const ig = await loadIgnoreFilter(env, root, piContext);
     const re = new RegExp(params.pattern, params.ignoreCase ? "i" : "");
+    const result = searchResult();
+    const buffer = Buffer.alloc(MAX_FILE_BYTES + 1);
 
+    if (target.kind === "file") {
+        // A named file is searched even when a .gitignore would exclude it:
+        // the caller pointed at it explicitly. `glob` is ignored here.
+        const absPath = resolve(target.root, target.name);
+        await searchFileInto(result, target.name, absPath, buffer, re, piContext);
+        return result;
+    }
+
+    const ig = await loadIgnoreFilter(env, target.root, piContext);
     const files = fg.stream(searchPattern(params), {
-        cwd: root,
+        cwd: target.root,
         dot: true,
         onlyFiles: true,
         followSymbolicLinks: false,
         suppressErrors: true,
         ignore: SAFE_DEFAULT_IGNORES,
     });
-    const result = searchResult();
-    const buffer = Buffer.alloc(MAX_FILE_BYTES + 1);
     for await (const entry of files) {
         if (piContext.abortSignal?.aborted) throw new Error("Operation aborted");
         // The walker yields `src\a.ts` on Windows; normalise so .gitignore
@@ -288,19 +331,7 @@ async function runFallback(
         const rel =
             process.platform === "win32" ? String(entry).replace(/\\/g, "/") : String(entry);
         if (ig?.(rel)) continue;
-        const absPath = resolve(root, rel);
-        const { text, oversized } = await readSearchFile(absPath, buffer);
-        if (oversized) result.skippedLarge++;
-        if (text === undefined) continue;
-        if (piContext.abortSignal?.aborted) throw new Error("Operation aborted");
-        // Split on CRLF too. Not platform-gated: a CRLF file reaches a POSIX
-        // checkout as well (an autocrlf checkout, a file copied from Windows),
-        // and the trailing `\r` would ride along in every match row and break
-        // `$` anchors.
-        const lines = text.split(/\r?\n/);
-        for (let i = 0; i < lines.length; i++) {
-            if (re.test(lines[i])) appendMatch(result, `${rel}:${i + 1}:${lines[i]}`);
-        }
+        await searchFileInto(result, rel, resolve(target.root, rel), buffer, re, piContext);
     }
     return result;
 }
@@ -310,12 +341,12 @@ export function createGrepTool(): GrepTool {
         name: "grep",
         label: "grep",
         description:
-            "Search file contents by regex or literal string. Respects .gitignore and excludes safe defaults (node_modules/.git/dist/build/.next) and binary files. Without ripgrep, files over 2 MiB are skipped with a notice. Returns matching 'file:line: text' rows, up to 300 lines / 50k chars; long lines are clipped.",
+            "Search file contents by regex or literal string. `path` may be a directory or a single file. Respects .gitignore and excludes safe defaults (node_modules/.git/dist/build/.next) and binary files. Without ripgrep, files over 2 MiB are skipped with a notice. Returns matching 'file:line: text' rows, up to 300 lines / 50k chars; long lines are clipped.",
         parameters: grepSchema,
         executionMode: "parallel",
         taco: {
             promptSummary:
-                "Regex / literal search across files — the tool for finding *where* a symbol or string appears; use `glob` to find files by name instead. Honours .gitignore and skips node_modules/.git/dist/build/.next and binary files. Without ripgrep, files over 2 MiB are skipped with a notice. Returns up to 300 `file:line: text` rows (50k chars total, long lines clipped) — if you hit the cap, narrow the pattern or `glob`. Safe to issue in parallel in the same turn.",
+                "Regex / literal search across files — the tool for finding *where* a symbol or string appears; use `glob` to find files by name instead. `path` may be a directory or a single file. Honours .gitignore and skips node_modules/.git/dist/build/.next and binary files. Without ripgrep, files over 2 MiB are skipped with a notice. Returns up to 300 `file:line: text` rows (50k chars total, long lines clipped) — if you hit the cap, narrow the pattern or `glob`. Safe to issue in parallel in the same turn.",
             mutates: false,
         },
         async execute(
@@ -329,13 +360,14 @@ export function createGrepTool(): GrepTool {
             // pi 0.85 carries cancellation on the Context rather than a
             // dedicated parameter.
             const signal = piContext.abortSignal;
-            const cwdResult = await env.absolutePath(params.path ?? ".", piContext);
-            const root = getOrThrow(cwdResult);
-            const ignoreContent = await buildRipgrepIgnoreContent(env, root, piContext);
+            const target = await statPathTarget(
+                getOrThrow(await env.absolutePath(params.path ?? ".", piContext)),
+            );
+            const ignoreContent = await buildRipgrepIgnoreContent(env, target.root, piContext);
 
             const result = hasRipgrep()
-                ? await runRipgrep(root, params, ignoreContent, piContext)
-                : await runFallback(env, root, params, piContext);
+                ? await runRipgrep(target, params, ignoreContent, piContext)
+                : await runFallback(env, target, params, piContext);
 
             if (signal?.aborted) throw new Error("Operation aborted");
             const shown = result.lines;

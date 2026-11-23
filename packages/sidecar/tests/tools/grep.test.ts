@@ -140,14 +140,18 @@ test("ripgrep reads ignore rules from a portable temporary file and cleans it up
     assert.equal(existsSync(ignorePath), false);
 });
 
-test("ripgrep spawn failures surface as errors instead of no matches", async (t) => {
+test("ripgrep spawn failures include the search root alongside the errno", async (t) => {
     const { dir, env, tool } = await fixture(t, true);
     let ignorePath = "";
     mockSpawn(t, (args) => {
         ignorePath = args[args.indexOf("--ignore-file") + 1];
         return realSpawn(join(dir, "missing-rg"), []);
     });
-    await assert.rejects(invokeTool(tool, { pattern: "needle" }, { env }), /ENOENT/);
+    await assert.rejects(invokeTool(tool, { pattern: "needle" }, { env }), (error: Error) => {
+        assert.match(error.message, /ENOENT/);
+        assert.ok(error.message.includes(dir), `missing root in: ${error.message}`);
+        return true;
+    });
     assert.ok(ignorePath);
     assert.equal(existsSync(ignorePath), false);
 });
@@ -295,3 +299,73 @@ test("real ripgrep honors anchored ignore rules with a temporary ignore file", a
     assert.match(result.content[0].text, /src\/visible.ts:1:-needle/);
     assert.doesNotMatch(result.content[0].text, /hidden.ts/);
 });
+
+test("fallback searches a single file path, ignoring glob and gitignore", async (t) => {
+    const { dir, env, tool } = await fixture(t);
+    mkdirSync(join(dir, "src"));
+    writeFileSync(join(dir, ".gitignore"), "*.ts\n");
+    writeFileSync(join(dir, "src", "one.ts"), "needle\n");
+    writeFileSync(join(dir, "src", "two.ts"), "needle\n");
+    const result = grepResult(
+        await invokeTool(
+            tool,
+            { pattern: "needle", path: join(dir, "src", "one.ts"), glob: "*.md" },
+            { env },
+        ),
+    );
+    assert.equal(result.content[0].text, "one.ts:1:needle");
+    assert.equal(result.details?.count, 1);
+});
+
+test("ripgrep searches a file from its parent directory with a filename prefix", async (t) => {
+    const { dir, env, tool } = await fixture(t, true);
+    mkdirSync(join(dir, "src"));
+    writeFileSync(join(dir, "src", "one.ts"), "needle\n");
+    let received: string[] = [];
+    let receivedCwd = "";
+    mockSpawn(t, (args, options) => {
+        received = args;
+        receivedCwd = String(options.cwd);
+        return realSpawn(process.execPath, ["-e", "process.stdout.write('one.ts:1:needle\\n')"]);
+    });
+    const result = grepResult(
+        await invokeTool(
+            tool,
+            { pattern: "needle", path: join(dir, "src", "one.ts"), glob: "*.md" },
+            { env },
+        ),
+    );
+    assert.equal(receivedCwd, join(dir, "src"));
+    assert.ok(received.includes("--with-filename"));
+    assert.equal(received.at(-2), "needle");
+    assert.equal(received.at(-1), "one.ts");
+    assert.ok(!received.includes("--glob"));
+    assert.equal(result.content[0].text, "one.ts:1:needle");
+});
+
+test("real ripgrep prefixes the filename when searching a single file", async (t) => {
+    if (realSpawnSync("rg", ["--version"]).status !== 0) {
+        t.skip("ripgrep is not installed");
+        return;
+    }
+    const { dir, env, spawn, tool } = await fixture(t, true);
+    spawn.mock.mockImplementation(realSpawnSync);
+    mkdirSync(join(dir, "src"));
+    writeFileSync(join(dir, "src", "one.ts"), "needle\n");
+    writeFileSync(join(dir, "src", "two.ts"), "needle\n");
+    const result = grepResult(
+        await invokeTool(tool, { pattern: "needle", path: join(dir, "src", "one.ts") }, { env }),
+    );
+    assert.equal(result.content[0].text, "one.ts:1:needle");
+    assert.equal(result.details?.count, 1);
+});
+
+for (const ripgrep of [false, true]) {
+    test(`${ripgrep ? "ripgrep" : "fallback"} rejects a search path that does not exist`, async (t) => {
+        const { dir, env, tool } = await fixture(t, ripgrep);
+        await assert.rejects(
+            invokeTool(tool, { pattern: "needle", path: join(dir, "missing") }, { env }),
+            /path does not exist/,
+        );
+    });
+}
