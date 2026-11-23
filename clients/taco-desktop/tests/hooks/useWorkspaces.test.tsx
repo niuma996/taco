@@ -18,11 +18,13 @@ import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { type ReactNode, useEffect } from "react";
 import { afterEach, beforeEach, describe, it, type Mock, vi } from "vitest";
 import { ToastProvider } from "../../src/components/ToastProvider";
+import { useSaveConfigPatch } from "../../src/hooks/primitives/useSaveConfigPatch";
 import { useConversationDrafts } from "../../src/hooks/useConversationDrafts";
 import { useWorkspaces } from "../../src/hooks/useWorkspaces";
 import { createSessionState } from "../../src/lib/chat/sessionState";
 import { createEmptyWorkspace, type WorkspaceState } from "../../src/lib/chat/workspaceReducer";
 import type { TacoClient } from "../../src/lib/clients/tacoClient.ts";
+import { applyGlobalConfig, getGlobalConfig } from "../../src/lib/globalConfig";
 import { SessionPushProcessor } from "../../src/lib/sessionPushProcessor";
 import { bindSessionSynchronization } from "../../src/lib/sessionSynchronization";
 
@@ -371,6 +373,63 @@ describe("useWorkspacesFirstTurn.test.tsx", () => {
         beforeEach(() => {
             localStorage.clear();
         });
+
+        for (const saved of [true, false]) {
+            it(`sends the first message before the approval mode save settles (saved: ${saved})`, async () => {
+                const originalConfig = getGlobalConfig().global;
+                let finishSave!: () => void;
+                const client = {
+                    ...makeClient(),
+                    settingsWrite: vi.fn(
+                        () =>
+                            new Promise((resolve, reject) => {
+                                finishSave = () =>
+                                    saved
+                                        ? resolve({
+                                              global: { commandPermissions: { mode: "ask" } },
+                                          })
+                                        : reject(new Error("settings unavailable"));
+                            }),
+                    ),
+                };
+                const { result } = await renderSeeded(client);
+                const { result: settings } = renderHook(() =>
+                    useSaveConfigPatch(client as unknown as TacoClient),
+                );
+                const target = result.current.composerTarget;
+                assert.equal(target.kind, "draft");
+                let save!: Promise<void>;
+                let submit!: ReturnType<typeof result.current.submitPrompt>;
+                let outcome: Awaited<typeof submit> | undefined;
+                await act(async () => {
+                    save = settings.current
+                        .save({
+                            kind: "global",
+                            patch: { commandPermissionsEdit: { mode: "ask" } },
+                        })
+                        .catch(() => {});
+                    submit = result.current.submitPrompt(target, "hello", undefined, undefined);
+                    void submit.then((value) => {
+                        outcome = value;
+                    });
+                });
+                try {
+                    assert.equal(settings.current.saving, true);
+                    assert.equal(outcome, "accepted");
+                    assert.equal(client.sessionCreate.mock.calls.length, 1);
+                    assert.equal(client.sessionPrompt.mock.calls.length, 1);
+                } finally {
+                    await act(async () => {
+                        finishSave();
+                        await save;
+                        await submit;
+                        applyGlobalConfig(originalConfig);
+                    });
+                }
+                assert.equal(settings.current.error, saved ? null : "settings unavailable");
+                assert.equal(client.sessionPrompt.mock.calls.length, 1);
+            });
+        }
 
         it("keeps the composer target stable through renders and workspace updates", async () => {
             const { result, rerender } = await renderSeeded(makeClient());

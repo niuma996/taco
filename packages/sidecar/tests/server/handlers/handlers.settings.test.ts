@@ -2,7 +2,7 @@ import { strict as assert } from "node:assert";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, before, beforeEach, describe, it } from "node:test";
-import { asWorkspaceId } from "@taco-ai/protocol";
+import { asSessionId, asWorkspaceId } from "@taco-ai/protocol";
 import { readGlobalConfig, saveGlobalConfig } from "../../../src/config/config.ts";
 import { ProviderKeyStore } from "../../../src/runtime/models/providerKeyStore.ts";
 import { maskKey, toView } from "../../../src/server/handlers/settings.ts";
@@ -76,6 +76,24 @@ describe("settings.write on a real server", () => {
         assert.deepEqual(readGlobalConfig().customProviders, []);
         assert.equal(server.buildProvider(CUSTOM_B.id), undefined);
         assert.equal(existing.models.getModel(CUSTOM_B.id, "other-model"), undefined);
+    });
+
+    it("uses the saved approval mode for new chats in an already-open workspace", async () => {
+        await write({ commandPermissions: { mode: "ask", deny: ["ls -a"] } });
+        const ws = await workspace();
+        const first = asSessionId("first-chat");
+        await ws.createSession(first);
+        const evaluate = (sessionId: typeof first, command: string) =>
+            ws.permissionBroker.evaluateAndRequest({ sessionId, command, toolCallId: "test" });
+        assert.equal((await evaluate(first, "ls")).evaluation.behavior, "ask");
+
+        await write({ commandPermissionsEdit: { mode: "auto" } });
+        const next = asSessionId("next-chat");
+        await ws.createSession(next);
+        assert.equal((await evaluate(next, "ls")).approved, true);
+        const denylisted = await evaluate(next, "ls -a");
+        assert.equal(denylisted.evaluation.behavior, "ask");
+        assert.equal(denylisted.evaluation.matchedList, "deny");
     });
 
     it("announces custom-provider changes once and ignores identical writes", async (t) => {

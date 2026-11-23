@@ -103,7 +103,7 @@
     "stateSyncRecovering": "Synchronizing conversation…",
     "executionUnknown": "Run status is not yet confirmed",
     "historyTruncated": "Only recent messages are shown",
-    "commandPermissionModeHint": "Applies to all chats. Manual: approve commands outside the allowlist. Automatic: approve denylisted and built-in high-risk commands. The denylist takes priority.",
+    "commandPermissionModeHint": "Applies to local chats after saving. Manual: approve commands outside the allowlist. Automatic: approve denylisted and built-in high-risk commands. The denylist takes priority.",
     "placeholderRunning": "Assistant is running… type here to steer",
     "placeholderIdle": "Type a prompt and hit Enter… (paste or attach images)",
     "placeholderCompacting": "Compressing context — please wait…",

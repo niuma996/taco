@@ -103,7 +103,7 @@
     "stateSyncRecovering": "正在同步会话…",
     "executionUnknown": "运行状态待确认",
     "historyTruncated": "仅显示最近部分消息",
-    "commandPermissionModeHint": "对所有聊天生效。手动审批：白名单之外需确认。自动审批：黑名单和内置高风险命令需确认。黑名单优先。",
+    "commandPermissionModeHint": "保存成功后对本地聊天生效。手动审批：白名单之外需确认。自动审批：黑名单和内置高风险命令需确认。黑名单优先。",
     "placeholderRunning": "助手运行中…可直接插话",
     "placeholderIdle": "输入提示后按回车…(可粘贴或附加图片)",
     "placeholderCompacting": "压缩上下文中,请稍候…",
