@@ -7,29 +7,30 @@ import type { ThemePreference } from "../../lib/clientSettings.ts";
  * set up in `wireI18nToClientSettings()`.
  */
 
+import { Languages, Monitor, Moon, Sun } from "lucide-react";
+import type { ReactNode } from "react";
 import { useGlobalConfig } from "../../hooks/primitives/useGlobalConfig.ts";
 import { useSaveConfigPatch } from "../../hooks/primitives/useSaveConfigPatch.ts";
 import { SUPPORTED_UI_LANGUAGES, type SupportedUiLanguage } from "../../i18n/index.ts";
 import { useT, useUiLanguage } from "../../i18n/useI18n.ts";
 import type { TacoClient } from "../../lib/clients/tacoClient.ts";
-import { Select } from "../ui/Select.tsx";
+import { OptionCardGroup } from "../ui/OptionCardGroup.tsx";
 
 export interface AppearanceTabProps {
     client: TacoClient;
 }
 
-// Theme options — translated via i18n; renders as "Light / Dark / Follow system" in
-// English and "Light / Dark / Follow system" in Chinese.
 const OPTIONS: ReadonlyArray<{
     value: ThemePreference;
     labelKey:
         | "settings.themeOptionLight"
         | "settings.themeOptionDark"
         | "settings.themeOptionSystem";
+    icon: ReactNode;
 }> = [
-    { value: "light", labelKey: "settings.themeOptionLight" },
-    { value: "dark", labelKey: "settings.themeOptionDark" },
-    { value: "system", labelKey: "settings.themeOptionSystem" },
+    { value: "light", labelKey: "settings.themeOptionLight", icon: <Sun size={18} /> },
+    { value: "dark", labelKey: "settings.themeOptionDark", icon: <Moon size={18} /> },
+    { value: "system", labelKey: "settings.themeOptionSystem", icon: <Monitor size={18} /> },
 ];
 
 export function AppearanceTab(props: AppearanceTabProps) {
@@ -49,37 +50,43 @@ export function AppearanceTab(props: AppearanceTabProps) {
             <h3>{t("settings.appearanceTitle")}</h3>
             <p className="settings-tab-desc">{t("settings.appearanceDesc")}</p>
             <div className="settings-row">
-                <Select
+                <OptionCardGroup<ThemePreference>
                     value={current}
-                    options={OPTIONS.map((o) => ({ value: o.value, label: t(o.labelKey) }))}
-                    onValueChange={(v) =>
-                        void save({ kind: "client", patch: { theme: v as ThemePreference } })
-                    }
+                    items={OPTIONS.map((option) => ({
+                        value: option.value,
+                        label: t(option.labelKey),
+                        icon: option.icon,
+                    }))}
+                    onValueChange={(next) => void save({ kind: "client", patch: { theme: next } })}
                     disabled={saving}
                     label={t("app.theme")}
                 />
-                {saving && <span className="settings-saving">{t("app.saving")}</span>}
             </div>
             <section className="settings-tab-subsection">
                 <h3>{t("settings.languageTitle")}</h3>
                 <p className="settings-tab-desc">{t("settings.languageDesc")}</p>
                 <div className="settings-row">
-                    <Select
+                    <OptionCardGroup<SupportedUiLanguage>
                         value={uiLanguage}
-                        options={SUPPORTED_UI_LANGUAGES.map((lng) => ({
-                            value: lng,
+                        items={SUPPORTED_UI_LANGUAGES.map((language) => ({
+                            value: language,
                             label:
-                                lng === "zh"
+                                language === "zh"
                                     ? t("settings.languageOptionZh")
                                     : t("settings.languageOptionEn"),
+                            icon: <Languages size={18} />,
                         }))}
-                        onValueChange={(v) => void saveLanguage(v as SupportedUiLanguage)}
+                        onValueChange={(next) => void saveLanguage(next)}
                         disabled={saving}
                         label={t("app.language")}
                     />
-                    {saving && <span className="settings-saving">{t("app.saving")}</span>}
                 </div>
             </section>
+            {saving && (
+                <div className="settings-row">
+                    <span className="settings-saving">{t("app.saving")}</span>
+                </div>
+            )}
             {error && (
                 <div className="error-banner" role="alert">
                     {error}

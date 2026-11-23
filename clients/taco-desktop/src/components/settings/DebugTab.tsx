@@ -142,11 +142,7 @@ export function DebugTab(props: DebugTabProps) {
             <p className="settings-tab-desc debug-restart-hint">{t("settings.restartHint")}</p>
             {!restarted && (
                 <div className="settings-row">
-                    <Button
-                        variant="primary"
-                        onClick={() => void applyAndRestart()}
-                        disabled={restarting}
-                    >
+                    <Button loading={restarting} onClick={() => void applyAndRestart()}>
                         {restarting ? t("settings.restarting") : t("settings.applyAndRestart")}
                     </Button>
                 </div>
