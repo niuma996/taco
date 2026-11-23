@@ -29,8 +29,17 @@ describe("worktree turn capability", () => {
         assert.match(guidance, /high-risk/i);
         assert.match(guidance, /parallel/i);
         assert.match(guidance, /read-only|questions/i);
-        assert.match(guidance, /already in a Git worktree/i);
+        assert.match(guidance, /already running in a linked worktree/i);
         assert.match(guidance, /uncommitted changes are not copied/i);
         assert.match(guidance, /worktreeStart/);
+    });
+
+    it("distinguishes linked checkouts from the main checkout and from Git status", () => {
+        const guidance = buildWorktreeGuidance();
+        assert.match(guidance, /the main checkout is not a linked worktree/i);
+        assert.match(
+            guidance,
+            /working_tree_changes tag, when present, lists uncommitted files in the current checkout/i,
+        );
     });
 });

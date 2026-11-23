@@ -73,7 +73,7 @@ export function createWorktreeHandoff(options: HandoffOptions) {
                         sessionId,
                         `${tagWrap(
                             "worktree_handoff",
-                            "This session is already the managed worktree created for the user's request. Execute the underlying task in this checkout. The original request for isolation is satisfied; do not create another worktree unless the user explicitly asks for an additional separate one.",
+                            "This session is already running in the Taco-managed linked Git worktree created for the user's request. Execute the task in this checkout. The original request for isolation is satisfied; do not create another worktree unless the user explicitly asks for an additional one.",
                         )}\n\n${request.task}`,
                         request.images,
                         staged,

@@ -24,7 +24,7 @@ describe("worktree runtime boundaries", () => {
         try {
             assert.ok(runtime.parentInstructionsBlock.includes("Main rules"));
             assert.ok(runtime.systemPrompt.includes(`Project root: ${main}`));
-            assert.ok(runtime.systemPrompt.includes("Git worktree: yes"));
+            assert.ok(runtime.systemPrompt.includes("Linked Git worktree: yes"));
             const environment = runtime.systemPrompt.match(
                 /<environment>[\s\S]*?<\/environment>/,
             )?.[0];

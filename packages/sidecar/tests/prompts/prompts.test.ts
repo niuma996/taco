@@ -647,7 +647,7 @@ describe("buildEnvironmentPrompt", () => {
         };
         const out = buildEnvironmentPrompt({ env: worktreeEnv });
         assert.ok(out.includes("Project root: /tmp/main&lt;&amp;&gt;"));
-        assert.ok(out.includes("Git worktree: yes"));
+        assert.ok(out.includes("Linked Git worktree: yes"));
         assert.ok(out.includes("Working directory: /tmp/work&lt;&amp;&gt;"));
         assert.ok(out.includes("shell&lt;/environment&gt;"));
         assert.ok(out.includes("feature&lt;&amp;&gt;"));

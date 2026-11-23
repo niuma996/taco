@@ -32,12 +32,12 @@ export function createWorktreeStartTool(): TacoTool {
         name: "worktreeStart",
         label: "Start isolated worktree task",
         description:
-            "Create a Taco-managed Git worktree and hand the user's implementation task to a new session there. Use for complex, high-risk, or parallel-conflicting writes, or an explicit isolation request. The source session keeps its cwd. The new checkout contains committed content only.",
+            "Create a Taco-managed linked Git worktree (a separate checkout) and hand the user's implementation task to a new session there. Use for complex, high-risk, or parallel-conflicting writes, or an explicit isolation request. The source session stays in its current checkout. The new checkout starts from a commit; no uncommitted source changes are copied.",
         parameters: schema,
         executionMode: "sequential",
         taco: {
             promptSummary:
-                "Create a managed worktree and continue the task in a new session there. For substantial, risky, or parallel-conflicting writes; not for read-only work or routine small edits.",
+                "Create a linked Git worktree and continue the task in a new session there. For substantial, risky, or parallel-conflicting writes; not for read-only work or routine small edits.",
             mutates: true,
         },
         async execute(_toolCallId, params: Input, _onUpdate, context, _invocation, piContext) {

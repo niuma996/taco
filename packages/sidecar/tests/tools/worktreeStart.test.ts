@@ -15,6 +15,13 @@ const context = {
 } as unknown as TacoToolContext;
 
 describe("worktreeStart", () => {
+    it("describes the handoff as a separate checkout that excludes uncommitted changes", () => {
+        const tool = createWorktreeStartTool();
+        assert.match(tool.description, /linked Git worktree \(a separate checkout\)/);
+        assert.match(tool.description, /no uncommitted source changes are copied/i);
+        assert.match(tool.taco?.promptSummary ?? "", /linked Git worktree/);
+    });
+
     it("hands the current user task and committed attachments to the managed service", async () => {
         let received: unknown;
         const tool = createWorktreeStartTool();

@@ -46,7 +46,7 @@ export function buildEnvironmentPrompt(options: BuildEnvironmentPromptOptions): 
         lines.push(`- Working directory: ${escapeTagText(env.cwd)}`);
         if (env.isWorktree) {
             if (env.projectRoot) lines.push(`- Project root: ${escapeTagText(env.projectRoot)}`);
-            lines.push("- Git worktree: yes");
+            lines.push("- Linked Git worktree: yes");
         }
         lines.push(
             `- Platform: ${escapeTagText(platformLabel(env.platform))}, default shell: ${escapeTagText(env.shell)}`,
