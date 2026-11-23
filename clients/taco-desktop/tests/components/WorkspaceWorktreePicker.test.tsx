@@ -1,5 +1,8 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { type RefObject, useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { Modal } from "../../src/components/ui/Modal";
 import { WorkspaceWorktreePicker } from "../../src/components/WorkspaceWorktreePicker";
 import en from "../../src/i18n/locales/en.json";
 import zh from "../../src/i18n/locales/zh.json";
@@ -172,7 +175,7 @@ describe("WorkspaceWorktreePicker", () => {
             expect(onSelect).not.toHaveBeenCalled();
         },
     );
-    it("opens the management view and labels the current worktree", async () => {
+    it("opens the worktree manager and labels the current worktree", async () => {
         const { onManage } = setup("/project/.taco/worktrees/review", {
             ...list,
             repository: {
@@ -189,5 +192,41 @@ describe("WorkspaceWorktreePicker", () => {
         });
         fireEvent.click(await screen.findByRole("menuitem", { name: "worktrees.manage" }));
         expect(onManage).toHaveBeenCalledTimes(1);
+    });
+
+    it("returns focus to the trigger after the manager closes", async () => {
+        const client = { worktreeList: vi.fn().mockResolvedValue(list) };
+        const triggerRef: RefObject<HTMLButtonElement | null> = { current: null };
+        function Harness() {
+            const [open, setOpen] = useState(false);
+            return (
+                <>
+                    <WorkspaceWorktreePicker
+                        client={client}
+                        cwd="/project"
+                        onSelect={vi.fn()}
+                        onManage={() => setOpen(true)}
+                        triggerRef={triggerRef}
+                    />
+                    <Modal
+                        open={open}
+                        onClose={() => setOpen(false)}
+                        title="Worktrees"
+                        restoreFocusTo={() => triggerRef.current}
+                    >
+                        body
+                    </Modal>
+                </>
+            );
+        }
+        render(<Harness />, { wrapper: queryWrapper().wrapper });
+        const trigger = await screen.findByRole("button", { name: "worktrees.switch" });
+        fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false });
+        fireEvent.click(await screen.findByRole("menuitem", { name: "worktrees.manage" }));
+
+        await screen.findByRole("dialog");
+        await userEvent.setup({ delay: null }).keyboard("{Escape}");
+        await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+        expect(document.activeElement).toBe(trigger);
     });
 });

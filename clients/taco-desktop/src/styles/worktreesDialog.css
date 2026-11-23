@@ -1,25 +1,24 @@
-/* worktreesPane.css — repository inventory and directory navigation. */
+/* worktreesDialog.css — repository inventory and directory navigation. */
 
-.worktrees-pane {
-    display: flex;
-    flex: 1;
-    min-height: 0;
-    flex-direction: column;
-    overflow: hidden;
+/* The dialog owns the scroll, so the list lays out as a plain block. */
+.worktrees-dialog {
+    /* Base .ui-modal sets only max-width; the explicit width gives the
+       worktree paths room without stretching across the viewport. */
+    width: 36rem;
+    max-width: calc(100vw - 4rem);
 }
 
-.worktrees-pane .pane-header-title {
-    display: flex;
+.worktrees-dialog-title {
+    display: inline-flex;
     align-items: center;
     gap: var(--space-2);
 }
 
 .worktrees-list {
-    flex: 1;
-    min-height: 0;
     margin: 0;
-    padding: var(--space-3);
-    overflow-y: auto;
+    /* The modal body sits flush against its border, so the rows need their
+       own inset — otherwise the hover and current backgrounds touch it. */
+    padding: var(--space-1) var(--space-2);
     list-style: none;
 }
 
@@ -28,6 +27,10 @@
     align-items: center;
     gap: var(--space-2);
     border-bottom: 1px solid var(--border-subtle);
+}
+
+.worktree-item:last-child {
+    border-bottom: none;
 }
 
 .worktree-item[data-current="true"] {

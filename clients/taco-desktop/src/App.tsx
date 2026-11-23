@@ -41,6 +41,7 @@ import { WorkspaceAssociationsDialog } from "./components/WorkspaceAssociationsD
 import { type WorkspaceMode, WorkspaceModeTabs } from "./components/WorkspaceModeTabs";
 import { WorkspaceRemovalDialog } from "./components/WorkspaceRemovalDialog";
 import { WorkspaceWorktreePicker } from "./components/WorkspaceWorktreePicker";
+import { WorktreesDialog } from "./components/WorktreesDialog";
 import { useChatInputState } from "./hooks/primitives/useChatInputState";
 import { useStableCallback } from "./hooks/primitives/useStableCallback";
 import { useTheme } from "./hooks/primitives/useTheme";
@@ -96,7 +97,6 @@ import { ChatPane } from "./views/ChatPane";
 import { CheckpointsPane } from "./views/CheckpointsPane";
 import { ConversationSidebar } from "./views/ConversationSidebar";
 import { WorkPane } from "./views/WorkPane";
-import { WorktreesPane } from "./views/WorktreesPane";
 
 const EMPTY_MESSAGES: UiMessage[] = [];
 const EMPTY_BACKGROUND_SUBAGENTS: SessionState["backgroundSubagents"] = {};
@@ -139,7 +139,6 @@ export default function App() {
         | "plugins"
         | "channels"
         | "work"
-        | "worktrees"
         | "memory"
         | "checkpoints"
         | "schedules"
@@ -195,8 +194,11 @@ export default function App() {
     );
 
     const activeSid = ws?.activeSession;
-    const worktreeCwd = activeCwd && !activeCwd.startsWith(IM_CWD_PREFIX) ? activeCwd : null;
     const owningWorkspaceCwd = useOwningWorkspaceCwd(client, activeCwd);
+    // Worktree management is repository-scoped, so it opens as a dialog over
+    // the chat instead of holding a permanent activity-rail slot.
+    const [worktreesOpen, setWorktreesOpen] = useState(false);
+    const worktreeTriggerRef = useRef<HTMLButtonElement | null>(null);
     const activeRuntime = activeSid ? getSessionState(ws, activeSid) : undefined;
     const messages = activeRuntime?.messages ?? EMPTY_MESSAGES;
     const backgroundSubagents = activeRuntime?.backgroundSubagents ?? EMPTY_BACKGROUND_SUBAGENTS;
@@ -852,15 +854,18 @@ export default function App() {
                         updateError={lifecycle.updateStatus.error}
                         onCheckUpdate={lifecycle.runUpdateCheck}
                     />
-                    {mainView === "worktrees" && (
-                        <WorktreesPane
-                            client={client}
-                            cwd={worktreeCwd}
-                            activeCwd={activeCwd}
-                            onOpenWorkspace={requestNewSession}
-                            onOpenFolder={() => void browseAndOpen()}
-                        />
-                    )}
+                    <WorktreesDialog
+                        client={client}
+                        cwd={owningWorkspaceCwd}
+                        activeCwd={activeCwd}
+                        open={worktreesOpen}
+                        restoreFocusTo={() => worktreeTriggerRef.current}
+                        onClose={() => setWorktreesOpen(false)}
+                        onOpenWorkspace={(path) => {
+                            setWorktreesOpen(false);
+                            requestNewSession(path);
+                        }}
+                    />
                     {mainView === "chat" ? (
                         <>
                             {/* Always mounted — collapse is a CSS width
@@ -932,7 +937,8 @@ export default function App() {
                                                         client={client}
                                                         cwd={activeCwd}
                                                         onSelect={requestNewSession}
-                                                        onManage={() => setMainView("worktrees")}
+                                                        onManage={() => setWorktreesOpen(true)}
+                                                        triggerRef={worktreeTriggerRef}
                                                     />
                                                 ) : undefined
                                             }

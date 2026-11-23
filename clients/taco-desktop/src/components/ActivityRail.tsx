@@ -2,7 +2,7 @@
  * ActivityRail — narrow left icon column spanning the full window height.
  *
  * Entries: chat (default) then agents/skills/tools/plugins/channels in
- * the top group, work and worktrees above the "more" button, a single "more" button
+ * the top group, work above the "more" button, a single "more" button
  * collapsing memory/checkpoints/schedules/mcp, and settings pinned to the
  * bottom group. Top padding is driven by --rail-top-padding (36px on macOS
  * to align with the traffic-light center).
@@ -18,7 +18,6 @@ import {
     Check,
     ClipboardList,
     Ellipsis,
-    GitFork,
     MessageSquare,
     MessagesCircle,
     NotebookDot,
@@ -41,7 +40,6 @@ type ActivityView =
     | "plugins"
     | "channels"
     | "work"
-    | "worktrees"
     | "memory"
     | "checkpoints"
     | "schedules"
@@ -70,7 +68,6 @@ const TOP_ITEMS: ReadonlyArray<ItemDef> = [
     { type: "plugins", icon: Puzzle, labelKey: "activity.plugins" },
     { type: "channels", icon: MessagesCircle, labelKey: "activity.channels" },
     { type: "work", icon: ClipboardList, labelKey: "activity.work" },
-    { type: "worktrees", icon: GitFork, labelKey: "activity.worktrees" },
 ];
 
 const OVERFLOW_ITEMS: ReadonlyArray<ItemDef> = [

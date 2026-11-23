@@ -1,5 +1,6 @@
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import { Check, ChevronDown, Folder, GitFork, Settings2 } from "lucide-react";
+import type { RefObject } from "react";
 import { useWorktrees, type WorktreesClient } from "../hooks/useWorktrees";
 import { useT } from "../i18n/useI18n";
 import { lastSegment } from "../lib/workspaceStorage";
@@ -10,6 +11,10 @@ export interface WorkspaceWorktreePickerProps {
     cwd: string;
     onSelect: (cwd: string) => void;
     onManage: () => void;
+    /** Receives the trigger button. The caller hands it back to the focus
+     *  when the manager closes: the menu item that opened the manager is
+     *  gone by then, so it cannot restore focus itself. */
+    triggerRef?: RefObject<HTMLButtonElement | null>;
 }
 
 /** Switches a new chat between its main checkout and the repository's worktrees. */
@@ -26,6 +31,7 @@ export function WorkspaceWorktreePicker(props: WorkspaceWorktreePickerProps) {
             <DropdownMenu.Trigger asChild>
                 <button
                     type="button"
+                    ref={props.triggerRef}
                     className="workspace-worktree-picker"
                     aria-label={t("worktrees.switch")}
                     title={props.cwd}

@@ -272,8 +272,7 @@
     "skillsNoMatch": "No skills match your filter.",
     "systemPromptLabel": "System Prompt",
     "loading": "Loading…",
-    "badgeUpdateAvailable": "Update available",
-    "worktrees": "Worktrees"
+    "badgeUpdateAvailable": "Update available"
   },
   "configChange": {
     "risk": "Config change"
@@ -1335,6 +1334,7 @@
   },
   "worktrees": {
     "title": "Worktrees",
+    "scope": "Worktrees of {{path}}",
     "loading": "Loading worktrees…",
     "loadFailed": "Cannot load worktrees: {{error}}",
     "refresh": "Refresh worktrees",
@@ -1344,13 +1344,9 @@
     "locked": "Locked",
     "unavailable": "Unavailable",
     "switch": "Switch main checkout or worktree",
-    "noLocalWorkspace": "No local workspace is selected. Open a local directory before managing its worktrees.",
-    "openLocalWorkspace": "Open local workspace",
     "manage": "Manage worktrees",
     "open": "Open",
     "create": "New worktree",
-    "createTitle": "Create a worktree",
-    "createDescription": "Create an isolated checkout in .taco/worktrees.",
     "name": "Name",
     "base": "Base",
     "baseHint": "Use the current checkout or the repository default branch.",

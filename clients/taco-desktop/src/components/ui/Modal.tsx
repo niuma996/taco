@@ -31,6 +31,12 @@ export interface ModalProps {
     bare?: boolean;
     /** Radix open-autofocus hook, for dialogs that focus a specific control. */
     onOpenAutoFocus?: (event: Event) => void;
+    /** Resolves the element that takes focus when the dialog closes. Defaults to
+     *  whatever was focused when it opened — but a dialog opened from a dropdown
+     *  item captures an element that unmounts with the menu, so callers that know
+     *  a stable target pass a resolver here. Resolved at close time, because the
+     *  target may remount while the dialog is open. */
+    restoreFocusTo?: () => Element | null;
     /** Right-aligned button row; omit when children render their own actions. */
     actions?: ReactNode;
     children?: ReactNode;
@@ -47,6 +53,7 @@ export function Modal(props: ModalProps) {
         backdropClassName,
         bare = false,
         onOpenAutoFocus,
+        restoreFocusTo,
         actions,
         children,
     } = props;
@@ -54,7 +61,7 @@ export function Modal(props: ModalProps) {
     // controlled without one (close would otherwise dump focus on <body>).
     // Capture the pre-open element at open-autofocus time — before Radix
     // moves focus into the dialog — and restore it on close.
-    const restoreFocusTo = useRef<Element | null>(null);
+    const restoreFocusToRef = useRef<Element | null>(null);
     return (
         <Dialog.Root
             open={open}
@@ -73,12 +80,16 @@ export function Modal(props: ModalProps) {
                 <Dialog.Content
                     className={className ? `ui-modal ${className}` : "ui-modal"}
                     onOpenAutoFocus={(e) => {
-                        restoreFocusTo.current = document.activeElement;
+                        restoreFocusToRef.current = document.activeElement;
                         onOpenAutoFocus?.(e);
                     }}
                     onCloseAutoFocus={(e) => {
                         e.preventDefault();
-                        (restoreFocusTo.current as HTMLElement | null)?.focus();
+                        const preferred = restoreFocusTo?.();
+                        const target = preferred?.isConnected
+                            ? preferred
+                            : restoreFocusToRef.current;
+                        if (target?.isConnected) (target as HTMLElement).focus();
                     }}
                 >
                     {/* `bare` dialogs draw their own header, but Radix still needs

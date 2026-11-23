@@ -272,8 +272,7 @@
     "skillsNoMatch": "没有匹配的技能。",
     "systemPromptLabel": "系统提示词",
     "loading": "加载中…",
-    "badgeUpdateAvailable": "有可用更新",
-    "worktrees": "工作树"
+    "badgeUpdateAvailable": "有可用更新"
   },
   "configChange": {
     "risk": "配置变更"
@@ -1335,6 +1334,7 @@
   },
   "worktrees": {
     "title": "工作树",
+    "scope": "{{path}} 的工作树",
     "loading": "正在加载工作树…",
     "loadFailed": "无法加载工作树：{{error}}",
     "refresh": "刷新工作树",
@@ -1344,13 +1344,9 @@
     "locked": "已锁定",
     "unavailable": "不可用",
     "switch": "切换主工作目录或工作树",
-    "noLocalWorkspace": "当前没有选中的本地工作区。请先打开一个本地目录，再管理它的工作树。",
-    "openLocalWorkspace": "打开本地工作区",
     "manage": "管理工作树",
     "open": "打开",
     "create": "新建工作树",
-    "createTitle": "创建工作树",
-    "createDescription": "在 .taco/worktrees 中创建独立工作目录。",
     "name": "名称",
     "base": "基础分支",
     "baseHint": "从当前目录或仓库默认分支创建。",

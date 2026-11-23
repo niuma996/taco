@@ -760,6 +760,9 @@
 .ui-modal-actions {
     flex-shrink: 0;
     display: flex;
+    /* Icon buttons have a fixed box (22px) while text buttons stretch to their
+       min-height (32px); center so their contents share one baseline. */
+    align-items: center;
     justify-content: flex-end;
     gap: var(--space-2);
     flex-wrap: wrap;

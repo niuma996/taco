@@ -1,7 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { WorktreesDialog } from "../../src/components/WorktreesDialog";
 import * as useI18n from "../../src/i18n/useI18n";
-import { WorktreesPane } from "../../src/views/WorktreesPane";
 import { queryWrapper } from "../helpers/queryWrapper";
 
 vi.mock("@tauri-apps/plugin-opener", () => ({ openUrl: vi.fn().mockResolvedValue(undefined) }));
@@ -68,10 +68,11 @@ function setup(overrides: { list?: unknown; cwd?: string; activeCwd?: string } =
         client,
         cwd: overrides.cwd ?? "/project",
         activeCwd: overrides.activeCwd ?? linkedPath,
-        onOpenFolder: vi.fn(),
+        open: true,
+        onClose: vi.fn(),
         onOpenWorkspace,
     };
-    const view = render(<WorktreesPane {...props} />, { wrapper });
+    const view = render(<WorktreesDialog {...props} />, { wrapper });
     return { client, onOpenWorkspace, props, view };
 }
 afterEach(() => {
@@ -79,30 +80,12 @@ afterEach(() => {
     vi.clearAllMocks();
 });
 
-describe("WorktreesPane", () => {
-    it("does not infer a repository while the active conversation is a channel", () => {
-        const onOpenFolder = vi.fn();
-        const client = {
-            worktreeList: vi.fn(),
-            worktreeCreate: vi.fn(),
-            worktreeRemove: vi.fn(),
-            gitInspect: vi.fn(),
-            gitInit: vi.fn(),
-        };
-        render(
-            <WorktreesPane
-                client={client}
-                cwd={null}
-                activeCwd="im://channel/chat"
-                onOpenFolder={onOpenFolder}
-                onOpenWorkspace={vi.fn()}
-            />,
-            { wrapper: queryWrapper().wrapper },
-        );
-        expect(screen.getByText("worktrees.noLocalWorkspace")).toBeTruthy();
-        expect(client.worktreeList).not.toHaveBeenCalled();
-        fireEvent.click(screen.getByRole("button", { name: "worktrees.openLocalWorkspace" }));
-        expect(onOpenFolder).toHaveBeenCalledOnce();
+describe("WorktreesDialog", () => {
+    it("scopes the list to the owning repository", async () => {
+        setup();
+        expect(await screen.findByText("/project")).toBeTruthy();
+        expect(screen.getByText("worktree-review")).toBeTruthy();
+        expect(screen.getByText("worktrees.scope")).toBeTruthy();
     });
 
     it("lists the checkout and managed worktrees and opens either location", async () => {
@@ -117,7 +100,7 @@ describe("WorktreesPane", () => {
         expect(screen.queryByRole("button", { name: "worktrees.remove /project" })).toBeNull();
     });
 
-    it("creates a worktree from HEAD and opens it", async () => {
+    it("creates a worktree from the head of the worktree the user is on", async () => {
         const { client, onOpenWorkspace } = setup();
         await screen.findByRole("button", { name: "worktrees.open worktree-review" });
         fireEvent.click(screen.getByRole("button", { name: "worktrees.create" }));
@@ -127,12 +110,29 @@ describe("WorktreesPane", () => {
         fireEvent.click(await screen.findByRole("button", { name: "worktrees.createConfirm" }));
         await waitFor(() =>
             expect(client.worktreeCreate).toHaveBeenCalledExactlyOnceWith({
-                workspace: "/project",
+                // The base is the HEAD the user is looking at, so the create
+                // call is anchored to their worktree rather than the repo root.
+                workspace: linkedPath,
                 name: "review-2",
                 base: "head",
             }),
         );
         expect(onOpenWorkspace).toHaveBeenCalledExactlyOnceWith("/project/.taco/worktrees/review");
+    });
+
+    it("moves focus into the create form and back to the trigger button", async () => {
+        setup();
+        await screen.findByRole("button", { name: "worktrees.open worktrees.local" });
+        fireEvent.click(screen.getByRole("button", { name: "worktrees.create" }));
+        const input = await screen.findByLabelText("worktrees.name");
+        await waitFor(() => expect(document.activeElement).toBe(input));
+
+        fireEvent.click(screen.getByRole("button", { name: "worktrees.cancel" }));
+        await waitFor(() =>
+            expect(document.activeElement).toBe(
+                screen.getByRole("button", { name: "worktrees.create" }),
+            ),
+        );
     });
 
     it("opens a successfully created worktree even if inventory refresh fails", async () => {
@@ -151,7 +151,7 @@ describe("WorktreesPane", () => {
                 "/project/.taco/worktrees/review",
             ),
         );
-        expect(screen.queryByRole("dialog")).toBeNull();
+        expect(screen.queryByLabelText("worktrees.name")).toBeNull();
     });
 
     it("returns to the main checkout after removing the current worktree", async () => {
@@ -161,7 +161,6 @@ describe("WorktreesPane", () => {
         );
         fireEvent.click(await screen.findByRole("button", { name: "worktrees.removeConfirm" }));
         await waitFor(() => expect(onOpenWorkspace).toHaveBeenCalledExactlyOnceWith("/project"));
-        expect(screen.queryByRole("dialog")).toBeNull();
     });
 
     it("labels the main checkout and allows removing the queried linked worktree", async () => {
@@ -169,7 +168,7 @@ describe("WorktreesPane", () => {
         const local = await screen.findByRole("button", { name: "worktrees.open worktrees.local" });
         expect(local.getAttribute("data-worktree-open")).toBe("/project");
         fireEvent.click(screen.getByRole("button", { name: "worktrees.remove worktree-review" }));
-        fireEvent.click(screen.getByRole("button", { name: "worktrees.removeConfirm" }));
+        fireEvent.click(await screen.findByRole("button", { name: "worktrees.removeConfirm" }));
         await waitFor(() => expect(onOpenWorkspace).toHaveBeenCalledExactlyOnceWith("/project"));
         expect(client.worktreeRemove).toHaveBeenCalledExactlyOnceWith({
             workspace: linkedPath,
@@ -369,8 +368,17 @@ describe("WorktreesPane", () => {
                 fireEvent.click(screen.getByRole("button", { name: "worktrees.removeConfirm" }));
             }
             await waitFor(() => expect(complete).toBeTypeOf("function"));
-            view.rerender(<WorktreesPane {...props} cwd="/other" activeCwd="/other" />);
-            expect(screen.queryByRole("dialog")).toBeNull();
+            view.rerender(<WorktreesDialog {...props} cwd="/other" activeCwd="/other" />);
+            // The scope change remounts the content, so the pending step goes
+            // away with it: the create form closes and the confirmation closes.
+            expect(screen.getAllByRole("dialog")).toHaveLength(1);
+            if (action === "create") {
+                expect(screen.queryByLabelText("worktrees.name")).toBeNull();
+            } else {
+                expect(
+                    screen.queryByRole("button", { name: "worktrees.removeConfirm" }),
+                ).toBeNull();
+            }
             await act(async () => complete());
             expect(onOpenWorkspace).not.toHaveBeenCalled();
         },
@@ -390,13 +398,17 @@ describe("WorktreesPane", () => {
             await screen.findByRole("button", { name: "worktrees.remove worktree-review" }),
         );
         fireEvent.click(screen.getByRole("button", { name: "worktrees.removeConfirm" }));
-        view.rerender(<WorktreesPane {...props} activeCwd="/other" />);
+        view.rerender(<WorktreesDialog {...props} activeCwd="/other" />);
         await act(async () => complete());
         expect(onOpenWorkspace).not.toHaveBeenCalled();
+        // The tree is gone either way: the confirmation closes and the list
+        // refreshes, so the row cannot linger as a second, failing delete.
+        expect(screen.queryByRole("button", { name: "worktrees.removeConfirm" })).toBeNull();
+        await waitFor(() => expect(client.worktreeList).toHaveBeenCalledTimes(2));
     });
 
-    it("does not navigate when a create finishes after the pane unmounts", async () => {
-        const { client, onOpenWorkspace, view } = setup();
+    it("does not navigate to a created worktree when the active workspace changes during creation", async () => {
+        const { client, onOpenWorkspace, props, view } = setup();
         let complete!: () => void;
         client.worktreeCreate.mockImplementationOnce(
             () =>
@@ -416,7 +428,36 @@ describe("WorktreesPane", () => {
             target: { value: "review" },
         });
         fireEvent.click(screen.getByRole("button", { name: "worktrees.createConfirm" }));
-        view.unmount();
+        view.rerender(<WorktreesDialog {...props} activeCwd="/other" />);
+        await act(async () => complete());
+        // The tree exists, but the user already moved on — do not pull them
+        // back into it.
+        expect(client.worktreeCreate).toHaveBeenCalledTimes(1);
+        expect(onOpenWorkspace).not.toHaveBeenCalled();
+    });
+
+    it("does not navigate when a create finishes after the dialog closes", async () => {
+        const { client, onOpenWorkspace, props, view } = setup();
+        let complete!: () => void;
+        client.worktreeCreate.mockImplementationOnce(
+            () =>
+                new Promise((resolve) => {
+                    complete = () =>
+                        resolve({
+                            path: linkedPath,
+                            branch: "worktree-review",
+                            headOid: "abc",
+                            managed: true,
+                        });
+                }),
+        );
+        await screen.findByText("/project");
+        fireEvent.click(screen.getByRole("button", { name: "worktrees.create" }));
+        fireEvent.change(await screen.findByLabelText("worktrees.name"), {
+            target: { value: "review" },
+        });
+        fireEvent.click(screen.getByRole("button", { name: "worktrees.createConfirm" }));
+        view.rerender(<WorktreesDialog {...props} open={false} />);
         await act(async () => complete());
         expect(onOpenWorkspace).not.toHaveBeenCalled();
     });
@@ -429,7 +470,9 @@ describe("WorktreesPane", () => {
         );
         fireEvent.click(screen.getByRole("button", { name: "worktrees.removeConfirm" }));
         expect((await screen.findByRole("alert")).textContent).toContain("active session");
-        expect(screen.getByRole("dialog")).toBeTruthy();
+        // The confirmation is the topmost dialog, so it is the only one the
+        // accessibility tree exposes while it stays open.
+        expect(screen.getAllByRole("dialog")).toHaveLength(1);
         expect(screen.getByRole("button", { name: "worktrees.removeConfirm" })).toBeTruthy();
     });
 
