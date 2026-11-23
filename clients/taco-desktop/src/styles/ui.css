@@ -299,6 +299,92 @@
     border-color: var(--danger);
 }
 
+/* ── OptionCardGroup ── */
+
+.ui-option-card-group {
+    display: grid;
+    width: 100%;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, var(--option-card-min-width)), 1fr));
+    gap: var(--space-2-5);
+}
+
+.ui-option-card {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    min-width: 0;
+    padding: var(--space-3) var(--space-4);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    background: var(--bg-elevated);
+    color: var(--fg);
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+    transition:
+        background-color var(--motion-duration-fast) var(--motion-ease-standard),
+        border-color var(--motion-duration-fast) var(--motion-ease-standard);
+}
+
+.ui-option-card:hover:not(:disabled) {
+    background: var(--hover-overlay);
+}
+
+.ui-option-card[aria-checked="true"] {
+    border-color: var(--accent-border);
+    background: var(--accent-bg-hover);
+}
+
+.ui-option-card:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+}
+
+.ui-option-card:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.ui-option-card__icon {
+    display: inline-flex;
+    flex: 0 0 var(--space-5);
+    align-items: center;
+    justify-content: center;
+    color: var(--fg-dim);
+}
+
+.ui-option-card[aria-checked="true"] .ui-option-card__icon,
+.ui-option-card[aria-checked="true"] .ui-option-card__check {
+    color: var(--accent);
+}
+
+.ui-option-card__text {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    gap: var(--space-0-5);
+    min-width: 0;
+}
+
+.ui-option-card__label {
+    font-size: var(--text-base);
+    font-weight: var(--weight-medium);
+    line-height: var(--leading-normal);
+}
+
+.ui-option-card__description {
+    color: var(--fg-dim);
+    font-size: var(--text-xs);
+    line-height: var(--leading-normal);
+}
+
+.ui-option-card__check {
+    display: inline-flex;
+    flex: 0 0 var(--space-4);
+    align-items: center;
+    justify-content: center;
+}
+
 /* ── IconButton ── */
 /* One icon-only control for the whole app. The transparent 1px border keeps
    ghost and outline the same outer size, so swapping variant never shifts

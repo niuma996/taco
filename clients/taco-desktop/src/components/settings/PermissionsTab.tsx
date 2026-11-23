@@ -1,5 +1,5 @@
-import { BUILTIN_READ_ONLY_COMMANDS, type CommandPermissionMode } from "@taco-ai/protocol";
-import { X } from "lucide-react";
+import { BUILTIN_READ_ONLY_COMMANDS } from "@taco-ai/protocol";
+import { CircleCheck, ShieldCheck, X } from "lucide-react";
 import { useState } from "react";
 import { useGlobalConfig } from "../../hooks/primitives/useGlobalConfig.ts";
 import { useSaveConfigPatch } from "../../hooks/primitives/useSaveConfigPatch.ts";
@@ -10,6 +10,7 @@ import { validatePermissionRuleClient } from "../../lib/commandPermissionRuleCli
 import { ConfirmModal } from "../ConfirmModal.tsx";
 import { Button } from "../ui/Button";
 import { IconButton } from "../ui/IconButton.tsx";
+import { OptionCardGroup } from "../ui/OptionCardGroup.tsx";
 import { Select } from "../ui/Select.tsx";
 import { TextInput } from "../ui/TextInput.tsx";
 
@@ -70,24 +71,34 @@ export function PermissionsTab({ client }: PermissionsTabProps) {
         <section className="settings-tab">
             <h3>{t("settings.permissionsTitle")}</h3>
             <p className="settings-tab-desc">{t("settings.permissionsDesc")}</p>
-            <div className="settings-row">
-                <span className="permissions-mode-label">{t("settings.permissionsMode")}</span>
-                <Select
+            <div className="settings-row-block">
+                <div className="settings-row-label permissions-mode-label">
+                    {t("settings.permissionsMode")}
+                </div>
+                <OptionCardGroup<"ask" | "auto">
                     value={safeMode}
                     disabled={saving}
-                    onValueChange={(v) =>
+                    onValueChange={(mode) =>
                         void save({
                             kind: "global",
                             patch: {
-                                commandPermissionsEdit: {
-                                    mode: v as CommandPermissionMode,
-                                },
+                                commandPermissionsEdit: { mode },
                             },
                         }).catch(() => {})
                     }
-                    options={[
-                        { value: "ask", label: t("settings.permissionsAsk") },
-                        { value: "auto", label: t("settings.permissionsAuto") },
+                    items={[
+                        {
+                            value: "ask",
+                            label: t("settings.permissionsAsk"),
+                            description: t("settings.permissionsAskDesc"),
+                            icon: <ShieldCheck size={18} />,
+                        },
+                        {
+                            value: "auto",
+                            label: t("settings.permissionsAuto"),
+                            description: t("settings.permissionsAutoDesc"),
+                            icon: <CircleCheck size={18} />,
+                        },
                     ]}
                     label={t("settings.permissionsMode")}
                 />

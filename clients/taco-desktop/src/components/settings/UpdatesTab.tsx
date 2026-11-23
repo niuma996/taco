@@ -120,21 +120,21 @@ export function UpdatesTab(props: UpdatesTabProps) {
             </div>
             <div className="settings-row-block">
                 <Button
-                    variant="primary"
                     className="updates-tab-action"
-                    disabled={props.checking}
+                    loading={props.checking}
                     onClick={props.onCheck}
                 >
-                    {t("settings.updates.checkNow")}
+                    {props.checking
+                        ? t("settings.updates.statusChecking")
+                        : t("settings.updates.checkNow")}
                 </Button>
             </div>
             <h3 className="settings-tab-h3-secondary">{t("settings.updates.advancedTitle")}</h3>
             <p className="settings-tab-desc">{t("settings.updates.advancedDesc")}</p>
             <div className="settings-row-block">
                 <Button
-                    variant="primary"
                     className="updates-tab-action"
-                    disabled={restarting}
+                    loading={restarting}
                     onClick={() => void restartSidecar()}
                 >
                     {restarting

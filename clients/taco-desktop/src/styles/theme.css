@@ -202,6 +202,7 @@
     --catalog-card-min-width: 12rem;
     --section-gap: var(--space-6);
     --settings-content-width: 45rem;
+    --option-card-min-width: 8rem;
     /* Brand mark on a provider card: the square the vendored SVG is painted in. */
     --provider-icon-size: 1.35rem;
     --provider-status-ready: #34d399;

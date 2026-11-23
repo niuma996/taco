@@ -17,6 +17,7 @@ import userEvent from "@testing-library/user-event";
 import { createRef, type RefObject, useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { Button } from "../../../src/components/ui/Button";
 import { Modal, type ModalProps } from "../../../src/components/ui/Modal";
 import { Select } from "../../../src/components/ui/Select";
 import { Slider } from "../../../src/components/ui/Slider";
@@ -25,6 +26,32 @@ import { Tag } from "../../../src/components/ui/Tag";
 import { TextInput } from "../../../src/components/ui/TextInput";
 
 afterEach(cleanup);
+
+// ─── Button ─────────────────────────────────────────────────────────────────
+
+describe("Button", () => {
+    it("exposes loading through aria-busy and prevents duplicate activation", async () => {
+        const onClick = vi.fn();
+        render(
+            <Button loading onClick={onClick}>
+                Restart
+            </Button>,
+        );
+        const button = screen.getByRole("button", { name: "Restart" });
+        expect((button as HTMLButtonElement).disabled).toBe(true);
+        expect(button.getAttribute("aria-busy")).toBe("true");
+        expect(button.querySelector("svg.spin")).not.toBeNull();
+        await userEvent.setup({ delay: null }).click(button);
+        expect(onClick).not.toHaveBeenCalled();
+    });
+
+    it("preserves a caller-provided aria-busy when loading is not set", () => {
+        render(<Button aria-busy={true}>Remove</Button>);
+        expect(screen.getByRole("button", { name: "Remove" }).getAttribute("aria-busy")).toBe(
+            "true",
+        );
+    });
+});
 
 // ─── Modal ──────────────────────────────────────────────────────────────────
 

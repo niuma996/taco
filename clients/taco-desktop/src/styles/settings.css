@@ -139,6 +139,10 @@
 .settings-row-block {
     display: block;
 }
+.permissions-mode-label {
+    display: block;
+    margin-bottom: var(--space-2);
+}
 .permission-rule-list {
     list-style: none;
     padding: 0;

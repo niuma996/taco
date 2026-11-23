@@ -28,6 +28,34 @@ beforeEach(async () => {
     } as unknown as TacoClient);
 });
 
+describe("PermissionsTab — approval mode", () => {
+    it("changes the approval mode through option cards", async () => {
+        const settingsWrite = vi.fn(async () => ({
+            global: { commandPermissions: { mode: "ask", allow: [], deny: [] } },
+        }));
+        const client = {
+            settingsGet: async () => ({
+                global: { commandPermissions: { mode: "auto", allow: [], deny: [] } },
+            }),
+            settingsWrite,
+        } as unknown as TacoClient;
+        const { loadGlobalConfig } = await import("../../../src/lib/globalConfig");
+        await loadGlobalConfig(client);
+        render(<PermissionsTab client={client} />);
+
+        expect(screen.queryByRole("combobox", { name: "settings.permissionsMode" })).toBeNull();
+        await userEvent
+            .setup({ delay: null })
+            .click(screen.getByRole("radio", { name: /settings.permissionsAsk/ }));
+
+        await waitFor(() =>
+            expect(settingsWrite).toHaveBeenCalledWith({
+                global: { commandPermissionsEdit: { mode: "ask" } },
+            }),
+        );
+    });
+});
+
 describe("PermissionsTab — removeRule", () => {
     it("removes the rule from the rendered list after settings.write succeeds", async () => {
         const settingsWrite = vi.fn().mockResolvedValue({
@@ -191,5 +219,27 @@ describe("PermissionsTab — built-in allowlist", () => {
             expect(screen.getByText("settings.permissionsBuiltinAllowListDesc")).toBeTruthy();
             expect(screen.queryAllByRole("button", { name: REMOVE })).toHaveLength(0);
         });
+    });
+});
+
+describe("PermissionsTab — empty rule lists", () => {
+    it("shows the empty state for both allow and deny lists", async () => {
+        const client = {
+            settingsGet: async () => ({
+                global: { commandPermissions: { mode: "ask", allow: [], deny: [] } },
+            }),
+            settingsWrite: vi.fn(),
+        } as unknown as TacoClient;
+        const { loadGlobalConfig } = await import("../../../src/lib/globalConfig");
+        await loadGlobalConfig(client);
+        const user = userEvent.setup({ delay: null });
+        render(<PermissionsTab client={client} />);
+
+        expect(screen.getByText("settings.permissionsNoRules")).toBeTruthy();
+        await user.click(screen.getByRole("combobox", { name: "settings.permissionsRuleType" }));
+        await user.click(
+            await screen.findByRole("option", { name: "settings.permissionsDenyList" }),
+        );
+        expect(screen.getByText("settings.permissionsNoRules")).toBeTruthy();
     });
 });
