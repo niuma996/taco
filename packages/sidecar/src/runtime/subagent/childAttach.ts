@@ -53,6 +53,12 @@ export interface ChildAttachDeps {
     readonly projectContext: string;
     /** Parent's `<environment>` snapshot; without it a child in a workspace with no `.gitignore` would see no cwd/platform/shell at all. */
     readonly environmentContext?: EnvironmentContext;
+    /**
+     * Product name the child calls itself in its rebuilt prompt. Inherited
+     * from the parent workspace's startup snapshot, so a child never claims a
+     * different identity than the session that spawned it.
+     */
+    readonly productName?: string;
     /** Parent's IM/channel flag — children inherit the path-semantics variant. */
     readonly hideWorkspacePath: boolean | undefined;
     /** Parent's rendered instruction blocks; a thunk so a settings.write reaches the child. */
@@ -195,6 +201,7 @@ export async function prepareChildAttach(
         modelIdentity: args.modelIdentity,
         projectContext: deps.projectContext,
         environmentContext: deps.environmentContext,
+        productName: deps.productName,
         hideWorkspacePath: deps.hideWorkspacePath,
         readOnlyShell:
             args.agentType !== undefined && READ_ONLY_SHELL_AGENT_TYPES.has(args.agentType),

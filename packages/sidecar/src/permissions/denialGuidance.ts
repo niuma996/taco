@@ -42,9 +42,9 @@ export function denialGuidance(
     const { action, alternativeRoutes } = subject;
     if (reason === "no_approver") {
         return (
-            "[denied] This needs approval in the Taco desktop app, and no desktop app is " +
+            "[denied] This needs approval in the desktop app, and no desktop app is " +
             "connected right now. Do not retry it or work around it. Tell the user it needs " +
-            "approval in the Taco desktop app, then continue without it or stop."
+            "approval in the desktop app, then continue without it or stop."
         );
     }
     if (reason === "im_channel") {
@@ -54,7 +54,7 @@ export function denialGuidance(
             `not attempt the same outcome by another route — ${alternativeRoutes} — is still the ` +
             "refused action. Stop, tell the user what you were trying to do and that it needs " +
             "approval, and ask how they want to proceed. A reply in this chat is the only way to " +
-            "ask; the user can run it from the Taco desktop app or adjust the channel's " +
+            "ask; the user can run it from the desktop app or adjust the channel's " +
             "permission settings."
         );
     }

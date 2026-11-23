@@ -1,11 +1,11 @@
 ---
 name: taco-configure
-description: Use when changing taco's own setup — installing a skill from a URL, writing an agent definition, or editing the global config (default model, thinking level, system prompt, instructions, command permissions). For authoring a new skill from scratch, prefer the `create-skill` skill.
+description: Use when changing the application's own setup — installing a skill from a URL, writing an agent definition, or editing the global config (default model, thinking level, system prompt, instructions, command permissions). For authoring a new skill from scratch, prefer the `create-skill` skill.
 metadata:
   version: "1.2.0"
 ---
 
-# Configuring taco
+# Configuring the application
 
 `create-skill` covers writing a skill from scratch. This skill covers the rest: installing a skill someone else wrote, defining agents, and patching the global config. Reach for it when the ask touches global state rather than one SKILL.md.
 
@@ -42,11 +42,13 @@ Accepted fields — this is the whole list:
 
 **Secrets are not settable here.** API keys, provider definitions, MCP servers, channels and the outbound `userAgent` are entered by the user in the desktop settings pane — Providers & Models for providers and request identity, the channel and MCP panes for the rest. Those paths write the secret without echoing it back. A patch naming one of these fields is refused before the user is even asked, so do not offer it as an option.
 
-The `userAgent` is the identity every provider request presents, so only the user changes it (Providers & Models → Request identity). If the ask is "make the provider stop seeing taco", point them there.
+The `userAgent` is the identity every provider request presents, so only the user changes it (Providers & Models → Request identity). If the ask is "make the provider stop seeing this product", point them there.
+
+The `productName` is the name the assistant calls itself in its prompts. It is also user-owned: change it in the settings entry, and note that it takes effect after the sidecar restarts — a running session keeps the name it started with.
 
 ## Skills: where to put one
 
-Skills resolve first-match-by-name across the search paths, so a project-local skill shadows a global one of the same name. Default to the global directory (`$TACO_HOME/skills/`, typically `~/.taco/skills/`) when the user has not said otherwise; use `askUser` with `scope` as the header when the choice matters — Global first, Project-local second. Never write to the builtin directory: it ships with taco and upgrades overwrite it.
+Skills resolve first-match-by-name across the search paths, so a project-local skill shadows a global one of the same name. Default to the global directory (`$TACO_HOME/skills/`, typically `~/.taco/skills/`) when the user has not said otherwise; use `askUser` with `scope` as the header when the choice matters — Global first, Project-local second. Never write to the builtin directory: it ships with the runtime and upgrades overwrite it.
 
 Saving is enough — the directory is watched and the catalog reloads a moment later. If the running session's `<available_skills>` does not pick the skill up, start a new session.
 
@@ -60,7 +62,7 @@ Agents are `*.md` files, one agent per file, in one of four user directories: `~
 
 Default to the global directory (`$TACO_HOME/agents/`) for personal agents; use the project-local one only when the agent is bound to this repo's conventions. In an IM conversation there is no project directory, so write global only. Before writing a global agent, check whether a project-local one of the same name exists — it would shadow the new copy in that workspace.
 
-Frontmatter taco reads: `name` (the only required key), `description`, `whenToUse`, `tools` (a whitelist of tool names), `maxTurns`, `timeoutMinutes`, `context` (`independent`, or `fork` to hand the subagent this conversation's transcript), `runtime` (`standard`, `claude-code`, `codex`), `permissionMode`, `cwd`, `fewShots` (a YAML list of `{ user, assistant }` pairs injected ahead of the body), and a `codex` block of codex-runtime options.
+Frontmatter the runtime reads: `name` (the only required key), `description`, `whenToUse`, `tools` (a whitelist of tool names), `maxTurns`, `timeoutMinutes`, `context` (`independent`, or `fork` to hand the subagent this conversation's transcript), `runtime` (`standard`, `claude-code`, `codex`), `permissionMode`, `cwd`, `fewShots` (a YAML list of `{ user, assistant }` pairs injected ahead of the body), and a `codex` block of codex-runtime options.
 
 `whenToUse` is a one-line hint shown in the system prompt's `<available_agents>` listing — prefer it over `description`, which is only metadata.
 

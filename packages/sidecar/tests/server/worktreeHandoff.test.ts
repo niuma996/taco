@@ -85,7 +85,7 @@ test("managed handoff preserves source identity, model and attachments", async (
         assert.equal(events.at(-1), "invalidate");
         assert.match(promptText, /inspect the attachment/);
         assert.match(promptText, /<worktree_handoff>/);
-        assert.match(promptText, /already running in the Taco-managed linked Git worktree/);
+        assert.match(promptText, /already running in the runtime-managed linked Git worktree/);
         assert.match(promptText, /original request for isolation is satisfied/);
         assert.match(promptText, /name="source\.txt"/);
         assert.ok(!promptText.includes(sourcePath), "target tag must not reference source storage");

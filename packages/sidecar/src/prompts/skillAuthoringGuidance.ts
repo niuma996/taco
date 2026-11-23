@@ -58,13 +58,13 @@ export function formatSkillAuthoringGuidance(
     ];
     if (builtin) {
         lines.push(
-            `Do not write to ${builtin} — it ships with taco and is read-only (upgrades overwrite it).`,
+            `Do not write to ${builtin} — it ships with the runtime and is read-only (upgrades overwrite it).`,
         );
     }
     lines.push(
         "",
-        "SKILL.md needs YAML frontmatter with at least `name` and `description`. taco also reads these " +
-            "taco-specific keys, which a generic skill-authoring guide will not mention:",
+        "SKILL.md needs YAML frontmatter with at least `name` and `description`. The runtime also reads " +
+            "these runtime-specific keys, which a generic skill-authoring guide will not mention:",
         '  - runAs: "inline" | "subagent" (default "inline"). inline injects the body into the current ' +
             "session; subagent runs it in a sandboxed child session.",
         "  - inlineOnly: true — refuses subagent-mode invocation. Required for any skill whose body " +

@@ -50,6 +50,7 @@ describe("saveGlobalConfig round-trip", () => {
         { name: "extensions", value: ["@taco/ext-a", "@taco/ext-b"] },
         { name: "disabledExtensions", value: ["@taco/ext-b"] },
         { name: "userAgent", value: "my-gateway/1.0" },
+        { name: "productName", value: "Acme" },
     ];
 
     const clearable: ReadonlySet<keyof TacoGlobalConfigShape> = new Set([
@@ -63,6 +64,7 @@ describe("saveGlobalConfig round-trip", () => {
         "anthropicApiKey",
         "openaiApiKey",
         "userAgent",
+        "productName",
     ]);
 
     for (const { name, value } of scalars) {

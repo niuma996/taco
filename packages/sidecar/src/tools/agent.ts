@@ -74,7 +74,7 @@ export function createAgentTool(
                     "",
                     '"fork": the subagent additionally receives a transcript of this conversation up to now. Use it only when the task is a judgement about something already settled here — reviewing a change made above, or continuing from earlier findings — and accept that it inherits this conversation\'s framing along with its facts, and that it costs more context.',
                     "",
-                    'Only agent types running on taco\'s own engine support fork. A "fork" sent for any other type is corrected to "independent" rather than failing, so passing it there is harmless but pointless.',
+                    'Only agent types running on the standard engine support fork. A "fork" sent for any other type is corrected to "independent" rather than failing, so passing it there is harmless but pointless.',
                 ].join("\n"),
             }),
         ),

@@ -105,7 +105,7 @@ describe("memory sources", () => {
         assert.equal(enabled.managedGlobal[0]?.key, otherRoot);
         assert.equal(enabled.managedGlobal[0]?.label, "other");
         const block = buildLayeredMemoryBlock(enabled);
-        assert.match(block, /Taco system memory \(other\)/);
+        assert.match(block, /System memory \(other\)/);
         assert.doesNotMatch(block, /private-channel-note|unregistered-note/);
         assert.deepEqual(
             enabled.managedGlobal[0]?.entries.map((topic) => topic.id),
@@ -222,7 +222,7 @@ describe("memory sources", () => {
         assert.equal(block.match(/^- \[/gm)?.length, 3);
         assert.ok(block.indexOf("— newer") < block.indexOf("— older"));
         assert.match(block, /Associated workspace memory \(Linked\).*read-only/);
-        assert.match(block, /Taco system memory \(Global\).*read-only/);
+        assert.match(block, /System memory \(Global\).*read-only/);
         assert.doesNotMatch(block, /Current channel memory|\(Empty\)|omitted/i);
     });
 

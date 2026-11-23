@@ -147,6 +147,31 @@ describe("config", () => {
             );
         });
 
+        it("refuses the product name even when the user would approve", async () => {
+            // The shared patch type makes the field writable here, so the
+            // refusal has to be explicit — an approval must not be able to
+            // slip a rename through.
+            let asked = 0;
+            const broker = makeBroker((requestId) => {
+                asked++;
+                broker.resolve(requestId, true, "once");
+            });
+            const handler = getRegisteredMethod("config.patch");
+            assert.ok(handler);
+
+            await assert.rejects(
+                () =>
+                    handler.handler(
+                        makeCtx(
+                            { permissionBroker: broker },
+                            { ...patchParams, patch: { productName: "Acme" } },
+                        ),
+                    ),
+                /productName is not settable here/,
+            );
+            assert.equal(asked, 0, "the user must not even be asked");
+        });
+
         it("refuses subagent and IM sessions without asking the user", async () => {
             const broker = makeBroker(() => {});
             const handler = getRegisteredMethod("config.patch");

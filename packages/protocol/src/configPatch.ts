@@ -40,6 +40,7 @@ export type GlobalConfigPatch = Partial<
         | "anthropicApiKey"
         | "openaiApiKey"
         | "userAgent"
+        | "productName"
     >
 > & {
     /** Incremental permission changes applied atomically to the latest disk state. */
@@ -61,6 +62,15 @@ export type GlobalConfigPatch = Partial<
     openaiApiKey?: string | null;
     /** Custom outbound User-Agent; `null` clears it back to the default identity. */
     userAgent?: string | null;
+    /**
+     * Product name used in the assistant's system prompt identity line.
+     * `null` clears the override back to the default product name.
+     *
+     * The value takes effect only after a restart — the running identity is a
+     * startup snapshot. An empty or whitespace-only string is treated as
+     * `null` (clear).
+     */
+    productName?: string | null;
 };
 
 /**

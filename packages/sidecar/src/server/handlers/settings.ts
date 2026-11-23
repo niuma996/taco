@@ -17,6 +17,7 @@ import type {
 } from "@taco-ai/protocol";
 import { ErrorCodes } from "@taco-ai/protocol";
 import { readGlobalConfig, saveGlobalConfig } from "../../config/config.ts";
+import { readStoredProductName } from "../../config/productIdentity.ts";
 import type { ServerRpcSurface } from "../../runtime/serverRpcSurface.ts";
 import { RpcHandlerError, registerMethod } from "../methodRegistry.ts";
 import { mcpServerToView } from "./mcpView.ts";
@@ -82,6 +83,9 @@ export function toView(raw: TacoGlobalConfigShape): TacoGlobalConfigView {
         mcpServers: raw.mcpServers?.map(mcpServerToView),
         instructions: raw.instructions,
         userAgent: raw.userAgent,
+        // A hand-edited file can hold anything; the view only carries a name
+        // the runtime would actually use.
+        productName: readStoredProductName(raw.productName),
     };
     if (raw.anthropicApiKey !== undefined) v.anthropicApiKey = maskKey(raw.anthropicApiKey);
     if (raw.openaiApiKey !== undefined) v.openaiApiKey = maskKey(raw.openaiApiKey);

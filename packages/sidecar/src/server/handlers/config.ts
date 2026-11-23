@@ -55,6 +55,18 @@ export function registerConfigHandlers(): void {
             }
 
             const patch = params.patch as GlobalConfigPatch;
+            // The product identity is not the model's to change: it renames
+            // the assistant in every prompt, and the running identity only
+            // changes on the next restart. The shared patch type makes the
+            // field writable here, so the refusal has to be explicit.
+            if ("productName" in patch) {
+                throw new RpcHandlerError(
+                    ErrorCodes.InvalidParams,
+                    "config.patch: productName is not settable here — it renames the " +
+                        "assistant in every prompt. Ask the user to set it in the settings " +
+                        "entry; it takes effect after the sidecar restarts.",
+                );
+            }
             const fields = patchFields(patch);
             if (fields.length === 0) {
                 throw new RpcHandlerError(

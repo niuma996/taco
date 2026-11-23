@@ -31,7 +31,7 @@ export const communicationDefinitions = [
         description:
             "Message an existing agent with the same parent, never yourself. " +
             "A queued or started receipt confirms acceptance, not completion; consult status and effectiveDelivery. " +
-            "Claude Code uses nextTurn delivery; Codex queues in Taco until the current turn settles. " +
+            "Claude Code uses nextTurn delivery; Codex queues in the runtime until the current turn settles. " +
             "Claude Code does not interrupt an active tool; Codex also waits rather than interrupting. " +
             "Agents have independent context; later parent conversation messages are not synced, so send needed context explicitly.",
         inputSchema: chatSchema,

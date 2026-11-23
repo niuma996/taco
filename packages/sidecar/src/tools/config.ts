@@ -154,23 +154,32 @@ export function configToolsAllowed(ctx: TacoToolContext): boolean {
 }
 
 const REFUSAL =
-    "The config tools are not available in this session. They change global taco " +
-    "settings, which only a local desktop session may do.";
+    "The config tools are not available in this session. They change global " +
+    "application settings, which only a local desktop session may do.";
+
+/**
+ * Note appended to a config read: the saved product name is not the identity
+ * the running assistant uses. Without it the model reads the value as the
+ * current name and tells the user the wrong thing.
+ */
+const PRODUCT_NAME_RESTART_NOTE =
+    "`productName` (when set) is the saved product identity. The running assistant keeps the " +
+    "name it started with, so a change takes effect after the sidecar restarts.";
 
 function createConfigGet(): TacoTool {
     return {
         name: "configGet",
         label: "configGet",
         description:
-            "Read the global taco configuration (default model, thinking level, system " +
+            "Read the global application configuration (default model, thinking level, system " +
             "prompt, command permissions). Secrets are masked and cannot be read back in " +
             "full. Use this before changing a setting, to see its current value.",
         parameters: configGetSchema,
         executionMode: "sequential",
         taco: {
             promptSummary:
-                "Read the current global taco configuration. Secrets come back masked, so a " +
-                "stored key can only be confirmed as present, never shown.",
+                "Read the current global application configuration. Secrets come back masked, " +
+                "so a stored key can only be confirmed as present, never shown.",
             mutates: false,
         },
         async execute(
@@ -185,7 +194,12 @@ function createConfigGet(): TacoTool {
             }
             const result = await ctx.call(RPC.settingsGet, ctx.workspace, undefined);
             return {
-                content: [{ type: "text", text: summarizeConfig(result.global) }],
+                content: [
+                    {
+                        type: "text",
+                        text: `${summarizeConfig(result.global)}\n\n${PRODUCT_NAME_RESTART_NOTE}`,
+                    },
+                ],
                 details: result.global,
             };
         },
@@ -215,17 +229,17 @@ function createConfigPatch(): TacoTool {
         name: "configPatch",
         label: "configPatch",
         description:
-            "Change the global taco configuration. The user is asked to approve each change " +
-            "before it is written. Only the model, system prompt, thinking level, compaction, " +
-            "instructions and command permissions can be set here — API keys, providers, MCP " +
-            "servers, channels and the outbound User-Agent are entered in the desktop " +
-            "settings pane.",
+            "Change the global application configuration. The user is asked to approve each " +
+            "change before it is written. Only the model, system prompt, thinking level, " +
+            "compaction, instructions and command permissions can be set here — API keys, " +
+            "providers, MCP servers, channels, the outbound User-Agent and the product name " +
+            "are entered in the desktop settings pane.",
         parameters: configPatchSchema,
         executionMode: "sequential",
         taco: {
             promptSummary:
-                "Change global taco settings (default model, thinking level, system prompt, " +
-                "command permissions). Each change is approved by the user first.",
+                "Change global application settings (default model, thinking level, system " +
+                "prompt, command permissions). Each change is approved by the user first.",
             mutates: true,
         },
         async execute(
@@ -262,6 +276,15 @@ function createConfigPatch(): TacoTool {
                         "desktop settings pane (Providers & Models → Request identity).",
                 );
             }
+            // The product name renames the assistant in every prompt. It is
+            // the user's to set, and it only takes effect on the next restart.
+            if ("productName" in patch) {
+                throw new Error(
+                    "configPatch: productName is not settable here — it renames the assistant " +
+                        "in every prompt. Ask the user to set it in the settings entry; it " +
+                        "takes effect after the sidecar restarts.",
+                );
+            }
             // The patch schema keeps unknown properties (the RPC envelope is
             // deliberately open), so the writable set is enforced here rather
             // than by the schema.
@@ -294,7 +317,9 @@ function createConfigPatch(): TacoTool {
                 content: [
                     {
                         type: "text",
-                        text: `Configuration updated.\n\n${summarizeConfig(result.global ?? {})}`,
+                        text:
+                            `Configuration updated.\n\n${summarizeConfig(result.global ?? {})}` +
+                            `\n\n${PRODUCT_NAME_RESTART_NOTE}`,
                     },
                 ],
                 details: result,

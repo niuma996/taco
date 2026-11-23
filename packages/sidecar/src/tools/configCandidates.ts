@@ -19,8 +19,8 @@ export function configToolCandidates(): ToolCandidate[] {
         {
             name: "configGet",
             summary:
-                "Read the global taco configuration (default model, thinking level, system " +
-                "prompt, command permissions). Secrets come back masked.",
+                "Read the global application configuration (default model, thinking level, " +
+                "system prompt, command permissions). Secrets come back masked.",
             loading: "deferred",
             source: "builtin",
             load: async () => createConfigTools().configGet,
@@ -28,9 +28,9 @@ export function configToolCandidates(): ToolCandidate[] {
         {
             name: "configPatch",
             summary:
-                "Change the global taco configuration. The user approves each change " +
-                "before it is written. API keys, providers, MCP servers, channels and the " +
-                "outbound User-Agent are not settable here.",
+                "Change the global application configuration. The user approves each change " +
+                "before it is written. API keys, providers, MCP servers, channels, the " +
+                "outbound User-Agent and the product name are not settable here.",
             loading: "deferred",
             source: "builtin",
             load: async () => createConfigTools().configPatch,

@@ -67,6 +67,19 @@ describe("prepareChildAttach — capability statement", () => {
         return systemPrompt;
     }
 
+    it("renders the inherited product name in the child identity line", async () => {
+        const tools = ["read"].map(fakeTool);
+        const deps: ChildAttachDeps = { ...depsFor(tools), productName: "Acme" };
+        const { systemPrompt } = await prepareChildAttach(deps, {
+            sessionId: asSessionId("s1"),
+            agentType: "reviewer",
+            childDepth: 1,
+            allowedTools: tools,
+            modelIdentity: "test/model",
+        });
+        assert.match(systemPrompt, /You are the Acme assistant/);
+    });
+
     it("tells a read-only profile it cannot write files", async () => {
         const prompt = await attach("reviewer", ["read", "grep", "glob", "shell"]);
         assert.match(prompt, /<capabilities>/);

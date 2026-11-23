@@ -45,6 +45,7 @@ import {
     validateCommandPermissions,
 } from "../config/config.ts";
 import { renderInstructionBlock, resolveInstructions } from "../config/instructions.ts";
+import { DEFAULT_PRODUCT_NAME } from "../config/productIdentity.ts";
 import {
     resolveWorkspaceConfigSources,
     type WorkspaceConfigSources,
@@ -215,6 +216,13 @@ interface WorkspaceRuntimeConfig {
      */
     instructionsConfig?: InstructionsConfig;
     /**
+     * Product name the assistant calls itself in the system prompt.
+     *
+     * A startup snapshot: the server resolves it once and hands the same
+     * value to every workspace it builds. Unset falls back to the default.
+     */
+    productName?: string;
+    /**
      * Resolver from a configured channel instance id to its safe IM channel
      * identity (platform type + instance id). Supplied by the server; the
      * workspace only calls it for IM workspaces, passing the channelId from
@@ -384,6 +392,10 @@ export class WorkspaceRuntime extends EventEmitter {
      *  contract `<model_identity>` already documents: `setSessionModel`
      *  switches the runtime model but does not retroactively change this. */
     private readonly modelIdentitySnapshot: string | undefined;
+    /** Product name used in the identity line. A startup snapshot — it does
+     *  not change while the workspace lives, so a rebuild renders the same
+     *  bytes and the prompt cache stays valid. */
+    private readonly productName: string;
     /** `.gitignore`-derived project context, read once (sync I/O) at
      *  construction. Reused by `rebuildSystemPrompt` so hot reload doesn't
      *  re-read the filesystem for a section that never changes post-construction. */
@@ -726,6 +738,7 @@ export class WorkspaceRuntime extends EventEmitter {
         this.environmentContextSnapshot = promptSnapshots.environmentContext;
         this.parentInstructionsBlock = promptSnapshots.parentInstructionsBlock;
         this.instructionsConfig = options.instructionsConfig;
+        this.productName = options.productName ?? DEFAULT_PRODUCT_NAME;
         this.agentCatalog = options.agents ?? [];
         this.systemPrompt = this.rebuildSystemPrompt(this.resources.skills ?? []);
         this.streamOptions = options.streamOptions ?? {};
@@ -876,6 +889,7 @@ export class WorkspaceRuntime extends EventEmitter {
             defaultModel: this.defaultModel,
             projectContext: this.projectContextSnapshot,
             environmentContext: this.environmentContextSnapshot,
+            productName: this.productName,
             hideWorkspacePath: isIm,
             // Thunk, not a value: `updateInstructionsConfig()` re-renders the
             // block on settings.write, and a captured string would pin every
@@ -1237,6 +1251,7 @@ export class WorkspaceRuntime extends EventEmitter {
             modelIdentity: this.modelIdentitySnapshot,
             projectContext: this.projectContextSnapshot,
             environmentContext: this.environmentContextSnapshot,
+            productName: this.productName,
             contributors: contributors.length > 0 ? contributors : undefined,
             sessionKind: { role: "main", depth: 0 },
             hideWorkspacePath: this.scope.kind === "im",

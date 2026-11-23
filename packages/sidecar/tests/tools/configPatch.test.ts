@@ -105,6 +105,28 @@ describe("configPatch tool through handler and persistence", () => {
         assert.equal(readGlobalConfig().userAgent, "my-gateway/1.0");
     });
 
+    it("refuses to set the product name", async () => {
+        // The name renames the assistant in every prompt, and the running
+        // identity only changes on the next restart — so it is the user's
+        // to set, through the settings entry.
+        saveGlobalConfig({ defaultModel: "keep-me" });
+        let calls = 0;
+        const ctx = context();
+        const call = ctx.call;
+        assert.ok(call);
+        ctx.call = async (method, workspace, params) => {
+            calls++;
+            return call(method, workspace, params);
+        };
+        const { configPatch } = createConfigTools();
+        await assert.rejects(
+            invokeTool(configPatch, { patch: { productName: "Acme" } }, ctx),
+            /configPatch: productName is not settable here/,
+        );
+        assert.equal(calls, 0);
+        assert.equal(readGlobalConfig().defaultModel, "keep-me");
+    });
+
     // Fields outside the writable set carry secret material `configGet`
     // masks on read, or are plain not the model's to write. The tool has to
     // refuse them before the user is asked — a whole-array replace (MCP

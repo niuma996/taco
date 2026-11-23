@@ -80,6 +80,7 @@ import {
     resolveConfig,
     validateCommandPermissions,
 } from "../config/config.ts";
+import { DEFAULT_PRODUCT_NAME, validateProductName } from "../config/productIdentity.ts";
 import { tacoHome } from "../config/tacoHome.ts";
 import {
     resolveWorkspaceConfigSources,
@@ -351,6 +352,14 @@ export class SidecarServer implements ServerRpcSurface {
             this.emitPush(PushMethods.WorktreeHandoff, WORKSPACE_ANY, undefined, params),
     });
     private readonly options: SidecarServerOptions & { resolveConfig: () => ResolvedTacoConfig };
+    /**
+     * Product identity snapshot — resolved once at construction.
+     *
+     * Frozen by contract: a change takes effect on the next restart, so the
+     * refresh path must not apply it. Every workspace of this server (and
+     * every subagent it spawns) reads this same value.
+     */
+    private readonly productName: string;
     /** Command-idempotency cache + turn gate — see commandIdempotency.ts. */
     private readonly idempotency: CommandIdempotencyGate;
     /** IM workspace policy store — admin-granted, survives channel unbind. */
@@ -538,6 +547,19 @@ export class SidecarServer implements ServerRpcSurface {
                     instructions: options.instructionsConfig,
                 }));
         const config = resolver();
+        // The product identity is a STARTUP snapshot, not hot-reloadable state.
+        // Freezing it is the contract (a change takes effect on restart), not
+        // an oversight — otherwise old workspaces would keep one name while
+        // new ones used another.
+        //
+        // Single carrier: `ResolvedTacoConfig.productName`. `resolveConfig`
+        // resolves the priority (explicit override > disk > default): the
+        // disk value is read leniently (a hand-edited `taco.json` falls back
+        // to the default with a warning), so the strict check here only ever
+        // sees an explicit startup value.
+        this.productName =
+            validateProductName(config.productName, "startup configuration") ??
+            DEFAULT_PRODUCT_NAME;
         this.options = {
             ...config,
             ...options,
@@ -1391,6 +1413,7 @@ export class SidecarServer implements ServerRpcSurface {
                 compaction: this.options.compaction,
                 memoryEnabled: this.options.memoryEnabled,
                 instructionsConfig: this.instructionsConfig,
+                productName: this.productName,
                 extensions,
                 providerKeyStore: this.providerKeyStore,
                 customProviders: this.customProviders,

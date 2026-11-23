@@ -134,7 +134,29 @@ describe("buildSystemPrompt", () => {
     it("injects tool names into the core template", () => {
         const out = buildSystemPrompt({ tools: [stubTool("read"), stubTool("edit")] });
         assert.ok(out.includes("read, edit"));
-        assert.ok(out.includes("You are TACO"));
+        assert.ok(out.includes("You are the Taco assistant"));
+    });
+
+    it("renders the configured product name in the identity line", () => {
+        const out = buildSystemPrompt({ tools: [stubTool("read")], productName: "Acme" });
+        assert.match(out, /You are the Acme assistant, an AI coding assistant\./);
+        assert.ok(!out.includes("Taco"));
+    });
+
+    it("never leaves the product-name placeholder unfilled", () => {
+        for (const productName of [undefined, "", "   "]) {
+            const out = buildSystemPrompt({ tools: [stubTool("read")], productName });
+            assert.ok(
+                !out.includes("{{PRODUCT_NAME}}"),
+                `literal placeholder leaked for ${JSON.stringify(productName)}`,
+            );
+            assert.match(out, /You are the Taco assistant/);
+        }
+    });
+
+    it("renders byte-identical output for an unchanged product name", () => {
+        const options = { tools: [stubTool("read")], productName: "Acme" };
+        assert.equal(buildSystemPrompt(options), buildSystemPrompt(options));
     });
 
     it("limits authorization to the user's request and runtime permission checks", () => {

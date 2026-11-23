@@ -140,6 +140,7 @@ below).
     "minimax": ["MiniMax-M2.7-highspeed"]
   },
   "userAgent": "my-gateway/1.0",
+  "productName": "Acme",
   "mcpServers": [
     {
       "id": "dbx",
@@ -244,6 +245,36 @@ applies to new chats immediately; open chats pick it up on their next
 reconnect.
 
 This field needs protocol 2.21; a 2.20 daemon drops it on `settings.write`.
+
+### Assistant identity (`productName`)
+
+`productName` is the name the assistant calls itself with, in the identity line
+of its system prompt:
+
+```
+You are the Acme assistant, an AI coding assistant.
+```
+
+Unset, the name is `Taco`. The name is read once at sidecar startup and
+frozen for the life of the process: saving it through `settings.write` (or
+editing `taco.json` by hand) takes effect on the next restart. Every
+workspace and every subagent of one process shares that snapshot, so a
+running session never shows two different names.
+
+The value must be a non-empty string of letters, digits, ordinary spaces and
+common name punctuation (Chinese names are fine), at most 80 characters.
+Control characters, line breaks and `<`, `>`, `{`, `}` are rejected — the
+name is inserted into a prompt, so it must not be able to open a section or
+a template marker. An empty string clears the override and restores the
+default name; leaving the field out of a patch keeps the stored value.
+
+A malformed value in `taco.json` never keeps the sidecar from starting: it
+logs a warning and falls back to the default name.
+
+This is the assistant's own name, not the product's request identity — that
+one is `userAgent` above. It also does not rename the application: the
+on-disk paths (`.taco`, `taco.json`), `TACO_HOME` and the built-in skill
+names keep their existing spelling.
 
 ### Model lists on built-in providers
 

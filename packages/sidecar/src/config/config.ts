@@ -34,14 +34,17 @@ import {
     type TacoGlobalConfigShape,
 } from "@taco-ai/protocol";
 import type { ChannelConfig } from "../channels/registry.ts";
+import { createLogger } from "../lib/logger.ts";
 import { validatePermissionRule } from "../permissions/shellRuleMatching.ts";
 import type { ThinkingLevel } from "../runtime/pi/types.ts";
 import { resourceRoot } from "../runtime/runtimeResources.ts";
 import { ConfigStore } from "./configStore.ts";
+import { DEFAULT_PRODUCT_NAME, validateProductName } from "./productIdentity.ts";
 import { tacoHome } from "./tacoHome.ts";
 import type { SkillDirInput } from "./workspaceConfigSources.ts";
 
 const configStore = new ConfigStore();
+const log = createLogger("config");
 
 /** Longest accepted custom User-Agent — real UAs are far shorter. */
 const USER_AGENT_MAX_LENGTH = 256;
@@ -89,6 +92,13 @@ export interface ResolvedTacoConfig {
     instructions?: InstructionsConfig;
     /** Custom outbound User-Agent. `undefined` = default `taco/<version>` identity. */
     userAgent?: string;
+    /**
+     * Product name used in the assistant's system prompt identity line.
+     *
+     * Resolved at startup and then frozen: a change takes effect on the next
+     * restart, not on a configuration refresh.
+     */
+    productName: string;
 }
 
 /** pi thinkingLevel value domain whitelist — superset (including `max`) reserved for future-compat. */
@@ -358,6 +368,26 @@ function loadGlobalConfig(): TacoGlobalConfigShape {
 }
 
 /**
+ * Resolve the product name: explicit startup parameter > global config > default.
+ *
+ * The startup parameter is validated strictly — a bad value must not reach the
+ * prompt. The value read from disk is validated leniently: a hand-edited
+ * `taco.json` falls back to the default with a warning instead of keeping the
+ * sidecar from starting.
+ */
+function resolveProductName(startupValue: string | undefined, diskValue: unknown): string {
+    if (startupValue !== undefined) {
+        return validateProductName(startupValue, "startup parameter") ?? DEFAULT_PRODUCT_NAME;
+    }
+    try {
+        return validateProductName(diskValue, "taco.json") ?? DEFAULT_PRODUCT_NAME;
+    } catch (e) {
+        log.warn(`invalid productName in taco.json; using the default: ${String(e)}`);
+        return DEFAULT_PRODUCT_NAME;
+    }
+}
+
+/**
  * Merge: cliOverrides > env vars > global config.
  *
  * Note: ANTHROPIC_API_KEY / OPENAI_API_KEY are read directly from env by pi-ai and
@@ -429,6 +459,7 @@ export function resolveConfig(
         mcpServers: validateMcpServers(global.mcpServers, "taco.json"),
         memoryEnabled: cliOverrides.memoryEnabled ?? global.memoryEnabled,
         userAgent: validateUserAgent(global.userAgent, "taco.json"),
+        productName: resolveProductName(cliOverrides.productName, global.productName),
     };
 }
 
@@ -935,6 +966,12 @@ function mergeGlobalConfigPatch(
     }
     if ("memoryEnabled" in patch) next.memoryEnabled = patch.memoryEnabled;
     if ("userAgent" in patch) next.userAgent = validateUserAgent(cleared(patch.userAgent), "patch");
+    // `undefined` means "not mentioned" (keep the saved value); `null` and a
+    // blank string clear the override, and the stored shape keeps only a
+    // validated name — "unset" is the single representation of "default".
+    if (patch.productName !== undefined) {
+        next.productName = validateProductName(patch.productName, "patch");
+    }
     if ("instructions" in patch) {
         // Nested merge — same semantics as `compaction` above. Per-file
         // switches and override paths are deep-merged so a partial patch

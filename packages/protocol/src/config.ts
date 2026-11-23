@@ -120,6 +120,18 @@ export interface TacoGlobalConfigShape {
     /** Project-context instructions injection (CLAUDE.md / AGENTS.md / DESIGN.md). */
     instructions?: InstructionsConfig;
     /**
+     * Product name used in the assistant's system prompt identity line.
+     *
+     * LIFECYCLE: read once at sidecar startup; a change takes effect only
+     * after a restart. The running identity is a startup snapshot, so every
+     * workspace and subagent of one process agrees on it.
+     *
+     * Scope: the prompt identity only. It does not rename the desktop app,
+     * the on-disk paths (`.taco`, `taco.json`, `TACO_HOME`), the skill
+     * names, or the wire identifiers.
+     */
+    productName?: string;
+    /**
      * User-Agent sent to model providers instead of the default `taco/<version>`.
      * Unset keeps the default identity. A custom value replaces the UA and
      * suppresses the `x-taco-sidecar-version` header — that header names taco

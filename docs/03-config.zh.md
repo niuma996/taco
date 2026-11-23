@@ -135,6 +135,7 @@ Taco 会读 / 写下列文件路径。基准目录是 `$TACO_HOME`，默认 `~/.
     "minimax": ["MiniMax-M2.7-highspeed"]
   },
   "userAgent": "my-gateway/1.0",
+  "productName": "Acme",
   "mcpServers": [
     {
       "id": "dbx",
@@ -183,6 +184,7 @@ Taco 会读 / 写下列文件路径。基准目录是 `$TACO_HOME`，默认 `~/.
 | `providerExtraModels`  | object | 内置 provider id → 追加模型列表，见下方「内置供应商的模型列表」 |
 | `providerHiddenModels` | object | 内置 provider id → 从静态列表移除的模型 id         |
 | `userAgent`        | string | 发往模型服务的自定义 User-Agent，见下方「自定义请求标识」  |
+| `productName`     | string | 助手在 system prompt 里自称的名字，见下方「助手身份」  |
 | `extra`           | object | 兜底，未来扩展用                                       |
 
 #### 自定义请求标识（`userAgent`）
@@ -213,6 +215,30 @@ HTTP 头，写入时会拒绝换行等控制字符。留空即恢复默认标识
 已经打开的聊天在下次重新连接后生效。
 
 这个字段需要协议 2.21；2.20 的后台服务会在 `settings.write` 时丢掉它。
+
+#### 助手身份（`productName`）
+
+`productName` 是助手在 system prompt 身份行里自称的名字：
+
+```
+You are the Acme assistant, an AI coding assistant.
+```
+
+不配置时名字为 `Taco`。名字在 sidecar 启动时读取一次并冻结：之后通过
+`settings.write` 保存（或直接手改 `taco.json`）要等下次重启才生效。
+同一进程内的所有 workspace 和子 agent 共用这份快照，运行中的会话不会出现
+两个不同的名字。
+
+取值必须是非空字符串，由字母、数字、普通空格和常见名称标点组成（中文名
+也可以），最长 80 个字符。控制字符、换行以及 `<`、`>`、`{`、`}` 会被拒绝 ——
+名字会进 prompt，不能让它打开一个新段落或模板占位符。传空字符串表示清除覆盖、
+恢复默认名；patch 里不带这个字段则保留已存的值。
+
+`taco.json` 里的值损坏时不会阻止 sidecar 启动：记一条警告并回落到默认名。
+
+这是助手自称的名字，不是产品对外的请求标识（那是上面的 `userAgent`），
+也不会重命名应用本身：磁盘路径（`.taco`、`taco.json`）、`TACO_HOME`
+以及内置 skill 名称都保持原样。
 
 ### 3.3 safe view（`settings.get` / `settings.write` 返回的那份）
 

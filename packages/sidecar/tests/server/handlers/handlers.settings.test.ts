@@ -147,6 +147,27 @@ describe("settings.write on a real server", () => {
         assert.ok(!("liteThinkingLevel" in readGlobalConfig()));
     });
 
+    it("persists, clears and rejects the product name", async (t) => {
+        const result = await write({ productName: "Acme" });
+        assert.equal(readGlobalConfig().productName, "Acme");
+        assert.equal((result.global as { productName?: string }).productName, "Acme");
+
+        // The running identity is a startup snapshot — a saved name does not
+        // rename the assistant that is already running.
+        const ws = await workspace();
+        assert.match(ws.systemPrompt, /You are the Taco assistant/);
+
+        await write({ productName: null });
+        assert.equal(readGlobalConfig().productName, undefined);
+        assert.ok(!("productName" in readGlobalConfig()));
+
+        const before = readFileSync(join(home, "taco.json"), "utf8");
+        const refresh = t.mock.method(server, "refreshConfiguration");
+        await assert.rejects(write({ productName: "Acme\nCorp" }), /invalid productName/);
+        assert.equal(readFileSync(join(home, "taco.json"), "utf8"), before);
+        assert.equal(refresh.mock.callCount(), 0);
+    });
+
     it("rejects invalid lite thinking levels before changing disk or runtime", async (t) => {
         await write({ liteThinkingLevel: "off" });
         const before = readFileSync(join(home, "taco.json"), "utf8");

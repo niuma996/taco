@@ -223,7 +223,7 @@ export function buildLayeredMemoryBlock(sources: ResolvedMemorySources): string 
             sourceId: workspaceKey(layer.key),
         })),
         ...sources.managedGlobal.map((layer) => ({
-            label: `Taco system memory (${layer.label})`,
+            label: `System memory (${layer.label})`,
             entries: layer.entries,
             inherited: true,
             memoryLayer: "managed-global",

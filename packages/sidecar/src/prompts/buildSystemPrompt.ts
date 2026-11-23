@@ -8,6 +8,7 @@
  * (not `.md`) so no dist-path resolution and strings are type-checked.
  */
 
+import { DEFAULT_PRODUCT_NAME } from "../config/productIdentity.ts";
 import { buildPlatformPrompt } from "./buildPlatformPrompt.ts";
 import { fillPlaceholders } from "./fillPlaceholders.ts";
 import {
@@ -224,6 +225,12 @@ export interface BuildSystemPromptOptions {
      * the session to run builds and tests, both of which that broker denies.
      */
     readOnlyShell?: boolean;
+    /**
+     * Product name the assistant calls itself in the identity line. Callers
+     * pass the validated startup value; a missing or blank name falls back
+     * to the default so the template placeholder is never left unfilled.
+     */
+    productName?: string;
 }
 
 const SECTION_SEPARATOR = "\n\n---\n\n";
@@ -236,6 +243,9 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
 
     const core = fillPlaceholders(CORE_TEMPLATE, {
         TOOL_NAMES: toolNamesText,
+        // A literal `{{PRODUCT_NAME}}` would reach the model, so the default
+        // is applied here rather than left to the caller.
+        PRODUCT_NAME: options.productName?.trim() || DEFAULT_PRODUCT_NAME,
         // Drop the section when the identity is unknown — `<model_identity>unknown</model_identity>`
         // is pure noise. The newlines are part of the value so both branches keep clean spacing.
         MODEL_IDENTITY_SECTION: options.modelIdentity

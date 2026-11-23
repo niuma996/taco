@@ -15,7 +15,7 @@ const chatToAgentSchema = Type.Object({
         Type.Union([Type.Literal("steer"), Type.Literal("followUp")], {
             default: "steer",
             description:
-                "steer requests input during a running conversation; followUp queues input after its current run. The receipt reports effectiveDelivery. Claude Code uses nextTurn delivery. Codex queues in Taco until the current turn settles.",
+                "steer requests input during a running conversation; followUp queues input after its current run. The receipt reports effectiveDelivery. Claude Code uses nextTurn delivery. Codex queues in the runtime until the current turn settles.",
         }),
     ),
     background: Type.Optional(
@@ -43,7 +43,7 @@ export function createChatToAgentTool(ctx: AgentConversationContext): TacoTool {
             "Later parent conversation messages do not automatically sync to children; send needed context explicitly. " +
             "Defaults to delivery steer and background true. Synchronous background: false works only from a parent to its own idle child. " +
             "Claude Code delivers at nextTurn and does not interrupt an active tool. " +
-            "Codex queues messages in Taco and applies them after the current turn, not mid-tool. " +
+            "Codex queues messages in the runtime and applies them after the current turn, not mid-tool. " +
             "A queued or started receipt confirms acceptance, not completion; consult status and effectiveDelivery.",
         parameters: chatToAgentSchema,
         executionMode: "parallel",

@@ -110,6 +110,12 @@ export interface AgentSpawnerOptions {
      */
     readonly environmentContext?: EnvironmentContext;
     /**
+     * Product name the child calls itself in its rebuilt prompt. A startup
+     * snapshot, inherited from the parent workspace so a child never
+     * introduces a different identity than its parent.
+     */
+    readonly productName?: string;
+    /**
      * Mirrors the parent's IM/third-party channel flag. Children inherit it so
      * their rebuilt prompt carries the same `<channel_safety>` block and the
      * path-semantics variant that omits absolute-path examples — a child that
@@ -202,6 +208,7 @@ export class AgentSpawner extends EventEmitter {
             : undefined;
         this.projectContext = options.projectContext ?? "";
         this.environmentContext = options.environmentContext;
+        this.productName = options.productName;
         this.hideWorkspacePath = options.hideWorkspacePath;
         this.getParentInstructionsBlock = options.getParentInstructionsBlock ?? (() => "");
         this.getDeferredToolCatalog = options.getDeferredToolCatalog ?? (() => []);
@@ -316,6 +323,8 @@ export class AgentSpawner extends EventEmitter {
     private readonly projectContext: string;
     /** Workspace-level `<environment>` snapshot, passed through to rebuilt subagent prompts. */
     private readonly environmentContext: EnvironmentContext | undefined;
+    /** Product identity snapshot inherited from the parent workspace. */
+    private readonly productName: string | undefined;
     /** Parent's IM/third-party channel flag, inherited by every rebuilt subagent prompt. */
     private readonly hideWorkspacePath: boolean | undefined;
     /**
@@ -404,6 +413,7 @@ export class AgentSpawner extends EventEmitter {
             systemPromptContributors: this.systemPromptContributors,
             projectContext: this.projectContext,
             environmentContext: this.environmentContext,
+            productName: this.productName,
             hideWorkspacePath: this.hideWorkspacePath,
             getParentInstructionsBlock: this.getParentInstructionsBlock,
             getDeferredToolCatalog: this.getDeferredToolCatalog,
