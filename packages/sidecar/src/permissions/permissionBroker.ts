@@ -39,7 +39,7 @@ export interface PermissionBrokerOptions {
      *  global evaluator. Thunk to match the existing globalConfig style. */
     imCommandPolicy?: () => ImCommandPolicy | undefined;
     /** Isolate mode: do not inherit any session/global rules.
-     *  Only isStrictReadOnly() commands auto-allow; everything else denies.
+     *  Only commands accepted by the isolated read-only evaluator may run.
      *  Used by read-only subagents (e.g. explorer) so that a user's
      *  root-session allowlist cannot leak into the child's shell execution. */
     readOnly?: boolean;
@@ -142,6 +142,14 @@ export class PermissionBroker extends EventEmitter {
             : imPolicy
               ? evaluateCommandForImWorkspace(args.command, baseConfig, imPolicy, context)
               : evaluateCommand(args.command, baseConfig, context);
+        if (args.signal?.aborted) {
+            return {
+                approved: false,
+                scope: "once",
+                evaluation,
+                denialReason: "aborted",
+            };
+        }
         // readOnly: an "ask" (needs UI approval) degrades to deny immediately.
         // The isolated broker has no UI wiring — waiting would hang the
         // explorer for the full requestTimeoutMs before timing out.
@@ -303,14 +311,23 @@ export class PermissionBroker extends EventEmitter {
 
     /**
      * Park a request until the user answers, the abort signal fires, or the
-     * timeout elapses. Every settle path funnels through `finish`, which is
-     * also how the UI learns about a non-user outcome.
+     * timeout elapses. Once published, every settle path funnels through `finish` so the UI
+     * also learns about a non-user outcome.
      */
     private awaitDecision(
         request: CommandPermissionRequest,
         signal: AbortSignal | undefined,
     ): Promise<CommandPermissionDecision> {
         return new Promise<CommandPermissionDecision>((resolve) => {
+            if (signal?.aborted) {
+                resolve({
+                    approved: false,
+                    scope: "once",
+                    evaluation: request.evaluation,
+                    denialReason: "aborted",
+                });
+                return;
+            }
             const finish = (decision: CommandPermissionDecision) => {
                 if (timer) clearTimeout(timer);
                 this.pending.delete(request.requestId);

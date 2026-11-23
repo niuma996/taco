@@ -73,7 +73,7 @@ export type {
     ImWorkspacePolicyPatch,
 } from "./channels.js";
 export { IM_CWD_PREFIX, makeImCwd, parseImCwd } from "./channels.js";
-export { BUILTIN_READ_ONLY_COMMANDS } from "./commandPermissions.js";
+export { BUILTIN_FIXED_GIT_INSPECTIONS, BUILTIN_READ_ONLY_COMMANDS } from "./commandPermissions.js";
 // taco.json + settings + custom providers + commands + extensions.
 export type {
     ChannelInstanceConfig,

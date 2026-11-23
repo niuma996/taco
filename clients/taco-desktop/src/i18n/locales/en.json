@@ -303,7 +303,7 @@
     "permissionsBypass": "Bypass non-critical prompts",
     "permissionsRules": "Allowlisted commands run automatically. Denylisted commands require approval and take priority over the allowlist. Unparseable commands and paths outside authorized directories also require approval.",
     "permissionsBuiltinAllowList": "Built-in read-only allowlist",
-    "permissionsBuiltinAllowListDesc": "Automatic mode runs these command bases without a prompt when their arguments are safe literals. Local automatic chats also allow simple ls path patterns such as src/* or ./* when no deny rules are configured. Bare patterns require ls -- *. Loops and dynamic execution still require approval. Manual, IM and read-only execution keep their existing restrictions.",
+    "permissionsBuiltinAllowListDesc": "Automatic mode runs these command bases without a prompt when their arguments are safe literals. Local automatic chats also allow simple ls path patterns and bounded wc patterns such as ls src/* or wc -l src/*.ts when no deny rules are configured. Bare patterns require ls -- *. Loops and dynamic execution still require approval. Manual, IM and read-only execution keep their existing restrictions.",
     "permissionsTriggeringCommand": "Command requiring approval",
     "permissionsRuleType": "Rule list",
     "permissionsAllowList": "Allowlist",

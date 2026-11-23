@@ -11,6 +11,44 @@ import { parseShellCommand } from "../../src/permissions/shellParser.ts";
 const auto = { mode: "auto" as const, allow: [], deny: [] };
 const context = { cwd: process.cwd(), language: "bash" as const };
 
+describe("local automatic wc path globs", () => {
+    it("allows bounded file statistics over literal paths and ordinary path globs", () => {
+        for (const command of ["wc -l src/*.ts", "wc -c ./src/file?.ts", "wc --bytes src/*.ts"]) {
+            const result = evaluateCommand(command, auto, context);
+            assert.equal(result.behavior, "allow", command);
+            assert.equal(result.risk, "readOnly", command);
+        }
+    });
+
+    it("keeps dynamic, unsafe, and option-like glob forms approval-gated", () => {
+        for (const command of [
+            'wc -l "$FILES"',
+            "wc -l $(printf src/*.ts)",
+            "wc -l src/**/file.ts",
+            "wc -l *",
+            "wc -l -- *",
+            "wc -l src/*.ts -",
+            "wc -l src/*.ts && pwd",
+            "FOO=bar wc -l src/*.ts",
+            "wc -l -*/file",
+            "wc -l src/*.ts > counts.txt",
+            "wc -l src/*.ts | tee counts.txt",
+        ]) {
+            assert.equal(evaluateCommand(command, auto, context).behavior, "ask", command);
+        }
+    });
+
+    it("does not widen the isolated read-only broker", async () => {
+        const broker = new PermissionBroker(() => auto, { readOnly: true });
+        const result = await broker.evaluateAndRequest({
+            sessionId: "read-only",
+            toolCallId: "wc",
+            command: "wc -l src/*.ts",
+        });
+        assert.equal(result.approved, false);
+    });
+});
+
 describe("local automatic ls path globs", () => {
     it("allows prefixed path patterns without executing or expanding them", () => {
         for (const command of [

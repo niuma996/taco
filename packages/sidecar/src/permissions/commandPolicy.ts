@@ -17,6 +17,7 @@ import {
     matchWildcardPattern,
     parsePermissionRule,
 } from "./shellRuleMatching.ts";
+import { isReadOnlyWcPathGlob } from "./wcPathGlobs.ts";
 
 const RISK_ORDER: Record<CommandRisk, number> = {
     readOnly: 0,
@@ -735,10 +736,11 @@ function evaluateParsed(
                 allowPathGlobs &&
                 parsed.language === "bash" &&
                 !config.deny?.length &&
-                isReadOnlyLsPathGlob(node)
+                (isReadOnlyLsPathGlob(node) ||
+                    (parsed.nodes.length === 1 && isReadOnlyWcPathGlob(node)))
             ) {
                 values.push(
-                    result("allow", "recognized read-only ls path glob", {
+                    result("allow", "recognized read-only path glob", {
                         source: "mode",
                         risk: "readOnly",
                     }),
@@ -750,7 +752,7 @@ function evaluateParsed(
                 : node.argumentKinds.includes("variable")
                   ? "variable expansion cannot be determined statically"
                   : node.argumentKinds.includes("glob")
-                    ? "path glob is outside the supported read-only ls forms"
+                    ? "path glob is outside the supported read-only ls or wc forms"
                     : "unsupported or dynamic shell command";
             values.push(
                 result(readOnly ? "deny" : "ask", reason, {

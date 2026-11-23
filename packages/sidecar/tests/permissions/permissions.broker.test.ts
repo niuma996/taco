@@ -48,6 +48,37 @@ describe("permissionBroker", () => {
         }
     });
 
+    it("does not create an approval after cancellation during display resolution", async () => {
+        let finishDisplay!: () => void;
+        const displayPending = new Promise<void>((resolve) => {
+            finishDisplay = resolve;
+        });
+        const controller = new AbortController();
+        const broker = new PermissionBroker(() => ({ mode: "ask", allow: [], deny: [] }), {
+            resolveDisplayContext: async (sessionId) => {
+                await displayPending;
+                return { displaySessionId: sessionId, displayToolCallId: undefined };
+            },
+            requestTimeoutMs: 25,
+        });
+        let requested = 0;
+        broker.on("requested", () => requested++);
+        const pending = broker.evaluateAndRequest({
+            sessionId: "s1",
+            toolCallId: "t1",
+            command: "pnpm build",
+            signal: controller.signal,
+        });
+        controller.abort();
+        finishDisplay();
+        const decision = await pending;
+        assert.equal(decision.approved, false);
+        assert.equal(decision.denialReason, "aborted");
+        assert.equal(decision.scope, "once");
+        assert.equal(requested, 0);
+        assert.deepEqual(broker.pendingForSession("s1"), []);
+    });
+
     describe("PermissionBroker readOnly mode", () => {
         it("readOnly: isStrictReadOnly command auto-allows", async () => {
             const broker = new PermissionBroker(

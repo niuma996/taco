@@ -1,3 +1,4 @@
+import { isSafeReadOnlyPathGlob } from "./pathGlobs.ts";
 import type { ParsedShellNode } from "./shellParser.ts";
 
 const LS_FLAGS = /^-[1aAbBcCdfFgGhiklLmnpqQrRsStuUx]+$/;
@@ -21,17 +22,7 @@ export function isReadOnlyLsPathGlob(node: ParsedShellNode): boolean {
     let endOfOptions = false;
     return node.argv.slice(1).every((arg, index) => {
         const kind = node.argumentKinds[index + 1];
-        if (kind === "glob") {
-            // Deliberately exclude globstar, braces, extglobs, and unusual
-            // literal characters until their shell semantics are supported.
-            if (
-                arg.includes("**") ||
-                !/^(?:[A-Za-z0-9_./-]|\*|\?|\[[!^]?[A-Za-z0-9_-]+\])+$/.test(arg)
-            )
-                return false;
-            const prefix = arg.slice(0, arg.search(/[*?[]/));
-            return endOfOptions || (!arg.startsWith("-") && prefix.includes("/"));
-        }
+        if (kind === "glob") return isSafeReadOnlyPathGlob(arg, endOfOptions);
         if (kind !== "literal") return false;
         if (endOfOptions) return true;
         if (arg === "--") {

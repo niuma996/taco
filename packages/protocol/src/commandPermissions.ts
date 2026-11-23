@@ -1,3 +1,17 @@
+/** Standalone Git inspections dispatched with fixed arguments and no shell. */
+export const BUILTIN_FIXED_GIT_INSPECTIONS = [
+    "git --version",
+    "git version",
+    "git rev-parse HEAD",
+    "git rev-parse --show-toplevel",
+    "git status",
+    "git status --short",
+    "git diff",
+    "git diff --cached",
+    "git diff --stat",
+    "git log --oneline",
+] as const;
+
 /**
  * Command prefixes the sidecar recognizes as strictly read-only.
  *

@@ -107,6 +107,7 @@ export async function runShell(
     spawnArgs: string[] | null,
     opts: {
         cwd: string;
+        env?: NodeJS.ProcessEnv;
         timeoutMs?: number;
         signal?: AbortSignal;
         /**
@@ -126,7 +127,7 @@ export async function runShell(
     // process.env for pi's own subprocesses. Only keys we injected are removed
     // (isInjectedEnvKey); a user's own GOOGLE_API_KEY etc. stays put.
     const childEnv = Object.fromEntries(
-        Object.entries(process.env).filter(([k]) => !isInjectedEnvKey(k)),
+        Object.entries(opts.env ?? process.env).filter(([k]) => !isInjectedEnvKey(k)),
     );
 
     // POSIX: the command runs under its own process group so `killProcessTree`

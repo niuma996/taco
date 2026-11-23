@@ -182,6 +182,49 @@ describe("shellTool description", () => {
 });
 
 describe("shellTool permission results", () => {
+    it("runs fixed Git history without using an ambient Git directory", async (t) => {
+        const cwd = mkdtempSync(join(tmpdir(), "taco-shell-git-"));
+        t.after(() => rmSync(cwd, { recursive: true, force: true }));
+        const git = (...args: string[]) => childProcess.execFileSync("git", ["-C", cwd, ...args]);
+        git("init", "--quiet");
+        git(
+            "-c",
+            "user.name=Taco",
+            "-c",
+            "user.email=taco@example.test",
+            "-c",
+            "commit.gpgSign=false",
+            "commit",
+            "--quiet",
+            "--allow-empty",
+            "-m",
+            "fixture commit",
+        );
+        const previous = process.env.GIT_DIR;
+        t.after(() => {
+            if (previous === undefined) delete process.env.GIT_DIR;
+            else process.env.GIT_DIR = previous;
+        });
+        process.env.GIT_DIR = join(cwd, "unavailable");
+        const broker = new PermissionBroker(() => ASK_CONFIG, { readOnly: true });
+        const tool = createShellTool({ permissionBroker: broker, sessionId: "session-1" });
+        const result = (await invokeTool(
+            tool,
+            { command: "git log --oneline" },
+            context(cwd),
+        )) as ShellToolResult;
+        assert.equal(result.isError, false, textOf(result));
+        assert.match(textOf(result), /fixture commit/);
+        for (const command of ["git status --short", "git diff --stat"]) {
+            const inspection = (await invokeTool(
+                tool,
+                { command },
+                context(cwd),
+            )) as ShellToolResult;
+            assert.equal(inspection.isError, false, `${command}: ${textOf(inspection)}`);
+        }
+    });
+
     it("returns an explicit failed result when the user denies approval", async () => {
         const broker = new PermissionBroker(() => ASK_CONFIG);
         const tool = createShellTool({ permissionBroker: broker, sessionId: "session-1" });

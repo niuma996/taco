@@ -14,7 +14,6 @@ import type {
     WorktreeRemoveResult,
 } from "@taco-ai/protocol";
 import { HIDDEN_WINDOWS_SPAWN } from "../lib/hiddenWindowsSpawn.ts";
-import { scrubbedProcessEnv } from "../runtime/models/providerKeyStore.ts";
 import { gitDirectoryIdentity } from "../workspace/gitIdentity.ts";
 import {
     WorktreeLockError,
@@ -27,6 +26,7 @@ import {
     type ManagedWorktreeRecord,
     WorktreeMetadataStore,
 } from "../workspace/worktreeMetadata.ts";
+import { gitArguments, gitEnvironment } from "./gitProcess.ts";
 
 const exec = promisify(execFile);
 const COMMAND_TIMEOUT_MS = 5_000;
@@ -50,22 +50,14 @@ export class GitServiceError extends Error {
     }
 }
 
-function gitEnv(): Record<string, string> {
-    const env = scrubbedProcessEnv();
-    // A daemon's ambient Git overrides must never redirect a workspace query or git init.
-    for (const key of Object.keys(env))
-        if (key.startsWith("GIT_")) Reflect.deleteProperty(env, key);
-    return { ...env, LC_ALL: "C", GIT_TERMINAL_PROMPT: "0", GIT_OPTIONAL_LOCKS: "0" };
-}
-
 async function git(cwd: string, args: string[], signal: AbortSignal): Promise<string> {
     signal.throwIfAborted();
     const { stdout } = await withWorktreeGitCommand(() =>
-        exec("git", ["--no-pager", "-c", "core.fsmonitor=false", "-C", cwd, ...args], {
+        exec("git", gitArguments(cwd, args), {
             timeout: COMMAND_TIMEOUT_MS,
             signal,
             maxBuffer: 16 * 1024 * 1024,
-            env: gitEnv(),
+            env: gitEnvironment(),
             encoding: "utf8",
             ...HIDDEN_WINDOWS_SPAWN,
         }),
