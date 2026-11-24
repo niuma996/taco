@@ -326,7 +326,7 @@ test("ripgrep searches a file from its parent directory with a filename prefix",
     mockSpawn(t, (args, options) => {
         received = args;
         receivedCwd = String(options.cwd);
-        return realSpawn(process.execPath, ["-e", "process.stdout.write('one.ts:1:needle\\n')"]);
+        return realSpawn(process.execPath, ["-e", "process.stdout.write('1:needle\\n')"]);
     });
     const result = grepResult(
         await invokeTool(
@@ -336,10 +336,11 @@ test("ripgrep searches a file from its parent directory with a filename prefix",
         ),
     );
     assert.equal(receivedCwd, join(dir, "src"));
-    assert.ok(received.includes("--with-filename"));
+    assert.ok(received.includes("--no-filename"));
     assert.equal(received.at(-2), "needle");
-    assert.equal(received.at(-1), "one.ts");
+    assert.equal(received.at(-1), join(dir, "src", "one.ts"));
     assert.ok(!received.includes("--glob"));
+    assert.ok(!received.includes("--ignore-file"));
     assert.equal(result.content[0].text, "one.ts:1:needle");
 });
 
@@ -359,6 +360,79 @@ test("real ripgrep prefixes the filename when searching a single file", async (t
     assert.equal(result.content[0].text, "one.ts:1:needle");
     assert.equal(result.details?.count, 1);
 });
+
+test("real ripgrep retains single-file matches that look like binary diagnostics", async (t) => {
+    if (realSpawnSync("rg", ["--version"]).status !== 0) {
+        t.skip("ripgrep is not installed");
+        return;
+    }
+    const { dir, env, spawn, tool } = await fixture(t, true);
+    spawn.mock.mockImplementation(realSpawnSync);
+    const text = 'binary file matches (found "\\0" byte around offset 8)';
+    writeFileSync(join(dir, "one.txt"), `${text}\n`);
+    const result = grepResult(
+        await invokeTool(tool, { pattern: "binary", path: "one.txt" }, { env }),
+    );
+    assert.equal(result.content[0].text, `one.txt:1:${text}`);
+    assert.equal(result.details.count, 1);
+});
+
+test("real ripgrep searches a file named '-' rather than stdin", async (t) => {
+    if (realSpawnSync("rg", ["--version"]).status !== 0) {
+        t.skip("ripgrep is not installed");
+        return;
+    }
+    const { dir, env, spawn, tool } = await fixture(t, true);
+    spawn.mock.mockImplementation(realSpawnSync);
+    writeFileSync(join(dir, "-"), "needle\n");
+    const result = grepResult(
+        await invokeTool(
+            tool,
+            { pattern: "needle", path: "-" },
+            { env },
+            {
+                signal: AbortSignal.timeout(2_000),
+            },
+        ),
+    );
+    assert.equal(result.content[0].text, "-:1:needle");
+    assert.equal(result.details.count, 1);
+});
+
+for (const ripgrep of [false, true]) {
+    const backend = ripgrep ? "real ripgrep" : "fallback";
+    test(`${backend} skips an explicitly named binary file`, async (t) => {
+        if (ripgrep && realSpawnSync("rg", ["--version"]).status !== 0) {
+            t.skip("ripgrep is not installed");
+            return;
+        }
+        const { dir, env, spawn, tool } = await fixture(t, ripgrep);
+        if (ripgrep) spawn.mock.mockImplementation(realSpawnSync);
+        writeFileSync(join(dir, "nul.bin"), `needle\n${"x\n".repeat(65_536)}x\0needle\n`);
+        const result = grepResult(
+            await invokeTool(tool, { pattern: "needle", path: "nul.bin" }, { env }),
+        );
+        assert.equal(result.content[0].text, "(no matches)");
+        assert.deepEqual(result.details, { count: 0, truncated: false });
+    });
+
+    test(`${backend} does not read .gitignore when searching a single file`, async (t) => {
+        if (ripgrep && realSpawnSync("rg", ["--version"]).status !== 0) {
+            t.skip("ripgrep is not installed");
+            return;
+        }
+        const { dir, env, spawn, tool } = await fixture(t, ripgrep);
+        if (ripgrep) spawn.mock.mockImplementation(realSpawnSync);
+        writeFileSync(join(dir, "one.ts"), "needle\n");
+        writeFileSync(join(dir, ".gitignore"), "*.ts\n");
+        const read = t.mock.method(env, "readTextFile");
+        const result = grepResult(
+            await invokeTool(tool, { pattern: "needle", path: "one.ts" }, { env }),
+        );
+        assert.equal(result.content[0].text, "one.ts:1:needle");
+        assert.equal(read.mock.callCount(), 0);
+    });
+}
 
 for (const ripgrep of [false, true]) {
     test(`${ripgrep ? "ripgrep" : "fallback"} rejects a search path that does not exist`, async (t) => {

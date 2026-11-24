@@ -148,16 +148,14 @@ async function buildRipgrepIgnoreContent(
 }
 
 async function runRipgrep(
+    env: ExecutionToolContext["env"],
     target: PathTarget,
     params: GrepToolInput,
-    ignoreContent: string,
     piContext: Context,
 ): Promise<SearchResult> {
     const root = target.root;
-    const tempDir = await mkdtemp(join(tmpdir(), "taco-grep-ignore-"));
+    let tempDir: string | undefined;
     try {
-        const ignorePath = join(tempDir, "ignore");
-        await writeFile(ignorePath, ignoreContent, { mode: 0o600 });
         const args = [
             "--line-number",
             // Match end anchors before CRLF as the fallback does, on every host.
@@ -167,25 +165,40 @@ async function runRipgrep(
             "never",
             "--no-ignore",
             "--hidden",
-            "--ignore-file",
-            ignorePath,
             "--max-columns",
             String(MAX_LINE_CHARS),
             "--max-columns-preview",
         ];
         if (params.ignoreCase) args.push("--ignore-case");
-        // An explicit file is the whole search target; a glob filter can only
-        // subtract it, and the tool contract says the glob is ignored there.
-        if (params.glob && target.kind === "directory") args.push("--glob", params.glob);
+        if (target.kind === "directory") {
+            const ignoreContent = await buildRipgrepIgnoreContent(env, root, piContext);
+            tempDir = await mkdtemp(join(tmpdir(), "taco-grep-ignore-"));
+            const ignorePath = join(tempDir, "ignore");
+            await writeFile(ignorePath, ignoreContent, { mode: 0o600 });
+            args.push("--ignore-file", ignorePath);
+            if (params.glob) args.push("--glob", params.glob);
+        } else {
+            // Supply the known basename ourselves so only numbered rows count as matches.
+            args.push("--no-filename");
+        }
         // ripgrep prints `src\a.ts` on Windows; the tool contract (and the
         // fallback path) report forward slashes, so pin the separator. POSIX
         // already defaults to "/", so this only changes Windows output.
         if (process.platform === "win32") args.push("--path-separator=/");
-        // With an explicit file argument ripgrep omits the filename prefix by
-        // default, which would break the `file:line: text` contract.
-        if (target.kind === "file") args.push("--with-filename");
-        args.push("--", params.pattern, target.kind === "file" ? target.name : ".");
+        // A bare "-" means stdin to ripgrep, even after "--".
+        args.push("--", params.pattern, target.kind === "file" ? resolve(root, target.name) : ".");
         const result = searchResult();
+        let binary = false;
+        const appendRow = (line: string): void => {
+            if (target.kind === "directory") {
+                appendMatch(result, line);
+            } else if (line.startsWith("binary file matches")) {
+                // ripgrep can emit this after some matches if it encounters a late NUL.
+                binary = true;
+            } else if (/^\d+:/.test(line)) {
+                appendMatch(result, `${target.name}:${line}`);
+            }
+        };
         const child = spawn("rg", args, {
             cwd: root,
             signal: piContext.abortSignal,
@@ -228,21 +241,21 @@ async function runRipgrep(
                             Math.min(end, start + MAX_LINE_CHARS + 1 - line.length),
                         );
                         if (newline === -1) break;
-                        if (line.length > 0) appendMatch(result, line);
+                        if (line.length > 0) appendRow(line);
                         line = "";
                         start = newline + 1;
                     }
                 }
-                if (line.length > 0) appendMatch(result, line);
+                if (line.length > 0) appendRow(line);
             };
             await Promise.all([completion, consume()]);
         } finally {
             child.stdout.destroy();
             if (child.exitCode === null && child.signalCode === null) child.kill();
         }
-        return result;
+        return binary ? searchResult() : result;
     } finally {
-        await rm(tempDir, { recursive: true, force: true });
+        if (tempDir !== undefined) await rm(tempDir, { recursive: true, force: true });
     }
 }
 
@@ -363,10 +376,9 @@ export function createGrepTool(): GrepTool {
             const target = await statPathTarget(
                 getOrThrow(await env.absolutePath(params.path ?? ".", piContext)),
             );
-            const ignoreContent = await buildRipgrepIgnoreContent(env, target.root, piContext);
 
             const result = hasRipgrep()
-                ? await runRipgrep(target, params, ignoreContent, piContext)
+                ? await runRipgrep(env, target, params, piContext)
                 : await runFallback(env, target, params, piContext);
 
             if (signal?.aborted) throw new Error("Operation aborted");
