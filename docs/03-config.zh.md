@@ -234,7 +234,9 @@ Unicode NFC 规范化后，最多允许 80 个 Unicode 码点。控制字符、�
 以及 `<`、`>`、`{`、`}` 会被拒绝。patch 中传空字符串或 `null` 表示清除覆盖；
 省略字段则保留已存的值。
 
-`taco.json` 里的值损坏时不会阻止 sidecar 启动：记一条警告并回落到默认名。
+如果 `taco.json` 的 JSON 语法正确，但 `productName` 的值不合法，sidecar
+会记录警告并回落到默认名。在其他字段前添加 `productName` 时，别漏掉值后的
+逗号。如果启动时报 JSON 解析错误，请检查提示行及其上一行，修正语法后再重启 sidecar。
 
 这是助手自称的名字，不是产品对外的请求标识（那是上面的 `userAgent`），
 也不会重命名应用本身：磁盘路径（`.taco`、`taco.json`）、`TACO_HOME`

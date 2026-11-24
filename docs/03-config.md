@@ -268,8 +268,11 @@ may contain at most 80 Unicode code points. Control and format characters,
 line breaks and `<`, `>`, `{`, `}` are rejected. An empty string or `null`
 in a patch clears the override; leaving the field out keeps the stored value.
 
-A malformed value in `taco.json` never keeps the sidecar from starting: it
-logs a warning and falls back to the default name.
+An invalid `productName` value in an otherwise valid `taco.json` logs a
+warning and falls back to the default name. The file itself must be valid JSON:
+when adding `productName` before another field, include a comma after its value.
+If startup reports a JSON parse error, check the reported line and the line
+above it, fix the syntax, then restart the sidecar.
 
 This is the assistant's own name, not the product's request identity — that
 one is `userAgent` above. It also does not rename the application: the
