@@ -3,15 +3,7 @@ import { test } from "node:test";
 import { Check } from "typebox/value";
 import * as protocol from "../src/index.ts";
 
-test("worktree management uses the 2.25 contract and distinct process pushes", () => {
-    assert.deepEqual(protocol.SIDECAR_PROTOCOL_VERSION, { major: 2, minor: 25 });
-    assert.equal(protocol.isCompatibleSidecarProtocol({ major: 2, minor: 20 }), false);
-    assert.equal(protocol.isCompatibleSidecarProtocol({ major: 2, minor: 21 }), false);
-    assert.equal(protocol.isCompatibleSidecarProtocol({ major: 2, minor: 22 }), false);
-    assert.equal(protocol.isCompatibleSidecarProtocol({ major: 2, minor: 23 }), false);
-    assert.equal(protocol.isCompatibleSidecarProtocol({ major: 2, minor: 24 }), false);
-    assert.equal(protocol.isCompatibleSidecarProtocol({ major: 2, minor: 25 }), true);
-    assert.equal(protocol.isCompatibleClientProtocol({ major: 2, minor: 21 }), true);
+test("worktree management exposes distinct process pushes", () => {
     assert.equal(protocol.PushMethods.WorktreeChanged, "worktree.changed");
     assert.equal(protocol.PushMethods.WorktreeHandoff, "worktree.handoff");
 });

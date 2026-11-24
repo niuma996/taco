@@ -15,6 +15,7 @@
 import type { ConfigPatchResult, GlobalConfigPatch } from "@taco-ai/protocol";
 import { asSessionId, ErrorCodes, IM_CWD_PREFIX } from "@taco-ai/protocol";
 import { updateGlobalConfig, validateCommandPermissions } from "../../config/config.ts";
+import { PRODUCT_NAME_EDIT_GUIDANCE } from "../../config/productIdentity.ts";
 import { createLogger } from "../../lib/logger.ts";
 import { patchFields } from "../../tools/config.ts";
 import { RpcHandlerError, registerMethod } from "../methodRegistry.ts";
@@ -56,15 +57,14 @@ export function registerConfigHandlers(): void {
 
             const patch = params.patch as GlobalConfigPatch;
             // The product identity is not the model's to change: it renames
-            // the assistant in every prompt, and the running identity only
+            // the assistant in standard-engine prompts, and the running identity only
             // changes on the next restart. The shared patch type makes the
             // field writable here, so the refusal has to be explicit.
             if ("productName" in patch) {
                 throw new RpcHandlerError(
                     ErrorCodes.InvalidParams,
                     "config.patch: productName is not settable here — it renames the " +
-                        "assistant in every prompt. Ask the user to set it in the settings " +
-                        "entry; it takes effect after the sidecar restarts.",
+                        `assistant in standard-engine prompts. ${PRODUCT_NAME_EDIT_GUIDANCE}`,
                 );
             }
             const fields = patchFields(patch);

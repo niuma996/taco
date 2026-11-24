@@ -26,6 +26,12 @@ describe("validateProductName", () => {
         }
     });
 
+    it("normalizes decomposed accents and accepts scripts with combining marks", () => {
+        assert.equal(validateProductName("Cafe\u0301", "test"), "Café");
+        assert.equal(validateProductName("भारत", "test"), "भारत");
+        assert.equal(validateProductName("e\u0301".repeat(80), "test"), "é".repeat(80));
+    });
+
     it("trims surrounding whitespace", () => {
         assert.equal(validateProductName("  Acme  ", "test"), "Acme");
     });
@@ -61,8 +67,8 @@ describe("validateProductName", () => {
     });
 
     it("counts code points, not UTF-16 units", () => {
-        // 80 CJK characters are 160 UTF-16 units but still 80 code points.
-        assert.equal(validateProductName("中".repeat(80), "test"), "中".repeat(80));
+        assert.equal(validateProductName("𠮷".repeat(80), "test"), "𠮷".repeat(80));
+        assert.throws(() => validateProductName("𠮷".repeat(81), "test"), /longer than 80/);
     });
 });
 

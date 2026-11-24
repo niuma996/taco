@@ -255,18 +255,18 @@ of its system prompt:
 You are the Acme assistant, an AI coding assistant.
 ```
 
-Unset, the name is `Taco`. The name is read once at sidecar startup and
-frozen for the life of the process: saving it through `settings.write` (or
-editing `taco.json` by hand) takes effect on the next restart. Every
-workspace and every subagent of one process shares that snapshot, so a
-running session never shows two different names.
+To change the name, edit `$TACO_HOME/taco.json` and restart the sidecar.
+There is no desktop setting for this field. Programmatic clients can use
+`settings.write` with sidecar protocol 2.26 or later; `config.patch` cannot
+change it. The default is `Taco`. The sidecar reads the name at startup, and
+all standard-engine sessions and subagents share that name until the next
+restart.
 
-The value must be a non-empty string of letters, digits, ordinary spaces and
-common name punctuation (Chinese names are fine), at most 80 characters.
-Control characters, line breaks and `<`, `>`, `{`, `}` are rejected — the
-name is inserted into a prompt, so it must not be able to open a section or
-a template marker. An empty string clears the override and restores the
-default name; leaving the field out of a patch keeps the stored value.
+The name may contain letters, combining marks, numbers, ordinary spaces,
+punctuation and symbols. After trimming and Unicode NFC normalization, it
+may contain at most 80 Unicode code points. Control and format characters,
+line breaks and `<`, `>`, `{`, `}` are rejected. An empty string or `null`
+in a patch clears the override; leaving the field out keeps the stored value.
 
 A malformed value in `taco.json` never keeps the sidecar from starting: it
 logs a warning and falls back to the default name.

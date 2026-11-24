@@ -44,7 +44,7 @@ Accepted fields — this is the whole list:
 
 The `userAgent` is the identity every provider request presents, so only the user changes it (Providers & Models → Request identity). If the ask is "make the provider stop seeing this product", point them there.
 
-The `productName` is the name the assistant calls itself in its prompts. It is also user-owned: change it in the settings entry, and note that it takes effect after the sidecar restarts — a running session keeps the name it started with.
+The `productName` field sets the assistant’s name in its prompts. Ask the user to edit `$TACO_HOME/taco.json` and restart the sidecar. There is no desktop setting for this field, and `configPatch` cannot change it.
 
 ## Skills: where to put one
 

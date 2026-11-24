@@ -122,6 +122,7 @@ because a registered system-service daemon can outlive a desktop upgrade.
 | 2.23 | Explicit `worktree.cleanup`, verified inventory `projectRoot` and optional `orphaned` markers for stale or unowned paths. |
 | 2.24 | Process-level `worktree.handoff` notification for agent-created managed worktree sessions. |
 | 2.25 | Verified missing checkouts support metadata-only removal with `forgetMissing`. |
+| 2.26 | Optional `productName` in `settings.get` / `settings.write`, applied on sidecar restart. A 2.25 daemon drops the field on write. |
 
 Adding a value to an existing response enum is potentially breaking: older clients
 may index exhaustive maps with it. Such values require connection-scoped capability

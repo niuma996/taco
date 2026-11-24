@@ -38,6 +38,7 @@ import {
 } from "@taco-ai/protocol";
 import type { Static } from "typebox";
 import { Type } from "typebox";
+import { PRODUCT_NAME_EDIT_GUIDANCE } from "../config/productIdentity.ts";
 import { denialGuidance } from "../permissions/denialGuidance.ts";
 import type { TacoToolContext } from "./context.ts";
 import type { TacoTool } from "./index.ts";
@@ -232,8 +233,9 @@ function createConfigPatch(): TacoTool {
             "Change the global application configuration. The user is asked to approve each " +
             "change before it is written. Only the model, system prompt, thinking level, " +
             "compaction, instructions and command permissions can be set here — API keys, " +
-            "providers, MCP servers, channels, the outbound User-Agent and the product name " +
-            "are entered in the desktop settings pane.",
+            "providers, MCP servers, channels and the outbound User-Agent are entered in the " +
+            "desktop settings pane. " +
+            PRODUCT_NAME_EDIT_GUIDANCE,
         parameters: configPatchSchema,
         executionMode: "sequential",
         taco: {
@@ -276,13 +278,10 @@ function createConfigPatch(): TacoTool {
                         "desktop settings pane (Providers & Models → Request identity).",
                 );
             }
-            // The product name renames the assistant in every prompt. It is
-            // the user's to set, and it only takes effect on the next restart.
             if ("productName" in patch) {
                 throw new Error(
                     "configPatch: productName is not settable here — it renames the assistant " +
-                        "in every prompt. Ask the user to set it in the settings entry; it " +
-                        "takes effect after the sidecar restarts.",
+                        `in standard-engine prompts. ${PRODUCT_NAME_EDIT_GUIDANCE}`,
                 );
             }
             // The patch schema keeps unknown properties (the RPC envelope is

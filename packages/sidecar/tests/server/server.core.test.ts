@@ -145,7 +145,7 @@ describe("initialize", () => {
             assert.equal(result.serverCapabilities.pushes.includes("sidecar.hello"), false);
             assert.deepEqual(result.protocolVersion, SIDECAR_PROTOCOL_VERSION);
             // Pinned separately: a bump must be a deliberate edit here too.
-            assert.deepEqual(SIDECAR_PROTOCOL_VERSION, { major: 2, minor: 25 });
+            assert.deepEqual(SIDECAR_PROTOCOL_VERSION, { major: 2, minor: 26 });
             assert.equal(typeof result.instanceId, "string");
             assert.equal(typeof result.pid, "number");
         });
@@ -194,30 +194,18 @@ describe("initialize", () => {
             if (!resp.ok) assert.equal(resp.error.code, "incompatible_protocol");
         });
 
-        it("a 2.25 client refuses a daemon older than the current minor", () => {
-            // The plugin settings dialog requires extensions.configGet/configUpdate.
-            assert.equal(isCompatibleSidecarProtocol({ major: 2, minor: 5 }), false);
-            assert.equal(isCompatibleSidecarProtocol({ major: 2, minor: 6 }), false);
-            assert.equal(isCompatibleSidecarProtocol({ major: 2, minor: 7 }), false);
-            assert.equal(isCompatibleSidecarProtocol({ major: 2, minor: 8 }), false);
-            assert.equal(isCompatibleSidecarProtocol({ major: 2, minor: 9 }), false);
-            assert.equal(isCompatibleSidecarProtocol({ major: 2, minor: 10 }), false);
-            assert.equal(isCompatibleSidecarProtocol({ major: 2, minor: 12 }), false);
-            assert.equal(isCompatibleSidecarProtocol({ major: 2, minor: 14 }), false);
-            assert.equal(isCompatibleSidecarProtocol({ major: 2, minor: 15 }), false);
-            assert.equal(isCompatibleSidecarProtocol({ major: 2, minor: 16 }), false);
-            assert.equal(isCompatibleSidecarProtocol({ major: 2, minor: 17 }), false);
-            assert.equal(isCompatibleSidecarProtocol({ major: 2, minor: 18 }), false);
-            // A newer sidecar is additive; the client ignores methods it lacks.
-            assert.equal(isCompatibleSidecarProtocol({ major: 2, minor: 19 }), false);
-            assert.equal(isCompatibleSidecarProtocol({ major: 2, minor: 20 }), false);
-            // A 2.21 daemon lacks worktree.create/remove and worktree.changed.
-            assert.equal(isCompatibleSidecarProtocol({ major: 2, minor: 21 }), false);
-            assert.equal(isCompatibleSidecarProtocol({ major: 2, minor: 22 }), false);
-            assert.equal(isCompatibleSidecarProtocol({ major: 2, minor: 23 }), false);
-            assert.equal(isCompatibleSidecarProtocol({ major: 2, minor: 24 }), false);
-            assert.equal(isCompatibleSidecarProtocol({ major: 2, minor: 25 }), true);
-            assert.equal(isCompatibleSidecarProtocol({ major: 2, minor: 11 }), false);
+        it("refuses sidecars that cannot persist a product name", () => {
+            for (let minor = 0; minor <= 25; minor++) {
+                assert.equal(isCompatibleSidecarProtocol({ major: 2, minor }), false);
+            }
+            assert.equal(isCompatibleSidecarProtocol({ major: 2, minor: 26 }), true);
+            assert.equal(isCompatibleSidecarProtocol({ major: 2, minor: 27 }), true);
+        });
+
+        it("still accepts a 2.25 client", async () => {
+            const { transport } = await bootServer();
+            const response = await sendLine(transport, initializeFrame("init-2-25", 25));
+            assert.equal(response.ok, true);
         });
 
         it("accepts a 2.17 client after adding scoped memory reads", async () => {

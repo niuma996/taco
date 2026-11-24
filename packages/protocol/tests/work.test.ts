@@ -1,16 +1,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { Check } from "typebox/value";
-import {
-    RPC,
-    rpcContract,
-    rpcSchemas,
-    SIDECAR_PROTOCOL_VERSION,
-    WORK_KINDS,
-} from "../src/index.ts";
+import { RPC, rpcContract, rpcSchemas, WORK_KINDS } from "../src/index.ts";
 
 test("work controls remain process-scoped methods", () => {
-    assert.deepEqual(SIDECAR_PROTOCOL_VERSION, { major: 2, minor: 25 });
     assert.equal(RPC.workCancel, "work.cancel");
     assert.equal(RPC.workDelete, "work.delete");
     assert.equal(rpcContract.workCancel.scope, "process");

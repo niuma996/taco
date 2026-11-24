@@ -64,7 +64,7 @@ export type GlobalConfigPatch = Partial<
     userAgent?: string | null;
     /**
      * Product name used in the assistant's system prompt identity line.
-     * `null` clears the override back to the default product name.
+     * Requires sidecar protocol 2.26. `null` clears the override.
      *
      * The value takes effect only after a restart — the running identity is a
      * startup snapshot. An empty or whitespace-only string is treated as

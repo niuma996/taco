@@ -108,7 +108,7 @@ describe("configPatch tool through handler and persistence", () => {
     it("refuses to set the product name", async () => {
         // The name renames the assistant in every prompt, and the running
         // identity only changes on the next restart — so it is the user's
-        // to set, through the settings entry.
+        // to set, through the global config file.
         saveGlobalConfig({ defaultModel: "keep-me" });
         let calls = 0;
         const ctx = context();
@@ -119,9 +119,10 @@ describe("configPatch tool through handler and persistence", () => {
             return call(method, workspace, params);
         };
         const { configPatch } = createConfigTools();
+        assert.match(configPatch.description, /\$TACO_HOME\/taco\.json/);
         await assert.rejects(
             invokeTool(configPatch, { patch: { productName: "Acme" } }, ctx),
-            /configPatch: productName is not settable here/,
+            /configPatch: productName is not settable here.*\$TACO_HOME\/taco\.json.*restart/i,
         );
         assert.equal(calls, 0);
         assert.equal(readGlobalConfig().defaultModel, "keep-me");

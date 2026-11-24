@@ -167,7 +167,7 @@ describe("config", () => {
                             { ...patchParams, patch: { productName: "Acme" } },
                         ),
                     ),
-                /productName is not settable here/,
+                /productName is not settable here.*\$TACO_HOME\/taco\.json.*restart/i,
             );
             assert.equal(asked, 0, "the user must not even be asked");
         });

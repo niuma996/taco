@@ -10,6 +10,9 @@
 /** Product name used when nothing is configured. */
 export const DEFAULT_PRODUCT_NAME = "Taco";
 
+export const PRODUCT_NAME_EDIT_GUIDANCE =
+    "Ask the user to set productName in $TACO_HOME/taco.json and restart the sidecar.";
+
 /** Maximum length of a product name, counted in Unicode code points. */
 export const PRODUCT_NAME_MAX_CODE_POINTS = 80;
 
@@ -27,15 +30,15 @@ export const PRODUCT_NAME_MAX_CODE_POINTS = 80;
 const FORBIDDEN = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}<>{}]/u;
 
 /**
- * Letters (any script, so Chinese names work), digits, ordinary spaces,
- * punctuation and symbols — the characters that show up in product names.
+ * Letters and combining marks from any script, numbers, ordinary spaces,
+ * punctuation and symbols.
  */
-const ALLOWED = /^[\p{L}\p{N}\p{P}\p{S} ]+$/u;
+const ALLOWED = /^[\p{L}\p{M}\p{N}\p{P}\p{S} ]+$/u;
 
 /**
  * Validate and normalize a product name.
  *
- * Returns the trimmed name, or `undefined` when the value means "no name"
+ * Returns the trimmed NFC name, or `undefined` when the value means "no name"
  * (`null`, `undefined`, or a blank string of ordinary spaces). Throws for
  * anything invalid — the caller decides whether that is fatal.
  */
@@ -50,22 +53,20 @@ export function validateProductName(value: unknown, source: string): string | un
                 "characters < > { } are not allowed",
         );
     }
-    const trimmed = value.trim();
-    // Blank means "clear the override" — checked after the forbidden
-    // characters so a whitespace-only value is a clear, not a hard failure.
-    if (trimmed === "") return undefined;
-    if ([...trimmed].length > PRODUCT_NAME_MAX_CODE_POINTS) {
+    const name = value.trim().normalize("NFC");
+    if (name === "") return undefined;
+    if ([...name].length > PRODUCT_NAME_MAX_CODE_POINTS) {
         throw new Error(
-            `invalid productName from ${source}: longer than ${PRODUCT_NAME_MAX_CODE_POINTS} characters`,
+            `invalid productName from ${source}: longer than ${PRODUCT_NAME_MAX_CODE_POINTS} Unicode code points`,
         );
     }
-    if (!ALLOWED.test(trimmed)) {
+    if (!ALLOWED.test(name)) {
         throw new Error(
-            `invalid productName from ${source}: only letters, digits, spaces, hyphens and ` +
-                "common name punctuation are allowed",
+            `invalid productName from ${source}: only letters, combining marks, numbers, ` +
+                "ordinary spaces, punctuation and symbols are allowed",
         );
     }
-    return trimmed;
+    return name;
 }
 
 /**
