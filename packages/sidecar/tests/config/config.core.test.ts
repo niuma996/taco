@@ -160,10 +160,27 @@ describe("config corrupt-file handling", () => {
         return dir;
     }
 
-    it("throws on malformed JSON instead of silently returning {}", () => {
-        const dir = useFreshHome();
-        writeFileSync(join(dir, "taco.json"), "{this is not valid json", "utf8");
-        assert.throws(() => readGlobalConfig(), /Unexpected token|Expected|JSON/);
+    it("reports the config path and JSON location for a missing comma", () => {
+        const path = join(useFreshHome(), "taco.json");
+        writeFileSync(path, '{\n  "productName": "Acme"\n  "defaultModel": "example"\n}');
+        assert.throws(() => readGlobalConfig(), {
+            name: "SyntaxError",
+            message:
+                `Invalid JSON in Taco configuration file "${path}" (line 3, column 3). ` +
+                "Check this line and the previous line for syntax errors, such as a missing comma. " +
+                "Fix the file, then restart Taco.",
+        });
+    });
+
+    it("does not expose config snippets when the parser cannot give a location", () => {
+        const path = join(useFreshHome(), "taco.json");
+        writeFileSync(path, '{"apiKeys":{"example": unquoted-placeholder}}');
+        assert.throws(() => readGlobalConfig(), {
+            name: "SyntaxError",
+            message:
+                `Invalid JSON in Taco configuration file "${path}". ` +
+                "Check the file for JSON syntax errors. Fix the file, then restart Taco.",
+        });
     });
 
     it("recovers after the file is repaired — a failure must not poison the cache", () => {

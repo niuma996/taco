@@ -99,8 +99,16 @@ export class ConfigStore {
         try {
             return JSON.parse(raw) as TacoGlobalConfigShape;
         } catch (error) {
-            log.error(`failed to read config ${path}:`, error);
-            throw error;
+            if (!(error instanceof SyntaxError)) throw error;
+            // V8's parser message can quote config contents, including secrets.
+            const location = /\(line (\d+) column (\d+)\)$/.exec(error.message);
+            const file = `Invalid JSON in Taco configuration file "${path}"`;
+            const hint = location
+                ? ` (line ${location[1]}, column ${location[2]}). Check this line and the previous line for syntax errors, such as a missing comma.`
+                : ". Check the file for JSON syntax errors.";
+            const configError = new SyntaxError(`${file}${hint} Fix the file, then restart Taco.`);
+            log.error(configError.message);
+            throw configError;
         }
     }
 
