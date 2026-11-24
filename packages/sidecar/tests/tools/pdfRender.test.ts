@@ -8,6 +8,19 @@ import { renderScan } from "../../src/tools/pdfIntercept.ts";
 import { canvasInstallCommand, loadCanvas } from "../../src/tools/pdfRender.ts";
 import { buildImageOnlyPdf, buildTextPdf } from "./pdfFixtures.ts";
 
+/**
+ * The canvas version the sidecar declares. The vendor-install hint the user
+ * sees is built from it, so both assertions read it from one source instead
+ * of repeating the literal.
+ */
+const CANVAS_VERSION = (
+    JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8")) as {
+        optionalDependencies: Record<string, string>;
+    }
+).optionalDependencies["@napi-rs/canvas"];
+
+const CANVAS_VERSION_PATTERN = CANVAS_VERSION.replace(/\./g, "\\.");
+
 describe("renderScan", () => {
     it("renders the pages of a document with no text layer", async () => {
         const result = await renderScan(buildImageOnlyPdf(), "scan.pdf");
@@ -39,7 +52,7 @@ describe("renderScan", () => {
         assert.equal(result.images.length, 0);
         assert.match(result.text, /no text layer/);
         assert.match(result.text, /npm install --prefix/);
-        assert.match(result.text, /@napi-rs\/canvas@1\.0\.13/);
+        assert.match(result.text, new RegExp(`@napi-rs/canvas@${CANVAS_VERSION_PATTERN}`));
         assert.equal(result.text.includes("officecli"), false);
         assert.equal(result.text.includes("pnpm add"), false);
     });
@@ -47,13 +60,7 @@ describe("renderScan", () => {
 
 describe("loadCanvas", () => {
     it("pins the canvas version the package declares", () => {
-        const pkg = JSON.parse(
-            readFileSync(new URL("../../package.json", import.meta.url), "utf8"),
-        ) as { optionalDependencies: Record<string, string> };
-        assert.match(
-            canvasInstallCommand(),
-            new RegExp(`@napi-rs/canvas@${pkg.optionalDependencies["@napi-rs/canvas"]}$`),
-        );
+        assert.match(canvasInstallCommand(), new RegExp(`@napi-rs/canvas@${CANVAS_VERSION}$`));
     });
 
     it("loads a vendor install when the package import fails", async () => {

@@ -19,7 +19,7 @@ import { tacoHome } from "../config/tacoHome.ts";
 
 /** Must match `optionalDependencies` in package.json. */
 const CANVAS_PACKAGE = "@napi-rs/canvas";
-const CANVAS_VERSION = "1.0.13";
+const CANVAS_VERSION = "1.2.0";
 
 /** How the canvas dependency is loaded, so tests can supply their own. */
 export type CanvasLoader = () => Promise<typeof import("@napi-rs/canvas")>;

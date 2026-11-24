@@ -115,7 +115,7 @@ it is not bundled, and a release install has no `node_modules` beside the
 bundle. Install it into `$TACO_HOME/vendor` when a scan needs rendering:
 
 ```bash
-npm install --prefix ~/.taco/vendor @napi-rs/canvas@1.0.13
+npm install --prefix ~/.taco/vendor @napi-rs/canvas@1.2.0
 ```
 
 Without it a scan still reads, and the result names that command.

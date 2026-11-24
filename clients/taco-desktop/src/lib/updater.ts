@@ -21,7 +21,7 @@
  */
 
 import { getVersion } from "@tauri-apps/api/app";
-import { relaunch } from "@tauri-apps/plugin-process";
+import { invoke } from "@tauri-apps/api/core";
 import { check, type Update } from "@tauri-apps/plugin-updater";
 
 export type UpdateState = "idle" | "checking" | "available" | "downloading" | "ready" | "error";
@@ -145,14 +145,9 @@ export async function applyUpdate(onProgress: (progress: number) => void): Promi
     }
 }
 
-/** Re-launch the desktop binary. Called only after a successful
- *  download+install so the running process is replaced by the freshly
- *  installed one. Wrapped to keep the @tauri-apps/plugin-process import
- *  in one file; the rest of the codebase can mock `applyUpdate` /
- *  checkForUpdate` instead. Re-throws so the dialog can surface
- *  elevation-cancel errors via the state machine. */
+/** After a successful install, let Rust stop the sidecar before relaunching. */
 export async function relaunchDesktop(): Promise<void> {
-    await relaunch();
+    await invoke("restart_desktop");
 }
 
 /** Returns the version of the running binary, as embedded in

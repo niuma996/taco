@@ -10,6 +10,7 @@
  * its fields.
  */
 
+use std::future::Future;
 use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
@@ -47,13 +48,8 @@ use crate::paths::{
 use crate::sidecar_launcher::DEBUG_ONLY_PASSTHROUGH_ENV;
 use crate::sidecar_launcher::{resolve_install_launcher, resolve_sidecar, PASSTHROUGH_ENV};
 
-/// Gate that lets a programmatic `AppHandle::exit` pass through without
-/// re-entering the shutdown helper. The OS-driven `RunEvent::ExitRequested`
-/// (Cmd+Q / window manager close on Windows/Linux) calls `prevent_exit`,
-/// runs the sidecar teardown, then `exit(0)` triggers a second ExitRequested.
-/// Swapping the gate from false → true on the first event marks the second
-/// one as "already handled" so it falls through and the process actually
-/// terminates.
+/// Claims the final quit or restart so a competing request cannot bypass
+/// sidecar teardown. Programmatic exit events are not intercepted.
 static EXIT_GATE: AtomicBool = AtomicBool::new(false);
 
 /// Absolute path of the default workspace, with the directory guaranteed to exist.
@@ -180,9 +176,11 @@ pub struct AppState {
     /// of leaving a zombie after a dispose race-kill.
     pub sidecar: Mutex<Option<SharedSidecar>>,
     next_process_generation: AtomicU64,
-    /// True while a dispose is in flight — ensure checks this before AND after spawn so it
-    /// never installs a process that will be killed moments later (orphan).
+    /// True during disposal and until process exit on final shutdown. Ensure
+    /// checks this before and after spawning to avoid publishing an orphan.
     shutdown_initiated: AtomicBool,
+    /// A desktop restart must not race a regular sidecar disposal.
+    shutdown_lock: Mutex<()>,
     /// Per-process log file family, set when a sidecar is installed. None
     /// before the first install; recreated on each new sidecar process so the
     /// file's lifetime matches the process lifetime. The reader task gets a
@@ -212,6 +210,7 @@ impl Default for AppState {
             sidecar: Mutex::new(None),
             next_process_generation: AtomicU64::new(1),
             shutdown_initiated: AtomicBool::new(false),
+            shutdown_lock: Mutex::new(()),
             log_files: Arc::new(StdMutex::new(None)),
             stderr_reader: StdMutex::new(None),
             ensure_lock: Mutex::new(()),
@@ -979,11 +978,35 @@ async fn workspace_send(
 /// / restartSidecar.
 #[tauri::command]
 async fn workspace_dispose_all(app: AppHandle) -> Result<(), String> {
-    shutdown_sidecar(&app).await;
+    shutdown_sidecar(&app, true).await;
     Ok(())
 }
 
-/// Gracefully stop the shared sidecar child and reset the shutdown flag.
+/// Relaunch after an update. Tauri's restart exit event cannot be prevented,
+/// so sidecar teardown must complete before requesting it.
+#[tauri::command]
+async fn restart_desktop(app: AppHandle) {
+    if EXIT_GATE.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    finish_desktop_exit(&app.state::<AppState>(), shutdown_sidecar(&app, false), || {
+        app.request_restart();
+    })
+    .await;
+}
+
+async fn finish_desktop_exit(
+    state: &AppState,
+    shutdown: impl Future<Output = ()>,
+    exit: impl FnOnce(),
+) {
+    // Let an in-flight startup publish its sidecar so shutdown can find it.
+    let _ensure_guard = state.ensure_lock.lock().await;
+    shutdown.await;
+    exit();
+}
+
+/// Gracefully stop the shared sidecar child. Only a regular disposal can reconnect.
 ///
 /// PR-D reorders the teardown so the daemon gets a chance to clean up its
 /// own sockets + pid file before any signal lands:
@@ -998,14 +1021,15 @@ async fn workspace_dispose_all(app: AppHandle) -> Result<(), String> {
 ///      via the pid file -- this catches the case where the launcher
 ///      handle points at a CLI process that's already exited.
 ///   5. As a final fallback, kill the launcher handle directly.
-///   6. Reset the shutdown flag.
-async fn shutdown_sidecar(app: &tauri::AppHandle) {
-    // Set the flag BEFORE acquiring the lock — any in-flight ensure (already past the first
-    // check, mid-spawn) sees it before install, so it kills the orphan launcher instead of
-    // being race-killed and leaving a zombie. Reset is outside the lock: the typical path
-    // is dispose → re-ensure (restartSidecar), and after reset the next ensure can spawn.
+///   6. Reset the shutdown flag only if the desktop will remain running.
+async fn shutdown_sidecar(app: &tauri::AppHandle, allow_reconnect: bool) {
     let state = app.state::<AppState>();
-    state.shutdown_initiated.store(true, Ordering::Release);
+    let _shutdown_guard = state.shutdown_lock.lock().await;
+    // Set the flag before taking the slot so an in-flight ensure aborts before
+    // publishing. With the shutdown lock held, true means final teardown already ran.
+    if state.shutdown_initiated.swap(true, Ordering::AcqRel) {
+        return;
+    }
     let dead = {
         let mut slot = state.sidecar.lock().await;
         slot.take()
@@ -1067,7 +1091,9 @@ async fn shutdown_sidecar(app: &tauri::AppHandle) {
             }
         }
     }
-    state.shutdown_initiated.store(false, Ordering::Release);
+    if allow_reconnect {
+        state.shutdown_initiated.store(false, Ordering::Release);
+    }
 }
 
 /// Poll the control socket until it stops accepting connections — i.e. the
@@ -1537,10 +1563,7 @@ fn build_tray(app: &tauri::App) -> tauri::Result<()> {
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id.as_ref() {
             "tray.show" => focus_main(app),
-            "tray.quit" => {
-                EXIT_GATE.store(true, Ordering::SeqCst);
-                app.exit(0);
-            }
+            "tray.quit" if !EXIT_GATE.swap(true, Ordering::SeqCst) => app.exit(0),
             _ => {}
         })
         .on_tray_icon_event(|tray, event| {
@@ -1653,6 +1676,7 @@ pub fn run() {
             workspace_ensure,
             workspace_send,
             workspace_dispose_all,
+            restart_desktop,
             set_fs_scope,
             allow_fs_file,
             desktop_config_read,
@@ -1671,18 +1695,17 @@ pub fn run() {
         // overriding here lands after it.
         #[cfg(all(target_os = "macos", debug_assertions))]
         tauri::RunEvent::Ready => apply_dev_dock_icon(),
-        tauri::RunEvent::ExitRequested { api, .. } => {
-            // The second ExitRequested fires after `h.exit(0)` below; the
-            // gate flips on the first call so the second one falls through
-            // and the process actually terminates.
+        tauri::RunEvent::ExitRequested { code: None, api, .. } => {
+            api.prevent_exit();
             if EXIT_GATE.swap(true, Ordering::SeqCst) {
                 return;
             }
-            api.prevent_exit();
             let h = app_handle.clone();
             tauri::async_runtime::spawn(async move {
-                shutdown_sidecar(&h).await;
-                h.exit(0);
+                finish_desktop_exit(&h.state::<AppState>(), shutdown_sidecar(&h, false), || {
+                    h.exit(0);
+                })
+                .await;
             });
         }
         // macOS: the close gesture hides the window instead of destroying it
@@ -1704,6 +1727,41 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::PASSTHROUGH_ENV;
+
+    #[tokio::test]
+    async fn desktop_exit_waits_for_sidecar_startup_and_shutdown() {
+        use std::cell::Cell;
+        use std::future::Future;
+        use std::task::{Context, Waker};
+
+        let state = super::AppState::default();
+        let startup = state.ensure_lock.lock().await;
+        let (finish_shutdown, shutdown_done) = tokio::sync::oneshot::channel();
+        let shutdown_started = Cell::new(false);
+        let restarted = Cell::new(false);
+        let mut exit = std::pin::pin!(super::finish_desktop_exit(
+            &state,
+            async {
+                shutdown_started.set(true);
+                shutdown_done.await.unwrap();
+            },
+            || restarted.set(true),
+        ));
+        let mut cx = Context::from_waker(Waker::noop());
+
+        assert!(exit.as_mut().poll(&mut cx).is_pending());
+        assert!(!shutdown_started.get());
+        assert!(!restarted.get());
+
+        drop(startup);
+        assert!(exit.as_mut().poll(&mut cx).is_pending());
+        assert!(shutdown_started.get());
+        assert!(!restarted.get());
+
+        finish_shutdown.send(()).unwrap();
+        assert!(exit.as_mut().poll(&mut cx).is_ready());
+        assert!(restarted.get());
+    }
 
     #[test]
     fn service_management_is_disabled_for_debug_builds_only() {

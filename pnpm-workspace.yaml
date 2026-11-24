@@ -25,15 +25,19 @@ minimumReleaseAgeExclude:
   # @taco-ai/pi-harness is published alongside this change, so it is inside the
   # 24h gate on the day it lands. Drop this entry once that version is older.
   - '@taco-ai/pi-harness@0.1.0'
-  # lucide-react 1.61.0 was published less than 24h before the upgrade landed.
+  # lucide-react 1.78.0 was published less than 24h before the upgrade landed.
   # Drop this entry once that version is older.
-  - lucide-react@1.61.0
+  - lucide-react@1.78.0
+  # @tanstack/react-query 5.108.4 was published less than 24h before the upgrade
+  # landed. Drop this entry once that version is older.
+  - '@tanstack/react-query@5.108.4'
   # pele 1.13.0 was published less than 24h before the upgrade landed.
   # Drop this entry once that version is older.
   - pele@1.13.0
   - '@taco-ai/pi-harness'
   - '@taco-ai/pi-harness@0.2.0'
   - '@taco-ai/pi-harness@0.2.1'
+  - '@tanstack/query-core@5.108.4'
 peerDependencyRules:
   ignoreMissing:
     - "@earendil-works/*"
@@ -44,3 +48,7 @@ peerDependencyRules:
     # missing-peer warning while leaving the optionalDependency wiring
     # in packages/sidecar/package.json intact.
     - "@taco-ai/sidecar-*"
+  allowedVersions:
+    # madge declares typescript ^5.4.4 but works fine on 7.x; the warning is
+    # noise on every install. Revisit when madge widens its own range.
+    madge>typescript: ">=5"

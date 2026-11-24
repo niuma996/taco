@@ -15,7 +15,7 @@
     "node": ">=22"
   },
   "optionalDependencies": {
-    "@napi-rs/canvas": "1.0.13",
+    "@napi-rs/canvas": "1.2.0",
     "@wechatbot/wechatbot": "2.2.0",
     "@wecom/aibot-node-sdk": "1.0.7"
   },
@@ -53,7 +53,7 @@
     "@earendil-works/chord": "1.5.2",
     "@earendil-works/pi-ai": "1.5.2",
     "@earendil-works/pi-telemetry": "1.5.2",
-    "@modelcontextprotocol/sdk": "1.30.0",
+    "@modelcontextprotocol/sdk": "1.32.2",
     "@taco-ai/pi-harness": "0.2.1",
     "@taco-ai/protocol": "workspace:*",
     "@taco-ai/shared": "workspace:*",
@@ -61,18 +61,18 @@
     "croner": "^9.0.0",
     "fast-glob": "^3.3.3",
     "gray-matter": "^4.0.3",
-    "ignore": "^7.0.14",
+    "ignore": "^7.0.16",
     "pdf-lib": "1.17.1",
     "smol-toml": "1.9.1",
-    "typebox": "^1.4.3",
+    "typebox": "^1.4.7",
     "unpdf": "1.9.1",
     "web-tree-sitter": "0.25.10"
   },
   "devDependencies": {
     "@types/node": "^22.7.0",
     "esbuild": "^0.28.2",
-    "pdfjs-dist": "6.4.299",
-    "tsx": "^4.23.5",
+    "pdfjs-dist": "6.5.438",
+    "tsx": "^4.23.15",
     "typescript": "^7.0.2"
   }
 }

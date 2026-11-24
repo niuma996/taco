@@ -13,9 +13,38 @@
  * `assets/provider-icons/` by `scripts/generate-provider-icons.mjs`.
  *
  * Providers without a vendored mark — every custom provider, and any built-in
- * added later — fall back to a neutral glyph.
+ * added later — get a letter badge taken from the provider name. Names without
+ * an ASCII letter (e.g. Chinese-only) fall back to a neutral glyph.
  */
-import { Box } from "lucide-react";
+import {
+    Box,
+    CircleLetterA,
+    CircleLetterB,
+    CircleLetterC,
+    CircleLetterD,
+    CircleLetterE,
+    CircleLetterF,
+    CircleLetterG,
+    CircleLetterH,
+    CircleLetterI,
+    CircleLetterJ,
+    CircleLetterK,
+    CircleLetterL,
+    CircleLetterM,
+    CircleLetterN,
+    CircleLetterO,
+    CircleLetterP,
+    CircleLetterQ,
+    CircleLetterR,
+    CircleLetterS,
+    CircleLetterT,
+    CircleLetterU,
+    CircleLetterV,
+    CircleLetterW,
+    CircleLetterX,
+    CircleLetterY,
+    CircleLetterZ,
+} from "lucide-react";
 import { PROVIDER_ICON_SHAPES } from "./providerIconPaths.ts";
 
 /** Provider id → shape. Chinese-region variants reuse the global brand. */
@@ -49,27 +78,71 @@ function maskFor(shape: (typeof PROVIDER_ICON_SHAPES)[string]): string {
     return `url("data:image/svg+xml,${encodeURIComponent(svg)}")`;
 }
 
+/** Letter badges keyed by uppercase initial. Explicit so bundlers tree-shake. */
+const LETTER_MARKS = {
+    A: CircleLetterA,
+    B: CircleLetterB,
+    C: CircleLetterC,
+    D: CircleLetterD,
+    E: CircleLetterE,
+    F: CircleLetterF,
+    G: CircleLetterG,
+    H: CircleLetterH,
+    I: CircleLetterI,
+    J: CircleLetterJ,
+    K: CircleLetterK,
+    L: CircleLetterL,
+    M: CircleLetterM,
+    N: CircleLetterN,
+    O: CircleLetterO,
+    P: CircleLetterP,
+    Q: CircleLetterQ,
+    R: CircleLetterR,
+    S: CircleLetterS,
+    T: CircleLetterT,
+    U: CircleLetterU,
+    V: CircleLetterV,
+    W: CircleLetterW,
+    X: CircleLetterX,
+    Y: CircleLetterY,
+    Z: CircleLetterZ,
+} as const;
+
+/**
+ * The first ASCII letter of `name`, uppercased. A `custom:` provider id
+ * standing in for the name (the model menu groups by id) is stripped first,
+ * otherwise every custom provider would badge as "C".
+ */
+function letterMarkOf(name: string): (typeof LETTER_MARKS)[keyof typeof LETTER_MARKS] | undefined {
+    const letter = name
+        .replace(/^custom:/, "")
+        .match(/[a-z]/i)?.[0]
+        ?.toUpperCase();
+    return letter ? LETTER_MARKS[letter as keyof typeof LETTER_MARKS] : undefined;
+}
+
 export interface ProviderIconProps {
     /** Provider id as reported by the sidecar (`custom:…` for user-defined ones). */
     providerId: string;
-    /** Provider name, kept for the accessible label on the card. */
+    /** Provider display name — the fallback badge takes its initial from this. */
     name: string;
     /** Glyph size for the fallback mark. The brand mark is sized by CSS. */
     size?: number;
 }
 
 /**
- * Render the provider's brand mark, or a neutral placeholder when the
- * provider has none. The card is a button that already carries an
- * accessible name, so the mark itself is decorative.
+ * Render the provider's brand mark, or a letter badge when the provider has
+ * none. The card is a button that already carries an accessible name, so the
+ * mark itself is decorative.
  */
 export function ProviderIcon(props: ProviderIconProps) {
     const key = PROVIDER_SHAPES[props.providerId];
     const shape = key ? PROVIDER_ICON_SHAPES[key] : undefined;
     if (!shape) {
+        const Mark = letterMarkOf(props.name) ?? Box;
         return (
             <span className="provider-icon provider-icon--fallback" aria-hidden="true">
-                <Box size={props.size ?? 16} strokeWidth={1.7} />
+                <Mark size={props.size ?? 16} strokeWidth={1.7} />
             </span>
         );
     }
