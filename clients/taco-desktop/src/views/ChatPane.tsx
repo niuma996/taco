@@ -14,7 +14,7 @@ import type {
 } from "@taco-ai/protocol";
 import { ArrowUp, Paperclip, Square } from "lucide-react";
 import type { Dispatch, ReactNode, RefObject, SetStateAction } from "react";
-import { useEffect, useRef } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { AttachmentChip } from "../components/AttachmentChip";
 import { CommandPermissionModeSelector } from "../components/CommandPermissionModeSelector";
 import { ContextIndicator } from "../components/ContextIndicator";
@@ -55,8 +55,7 @@ export interface ChatPaneProps {
     /** Stage a file against the active workspace; resolves with the id a prompt sends back. */
     onStageAttachment: StageFn;
     /**
-     * Anything in flight that warrants a Stop button: the active session's run
-     * OR agent-tool cards streaming from background sessions.
+     * The active session is running or background agent-tool cards are streaming.
      */
     busy: boolean;
     /**
@@ -69,6 +68,7 @@ export interface ChatPaneProps {
     queuedItems: QueuedUiItem[];
     /** Cancel one queued entry (QueueBar row cancel button). */
     onCancelQueued: (item: QueuedUiItem) => void;
+    onInterruptAndSendQueued?: (entryIds: readonly string[]) => Promise<void>;
     /** Sidebar collapsed state + toggle, surfaced as a button on the session-info bar. */
     sidebarCollapsed: boolean;
     onToggleSidebar: () => void;
@@ -217,6 +217,7 @@ export function ChatPane(props: ChatPaneProps) {
         runInFlight,
         queuedItems,
         onCancelQueued,
+        onInterruptAndSendQueued,
         compacting,
         contextIndicator,
         onInputChange,
@@ -282,13 +283,53 @@ export function ChatPane(props: ChatPaneProps) {
     const loadingMeta = loadingSession
         ? ws?.sessions.find((s) => s.id === ws.loadingSessionId)
         : undefined;
-    const canSend =
-        Boolean(ws) && !loadingSession && (input.trim().length > 0 || attachments.length > 0);
-    // Single send/stop toggle: Stop while a run (or compaction) is in flight
-    // and the composer is empty; typing switches back to Send so an in-run
-    // steer stays one click away. Compaction always shows Stop — the textarea
-    // is locked then, so typed text can't be cleared to reveal it.
-    const showStop = !loadingSession && (compacting || (busy && !canSend));
+    const canSend = !composerLocked && (input.trim().length > 0 || attachments.length > 0);
+    const showRunning = runInFlight && !loadingSession;
+    const showInterrupt = showRunning && !composerLocked;
+    const steerItems = queuedItems.filter((item) => item.kind === "steer");
+    const showSteerBatch = showInterrupt && steerItems.length > 0;
+    const batchTarget = JSON.stringify([ws?.cwd, ws?.activeSession]);
+    const inFlightBatches = useRef(new Set<string>());
+    const [pendingBatches, setPendingBatches] = useState<ReadonlySet<string>>(new Set());
+    const batchPending = pendingBatches.has(batchTarget);
+    const canSendBatch =
+        showSteerBatch && !!onInterruptAndSendQueued && !steerItems.some((item) => item.optimistic);
+    const batchReady = canSendBatch && !batchPending;
+    const showSteerHint = batchReady && !canSend;
+    const steerHintId = useId();
+    async function interruptAndSendBatch() {
+        if (!canSendBatch || !onInterruptAndSendQueued || inFlightBatches.current.has(batchTarget))
+            return;
+        inFlightBatches.current.add(batchTarget);
+        setPendingBatches(new Set(inFlightBatches.current));
+        try {
+            await onInterruptAndSendQueued(steerItems.map((item) => item.id));
+        } finally {
+            inFlightBatches.current.delete(batchTarget);
+            setPendingBatches(new Set(inFlightBatches.current));
+        }
+    }
+    const composerSendsBatch =
+        !composerLocked &&
+        !canSend &&
+        (batchPending || (showSteerBatch && !!onInterruptAndSendQueued));
+    const showComposerStop =
+        !loadingSession && (compacting || (busy && !canSend && !composerSendsBatch));
+    const sendActionLabel = t(
+        showComposerStop
+            ? "input.stop"
+            : composerSendsBatch
+              ? "input.interruptAndSend"
+              : showInterrupt
+                ? "input.sendSteer"
+                : "input.send",
+    );
+    function submitDraft(submit: () => void) {
+        // Reset before React renders to avoid a one-frame multiline flicker.
+        const el = textareaRef.current;
+        if (el) el.style.height = "auto";
+        submit();
+    }
     const messages = session?.messages ?? EMPTY_MESSAGES;
     // Fresh chat (no messages yet) — covers both a brand-new session and one
     // that was just created via "New chat" but never prompted.
@@ -414,19 +455,15 @@ export function ChatPane(props: ChatPaneProps) {
                         })}
                     </>
                 )}
-                {/* Persistent run indicator: while a turn is in flight, three
-                    bouncing dots sit at the left of the message column, where
-                    the next assistant output will land — typing a steer then
-                    still reads as "agent busy", not "idle input". */}
-                {runInFlight && !loadingSession && (
+                {showRunning && (
                     <div
                         className="run-indicator"
                         role="status"
                         aria-label={t("input.runningIndicator")}
                     >
-                        <span className="run-indicator__dot" />
-                        <span className="run-indicator__dot" />
-                        <span className="run-indicator__dot" />
+                        <span className="run-indicator__dot" aria-hidden="true" />
+                        <span className="run-indicator__dot" aria-hidden="true" />
+                        <span className="run-indicator__dot" aria-hidden="true" />
                     </div>
                 )}
                 <footer className="input">
@@ -441,6 +478,28 @@ export function ChatPane(props: ChatPaneProps) {
                         </output>
                     )}
                     <QueueBar items={queuedItems} onCancel={onCancelQueued} />
+                    {showSteerBatch && (
+                        <div className="input-steer-actions">
+                            {showSteerHint && (
+                                <p className="input-steer-hint" id={steerHintId}>
+                                    {t("input.steerHint")}
+                                </p>
+                            )}
+                            {!onInterruptAndSendQueued && (
+                                <p className="input-steer-hint">{t("input.steerUnavailable")}</p>
+                            )}
+                            <Button
+                                variant="ghost"
+                                className="input-steer-button"
+                                size="sm"
+                                disabled={!canSendBatch}
+                                loading={batchPending}
+                                onClick={() => void interruptAndSendBatch()}
+                            >
+                                {t("input.interruptAndSendQueued")}
+                            </Button>
+                        </div>
+                    )}
                     {syncNotice && (
                         <output
                             className={
@@ -458,7 +517,11 @@ export function ChatPane(props: ChatPaneProps) {
                         </output>
                     )}
                     {props.recoveries?.map((item) => (
-                        <div key={item.id} className="input-status" role="status">
+                        <div
+                            key={item.id}
+                            className="input-status input-status--recovery"
+                            role="status"
+                        >
                             <span>
                                 {t(item.uncertain ? "input.deliveryUnknown" : "input.unsentDraft")}
                             </span>
@@ -500,32 +563,25 @@ export function ChatPane(props: ChatPaneProps) {
                             onChange={(e) => onInputChange(e.target.value)}
                             onPaste={handlePaste}
                             disabled={composerLocked}
+                            aria-describedby={showSteerHint ? steerHintId : undefined}
                             onKeyDown={(e) => {
                                 // While an IME composition (CJK) is active, Enter confirms a candidate, not a submit.
                                 // keyCode === 229 is a WebKit legacy fallback for older versions.
                                 if (e.nativeEvent.isComposing || e.keyCode === 229) return;
                                 if (e.key === "Enter" && !e.shiftKey) {
                                     e.preventDefault();
-                                    // The composer stays unlocked during a run: Enter
-                                    // delivers the text as an in-run steer. Only a
-                                    // compaction locks it.
-                                    if (!compacting && canSend) {
-                                        // Reset the textarea height before sending so the input snaps back to a
-                                        // single line ahead of the React re-render — avoids a
-                                        // single-frame flicker of the multi-line state.
-                                        const el = textareaRef.current;
-                                        if (el) {
-                                            el.style.height = "auto";
-                                        }
-                                        onEnter();
+                                    if (canSend) {
+                                        submitDraft(onEnter);
+                                    } else if (!e.repeat) {
+                                        void interruptAndSendBatch();
                                     }
                                 }
                             }}
                             placeholder={
-                                runInFlight
-                                    ? t("input.placeholderRunning")
-                                    : compacting
-                                      ? t("input.placeholderCompacting")
+                                compacting
+                                    ? t("input.placeholderCompacting")
+                                    : showInterrupt
+                                      ? t("input.placeholderRunning")
                                       : t("input.placeholderIdle")
                             }
                         />
@@ -576,48 +632,28 @@ export function ChatPane(props: ChatPaneProps) {
                                         className="input-context-indicator"
                                     />
                                 )}
-                                {/* One icon-only toggle instead of separate
-                                    send/steer/stop buttons; the i18n labels
-                                    move to aria-label/title. */}
                                 <button
                                     type="button"
-                                    className={`prompt-button send-toggle ${showStop ? "stop" : "send"}`}
-                                    aria-label={
-                                        showStop
-                                            ? t("input.stop")
-                                            : runInFlight
-                                              ? t("input.sendSteer")
-                                              : t("input.send")
-                                    }
-                                    title={
-                                        showStop
-                                            ? t("input.stop")
-                                            : runInFlight
-                                              ? t("input.sendSteer")
-                                              : t("input.send")
-                                    }
+                                    className={`prompt-button send-toggle ${showComposerStop ? "stop" : "send"}`}
+                                    aria-label={sendActionLabel}
+                                    title={sendActionLabel}
                                     onClick={
-                                        showStop
+                                        showComposerStop
                                             ? onAbort
-                                            : () => {
-                                                  // Same height reset as Enter — avoids a one-frame multi-line flicker.
-                                                  const el = textareaRef.current;
-                                                  if (el) {
-                                                      el.style.height = "auto";
-                                                  }
-                                                  onSend();
-                                              }
+                                            : composerSendsBatch
+                                              ? () => void interruptAndSendBatch()
+                                              : () => submitDraft(onSend)
                                     }
-                                    disabled={!showStop && !canSend}
+                                    disabled={!showComposerStop && !canSend && !batchReady}
                                 >
                                     {/* Keyed remount replays the swap animation
                                         on every state change. Filled square:
                                         an outlined one reads as a tick box. */}
                                     <span
-                                        key={showStop ? "stop" : "send"}
+                                        key={showComposerStop ? "stop" : "send"}
                                         className="send-toggle-icon"
                                     >
-                                        {showStop ? (
+                                        {showComposerStop ? (
                                             <Square
                                                 size={16}
                                                 fill="currentColor"

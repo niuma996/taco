@@ -11,9 +11,17 @@ import type {
     SessionTarget,
     WorkspaceCleanupResult,
 } from "@taco-ai/protocol";
-import { asSessionId, asWorkspaceId, ErrorCodes, IM_CWD_PREFIX } from "@taco-ai/protocol";
+import { asSessionId, asWorkspaceId, ErrorCodes, IM_CWD_PREFIX, RPC } from "@taco-ai/protocol";
 import { useQueryClient } from "@tanstack/react-query";
-import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+    type CSSProperties,
+    useCallback,
+    useEffect,
+    useMemo,
+    useRef,
+    useState,
+    useSyncExternalStore,
+} from "react";
 import { ActivityRail } from "./components/ActivityRail";
 import { ChatWorkspaceContext } from "./components/ChatWorkspaceContext";
 import { ConfirmModal } from "./components/ConfirmModal";
@@ -104,6 +112,16 @@ const EMPTY_BACKGROUND_RUN_IDS: SessionState["backgroundRunIds"] = {};
 
 export default function App() {
     const [client] = useState(() => new TacoClient());
+    const supportsInterruptAndSend = useSyncExternalStore(
+        useCallback((listener: () => void) => client.onConnectionReady(listener), [client]),
+        useCallback(
+            () =>
+                client
+                    .getServerCapabilities()
+                    ?.methods.includes(RPC.sessionInterruptAndSendQueued) ?? false,
+            [client],
+        ),
+    );
     const queryClient = useQueryClient();
     useManagementQuerySync(client);
     const wsApi = useWorkspaces(client);
@@ -228,8 +246,7 @@ export default function App() {
     );
     // runInFlight = the active session has a turn in flight (run_start without
     // its run_end). busy additionally covers agent-tool cards streaming from
-    // background sessions: Stop stays visible for those, but the composer only
-    // switches to steer mode on runInFlight.
+    // background sessions, but only runInFlight enables in-run steering.
     const runInFlight = Boolean(activeSid ? ws?.pendingBySessionId[activeSid] : false);
     const busy =
         runInFlight ||
@@ -973,6 +990,19 @@ export default function App() {
                                                     : []
                                             }
                                             onCancelQueued={(item) => void cancelQueued(item.id)}
+                                            onInterruptAndSendQueued={
+                                                supportsInterruptAndSend
+                                                    ? async (entryIds) => {
+                                                          const target = wsApi.composerTarget;
+                                                          if (target.kind === "session") {
+                                                              await wsApi.interruptAndSendQueued(
+                                                                  entryIds,
+                                                                  target,
+                                                              );
+                                                          }
+                                                      }
+                                                    : undefined
+                                            }
                                             compacting={contextInfo.compacting}
                                             contextIndicator={{
                                                 info: contextInfo.info,

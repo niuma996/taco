@@ -66,7 +66,11 @@ function workspace(
     };
 }
 
-function renderPane(ws: WorkspaceState | undefined, isIm = false) {
+function renderPane(
+    ws: WorkspaceState | undefined,
+    isIm = false,
+    overrides: Partial<ChatPaneProps> = {},
+) {
     const props: ChatPaneProps = {
         client: {
             gitInspect: () => new Promise(() => {}),
@@ -91,6 +95,7 @@ function renderPane(ws: WorkspaceState | undefined, isIm = false) {
         runInFlight: false,
         queuedItems: [],
         onCancelQueued: () => {},
+        onInterruptAndSendQueued: async () => {},
         sidebarCollapsed: false,
         onToggleSidebar: () => {},
         compacting: false,
@@ -109,6 +114,7 @@ function renderPane(ws: WorkspaceState | undefined, isIm = false) {
         onCopySessionId: () => {},
         copiedSessionId: null,
         onCommandPermission: () => {},
+        ...overrides,
     };
     // Image attachments report validation failures through toasts.
     const view = render(
@@ -165,6 +171,218 @@ describe("ChatPane composer while a session opens", () => {
         assert.equal(
             screen.getByRole("button", { name: "input.send" }).hasAttribute("disabled"),
             false,
+        );
+    });
+});
+
+describe("ChatPane running turn controls", () => {
+    it("keeps icon-only Stop for an empty composer without a steer queue", () => {
+        const onAbort = vi.fn();
+        renderPane(workspace({}), false, {
+            busy: true,
+            runInFlight: true,
+            input: "",
+            attachments: [],
+            onAbort,
+        });
+        assert.equal(Boolean(screen.queryByText("input.steerHint")), false);
+        assert.equal(screen.getByRole("textbox").hasAttribute("aria-describedby"), false);
+        assert.equal(
+            Boolean(screen.queryByRole("button", { name: "input.interruptReply" })),
+            false,
+        );
+        assert.equal(
+            Boolean(screen.queryByRole("button", { name: /input.interruptAndSendQueued/ })),
+            false,
+        );
+        fireEvent.keyDown(screen.getByRole("textbox"), { key: "Enter" });
+        assert.equal(onAbort.mock.calls.length, 0);
+        fireEvent.click(screen.getByRole("button", { name: "input.stop" }));
+        assert.equal(onAbort.mock.calls.length, 1);
+    });
+
+    it("keeps batch sending, submitting a draft and removing a queued message separate", () => {
+        const onAbort = vi.fn();
+        const onSend = vi.fn();
+        const onEnter = vi.fn();
+        const onCancelQueued = vi.fn();
+        const item = { id: "queued-1", kind: "steer", text: "Extra guidance" } as const;
+        renderPane(workspace({}), false, {
+            busy: true,
+            runInFlight: true,
+            queuedItems: [item],
+            onAbort,
+            onSend,
+            onEnter,
+            onCancelQueued,
+        });
+        const input = screen.getByRole<HTMLTextAreaElement>("textbox");
+        assert.equal(Boolean(screen.queryByText("input.steerHint")), false);
+        assert.equal(input.hasAttribute("aria-describedby"), false);
+        assert.ok(screen.getByText("queue.pendingCurrentTurn"));
+        assert.ok(screen.getByText(item.text));
+        fireEvent.click(screen.getByRole("button", { name: "queue.cancel" }));
+        assert.deepEqual(onCancelQueued.mock.calls, [[item]]);
+        assert.equal(onAbort.mock.calls.length, 0);
+
+        assert.equal(
+            Boolean(screen.queryByRole("button", { name: "input.interruptReply" })),
+            false,
+        );
+        assert.equal(input.value, "draft");
+
+        fireEvent.click(screen.getByRole("button", { name: "input.sendSteer" }));
+        fireEvent.keyDown(input, { key: "Enter" });
+        assert.equal(onSend.mock.calls.length, 1);
+        assert.equal(onEnter.mock.calls.length, 1);
+        assert.equal(onAbort.mock.calls.length, 0);
+    });
+
+    it.each(["Enter", "composer button", "queue button"])(
+        "interrupts and sends the confirmed steer batch with %s",
+        (trigger) => {
+            const onInterruptAndSendQueued = vi.fn(async () => {});
+            const onAbort = vi.fn();
+            const onEnter = vi.fn();
+            const onSend = vi.fn();
+            renderPane(workspace({}), false, {
+                busy: true,
+                runInFlight: true,
+                input: "",
+                attachments: [],
+                queuedItems: [
+                    { id: "one", kind: "steer", text: "first" },
+                    { id: "later", kind: "followUp", text: "later" },
+                    { id: "two", kind: "steer", text: "second" },
+                    { id: "next", kind: "nextRun", text: "next run" },
+                ],
+                onInterruptAndSendQueued,
+                onAbort,
+                onEnter,
+                onSend,
+            });
+            const input = screen.getByRole("textbox");
+            fireEvent.keyDown(input, { key: "Enter", shiftKey: true });
+            fireEvent.keyDown(input, { key: "Enter", isComposing: true });
+            fireEvent.keyDown(input, { key: "Enter", repeat: true });
+            assert.equal(onInterruptAndSendQueued.mock.calls.length, 0);
+
+            const queueButton = screen.getByRole("button", {
+                name: "input.interruptAndSendQueued",
+            });
+            const composerButton = screen.getByRole("button", { name: "input.interruptAndSend" });
+            assert.equal(composerButton.hasAttribute("disabled"), false);
+            assert.equal(
+                input.getAttribute("aria-describedby"),
+                screen.getByText("input.steerHint").id,
+            );
+            if (trigger === "Enter") fireEvent.keyDown(input, { key: "Enter" });
+            else fireEvent.click(trigger === "composer button" ? composerButton : queueButton);
+            assert.deepEqual(onInterruptAndSendQueued.mock.calls, [[["one", "two"]]]);
+
+            fireEvent.keyDown(input, { key: "Enter" });
+            fireEvent.click(composerButton);
+            fireEvent.click(queueButton);
+            assert.equal(
+                onInterruptAndSendQueued.mock.calls.length,
+                1,
+                "guards an in-flight batch",
+            );
+            assert.equal(
+                onAbort.mock.calls.length + onEnter.mock.calls.length + onSend.mock.calls.length,
+                0,
+            );
+        },
+    );
+
+    it("waits until the whole steer batch has been queued", () => {
+        const onInterruptAndSendQueued = vi.fn(async () => {});
+        renderPane(workspace({}), false, {
+            runInFlight: true,
+            input: "",
+            attachments: [],
+            queuedItems: [
+                { id: "one", kind: "steer", text: "first" },
+                { id: "staging", kind: "steer", text: "staging", optimistic: true },
+            ],
+            onInterruptAndSendQueued,
+        });
+        const button = screen.getByRole("button", { name: "input.interruptAndSendQueued" });
+        assert.equal(button.hasAttribute("disabled"), true);
+        const composerButton = screen.getByRole("button", { name: "input.interruptAndSend" });
+        assert.equal(composerButton.hasAttribute("disabled"), true);
+        assert.equal(Boolean(screen.queryByRole("button", { name: "input.stop" })), false);
+        assert.equal(Boolean(screen.queryByText("input.steerHint")), false);
+        fireEvent.keyDown(screen.getByRole("textbox"), { key: "Enter" });
+        fireEvent.click(composerButton);
+        assert.equal(onInterruptAndSendQueued.mock.calls.length, 0);
+    });
+
+    it("shows why batch sending is unavailable on an older service", () => {
+        const onAbort = vi.fn();
+        const onEnter = vi.fn();
+        renderPane(workspace({}), false, {
+            busy: true,
+            runInFlight: true,
+            input: "",
+            attachments: [],
+            queuedItems: [{ id: "one", kind: "steer", text: "first" }],
+            onInterruptAndSendQueued: undefined,
+            onAbort,
+            onEnter,
+        });
+        const button = screen.getByRole("button", { name: "input.interruptAndSendQueued" });
+        assert.equal(button.hasAttribute("disabled"), true);
+        assert.ok(screen.getByText("input.steerUnavailable"));
+        assert.equal(Boolean(screen.queryByText("input.steerHint")), false);
+        fireEvent.click(button);
+        fireEvent.keyDown(screen.getByRole("textbox"), { key: "Enter" });
+        assert.equal(onAbort.mock.calls.length + onEnter.mock.calls.length, 0);
+        fireEvent.click(screen.getByRole("button", { name: "input.stop" }));
+        assert.equal(onAbort.mock.calls.length, 1);
+    });
+
+    it("offers a batch button without submitting an existing attachment draft", () => {
+        const onInterruptAndSendQueued = vi.fn(async () => {});
+        const onEnter = vi.fn();
+        renderPane(workspace({}), false, {
+            busy: true,
+            runInFlight: true,
+            input: "",
+            queuedItems: [{ id: "one", kind: "steer", text: "first" }],
+            onInterruptAndSendQueued,
+            onEnter,
+        });
+        const input = screen.getByRole("textbox");
+        assert.equal(Boolean(screen.queryByText("input.steerHint")), false);
+        assert.equal(input.hasAttribute("aria-describedby"), false);
+        fireEvent.keyDown(input, { key: "Enter" });
+        assert.equal(onEnter.mock.calls.length, 1);
+        assert.equal(onInterruptAndSendQueued.mock.calls.length, 0);
+        fireEvent.click(screen.getByRole("button", { name: "input.interruptAndSendQueued" }));
+        assert.deepEqual(onInterruptAndSendQueued.mock.calls, [[["one"]]]);
+    });
+
+    it.each([
+        { state: "idle", busy: false, runInFlight: false, compacting: false },
+        { state: "compacting", busy: true, runInFlight: true, compacting: true },
+        { state: "background agent", busy: true, runInFlight: false, compacting: false },
+        { state: "opening a chat", busy: true, runInFlight: true, compacting: false },
+    ])("shows only the appropriate controls when $state", ({ state, ...flags }) => {
+        const loading = state === "opening a chat";
+        renderPane(workspace(loading ? { loadingSessionId: "b" } : {}), false, {
+            ...flags,
+            input: "",
+            attachments: [],
+        });
+        assert.equal(
+            Boolean(screen.queryByRole("button", { name: "input.interruptReply" })),
+            false,
+        );
+        assert.equal(Boolean(screen.queryByText("input.steerHint")), false);
+        assert.equal(
+            Boolean(screen.queryByRole("button", { name: "input.stop" })),
+            flags.busy && !loading,
         );
     });
 });

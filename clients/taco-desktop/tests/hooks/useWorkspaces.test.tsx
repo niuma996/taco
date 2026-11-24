@@ -603,7 +603,11 @@ describe("useWorkspacesFirstTurn.test.tsx", () => {
             });
             let ok: boolean | undefined;
             await act(async () => {
-                rejectPrompt?.(new Error("session.prompt aborted"));
+                rejectPrompt?.(
+                    Object.assign(new Error("session.prompt aborted"), {
+                        code: ErrorCodes.Aborted,
+                    }),
+                );
                 ok = await sendResult;
             });
 
@@ -1208,6 +1212,36 @@ describe("useWorkspacesSteer.test.tsx", () => {
             });
             assert.equal(ok, false);
             assert.deepEqual(result.current.notifications, []);
+        });
+
+        it("does not restore an admitted prompt interrupted by a queued batch", async () => {
+            const client = makeClient({
+                sessionPrompt: vi.fn(async () => {
+                    throw Object.assign(new Error("session.prompt aborted"), {
+                        code: ErrorCodes.Aborted,
+                        data: { reason: "queued_steer_interrupt" },
+                    });
+                }),
+            });
+            const { result } = await renderSeeded(client);
+            await act(async () => {
+                assert.equal(await result.current.sendPrompt("already sent"), true);
+            });
+            assert.deepEqual(result.current.notifications, []);
+        });
+
+        it("does not classify an unrelated aborted prompt as a queued batch interrupt", async () => {
+            const client = makeClient({
+                sessionPrompt: vi.fn(async () => {
+                    throw Object.assign(new Error("session.prompt aborted"), {
+                        code: ErrorCodes.Aborted,
+                    });
+                }),
+            });
+            const { result } = await renderSeeded(client);
+            await act(async () => {
+                assert.equal(await result.current.sendPrompt("hello"), false);
+            });
         });
 
         it("a successful prompt clears the marker, so a later genuine failure banners", async () => {

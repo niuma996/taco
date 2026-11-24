@@ -92,7 +92,13 @@ export function normalizeError(id: string, e: unknown): RpcResponse {
     // A stopped turn is an outcome, not a fault, and its message is our own
     // ("session.prompt aborted"), so it passes through unredacted.
     if (isAbortedTurn(e)) {
-        return err(id, ErrorCodes.Aborted, (e as Error).message);
+        const aborted = e as Error & { queuePreserved?: true };
+        return err(
+            id,
+            ErrorCodes.Aborted,
+            aborted.message,
+            aborted.queuePreserved ? { reason: "queued_steer_interrupt" } : undefined,
+        );
     }
     // Non-contract error — redact the upstream message.
     const raw = e instanceof Error ? e.message : String(e);

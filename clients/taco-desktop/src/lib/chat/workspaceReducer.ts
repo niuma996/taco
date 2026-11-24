@@ -601,7 +601,9 @@ function applySessionEvent(
         queuedBySessionId = next.length
             ? { ...queuedBySessionId, [sid]: next }
             : omitKey(queuedBySessionId, sid);
-    } else if (ev.type === "operation_abort") queuedBySessionId = omitKey(queuedBySessionId, sid);
+    } else if (ev.type === "operation_abort" && !ev.queuePreserved) {
+        queuedBySessionId = omitKey(queuedBySessionId, sid);
+    }
     let askUserPending = session.askUserPending;
     let agentToolPending = session.agentToolPending;
     let backgroundSubagents = session.backgroundSubagents;

@@ -47,6 +47,7 @@ export function toHarnessError(operation: string, error: unknown): Error {
 /** The subset of pi's OperationResultRecord that describes a non-success run. */
 interface TerminalOutcome {
     readonly status: string;
+    readonly queuePreserved?: true;
     readonly error?: { readonly code?: string; readonly message?: string };
 }
 
@@ -74,6 +75,7 @@ export function toTerminalError(operation: string, outcome: TerminalOutcome): Er
         Object.defineProperty(error, "code", { value: code, enumerable: false });
     }
     Object.defineProperty(error, "terminalStatus", { value: outcome.status, enumerable: false });
+    if (outcome.queuePreserved) Object.defineProperty(error, "queuePreserved", { value: true });
     return error;
 }
 

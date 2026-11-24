@@ -2439,6 +2439,38 @@ describe("workspacesReducer — steering queue", () => {
         assert.equal(next["/ws"]?.queuedBySessionId.s2?.length, 1, "other session untouched");
     });
 
+    it("keeps queued messages during a batch interrupt until queue_update arrives", () => {
+        const items = [
+            { id: "now", kind: "steer" as const, text: "x" },
+            { id: "later", kind: "followUp" as const, text: "y" },
+        ];
+        const state = {
+            "/ws": baseWs({ activeSession: "s1", queuedBySessionId: { s1: items } }),
+        };
+        const action = {
+            type: "APPLY_EVENT" as const,
+            cwd: "/ws",
+            sid: "s1",
+            suppressedThinking: false,
+            now: 1,
+        };
+        const interrupted = workspacesReducer(state, {
+            ...action,
+            ev: { type: "operation_abort", steer: [], followUp: [], queuePreserved: true },
+        });
+        assert.deepEqual(interrupted["/ws"]?.queuedBySessionId.s1, items);
+        const admitted = workspacesReducer(interrupted, {
+            ...action,
+            ev: {
+                type: "queue_update",
+                queues: [
+                    { entryId: "later", kind: "followUp", message: { role: "user", content: "y" } },
+                ],
+            },
+        });
+        assert.deepEqual(admitted["/ws"]?.queuedBySessionId.s1, [items[1]]);
+    });
+
     it("APPEND_QUEUED / REMOVE_QUEUED manage optimistic rows", () => {
         let state: Record<string, WorkspaceState> = { "/ws": baseWs({ activeSession: "s1" }) };
         state = workspacesReducer(state, {

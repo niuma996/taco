@@ -314,6 +314,22 @@ export function registerSessionTurnHandlers(): void {
     );
 
     registerMethod(
+        "sessionInterruptAndSendQueued",
+        true,
+        async ({ workspace, params }) => {
+            await workspace.assertExecutionAvailable();
+            const attached = requireAttached(workspace, params.sessionId);
+            return {
+                started: await attached
+                    .interruptAndSendQueued(params.entryIds)
+                    .catch(rethrowBusyAsSessionBusy),
+            };
+        },
+        // This replaces an in-flight turn, so it must bypass the turn-start gate.
+        { command: true },
+    );
+
+    registerMethod(
         "sessionAbort",
         true,
         async ({ workspace, params }) => {

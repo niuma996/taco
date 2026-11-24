@@ -146,6 +146,11 @@ export const sessionCancelQueuedSchema = Type.Object({
 
 export const sessionAbortSchema = Type.Object(sessionTarget);
 
+export const sessionInterruptAndSendQueuedSchema = Type.Object({
+    ...sessionTarget,
+    entryIds: Type.Array(Type.String({ minLength: 1 }), { minItems: 1 }),
+});
+
 export const subagentAbortSchema = Type.Object({
     workspace: workspaceIdSchema,
     subSessionId: sessionIdSchema,

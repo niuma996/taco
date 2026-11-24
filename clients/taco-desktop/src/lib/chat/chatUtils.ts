@@ -134,6 +134,7 @@ export type SessionEventLike =
       }
     | {
           type: "operation_abort";
+          queuePreserved?: true;
           /** Messages drained from the queues by the abort (pi reports them, clients use them to restore drafts). */
           steer?: MessageLike[];
           followUp?: MessageLike[];

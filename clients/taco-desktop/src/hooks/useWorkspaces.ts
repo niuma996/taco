@@ -736,9 +736,15 @@ export function useWorkspaces(client: TacoClient): UseWorkspacesApi {
             // the expected Stop outcome, not a failure to report. (Checked
             // first: a session_busy from a concurrent turn should not consume
             // the marker.)
-            if (abortRequestedRef.current.delete(JSON.stringify([cwd, promptSid]))) {
+            const requestedAbort = abortRequestedRef.current.delete(requestKey);
+            const remote = err as { code?: string; data?: { reason?: string } } | null;
+            const replacedByBatch =
+                remote?.code === ErrorCodes.Aborted &&
+                remote.data?.reason === "queued_steer_interrupt";
+            if (requestedAbort || replacedByBatch) {
                 settlePending();
-                return false;
+                // The batch replaces the run, not the already-admitted prompt.
+                return replacedByBatch;
             }
             // session_busy = the server has a run in flight for this session. The
             // turn-start failed, but the text can still land as an in-run steer —
@@ -931,6 +937,22 @@ export function useWorkspaces(client: TacoClient): UseWorkspacesApi {
         }
     }
 
+    async function interruptAndSendQueued(
+        entryIds: readonly string[],
+        target: SessionTarget,
+    ): Promise<void> {
+        try {
+            await client.sessionInterruptAndSendQueued({
+                workspace: asWorkspaceId(target.workspace),
+                sessionId: asSessionId(target.sessionId),
+                entryIds: [...entryIds],
+            });
+        } catch (error) {
+            console.error("[taco] sessionInterruptAndSendQueued failed", error);
+            pushNotification(t("input.interruptAndSendFailed"));
+        }
+    }
+
     async function loadSubagentHistory(subSessionId: string): Promise<void> {
         const cwd = activeCwdRef.current;
         const key = `${cwd}\u0000${subSessionId}`;
@@ -1065,6 +1087,7 @@ export function useWorkspaces(client: TacoClient): UseWorkspacesApi {
         steerPrompt,
         stageAttachment,
         cancelQueued,
+        interruptAndSendQueued,
         abortPrompt,
         setSessionModel: settings.setSessionModel,
         setSessionLevel: settings.setSessionLevel,

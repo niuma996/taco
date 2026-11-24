@@ -33,6 +33,7 @@ import type {
 } from "../../src/runtime/pi/types.ts";
 import { AgentHarness, JsonlSessionRepo, uuidv7 } from "../../src/runtime/pi/values.ts";
 import { normalizeMessageUpdate } from "../../src/server/push.ts";
+import { normalizeError } from "../../src/server/rpcResponse.ts";
 import type { TaskStore } from "../../src/tasks/taskTypes.ts";
 import type { TacoToolContextBase } from "../../src/tools/context.ts";
 import type { TacoTool } from "../../src/tools/index.ts";
@@ -387,6 +388,126 @@ describe("attachedSession.streaming", () => {
             }
         } finally {
             await idle.dispose();
+        }
+    });
+
+    it("interrupts a live run with the selected steer batch, keeping the other inbox entries", {
+        timeout: 5000,
+    }, async () => {
+        let enter!: () => void;
+        const entered = new Promise<void>((resolve) => {
+            enter = resolve;
+        });
+        let release!: () => void;
+        const blocked = new Promise<void>((resolve) => {
+            release = resolve;
+        });
+        const attached = await makeAttached("", true, {
+            tools: [
+                {
+                    name: "batchProbe",
+                    label: "probe",
+                    description: "Hold the initial run open",
+                    parameters: { type: "object", properties: {} },
+                    async execute() {
+                        enter();
+                        await blocked;
+                        return { content: [{ type: "text", text: "done" }], details: {} };
+                    },
+                },
+            ],
+            responses: [
+                fauxAssistantMessage([
+                    { type: "toolCall", id: "probe-call", name: "batchProbe", arguments: {} },
+                ]),
+                fauxAssistantMessage([fauxText("batch reply")]),
+                fauxAssistantMessage([fauxText("follow-up reply")]),
+            ],
+        });
+        const lane = (attached as unknown as { lane: AgentLane }).lane;
+        const image = { type: "image", mimeType: "image/png", data: "aW1hZ2U=" } as const;
+        let replacementQueues: string[] | undefined;
+        let finish!: (status: string) => void;
+        const finished = new Promise<string>((resolve) => {
+            finish = resolve;
+        });
+        let observeAbort!: (preserved: boolean) => void;
+        const aborted = new Promise<boolean>((resolve) => {
+            observeAbort = resolve;
+        });
+        const old = attached.prompt("old").then(
+            () => null,
+            (error: unknown) => normalizeError("old", error),
+        );
+        try {
+            await entered;
+            const originalOperation = (await lane.inspectExecution(harnessContext)).current;
+            assert.ok(originalOperation);
+            const a = await lane.steer("same text", undefined, harnessContext);
+            const later = await lane.followUp("later", undefined, harnessContext);
+            const b = await lane.steer("same text", [image], harnessContext);
+            const next = await lane.nextRun("next run", undefined, harnessContext);
+            assert.ok(a.ok && b.ok && later.ok && next.ok);
+            assert.equal(
+                await attached.interruptAndSendQueued(["stale", later.value.entryId]),
+                false,
+            );
+            assert.deepEqual(
+                (await lane.inspectExecution(harnessContext)).current,
+                originalOperation,
+            );
+
+            attached.on("event", (event) => {
+                if (event.type === "operation_abort") observeAbort(event.queuePreserved === true);
+                if (
+                    event.type === "queue_update" &&
+                    !replacementQueues &&
+                    !event.queues.some((item: { kind?: string }) => item.kind === "steer")
+                ) {
+                    replacementQueues = event.queues.map((item: { kind?: string }) => item.kind);
+                }
+                if (event.type === "run_end" && event.runId !== originalOperation.id)
+                    finish(event.status);
+            });
+            const entryIds = [b.value.entryId, "stale", a.value.entryId, b.value.entryId];
+            const send = attached.interruptAndSendQueued(entryIds);
+            assert.equal(await aborted, true);
+            release();
+            assert.equal(await send, true);
+            const interrupted = await old;
+            assert.ok(interrupted && !interrupted.ok);
+            assert.equal(interrupted.error.code, "aborted");
+            assert.deepEqual(interrupted.error.data, { reason: "queued_steer_interrupt" });
+            assert.equal(await finished, "completed");
+            assert.equal(await attached.interruptAndSendQueued(entryIds), false);
+            assert.deepEqual(replacementQueues, ["followUp", "nextRun"]);
+            const watch = await attached.watchSnapshot();
+            try {
+                const batch = watch.snapshot.transcript.filter(
+                    (entry) => entry.id === a.value.entryId || entry.id === b.value.entryId,
+                );
+                assert.deepEqual(
+                    batch.map((entry) => entry.id),
+                    [a.value.entryId, b.value.entryId],
+                );
+                assert.equal(batch[1]?.type, "message");
+                if (batch[1]?.type === "message" && batch[1].message.role === "user") {
+                    assert.deepEqual(batch[1].message.content, [
+                        { type: "text", text: "same text" },
+                        image,
+                    ]);
+                } else assert.fail("expected a separate user message with an image");
+                assert.deepEqual(
+                    watch.snapshot.queues.map((item: { entryId: string }) => item.entryId),
+                    [next.value.entryId],
+                );
+            } finally {
+                watch.unsubscribe();
+            }
+        } finally {
+            release();
+            await old;
+            await attached.dispose();
         }
     });
 

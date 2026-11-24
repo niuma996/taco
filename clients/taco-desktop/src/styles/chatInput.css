@@ -30,22 +30,26 @@ footer.input {
        while it is collapsed to zero height. */
 }
 
-/* In-progress status bar. Lives inside footer.input so its width matches
-   .input-card (same content box, including the collapsed-sidebar 20% gutter).
-   The `output` element has role=status so screen readers need no extra role. */
-.input-status {
+/* Composer notices and queued messages use the same bubble outline. */
+.input-status,
+.queue-bar__row {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
-    width: 100%;
+    gap: var(--space-2);
     box-sizing: border-box;
-    padding: 0.4rem 0.75rem;
-    font-size: 0.82rem;
+    padding: var(--space-1) var(--space-1-5) var(--space-1) var(--space-2-5);
+    border: 1px solid var(--border);
     border-radius: var(--radius-lg);
-    border: 1px solid var(--warning);
+    font-size: 0.82rem;
+}
+
+/* The output element supplies role=status for composer notices. */
+.input-status {
+    width: 100%;
+    border-color: color-mix(in srgb, var(--warning) 30%, var(--border));
     color: var(--warning);
     background: color-mix(in srgb, var(--warning) 8%, transparent);
-    margin-bottom: 0.5rem;
+    margin-bottom: var(--space-2);
     animation: ui-enter var(--motion-duration-fast) var(--motion-ease-out);
 }
 
@@ -53,6 +57,14 @@ footer.input {
     border-color: var(--border);
     color: var(--fg-dim);
     background: transparent;
+}
+
+.input-status--recovery {
+    flex-wrap: wrap;
+}
+
+.input-status--recovery .ui-btn {
+    margin-inline-start: auto;
 }
 
 .input-status__dot {
@@ -343,14 +355,7 @@ footer.input > .ui-collapse[data-open="true"] {
 }
 
 .queue-bar__row {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    padding: 0.3rem 0.4rem 0.3rem 0.6rem;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
     background: var(--input-bg);
-    font-size: 0.82rem;
 }
 
 .queue-bar__kind {
@@ -362,12 +367,44 @@ footer.input > .ui-collapse[data-open="true"] {
     font-size: 0.75rem;
 }
 
+.queue-bar__kind[data-kind="steer"] {
+    border-color: var(--accent-border);
+    background: var(--accent-bg-hover);
+    color: var(--fg);
+    font-weight: var(--weight-medium);
+}
+
 .queue-bar__text {
     flex: 1;
+    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    color: var(--fg);
+}
+
+.input-steer-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: flex-end;
+    gap: var(--space-1) var(--space-2);
+    margin: 0 0 var(--space-2);
+    padding-inline: var(--space-2);
+}
+
+.input-steer-button {
     color: var(--fg-dim);
+    font-weight: var(--weight-normal);
+}
+
+.input-steer-hint {
+    flex: 1;
+    min-width: 0;
+    margin: 0;
+    color: var(--fg-dim);
+    font-size: var(--text-xs);
+    line-height: var(--leading-normal);
 }
 
 .input-permission-mode {

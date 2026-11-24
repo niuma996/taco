@@ -313,6 +313,11 @@ export interface AbortResult {
     discardedFollowUp?: string[];
 }
 
+/** Admission receipt for `session.interruptAndSendQueued`. */
+export interface InterruptAndSendQueuedResult {
+    started: boolean;
+}
+
 /** `subagent.abort` params — stop one running subagent without touching its parent's turn. */
 export type SubagentAbortParams = ParamsOf<typeof subagentAbortSchema>;
 

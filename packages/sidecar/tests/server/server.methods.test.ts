@@ -613,6 +613,7 @@ describe("methods.snapshot", () => {
         "session.detach": { ensureWorkspace: true, command: true },
         "session.events.get": { ensureWorkspace: true },
         "session.followUp": { ensureWorkspace: true, command: true },
+        "session.interruptAndSendQueued": { ensureWorkspace: true, command: true },
         "session.history": { ensureWorkspace: true },
         "session.list": { ensureWorkspace: true },
         "session.listModels": { ensureWorkspace: true },

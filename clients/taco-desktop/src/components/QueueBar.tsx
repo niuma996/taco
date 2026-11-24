@@ -20,7 +20,7 @@ export interface QueueBarProps {
 }
 
 const KIND_LABEL_KEYS: Record<QueuedUiItem["kind"], string> = {
-    steer: "queue.kindSteer",
+    steer: "queue.pendingCurrentTurn",
     followUp: "queue.kindFollowUp",
     nextRun: "queue.kindNextRun",
 };
@@ -37,7 +37,9 @@ export function QueueBar({ items, onCancel }: QueueBarProps) {
             <ul className="queue-bar" aria-label={t("queue.title")} aria-live="polite">
                 {items.map((item) => (
                     <li key={item.id} className="queue-bar__row">
-                        <span className="queue-bar__kind">{t(KIND_LABEL_KEYS[item.kind])}</span>
+                        <span className="queue-bar__kind" data-kind={item.kind}>
+                            {t(KIND_LABEL_KEYS[item.kind])}
+                        </span>
                         <span className="queue-bar__text">{item.text}</span>
                         <IconButton
                             aria-label={t("queue.cancel")}

@@ -144,6 +144,7 @@ export interface UseWorkspacesApi {
     ) => Promise<AttachmentStageResult>;
     /** Cancel one not-yet-consumed queue entry by server entryId (QueueBar row). */
     cancelQueued: (entryId: string, target?: SessionTarget) => Promise<void>;
+    interruptAndSendQueued: (entryIds: readonly string[], target: SessionTarget) => Promise<void>;
     /**
      * Abort the active turn. Resolves to the drained steer/follow-up texts (in
      * drain order) so the caller can restore them into the composer — an

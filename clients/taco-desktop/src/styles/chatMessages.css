@@ -488,8 +488,7 @@
     color: var(--fg-dim);
 }
 
-/* Run indicator — three bouncing dots at the left of the message column while
-   a turn is in flight, where the next assistant output will land. */
+/* Run indicator — three bouncing dots where the next output will land. */
 .run-indicator {
     display: flex;
     align-items: center;

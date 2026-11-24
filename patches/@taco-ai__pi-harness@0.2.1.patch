@@ -1,0 +1,216 @@
+diff --git a/dist/harness/agent-harness.d.ts b/dist/harness/agent-harness.d.ts
+index b527be092ffc32bacbf4572f0dde89a1388dbfa5..f63dc084920e3ccb9c51457c68d66ee83ddee3d3 100644
+--- a/dist/harness/agent-harness.d.ts
++++ b/dist/harness/agent-harness.d.ts
+@@ -56,6 +56,8 @@ export type OperationRequest = {
+     operationId?: string;
+     prompt: AgentMessage | AgentMessage[];
+     images?: never;
++    /** Admit only these still-pending steer entries after the specified operation. */
++    queuedSteer?: { entryIds: readonly string[]; afterOperationId: string };
+ } | {
+     kind: "skill";
+     operationId?: string;
+@@ -220,6 +222,7 @@ export type HarnessEventPayload = {
+ } | {
+     type: "operation_abort";
+     operationId: string;
++    queuePreserved?: true;
+     steer: AgentMessage[];
+     followUp: AgentMessage[];
+ } | ({
+@@ -644,7 +647,7 @@ export interface AgentLane {
+     getResult(operationId: string, context: Context): Promise<OperationResultRecord | undefined>;
+     accept(request: OperationRequest, context: Context): Promise<OperationAdmissionResult>;
+     drive(options: DriveOptions, context: Context): Promise<DriveResult>;
+-    requestAbort(operationId: string, context: Context): Promise<AbortRequestResult>;
++    requestAbort(operationId: string, context: Context, options?: { queuedSteerIds: readonly string[] }): Promise<AbortRequestResult>;
+     inspectExecution(context: Context): Promise<LaneExecutionInfo>;
+     prompt(text: string, images: ImageContent[] | undefined, context: Context): Promise<RunResult>;
+     prompt(message: AgentMessage | AgentMessage[], context: Context): Promise<RunResult>;
+diff --git a/dist/harness/runtime/drive/reconcile.js b/dist/harness/runtime/drive/reconcile.js
+index 006a8d316c32b569a9250b696ad01f10f65e0443..b2d1f4eb9d499e79febb485f959400594878277f 100644
+--- a/dist/harness/runtime/drive/reconcile.js
++++ b/dist/harness/runtime/drive/reconcile.js
+@@ -34,7 +34,10 @@ async function publishAbortedTerminal(lane, drive, capability) {
+         if (current.control.status !== "cancel_requested") {
+             throw new SessionInvariantError("Cancellation reconciliation requires cancelled durable control");
+         }
+-        const record = operationResultRecord(meta, "aborted", state.tipId);
++        const record = {
++            ...operationResultRecord(meta, "aborted", state.tipId),
++            ...(current.control.queuePreserved ? { queuePreserved: true } : {}),
++        };
+         const cleanup = await operationCleanupWrites(reader, drive.operationId, current, drive.context);
+         const events = [];
+         if (meta.intent.kind === "run") {
+diff --git a/dist/harness/runtime/lane.d.ts b/dist/harness/runtime/lane.d.ts
+index e0baa8bf79d8fa07f93a7b5fc86ec68e0070870b..f67ab11d844ebf99ad17f5dcec154571b6cf8cf9 100644
+--- a/dist/harness/runtime/lane.d.ts
++++ b/dist/harness/runtime/lane.d.ts
+@@ -68,8 +68,8 @@ export declare class Lane<TContext extends object | undefined> implements AgentL
+     private acceptNavigation;
+     drive(options: DriveOptions, context: Context): Promise<DriveResult>;
+     /** Package-private durable cancellation primitive. Public exposure remains guarded until M8. */
+-    requestOperationAbort(operationId: string, context: Context): Promise<AbortRequestResult>;
+-    requestAbort(operationId: string, context: Context): Promise<AbortRequestResult>;
++    requestOperationAbort(operationId: string, context: Context, queuedSteerIds?: ReadonlySet<string>): Promise<AbortRequestResult>;
++    requestAbort(operationId: string, context: Context, options?: { queuedSteerIds: readonly string[] }): Promise<AbortRequestResult>;
+     inspectExecution(context: Context): Promise<LaneExecutionInfo>;
+     prompt(...args: [text: string, images: ImageContent[] | undefined, context: Context] | [message: AgentMessage | AgentMessage[], context: Context]): Promise<RunResult>;
+     skill(name: string, additionalInstructions: string | undefined, context: Context): Promise<RunResult>;
+diff --git a/dist/harness/runtime/lane.js b/dist/harness/runtime/lane.js
+index 6dd4b50e2b088e5c5749b88a28229ed244014a54..dc9a08304c87779664880b247bda22f206796125 100644
+--- a/dist/harness/runtime/lane.js
++++ b/dist/harness/runtime/lane.js
+@@ -389,6 +389,7 @@ export class Lane {
+                 }));
+             }
+         }
++        const queuedSteer = request.kind === "prompt" ? request.queuedSteer : undefined;
+         const prompt = messages.map((message) => ({ id: this.session.idGenerator.next(startedAt), message }));
+         return this.command(async (state, reader) => {
+             if (state.operation !== null) {
+@@ -402,7 +403,17 @@ export class Lane {
+                     })),
+                 };
+             }
+-            const { selected: selectedItems, remainder: inbox } = selectAcceptedInbox(state.inbox, acceptanceConfig.steeringMode, acceptanceConfig.followUpMode);
++            if (queuedSteer && state.lastOperationId !== queuedSteer.afterOperationId) {
++                return {
++                    kind: "return",
++                    result: Result.err(new InvalidMessage({ lane: this.name, reason: "empty", message: "The interrupted run is no longer the latest operation" })),
++                };
++            }
++            const selectedSteerIds = queuedSteer && new Set(queuedSteer.entryIds);
++            const isSelectedSteer = (item) => item.kind === "steer" && selectedSteerIds.has(item.entryId);
++            const { selected: selectedItems, remainder: inbox } = selectedSteerIds
++                ? { selected: state.inbox.filter(isSelectedSteer), remainder: state.inbox.filter((item) => !isSelectedSteer(item)) }
++                : selectAcceptedInbox(state.inbox, acceptanceConfig.steeringMode, acceptanceConfig.followUpMode);
+             const captured = await Promise.all(selectedItems.map(async (item) => {
+                 const stored = await reader.getValue(pendingEntry(item.entryId), context);
+                 if (stored === undefined) {
+@@ -439,7 +450,10 @@ export class Lane {
+                 lane: this.name,
+                 sourceTipId: state.tipId,
+                 startedAt,
+-                intent: { kind: "run", promptEntryIds: prompt.map(({ id }) => id) },
++                intent: {
++                    kind: "run",
++                    promptEntryIds: queuedSteer ? selectedItems.map(({ entryId }) => entryId) : prompt.map(({ id }) => id),
++                },
+             };
+             const operationState = {
+                 at: "starting",
+@@ -759,12 +773,12 @@ export class Lane {
+         }
+     }
+     /** Package-private durable cancellation primitive. Public exposure remains guarded until M8. */
+-    async requestOperationAbort(operationId, context) {
++    async requestOperationAbort(operationId, context, queuedSteerIds) {
+         if (this.closedError instanceof HarnessClosed) {
+             return Result.err(new Closed({ message: this.closedError.message }));
+         }
+         this.assertOpen();
+-        const drive = this.activeDrive?.operationId === operationId ? this.activeDrive : undefined;
++        let drive = this.activeDrive?.operationId === operationId ? this.activeDrive : undefined;
+         let resolveCancellation;
+         let rejectCancellation;
+         const cancellation = new Promise((resolve, reject) => {
+@@ -772,7 +786,8 @@ export class Lane {
+             rejectCancellation = reject;
+         });
+         void cancellation.catch(() => { });
+-        drive?.beginAbort(cancellation);
++        if (queuedSteerIds === undefined)
++            drive?.beginAbort(cancellation);
+         let gateSettled = false;
+         const settleGate = (signal) => {
+             if (gateSettled)
+@@ -797,7 +812,20 @@ export class Lane {
+                         result: Result.ok({ operationId, newlyRequested: false, steer: [], followUp: [] }),
+                     };
+                 }
+-                const removed = state.inbox.filter((item) => item.kind === "steer" || item.kind === "followUp");
++                if (queuedSteerIds !== undefined) {
++                    if (operation.meta.intent.kind !== "run" || !state.inbox.some((item) => item.kind === "steer" && queuedSteerIds.has(item.entryId))) {
++                        return {
++                            kind: "return",
++                            result: Result.ok({ operationId, newlyRequested: false, steer: [], followUp: [] }),
++                        };
++                    }
++                    // A stale request must not close the active drive's effect gate.
++                    drive = this.activeDrive?.operationId === operationId ? this.activeDrive : undefined;
++                    drive?.beginAbort(cancellation);
++                }
++                const removed = queuedSteerIds === undefined
++                    ? state.inbox.filter((item) => item.kind === "steer" || item.kind === "followUp")
++                    : [];
+                 const payloads = await Promise.all(removed.map(async (item) => {
+                     const stored = await reader.getValue(pendingEntry(item.entryId), context);
+                     if (stored?.value.type !== "message") {
+@@ -809,10 +837,14 @@ export class Lane {
+                 const followUp = payloads.filter(({ item }) => item.kind === "followUp").map(({ message }) => message);
+                 const removedIds = new Set(removed.map((item) => item.entryId));
+                 const inbox = state.inbox.filter((item) => !removedIds.has(item.entryId));
+-                const queues = await readLaneQueues(reader, inbox, context);
++                const queues = removed.length === 0 ? [] : await readLaneQueues(reader, inbox, context);
+                 const operationState = {
+                     ...operation.state,
+-                    control: { status: "cancel_requested", requestedAt: Date.now() },
++                    control: {
++                        status: "cancel_requested",
++                        requestedAt: Date.now(),
++                        ...(queuedSteerIds === undefined ? {} : { queuePreserved: true }),
++                    },
+                 };
+                 return {
+                     kind: "commit",
+@@ -832,6 +864,7 @@ export class Lane {
+                             operationId,
+                             steer,
+                             followUp,
++                            ...(queuedSteerIds === undefined ? {} : { queuePreserved: true }),
+                             lane: this.name,
+                         },
+                         ...(removed.length === 0 ? [] : [{ type: "queue_update", queues, lane: this.name }]),
+@@ -840,7 +873,7 @@ export class Lane {
+             }, context);
+             // A fresh Drive may observe an already-durable marker; pull its gate on the repeat path too. A mismatch
+             // can leave only the stale Drive's admission gate in aborting state; its cancellation wait is still released.
+-            settleGate(result.ok && result.value.newlyRequested === false);
++            settleGate(queuedSteerIds === undefined && result.ok && result.value.newlyRequested === false);
+             return result;
+         }
+         catch (error) {
+@@ -849,8 +882,8 @@ export class Lane {
+             throw error;
+         }
+     }
+-    requestAbort(operationId, context) {
+-        return this.requestOperationAbort(operationId, context);
++    requestAbort(operationId, context, options) {
++        return this.requestOperationAbort(operationId, context, options && new Set(options.queuedSteerIds));
+     }
+     inspectExecution(context) {
+         return this.readLane((state) => {
+diff --git a/dist/harness/session/types.d.ts b/dist/harness/session/types.d.ts
+index 41291d7ae3a35e331b26556abe74f7f4b4badc5c..b8588851e84156c57b44fa4a4d14cc3446fafc79 100644
+--- a/dist/harness/session/types.d.ts
++++ b/dist/harness/session/types.d.ts
+@@ -83,6 +83,7 @@ export type Control = {
+ } | {
+     status: "cancel_requested";
+     requestedAt: number;
++    queuePreserved?: true;
+ };
+ export interface OperationError {
+     code: string;
+@@ -95,6 +96,7 @@ export interface OperationResultRecord {
+     operationId: string;
+     kind: OperationMeta["intent"]["kind"];
+     status: TerminalStatus;
++    queuePreserved?: true;
+     error?: OperationError;
+     fromTipId: string | null;
+     tipId: string | null;

@@ -248,6 +248,21 @@ After a successful initialize, every other RPC is accepted. `initialize` is idem
 and outside `commandRecords` dedup. In-process self-RPC callers (e.g. the memory tool)
 are not gated.
 
+### Interrupt and send queued messages
+
+Offer `session.interruptAndSendQueued` only if it is listed in
+`initialize.result.serverCapabilities.methods`. Send the session target and the
+confirmed `steer` entry IDs in `entryIds`. The sidecar cancels the running reply
+only if at least one of those entries is still queued. The replacement run
+admits the remaining selected entries in inbox order, with their original
+message content and IDs; it does not drain `followUp` or `nextRun`.
+`{ "started": false }` means no replacement run was admitted.
+
+The interrupted prompt returns `aborted` with
+`data.reason: "queued_steer_interrupt"`. An `operation_abort` event with
+`queuePreserved: true` does not clear the queue; `queue_update` remains
+its authoritative state.
+
 ### Recommended client entry point
 
 `@taco-ai/shared`'s `TacoClient.handshake()` sends `initialize`, validates the
@@ -346,6 +361,7 @@ fields of `settings.get` or `settings.write`.
 | `session.events.get` | session.* |
 | `session.followUp` | session.* |
 | `session.history` | session.* |
+| `session.interruptAndSendQueued` | session.* |
 | `session.list` | session.* |
 | `session.listModels` | session.* |
 | `session.planState.get` | session.* |

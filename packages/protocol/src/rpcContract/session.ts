@@ -22,6 +22,7 @@ import {
     sessionEventsGetSchema,
     sessionFollowUpSchema,
     sessionHistorySchema,
+    sessionInterruptAndSendQueuedSchema,
     sessionListModelsSchema,
     sessionListSchema,
     sessionPlanStateGetSchema,
@@ -41,6 +42,7 @@ import type {
     CancelQueuedResult,
     CreateSessionResult,
     FollowUpResult,
+    InterruptAndSendQueuedResult,
     PromptResult,
     SessionCompactResult,
     SessionContextInfoResult,
@@ -165,6 +167,11 @@ const sessionRows = {
         sessionCancelQueuedSchema,
     ),
     sessionAbort: row<AbortResult>()("session.abort", "workspace", sessionAbortSchema),
+    sessionInterruptAndSendQueued: row<InterruptAndSendQueuedResult>()(
+        "session.interruptAndSendQueued",
+        "workspace",
+        sessionInterruptAndSendQueuedSchema,
+    ),
     subagentAbort: row<SubagentAbortResult>()("subagent.abort", "workspace", subagentAbortSchema),
     sessionSetModel: row<SessionSetModelResult>()(
         "session.setModel",

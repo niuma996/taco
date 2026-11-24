@@ -380,6 +380,7 @@ export type {
     DeleteSessionParams,
     FollowUpParams,
     FollowUpResult,
+    InterruptAndSendQueuedResult,
     ListModelsParams,
     PromptParams,
     PromptResult,

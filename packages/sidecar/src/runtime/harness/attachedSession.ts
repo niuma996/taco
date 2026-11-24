@@ -1369,6 +1369,64 @@ export class AttachedSession extends EventEmitter {
         return { outcome: "accepted", newlyRequested: result.value.newlyRequested };
     }
 
+    async interruptAndSendQueued(entryIds: readonly string[]): Promise<boolean> {
+        const { current } = await this.lane.inspectExecution(harnessContext);
+        if (current?.kind !== "run" || current.status === "aborting") return false;
+
+        const requested = await this.lane.requestAbort(current.id, harnessContext, {
+            queuedSteerIds: entryIds,
+        });
+        if (!requested.ok) {
+            if (requested.error._tag === "OperationMismatch") return false;
+            throw toHarnessError("session.interruptAndSendQueued", requested.error);
+        }
+        if (!requested.value.newlyRequested) return false;
+
+        const settled = await this.lane.drive({ operationId: current.id }, harnessContext);
+        if (!settled.ok) {
+            if (settled.error._tag === "OperationMismatch") return false;
+            throw toHarnessError("session.interruptAndSendQueued", settled.error);
+        }
+        if (settled.value.kind !== "settled" || settled.value.outcome.status !== "aborted")
+            return false;
+        this.compactionController.cancelAutoCompaction();
+
+        const admitted = await this.lane.accept(
+            {
+                kind: "prompt",
+                prompt: [],
+                queuedSteer: { entryIds, afterOperationId: current.id },
+            },
+            harnessContext,
+        );
+        if (!admitted.ok) {
+            if (admitted.error._tag === "InvalidMessage") return false;
+            throw toHarnessError("session.interruptAndSendQueued", admitted.error);
+        }
+
+        const operationId = admitted.value.operationId;
+        void this.lane
+            .drive({ operationId, waitForRetry: true }, harnessContext)
+            .then((result) => {
+                if (!result.ok) {
+                    if (result.error._tag !== "OperationMismatch")
+                        throw toHarnessError("session.interruptAndSendQueued", result.error);
+                } else if (
+                    result.value.kind === "settled" &&
+                    (result.value.outcome.status === "failed" ||
+                        result.value.outcome.status === "declined")
+                ) {
+                    throw toTerminalError("session.interruptAndSendQueued", result.value.outcome);
+                }
+            })
+            .catch((error: unknown) => {
+                log.error("queued steer run failed:", error);
+                if (this.listenerCount("error") > 0) this.emit("error", error);
+            })
+            .finally(() => this.emit("prompt.settled"));
+        return true;
+    }
+
     async abort(): Promise<AbortResult> {
         // Cancel checks already queued by earlier run_ends; lane.abort() owns an
         // admitted run or compaction. The aborted run's own run_end still
