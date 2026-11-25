@@ -8,6 +8,69 @@ starting with `v0.1.0` (the first open-source release).
 
 ## [Unreleased]
 
+## [0.4.4] — 2026-11-26
+
+This release brings Git worktrees into the product, lets you rename the
+assistant, and takes some waiting out of the cold start.
+
+### Added
+
+- Worktrees are managed from the desktop: a new Worktrees dialog lists the
+  worktrees of a repository, creates one from a base branch, removes it, and
+  switches the main working directory between them; removing a worktree keeps
+  its branch and session history, and a record whose checkout is gone can be
+  cleared on its own. — `sidecar` + `desktop`
+- The agent can hand work over to a worktree: the agent opens a worktree and
+  moves the current work into it, and the desktop follows the handover. —
+  `sidecar` + `desktop`
+- The assistant can be renamed: a `productName` field in `$TACO_HOME/taco.json`
+  replaces the name the assistant uses for itself; the agent cannot change it
+  on its own. — `sidecar`
+- Queued steering messages can be sent as one batch: messages queued while the
+  assistant is running are sent together, and they can also interrupt the
+  running turn and go out immediately. — `desktop`
+- Deleting a chat is protected: a chat that is running a turn cannot be deleted
+  and the menu explains why; deleting the chat you are looking at lands you on
+  the new-chat view. — `desktop`
+
+### Changed
+
+- The cold start is faster: the session metadata index is persisted per
+  workspace, so the daemon no longer rescans every session file on each start,
+  and the desktop reads its workspace configuration in a single round trip. —
+  `sidecar` + `desktop`
+- The sidebar lists 10 sessions per group by default. — `protocol` + `desktop`
+- Command approval covers more read-only commands: automatic approval accepts
+  safe path patterns such as `wc -l src/*.ts`, and the permissions settings
+  spell out what manual and automatic approval each cover. — `sidecar` +
+  `desktop`
+
+### Fixed
+
+- grep and glob validate their search paths: a path outside the workspace is
+  refused, and grep accepts a single file as its target. — `sidecar`
+- The desktop no longer shows an empty session list while it loads. — `desktop`
+- Updating the desktop restarts it cleanly. — `desktop`
+- Malformed configuration reports what is wrong. — `sidecar`
+- Worktree changes are serialized and recoverable: concurrent changes in
+  different processes no longer overlap, an interrupted removal recovers, and
+  ownership is reconciled. — `sidecar` + `desktop`
+
+### Breaking changes
+
+- The sidecar protocol is now 2.26. 2.22 adds the worktree methods and 2.26
+  the `productName` field, which a 2.21 daemon silently drops on
+  `settings.write`; the desktop and the sidecar have to be upgraded together. —
+  `protocol`
+
+### Upgrade notes
+
+- Upgrade the desktop and the sidecar together (protocol 2.26). The desktop
+  replaces an outdated daemon on its own; if you registered the daemon as a
+  system service with `taco install` and run the npm packages separately,
+  upgrade it with `taco upgrade` or restart it — otherwise the desktop refuses
+  the connection.
+
 ## [0.4.3] — 2026-11-19
 
 This release puts the workspace's Git state on screen, and tidies up the
