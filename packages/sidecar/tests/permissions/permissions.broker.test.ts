@@ -134,6 +134,249 @@ describe("permissionBroker", () => {
     });
 });
 
+describe("PermissionBroker", () => {
+    const askConfig: CommandPermissionConfig = { mode: "ask", rules: [] };
+
+    it("remembers a session approval for the exact command", async () => {
+        const broker = new PermissionBroker(() => askConfig);
+        const requestId = new Promise<string>((resolve) => {
+            broker.once("requested", (value) => resolve(value.requestId));
+        });
+        const pending = broker.evaluateAndRequest({
+            sessionId: "session-1",
+            toolCallId: "call-1",
+            command: "pnpm test",
+        });
+        broker.resolve(await requestId, true, "session");
+        assert.equal((await pending).approved, true);
+
+        const next = await broker.evaluateAndRequest({
+            sessionId: "session-1",
+            toolCallId: "call-2",
+            command: "pnpm test",
+        });
+        assert.equal(next.approved, true);
+        assert.equal(next.evaluation.source, "rule");
+    });
+
+    it("rejects pending requests when the session is cleaned up", async () => {
+        const broker = new PermissionBroker(() => askConfig, { requestTimeoutMs: 60_000 });
+        const pending = broker.evaluateAndRequest({
+            sessionId: "session-1",
+            toolCallId: "call-1",
+            command: "rm -rf /tmp/demo",
+        });
+        broker.cleanupSession("session-1");
+        const decision = await pending;
+        assert.equal(decision.approved, false);
+        assert.equal(decision.denialReason, "aborted");
+    });
+
+    it("rejects all pending requests when cleaned up", async () => {
+        const broker = new PermissionBroker(() => askConfig, { requestTimeoutMs: 60_000 });
+        const pending = broker.evaluateAndRequest({
+            sessionId: "session-1",
+            toolCallId: "call-1",
+            command: "rm -rf /tmp/demo",
+        });
+        broker.cleanupAll();
+        const decision = await pending;
+        assert.equal(decision.approved, false);
+        assert.equal(decision.denialReason, "aborted");
+    });
+
+    // The UI clears its pending-approval list on "resolved"; a settle path that
+    // skipped the event would leave a dead approve button on screen.
+    it("emits resolved on every settle path", async () => {
+        const settle: Record<string, (broker: PermissionBroker, requestId: string) => void> = {
+            user: (broker, requestId) => broker.resolve(requestId, false, "once"),
+            abort: () => controller.abort(),
+            cleanupSession: (broker) => broker.cleanupSession("session-1"),
+            cleanupAll: (broker) => broker.cleanupAll(),
+        };
+        let controller = new AbortController();
+        for (const [path, run] of Object.entries(settle)) {
+            controller = new AbortController();
+            const broker = new PermissionBroker(() => askConfig, { requestTimeoutMs: 60_000 });
+            const events: {
+                request: { requestId: string };
+                decision: { approved: boolean };
+            }[] = [];
+            broker.on("resolved", (e) => events.push(e));
+            let requestId = "";
+            broker.once("requested", (value) => {
+                requestId = value.requestId;
+            });
+            const pending = broker.evaluateAndRequest({
+                sessionId: "session-1",
+                toolCallId: "call-1",
+                command: "rm -rf /tmp/demo",
+                signal: controller.signal,
+            });
+            run(broker, requestId);
+            await pending;
+            assert.equal(events.length, 1, path);
+            assert.equal(events[0]?.request.requestId, requestId, path);
+            assert.equal(events[0]?.decision.approved, false, path);
+        }
+    });
+
+    it("emits resolved when a pending request times out", async () => {
+        const broker = new PermissionBroker(() => askConfig, { requestTimeoutMs: 10 });
+        const reasons: (string | undefined)[] = [];
+        broker.on("resolved", (e) => reasons.push(e.decision.denialReason));
+        await broker.evaluateAndRequest({
+            sessionId: "session-1",
+            toolCallId: "call-1",
+            command: "rm -rf /tmp/demo",
+        });
+        assert.deepEqual(reasons, ["timeout"]);
+    });
+
+    it("times out pending requests after the configured timeout", async () => {
+        const broker = new PermissionBroker(() => askConfig, { requestTimeoutMs: 10 });
+        const decision = await broker.evaluateAndRequest({
+            sessionId: "session-1",
+            toolCallId: "call-1",
+            command: "rm -rf /tmp/demo",
+        });
+        assert.equal(decision.approved, false);
+        assert.equal(decision.scope, "once");
+        assert.equal(decision.denialReason, "timeout");
+    });
+
+    it("attaches resolved display context to emitted request", async () => {
+        const resolver = async (sid: string) =>
+            sid === "child-1"
+                ? { displaySessionId: "root-1", displayToolCallId: "root-call-A" }
+                : { displaySessionId: sid, displayToolCallId: undefined };
+        const broker = new PermissionBroker(() => askConfig, {
+            resolveDisplayContext: resolver,
+        });
+        const requestPromise = new Promise<CommandPermissionRequest>((resolve) => {
+            broker.once("requested", (r) => resolve(r));
+        });
+        void broker.evaluateAndRequest({
+            sessionId: "child-1",
+            toolCallId: "bash-call-1",
+            command: "rm -rf /tmp/demo",
+        });
+        const request = await requestPromise;
+        assert.equal(request.sessionId, "child-1");
+        assert.equal(request.toolCallId, "bash-call-1");
+        assert.equal(request.displaySessionId, "root-1");
+        assert.equal(request.displayToolCallId, "root-call-A");
+        broker.cleanupAll();
+    });
+
+    it("falls back when resolver returns no displayToolCallId", async () => {
+        const resolver = async (sid: string) => ({
+            displaySessionId: sid,
+            displayToolCallId: undefined as string | undefined,
+        });
+        const broker = new PermissionBroker(() => askConfig, {
+            resolveDisplayContext: resolver,
+        });
+        const requestPromise = new Promise<CommandPermissionRequest>((resolve) => {
+            broker.once("requested", (r) => resolve(r));
+        });
+        void broker.evaluateAndRequest({
+            sessionId: "main-1",
+            toolCallId: "bash-1",
+            command: "rm -rf /tmp/demo",
+        });
+        const request = await requestPromise;
+        assert.equal(request.displaySessionId, "main-1");
+        assert.equal(request.displayToolCallId, undefined);
+        broker.cleanupAll();
+    });
+
+    it("falls back when resolver throws", async () => {
+        const broker = new PermissionBroker(() => askConfig, {
+            resolveDisplayContext: async () => {
+                throw new Error("boom");
+            },
+        });
+        const requestPromise = new Promise<CommandPermissionRequest>((resolve) => {
+            broker.once("requested", (r) => resolve(r));
+        });
+        void broker.evaluateAndRequest({
+            sessionId: "child-1",
+            toolCallId: "bash-1",
+            command: "rm -rf /tmp/demo",
+        });
+        const request = await requestPromise;
+        assert.equal(request.displaySessionId, "child-1");
+        assert.equal(request.displayToolCallId, undefined);
+        broker.cleanupAll();
+    });
+
+    it("stores session approvals against the root session so child respawns inherit", async () => {
+        const resolver = async (sid: string) =>
+            sid === "root-1"
+                ? { displaySessionId: "root-1", displayToolCallId: undefined }
+                : { displaySessionId: "root-1", displayToolCallId: "root-agent-tc" };
+        const broker = new PermissionBroker(() => askConfig, {
+            resolveDisplayContext: resolver,
+        });
+
+        // Child-1 prompts, user approves "for session".
+        const requestIdPromise = new Promise<string>((resolve) => {
+            broker.once("requested", (value) => resolve(value.requestId));
+        });
+        const pending1 = broker.evaluateAndRequest({
+            sessionId: "child-1",
+            toolCallId: "call-1",
+            command: "pnpm test",
+        });
+        broker.resolve(await requestIdPromise, true, "session");
+        assert.equal((await pending1).approved, true);
+
+        // Child-1 cleaned up — rules live on the root, not on the child.
+        broker.cleanupSession("child-1");
+
+        // Child-2 (fresh respawn) should inherit the approval.
+        const decision2 = await broker.evaluateAndRequest({
+            sessionId: "child-2",
+            toolCallId: "call-2",
+            command: "pnpm test",
+        });
+        assert.equal(decision2.approved, true);
+        assert.equal(decision2.evaluation.source, "rule");
+    });
+
+    it("root approvals propagate to subagent evaluations within the same lifetime", async () => {
+        const resolver = async (sid: string) =>
+            sid === "root-1"
+                ? { displaySessionId: "root-1", displayToolCallId: undefined }
+                : { displaySessionId: "root-1", displayToolCallId: "root-agent-tc" };
+        const broker = new PermissionBroker(() => askConfig, {
+            resolveDisplayContext: resolver,
+        });
+
+        // Root itself prompts for a command, user approves for the session.
+        const requestIdPromise = new Promise<string>((resolve) => {
+            broker.once("requested", (value) => resolve(value.requestId));
+        });
+        const pending = broker.evaluateAndRequest({
+            sessionId: "root-1",
+            toolCallId: "call-1",
+            command: "pnpm build",
+        });
+        broker.resolve(await requestIdPromise, true, "session");
+        assert.equal((await pending).approved, true);
+
+        // Subagent evaluate same command — inherits from root.
+        const decision = await broker.evaluateAndRequest({
+            sessionId: "child-1",
+            toolCallId: "call-2",
+            command: "pnpm build",
+        });
+        assert.equal(decision.approved, true);
+        assert.equal(decision.evaluation.source, "rule");
+    });
+});
+
 describe("permissionBroker.config", () => {
     const noRules = { mode: "ask" } as const;
 

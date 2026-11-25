@@ -28,6 +28,10 @@ import {
 import { readCodexState, writeCodexState } from "../../src/runtime/subagent/codex/codexState.ts";
 import { createClaudeCodeEngine } from "../../src/runtime/subagent/engines/claudeCodeEngine.ts";
 import { createCodexEngine } from "../../src/runtime/subagent/engines/codexEngine.ts";
+import {
+    normalizeSubagentRuntime,
+    sameSubagentRuntime,
+} from "../../src/runtime/subagent/engines/runtime.ts";
 import type {
     EngineRunRequest,
     NativeEngineDeps,
@@ -566,4 +570,19 @@ it("scrubs injected provider keys from both native SDKs and Codex preflight", as
     assert.equal(f.clients[1]?.env?.OPENAI_API_KEY, undefined);
     const servers = f.clients[1]?.config?.mcp_servers as { taco: { env: Record<string, string> } };
     assert.equal(servers.taco.env.OPENAI_API_KEY, undefined);
+});
+
+describe("subagent runtime identity", () => {
+    it("maps omitted and legacy runtime values to the standard engine", () => {
+        assert.equal(normalizeSubagentRuntime(undefined), "standard");
+        assert.equal(normalizeSubagentRuntime("unknown"), "standard");
+        assert.equal(normalizeSubagentRuntime("pi"), "standard");
+    });
+
+    it("compares runtime values by their canonical identity", () => {
+        assert.equal(sameSubagentRuntime("pi", "standard"), true);
+        assert.equal(sameSubagentRuntime(undefined, "unknown"), true);
+        assert.equal(sameSubagentRuntime("claude-code", "standard"), false);
+        assert.equal(sameSubagentRuntime("codex", "codex"), true);
+    });
 });

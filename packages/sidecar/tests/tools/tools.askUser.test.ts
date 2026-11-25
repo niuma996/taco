@@ -4,6 +4,7 @@ import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
 import type { AskUserQuestion } from "@taco-ai/protocol";
 import { Value } from "typebox/value";
+import type { AttachedSession } from "../../src/runtime/harness/attachedSession.ts";
 import { NodeExecutionEnv } from "../../src/runtime/pi/node.ts";
 import type { TextContent } from "../../src/runtime/pi/types.ts";
 import { createAskUserTool } from "../../src/tools/askUser.ts";
@@ -383,5 +384,47 @@ describe("resolveAskUserQuestions", () => {
         const attached = makeAttachedWith([older, newer]);
         const out = await resolveAskUserQuestions(attached, "tc-new", "askUser");
         assert.deepEqual(out, SAMPLE_QUESTIONS);
+    });
+});
+
+describe("resolveAskUserQuestions — answer ownership", () => {
+    const pending = {
+        type: "message",
+        message: {
+            role: "toolResult",
+            toolName: "askUser",
+            toolCallId: "q",
+            details: { waiting: true, questions: [{ question: "Choose?" }] },
+        },
+    };
+    const attached = (entries: unknown[]) =>
+        ({
+            session: { branch: async () => ({ findEntries: async () => entries }) },
+        }) as unknown as AttachedSession;
+
+    it("rejects a stale question after an answer was admitted", async () => {
+        assert.equal(
+            await resolveAskUserQuestions(
+                attached([
+                    pending,
+                    { type: "message", message: { role: "user", content: "answered" } },
+                ]),
+                "q",
+                "askUser",
+            ),
+            null,
+        );
+    });
+    it("rejects an older question when another interaction is pending", async () => {
+        const newer = { ...pending, message: { ...pending.message, toolCallId: "q-next" } };
+        assert.equal(
+            await resolveAskUserQuestions(attached([pending, newer]), "q", "askUser"),
+            null,
+        );
+    });
+    it("keeps the currently unanswered question actionable", async () => {
+        assert.deepEqual(await resolveAskUserQuestions(attached([pending]), "q", "askUser"), [
+            { question: "Choose?" },
+        ]);
     });
 });

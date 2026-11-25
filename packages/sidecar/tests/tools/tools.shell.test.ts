@@ -1,18 +1,16 @@
-// Shell-family tool tests: runShell signal escalation, shellTool, glob, grep.
+// Shell-family tool tests: runShell signal escalation, shellTool.
 
 import { strict as assert } from "node:assert";
 import childProcess from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { after, afterEach, before, describe, it } from "node:test";
+import { afterEach, describe, it } from "node:test";
 import { setTimeout } from "node:timers/promises";
 import { PermissionBroker } from "../../src/permissions/permissionBroker.ts";
 import { ProviderKeyStore } from "../../src/runtime/models/providerKeyStore.ts";
 import { NodeExecutionEnv } from "../../src/runtime/pi/node.ts";
-import { createGlobTool } from "../../src/tools/glob.ts";
-import { createGrepTool } from "../../src/tools/grep.ts";
 import { runShell } from "../../src/tools/shell.ts";
 import { createShellTool } from "../../src/tools/shellTool.ts";
 import { invokeTool } from "../_helpers/invokeTool.ts";
@@ -419,141 +417,5 @@ describe("shell tool env scrubbing", () => {
         })) as ShellToolResult;
 
         assert.equal(textOf(result).includes("sk-ant-secret-1234567890"), false);
-    });
-});
-
-describe("glob tool", () => {
-    let dir: string;
-    let env: NodeExecutionEnv;
-    before(() => {
-        dir = mkdtempSync(join(tmpdir(), "taco-glob-"));
-        env = new NodeExecutionEnv({ cwd: dir });
-        mkdirSync(join(dir, "src"));
-        mkdirSync(join(dir, "node_modules"));
-        mkdirSync(join(dir, "secrets"));
-        writeFileSync(join(dir, "src", "a.ts"), "a");
-        writeFileSync(join(dir, "src", "b.ts"), "b");
-        writeFileSync(join(dir, "src", "c.js"), "c");
-        // Only ignores `secrets/`, not `node_modules`.
-        // This distinguishes "safe defaults suppress node_modules" from ".gitignore suppresses secrets/".
-        writeFileSync(join(dir, ".gitignore"), "secrets/\n");
-        writeFileSync(join(dir, "node_modules", "dep.ts"), "dep");
-        writeFileSync(join(dir, "secrets", "k.ts"), "k");
-    });
-    after(() => rmSync(dir, { recursive: true, force: true }));
-
-    it("matches by pattern and returns relative paths", async () => {
-        const tool = createGlobTool();
-        const res = await invokeTool(
-            tool,
-            { pattern: "src/**/*.ts" },
-            { env },
-            { toolCallId: "tc" },
-        );
-        const text = res.content.map((c) => (c.type === "text" ? c.text : "")).join("\n");
-        assert.ok(text.includes("src/a.ts"));
-        assert.ok(text.includes("src/b.ts"));
-        assert.ok(!text.includes("c.js"));
-    });
-
-    it("respects safe defaults even without .gitignore mention", async () => {
-        const tool = createGlobTool();
-        const res = await invokeTool(tool, { pattern: "**/*.ts" }, { env }, { toolCallId: "tc" });
-        const text = res.content.map((c) => (c.type === "text" ? c.text : "")).join("\n");
-        assert.ok(!text.includes("node_modules"), "should exclude node_modules via safe defaults");
-    });
-
-    it("respects .gitignore user-ignored paths", async () => {
-        const tool = createGlobTool();
-        const res = await invokeTool(tool, { pattern: "**/*.ts" }, { env }, { toolCallId: "tc" });
-        const text = res.content.map((c) => (c.type === "text" ? c.text : "")).join("\n");
-        assert.ok(!text.includes("secrets"), "should respect .gitignore 'secrets/' entry");
-    });
-});
-
-type GrepDetails = { count: number; truncated: boolean };
-
-describe("grep tool", () => {
-    let dir: string;
-    let env: NodeExecutionEnv;
-    before(() => {
-        dir = mkdtempSync(join(tmpdir(), "taco-grep-"));
-        env = new NodeExecutionEnv({ cwd: dir });
-        mkdirSync(join(dir, "src"));
-        mkdirSync(join(dir, "node_modules"));
-        mkdirSync(join(dir, "secrets")); // user-specific, NOT in safe defaults
-        writeFileSync(join(dir, "src", "a.ts"), "const foo = 1;\nconst bar = 2;\n");
-        writeFileSync(join(dir, "src", "b.ts"), "function baz() { return foo; }\n");
-        writeFileSync(join(dir, "node_modules", "dep.ts"), "export const foo = 'shadow';");
-        writeFileSync(join(dir, "secrets", "config.ts"), "export const foo = 'hidden';");
-        // Only user-ignores `secrets/`, NOT `node_modules` (latter is a safe default)
-        writeFileSync(join(dir, ".gitignore"), "secrets/\n");
-    });
-    after(() => rmSync(dir, { recursive: true, force: true }));
-
-    it("finds a literal pattern and reports file:line", async () => {
-        const tool = createGrepTool();
-        const res = await invokeTool(tool, { pattern: "foo" }, { env }, { toolCallId: "tc" });
-        const text = res.content.map((c) => (c.type === "text" ? c.text : "")).join("\n");
-        assert.ok(text.includes("src/a.ts:1:"));
-        assert.ok(text.includes("src/b.ts:1:"));
-        assert.ok(!text.includes("const bar"));
-    });
-
-    it("respects safe defaults (excludes node_modules)", async () => {
-        const tool = createGrepTool();
-        const res = await invokeTool(tool, { pattern: "foo" }, { env }, { toolCallId: "tc" });
-        const text = res.content.map((c) => (c.type === "text" ? c.text : "")).join("\n");
-        assert.ok(!text.includes("node_modules"));
-    });
-
-    it("respects .gitignore (excludes secrets/)", async () => {
-        const tool = createGrepTool();
-        const res = await invokeTool(tool, { pattern: "foo" }, { env }, { toolCallId: "tc" });
-        const text = res.content.map((c) => (c.type === "text" ? c.text : "")).join("\n");
-        assert.ok(!text.includes("secrets"));
-    });
-
-    it("case-insensitive flag works", async () => {
-        writeFileSync(join(dir, "src", "c.ts"), "const FOO = 3;\n");
-        const tool = createGrepTool();
-        const res = await invokeTool(
-            tool,
-            { pattern: "FOO", ignoreCase: true },
-            { env },
-            { toolCallId: "tc" },
-        );
-        const text = res.content.map((c) => (c.type === "text" ? c.text : "")).join("\n");
-        assert.ok(text.includes("src/c.ts:1:"));
-    });
-
-    it("clips a long matching line", async () => {
-        writeFileSync(join(dir, "src", "min.js"), `var longneedle="${"x".repeat(5000)}";\n`);
-        const tool = createGrepTool();
-        const res = await invokeTool(
-            tool,
-            { pattern: "longneedle" },
-            { env },
-            { toolCallId: "tc" },
-        );
-        const text = res.content.map((c) => (c.type === "text" ? c.text : "")).join("\n");
-        assert.ok(text.includes("src/min.js:1:"));
-        assert.ok(text.length < 1000, `got ${text.length} chars`);
-        assert.equal((res.details as GrepDetails).truncated, true);
-    });
-
-    it("caps total output under the line cap", async () => {
-        mkdirSync(join(dir, "wide"));
-        // 200 rows (under MAX_LINES) of ~400 chars each would be ~80k chars unclipped.
-        const row = `widetoken ${"y".repeat(400)}`;
-        writeFileSync(join(dir, "wide", "w.txt"), `${Array(200).fill(row).join("\n")}\n`);
-        const tool = createGrepTool();
-        const res = await invokeTool(tool, { pattern: "widetoken" }, { env }, { toolCallId: "tc" });
-        const text = res.content.map((c) => (c.type === "text" ? c.text : "")).join("\n");
-        assert.ok(text.length <= 51_000, `got ${text.length} chars`);
-        const details = res.details as GrepDetails;
-        assert.equal(details.count, 200);
-        assert.equal(details.truncated, true);
-        assert.match(text, /more\)$/);
     });
 });

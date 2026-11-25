@@ -244,21 +244,112 @@ async function waitFor(
     predicate: () => boolean,
     timeoutMs: number,
     intervalMs = 50,
+    describeContext: () => string = () => "",
 ): Promise<void> {
-    const deadline = Date.now() + timeoutMs;
+    const startedAt = Date.now();
+    const deadline = startedAt + timeoutMs;
     while (Date.now() < deadline) {
         if (predicate()) return;
         await new Promise((r) => setTimeout(r, intervalMs));
     }
-    if (!predicate()) {
-        throw new Error(`condition not met within ${timeoutMs}ms`);
+    if (predicate()) return;
+    const context = describeContext();
+    throw new Error(
+        `condition not met within ${timeoutMs}ms (elapsed ${Date.now() - startedAt}ms` +
+            `${context ? `, ${context}` : ""})`,
+    );
+}
+
+/**
+ * Budget for one hot-reload wait.
+ *
+ * The old budget was 30s, so a lost fs event stalled the whole suite for
+ * 30–60s before it could fail. 10s still covers a heavily loaded machine
+ * (the healthy case settles in well under a second) while capping what a
+ * lost event can cost.
+ */
+const SKILL_RELOAD_BUDGET_MS = 10_000;
+
+/**
+ * Observability for the real-watcher cases.
+ *
+ * `SkillHotReloader` exposes no fs-event counter: the only public signal
+ * that chokidar delivered an event is the injected `reloadSkills` callback
+ * firing (watch event → 300ms debounce → rescan). Wrapping that callback
+ * turns "did the OS deliver an event" into an awaitable promise plus a
+ * counter, instead of inferring it from a derived value.
+ */
+function createReloadProbe() {
+    const state = { scans: 0 };
+    const waiters = new Set<() => void>();
+
+    const observe =
+        <T>(scan: () => Promise<T>) =>
+        async (): Promise<T> => {
+            state.scans++;
+            for (const wake of [...waiters]) {
+                waiters.delete(wake);
+                wake();
+            }
+            return scan();
+        };
+
+    /** Resolves once a scan newer than `afterScans` has run. */
+    const after = (afterScans: number): Promise<void> => {
+        if (state.scans > afterScans) return Promise.resolve();
+        return new Promise<void>((resolve) => {
+            waiters.add(resolve);
+        });
+    };
+
+    return { state, observe, after };
+}
+
+/** True if `signal` settles within `timeoutMs`, false if the budget runs out. */
+async function settlesWithin(signal: Promise<void>, timeoutMs: number): Promise<boolean> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const expiry = new Promise<boolean>((resolve) => {
+        timer = setTimeout(() => resolve(false), timeoutMs);
+    });
+    try {
+        return await Promise.race([signal.then(() => true), expiry]);
+    } finally {
+        clearTimeout(timer);
     }
 }
 
 // Write only once: retrying would let a change event hide a lost add event.
-async function writeAndAwaitReload(ws: WorkspaceRuntime, write: () => void): Promise<void> {
+async function writeAndAwaitReload(
+    ws: WorkspaceRuntime,
+    probe: ReturnType<typeof createReloadProbe>,
+    write: () => void,
+): Promise<void> {
+    const startedAt = Date.now();
+    const before = probe.state.scans;
     write();
-    await waitFor(() => (ws.resources.skills?.length ?? 0) > 0, 30_000, 40);
+
+    // 1. Did chokidar deliver the fs event at all? That is the
+    //    machine-load-sensitive part, so it gets its own awaitable signal
+    //    instead of being guessed from a derived value.
+    const delivered = await settlesWithin(probe.after(before), SKILL_RELOAD_BUDGET_MS);
+    if (!delivered) {
+        throw new Error(
+            `chokidar delivered no fs event within ${SKILL_RELOAD_BUDGET_MS}ms ` +
+                `(rescan callback ran ${probe.state.scans - before} time(s) since the write, ` +
+                `elapsed ${Date.now() - startedAt}ms)`,
+        );
+    }
+
+    // 2. Was the scan result applied? The callback resolves one microtask
+    //    *before* the workspace applies it, so the applied state is awaited
+    //    separately — with a short budget, since the reload has by then
+    //    demonstrably happened.
+    await waitFor(
+        () => (ws.resources.skills?.length ?? 0) > 0,
+        2_000,
+        10,
+        () => `rescan callback ran ${probe.state.scans} time(s)`,
+    );
 }
 
 let skillsDir: string;
@@ -283,6 +374,7 @@ describe("WorkspaceRuntime skill fs watcher (real chokidar)", () => {
 
     it("picks up a newly-written SKILL.md without an explicit reload call", async () => {
         let scanResult: TacoSkill[] = [];
+        const probe = createReloadProbe();
         const ws = new WorkspaceRuntime({
             providerKeyStore: new ProviderKeyStore({}),
             cwd: asWorkspaceId(tmpDirSkillWatch),
@@ -293,8 +385,9 @@ describe("WorkspaceRuntime skill fs watcher (real chokidar)", () => {
             // tests). This test only needs to prove the fs event reaches
             // reloadSkillsNow — the callback just needs to return *something*
             // that changed, so resources.skills is verifiable proof the watcher
-            // fired.
-            reloadSkills: async () => ({ skills: scanResult, diagnostics: [] }),
+            // fired. The probe wrapping it is also the "did the watcher see an
+            // event" signal the wait below is built on.
+            reloadSkills: probe.observe(async () => ({ skills: scanResult, diagnostics: [] })),
         });
 
         try {
@@ -316,7 +409,7 @@ describe("WorkspaceRuntime skill fs watcher (real chokidar)", () => {
                     source: "user",
                 },
             ];
-            await writeAndAwaitReload(ws, () =>
+            await writeAndAwaitReload(ws, probe, () =>
                 writeFileSync(join(newSkillDir, "SKILL.md"), "---\nname: watched-skill\n---\nbody"),
             );
 
@@ -337,12 +430,13 @@ describe("WorkspaceRuntime skill fs watcher (real chokidar)", () => {
         // .taco in between — the chain that defeated the bare watcher.
         const freshSkillsDir = join(tmpDirSkillWatch, ".taco", "skills");
         let scanResult: TacoSkill[] = [];
+        const probe = createReloadProbe();
         const ws = new WorkspaceRuntime({
             providerKeyStore: new ProviderKeyStore({}),
             cwd: asWorkspaceId(tmpDirSkillWatch),
             resources: { skills: [] },
             skillDirs: [freshSkillsDir],
-            reloadSkills: async () => ({ skills: scanResult, diagnostics: [] }),
+            reloadSkills: probe.observe(async () => ({ skills: scanResult, diagnostics: [] })),
         });
 
         try {
@@ -360,7 +454,7 @@ describe("WorkspaceRuntime skill fs watcher (real chokidar)", () => {
             ];
             // mkdir + write in one burst: the dir now exists (pre-created by the
             // runtime), so this is a post-ready `add` under a watched dir.
-            await writeAndAwaitReload(ws, () => {
+            await writeAndAwaitReload(ws, probe, () => {
                 mkdirSync(newSkillDir, { recursive: true });
                 writeFileSync(join(newSkillDir, "SKILL.md"), "---\nname: fresh-skill\n---\nbody");
             });

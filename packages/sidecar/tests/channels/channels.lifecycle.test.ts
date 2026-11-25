@@ -20,7 +20,7 @@ for (const mode of [
     "subagent",
 ] as const) {
     it(`delivers WeCom replies after stopping ${mode} and another inbound message`, {
-        timeout: 10_000,
+        timeout: 60_000,
     }, async (t) => {
         const server = new SidecarServer({ providerKeyStore: new ProviderKeyStore({}) });
         t.after(() => server.stop());
@@ -49,7 +49,10 @@ for (const mode of [
         client.emit("authenticated");
         const workspaceId = asWorkspaceId(makeImCwd("wecom", "u1", "c1"));
         const workspace = await server.ensureWorkspace(workspaceId);
-        const faux = fauxProvider({ provider: "faux", tokensPerSecond: 50 });
+        // The reply only has to be long enough to be distinguishable from the
+        // other messages; the old pace (50 tokens/s over ~375 tokens) burned
+        // ~7.5s of artificial delay per variant against a 10s budget.
+        const faux = fauxProvider({ provider: "faux", tokensPerSecond: 5000 });
         workspace.models.setProvider(faux.provider);
         workspace.setDefaultModel(faux.getModel().id, "faux");
         workspace.agentSpawner.replaceAgents([

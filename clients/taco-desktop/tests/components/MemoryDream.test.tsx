@@ -1,17 +1,29 @@
 import type { MemoryListResult, MemoryTopicEntry } from "@taco-ai/protocol";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { createInstance } from "i18next";
+import { I18nextProvider, initReactI18next } from "react-i18next";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { MemoryDreamPanel } from "../../src/components/memory/MemoryDreamPanel";
+import en from "../../src/i18n/locales/en.json";
+import zh from "../../src/i18n/locales/zh.json";
 import { MEMORY_ARCHIVE_PREFIX, MEMORY_ROOT_ID } from "../../src/lib/memoryPaneTypes";
 import { MemoryPane } from "../../src/views/MemoryPane";
 
-vi.mock("react-i18next", () => ({
-    useTranslation: vi.fn(() => ({
-        t: (key: string) => key,
-        i18n: { language: "en" },
-    })),
-}));
+// The locale suite needs the real translations, so the mock hands the hook back
+// untouched while the flag is on.
+const useRealTranslations = vi.hoisted(() => ({ on: false }));
+
+vi.mock("react-i18next", async (importOriginal) => {
+    const actual = await importOriginal<typeof import("react-i18next")>();
+    return {
+        ...actual,
+        useTranslation: (...args: unknown[]) =>
+            useRealTranslations.on
+                ? (actual.useTranslation as (...a: unknown[]) => unknown)(...args)
+                : { t: (key: string) => key, i18n: { language: "en" } },
+    };
+});
 
 const topic = (id: string, name = id, extras: Record<string, unknown> = {}): MemoryTopicEntry => ({
     id,
@@ -639,5 +651,69 @@ describe("memory Markdown and provenance", () => {
         expect(bodies[0]?.querySelector("strong")?.textContent).toBe("AB");
         expect(bodies[0]?.querySelector(".md-assistant strong")?.textContent).toBe("Merged fact");
         expect(bodies[1]?.querySelector("h2")?.textContent).toBe("Rewritten fact");
+    });
+});
+
+describe("MemoryDreamPanel locale", () => {
+    beforeAll(() => {
+        useRealTranslations.on = true;
+    });
+    afterAll(() => {
+        useRealTranslations.on = false;
+    });
+    afterEach(cleanup);
+
+    it("translates consolidation settings and updates them when the UI language changes", async () => {
+        const i18n = createInstance();
+        await i18n.use(initReactI18next).init({
+            lng: "zh",
+            fallbackLng: "en",
+            resources: { zh: { translation: zh }, en: { translation: en } },
+            interpolation: { escapeValue: false },
+        });
+        render(
+            <I18nextProvider i18n={i18n}>
+                <MemoryDreamPanel
+                    busy={null}
+                    scheduled
+                    onRun={vi.fn()}
+                    onApply={vi.fn()}
+                    onDiscard={vi.fn()}
+                    onUndo={vi.fn()}
+                    onScheduleToggle={vi.fn()}
+                    onSaveConfig={vi.fn(async () => true)}
+                    onClose={vi.fn()}
+                    dreamConfig={{
+                        minHours: 24,
+                        staleDays: 90,
+                        staleDaysDurable: 180,
+                        archiveCleanupEnabled: true,
+                        archiveRetentionDays: 7,
+                    }}
+                />
+            </I18nextProvider>,
+        );
+        fireEvent.click(screen.getByRole("button", { name: "记忆整理设置" }));
+        expect(screen.getByLabelText("最短整理间隔（小时）")).toBeTruthy();
+        expect(screen.getByLabelText("项目与参考记忆闲置天数")).toBeTruthy();
+        expect(screen.getByLabelText("用户偏好与反馈记忆闲置天数")).toBeTruthy();
+        expect(screen.getByLabelText("删除过期的已归档记忆")).toBeTruthy();
+        expect(screen.getByLabelText("归档保留时间")).toBeTruthy();
+        expect(screen.getByLabelText("归档保留时间").textContent).toContain("7 天");
+        expect(i18n.t("memory.dream.archiveRetention30")).toBe("30 天");
+        expect(i18n.t("memory.dream.archiveRetention90")).toBe("90 天");
+        expect(screen.getByRole("button", { name: "保存" })).toBeTruthy();
+
+        await act(() => i18n.changeLanguage("en"));
+        expect(screen.getByRole("button", { name: "Memory consolidation settings" })).toBeTruthy();
+        expect(screen.getByLabelText("Minimum hours between evaluations")).toBeTruthy();
+        expect(screen.getByLabelText("Project/reference idle days")).toBeTruthy();
+        expect(screen.getByLabelText("User/feedback idle days")).toBeTruthy();
+        expect(screen.getByLabelText("Delete expired archived memories")).toBeTruthy();
+        expect(screen.getByLabelText("Archive retention")).toBeTruthy();
+        expect(screen.getByLabelText("Archive retention").textContent).toContain("7 days");
+        expect(i18n.t("memory.dream.archiveRetention30")).toBe("30 days");
+        expect(i18n.t("memory.dream.archiveRetention90")).toBe("90 days");
+        expect(screen.getByRole("button", { name: "Save" })).toBeTruthy();
     });
 });

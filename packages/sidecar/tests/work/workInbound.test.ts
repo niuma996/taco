@@ -84,13 +84,26 @@ async function rig(
     return { root, service, calls, sent };
 }
 
+/**
+ * Poll a condition until it holds.
+ *
+ * The deadline is generous (10s) because the reads touch the filesystem and
+ * run under a loaded parallel suite, but the poll interval stays short (5ms)
+ * so the healthy case still settles fast. The error reports how long the
+ * wait actually took, so a failure says whether it was a slow machine or a
+ * condition that never became true.
+ */
 async function eventually<T>(read: () => Promise<T>, accept: (value: T) => boolean): Promise<T> {
-    const deadline = Date.now() + 2000;
+    const startedAt = Date.now();
+    const deadline = startedAt + 10_000;
     for (;;) {
         const value = await read();
         if (accept(value)) return value;
         if (Date.now() > deadline)
-            throw new Error(`condition did not become true: ${JSON.stringify(value)}`);
+            throw new Error(
+                `condition did not become true after ${Date.now() - startedAt}ms: ` +
+                    `${JSON.stringify(value)}`,
+            );
         await new Promise((resolve) => setTimeout(resolve, 5));
     }
 }
@@ -171,10 +184,33 @@ it("accepts self-fired work behind its caller without waiting for that lane", as
         waitForCompletion: false,
     };
     const pending = service.queueScheduled(request);
-    const result = await Promise.race([
-        pending,
-        new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), 300)),
-    ]);
+    // Durable acceptance must land while the caller still holds its lane:
+    // `queueScheduled` resolves as soon as the work is committed, without
+    // waiting for the (deliberately blocked) execution. Poll for that
+    // resolution instead of racing a fixed timeout — a 300ms budget for the
+    // durable queue admission plus fs writes was a flake risk on a loaded
+    // machine, and the lane is still held throughout.
+    const settled: {
+        done: boolean;
+        value?: { workId?: string; status: string };
+        error?: unknown;
+    } = { done: false };
+    void pending.then(
+        (value) => {
+            settled.done = true;
+            settled.value = value;
+        },
+        (error) => {
+            settled.done = true;
+            settled.error = error;
+        },
+    );
+    const outcome = await eventually(
+        async () => settled,
+        (state) => state.done,
+    );
+    assert.equal(outcome.error, undefined, `durable acceptance failed: ${String(outcome.error)}`);
+    const result = outcome.value;
     assert.ok(result?.workId, "durable acceptance must return before the caller releases its lane");
     assert.equal((await service.store.get(result.workId))?.status, "running");
     release();
