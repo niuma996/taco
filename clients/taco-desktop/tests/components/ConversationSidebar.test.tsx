@@ -338,6 +338,19 @@ describe("Sidebar conversation groups", () => {
         ).toBeTruthy();
     });
 
+    it("shows loading rather than an empty state while the workspace list is unfetched", () => {
+        const input = props();
+        // Cold start renders the active group before initFromStorage's first
+        // LOAD_SESSIONS lands; listTotal stays undefined until then.
+        const pending = createEmptyWorkspace("/repo/pending", true);
+        input.workspaces["/repo/pending"] = pending;
+        input.activeCwd = pending.cwd;
+        render(<Sidebar {...input} />);
+        const group = screen.getByRole("region", { name: "pending" });
+        expect(within(group).getByText("conversationNav.loading")).toBeTruthy();
+        expect(within(group).queryByText("conversationNav.noConversations")).toBeNull();
+    });
+
     it("keeps a failed project page visible and retries only that project", async () => {
         const input = props();
         const workspace = input.workspaces["/repo/one"];

@@ -282,12 +282,25 @@ export function ConversationSidebar(props: ConversationSidebarProps) {
             );
         const search = props.searches.forWorkspace(group.cwd);
         const searching = search.query.trim() !== "";
-        if ((!workspace || workspace.sessions.length === 0) && !searching)
+        if ((!workspace || workspace.sessions.length === 0) && !searching) {
+            // listTotal stays undefined until the first LOAD_SESSIONS lands, so
+            // undefined means "fetch in flight", not "empty". Cold start loads
+            // the active workspace through initFromStorage and never enters
+            // loadingGroups — without this branch the group renders 暂无会话 for
+            // the whole leader-barrier + sessionList window.
+            if (!workspace || workspace.listTotal === undefined)
+                return (
+                    <div className="conversation-group-empty">
+                        <LoaderCircle size={13} className="spin" aria-hidden="true" />
+                        {t("conversationNav.loading")}
+                    </div>
+                );
             return (
                 <div className="conversation-group-empty">
                     {t("conversationNav.noConversations")}
                 </div>
             );
+        }
         return (
             <Sidebar
                 embedded
