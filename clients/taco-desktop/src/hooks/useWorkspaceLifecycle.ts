@@ -34,8 +34,7 @@ import { sessionSynchronization } from "../lib/sessionSynchronization";
 import {
     initDefaultCwd,
     isValidWorkspaceCwd,
-    loadActiveCwd,
-    loadOpenedCwds,
+    loadWorkspaces,
     persistActiveCwd,
     persistCwds,
     persistWorkspaceRemoval,
@@ -486,32 +485,35 @@ export function useWorkspaceLifecycle({
         // `await listen(...)` returning are lost. Tauri's event bus is
         // fire-and-forget; there is no replay for late subscribers.
         await bootPhase("ui.sidecarLogListenerReady", () => sidecarLogListenerReady);
-        // Resolve the real default cwd ($TACO_HOME/workspace, created on demand)
-        // before reading storage — loadOpenedCwds / resolveActiveCwd fall back to
-        // it, and the sync placeholder value points at a path that may not exist.
+        // Read opened + active from desktop.json (via the Rust host) in one
+        // loadWorkspaces call — the previous loadOpenedCwds + loadActiveCwd pair
+        // paid two IPC round trips for the same block. The read also runs the
+        // one-shot migration from the legacy localStorage keys, so an
+        // upgrade-in-place user lands in the same workspaces as before.
+        // It is fired before initDefaultCwd resolves: the read itself never
+        // touches the default cwd, so the two IPC chains overlap. Only the
+        // consumers below care about the real default cwd ($TACO_HOME/workspace,
+        // created on demand) — pruneMissingCwds reseeds an empty list with it
+        // and resolveActiveCwd falls back to it — and both run after the await,
+        // when the sync placeholder value has been replaced.
         //
         // `initDefaultCwd` swallows its own errors (keeping the empty fallback),
         // so returning from this await means "settled", not "succeeded" — which
         // is exactly the signal `defaultCwdSettled` promises. try/finally guards
         // the case where bootPhase itself throws: a stuck flag would hide
         // onboarding forever.
+        const workspacesPromise = bootPhase("ui.loadWorkspaces", () => loadWorkspaces());
         try {
             await bootPhase("ui.initDefaultCwd", () => initDefaultCwd());
         } finally {
             setDefaultCwdSettled(true);
         }
-        // Read opened + active from desktop.json (via the Rust host). The read
-        // also runs the one-shot migration from the legacy localStorage keys,
-        // so an upgrade-in-place user lands in the same workspaces as before.
+        const { opened: openedRaw, active: storedActive } = await workspacesPromise;
         // pruneMissingCwds stats every opened path — on macOS a path under a
         // TCC-protected ancestor (~/Documents, ~/Desktop) is a candidate stall
         // point, so it is timed apart from the read that feeds it.
-        const openedRaw = await bootPhase("ui.loadOpenedCwds", () => loadOpenedCwds());
         const opened = await bootPhase("ui.pruneMissingCwds", () => pruneMissingCwds(openedRaw));
         bootMark("ui.opened", `count=${opened.length} list=${opened.join(",")}`);
-        // loadActiveCwd reads the same desktop.json block (separate IPC call so
-        // callers that only need active don't pay for the full opened list).
-        const storedActive = await bootPhase("ui.loadActiveCwd", () => loadActiveCwd());
         // resolveActiveCwd is a pure function: prefers the stored active, then
         // opened[0], then the default cwd. We still validate storedActive
         // against opened because the desktop.json active can outlive a workspace

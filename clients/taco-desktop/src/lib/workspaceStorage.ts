@@ -11,9 +11,9 @@
  * localStorage entries. After migration runs once the LS keys are gone and
  * the read path takes the desktop.json branch on every subsequent load.
  *
- * Hooks/views call a single API: `loadOpenedCwds`, `loadActiveCwd`,
- * `resolveActiveCwd` (pure), `persistCwds`, `persistActiveCwd`,
- * `persistExpandedWorkspaces`, `pruneMissingCwds`.
+ * Hooks/views call a single API: `loadWorkspaces`, `resolveActiveCwd`
+ * (pure), `persistCwds`, `persistActiveCwd`, `persistExpandedWorkspaces`,
+ * `pruneMissingCwds`.
  */
 
 import { IM_CWD_PREFIX } from "@taco-ai/protocol";
@@ -218,9 +218,7 @@ export function __migrateFromLocalStorage(): { opened: string[]; active: string 
  * Returns `{ opened: [], active: "" }` when nothing is stored anywhere.
  *
  * Async because the read crosses an IPC boundary into the Rust host
- * (`desktop_config_read`). The previous synchronous `loadOpenedCwds` is
- * kept as a thin async wrapper so call sites that already `await` it keep
- * working.
+ * (`desktop_config_read`).
  */
 export async function loadWorkspaces(): Promise<{ opened: string[]; active: string }> {
     const config = await readDesktopConfig();
@@ -252,31 +250,11 @@ export async function loadWorkspaces(): Promise<{ opened: string[]; active: stri
 }
 
 /**
- * Async wrapper that returns just the opened list. Drop-in replacement for
- * the old synchronous `loadOpenedCwds()` — every existing call site already
- * `await`s it (it was already async-shaped in `pruneMissingCwds`'s caller).
- */
-export async function loadOpenedCwds(): Promise<string[]> {
-    const { opened } = await loadWorkspaces();
-    return opened;
-}
-
-/**
- * Async wrapper that returns just the active cwd (empty string when unset).
- * The previous `localStorage.getItem(LS_ACTIVE)` callers now use this.
- */
-export async function loadActiveCwd(): Promise<string> {
-    const { active } = await loadWorkspaces();
-    return active;
-}
-
-/**
  * Validates and returns the current active cwd: stored > opened[0] > default cwd.
  *
- * Pure function — does not read storage. Callers fetch the stored value via
- * `loadActiveCwd()` and the opened list via `loadOpenedCwds()` and pass them
- * in. Kept as a pure function so the resolution rules (which cwd wins) stay
- * unit-testable without stubbing IPC.
+ * Pure function — does not read storage. Callers fetch both values via
+ * `loadWorkspaces()` and pass them in. Kept as a pure function so the
+ * resolution rules (which cwd wins) stay unit-testable without stubbing IPC.
  */
 export function resolveActiveCwd(stored: string | null, opened: string[]): string {
     if (stored && isValidWorkspaceCwd(stored)) return stored;

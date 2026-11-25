@@ -37,8 +37,7 @@ vi.mock("../../src/lib/workspaceStorage", () => ({
     initDefaultCwd: vi.fn(async () => ""),
     getDefaultCwd: () => "",
     isValidWorkspaceCwd: () => true,
-    loadActiveCwd: vi.fn(async () => null),
-    loadOpenedCwds: vi.fn(async () => []),
+    loadWorkspaces: vi.fn(async () => ({ opened: [], active: "" })),
     pruneMissingCwds: vi.fn(async (cwds: string[]) => cwds),
     resolveActiveCwd: () => "",
 }));
