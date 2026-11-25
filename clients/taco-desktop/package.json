@@ -43,7 +43,7 @@
     "@taco-ai/protocol": "workspace:*",
     "@taco-ai/shared": "workspace:*",
     "@tanstack/react-query": "5.108.4",
-    "@tauri-apps/api": "^2.0.0",
+    "@tauri-apps/api": "^2.12.5",
     "@tauri-apps/plugin-dialog": "^2.7.2",
     "@tauri-apps/plugin-fs": "^2.5.1",
     "@tauri-apps/plugin-opener": "^2.0.0",
@@ -62,7 +62,7 @@
     "shiki": "^4.5.0"
   },
   "devDependencies": {
-    "@tauri-apps/cli": "^2.0.0",
+    "@tauri-apps/cli": "^2.12.6",
     "@testing-library/react": "^16.3.3",
     "@testing-library/user-event": "^14.6.13",
     "@types/node": "^22.7.0",
