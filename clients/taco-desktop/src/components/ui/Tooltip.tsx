@@ -9,17 +9,19 @@ export interface TooltipProps {
     label: string;
     /** Preferred side; Radix flips it when there is no room. */
     side?: "top" | "bottom" | "left" | "right";
+    /** Extra class on the bubble — e.g. to lift it above an open menu. */
+    className?: string;
     /** Single element that receives the hover/focus handlers. */
     children: ReactElement;
 }
 
-export function Tooltip({ label, side = "top", children }: TooltipProps) {
+export function Tooltip({ label, side = "top", className, children }: TooltipProps) {
     return (
         <HoverCard.Root openDelay={250} closeDelay={0}>
             <HoverCard.Trigger asChild>{children}</HoverCard.Trigger>
             <HoverCard.Portal>
                 <HoverCard.Content
-                    className="ui-tooltip"
+                    className={className ? `ui-tooltip ${className}` : "ui-tooltip"}
                     side={side}
                     sideOffset={6}
                     collisionPadding={8}

@@ -84,6 +84,34 @@ describe("Sidebar session actions", () => {
         expect(onDelete).toHaveBeenCalledWith("session-1");
     });
 
+    it("grays out the delete action of a running session", async () => {
+        const onDelete = vi.fn();
+        render(
+            <Sidebar
+                ws={{
+                    ...createEmptyWorkspace("/repo"),
+                    sessions: [
+                        { id: "session-1", name: "Session", createdAt: "1970-01-01T00:00:00Z" },
+                    ],
+                    // A turn in flight: the session cannot be deleted.
+                    pendingBySessionId: { "session-1": true },
+                }}
+                onAttach={() => {}}
+                onDelete={onDelete}
+                onRename={() => {}}
+                search={searchStub()}
+            />,
+        );
+
+        const user = userEvent.setup({ delay: null });
+        await user.click(screen.getByRole("button", { name: "session.moreActions" }));
+        const deleteItem = screen.getByRole("menuitem", { name: /session.deleteSession/ });
+        expect(deleteItem.getAttribute("aria-disabled")).toBe("true");
+
+        await user.click(deleteItem);
+        expect(onDelete).not.toHaveBeenCalled();
+    });
+
     it("moves focus between session rows with arrow keys", async () => {
         render(
             <Sidebar

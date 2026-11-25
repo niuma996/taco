@@ -1080,7 +1080,16 @@ export function useWorkspaces(client: TacoClient): UseWorkspacesApi {
         },
         acceptWorktreeHandoff,
         restoreSessionSnapshot: lifecycle.restoreSessionSnapshot,
-        deleteSession: lifecycle.deleteSession,
+        deleteSession: async (cwd: string, sid: string): Promise<boolean> => {
+            const wasOpen = workspacesRef.current[cwd]?.activeSession === sid;
+            const deleted = await lifecycle.deleteSession(cwd, sid);
+            // The chat that was open is gone, so the workspace lands on the
+            // new-chat splash — the same landing a workspace switch gives.
+            // Another chat is still in the sidebar; opening one here would
+            // pull the user into a conversation they did not ask for.
+            if (deleted && wasOpen) beginPendingNewSession(cwd);
+            return deleted;
+        },
         renameSession: lifecycle.renameSession,
         beginPendingNewSession,
         sendPrompt,

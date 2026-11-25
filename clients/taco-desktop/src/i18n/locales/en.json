@@ -25,6 +25,7 @@
     "noSearchResults": "No matching chats",
     "searchFailed": "Search failed",
     "deleteSession": "Delete chat",
+    "deleteWhileRunning": "This chat is running — stop the task or wait for it to finish first.",
     "rename": "Rename chat",
     "moreActions": "Chat actions",
     "renameTitle": "Rename chat",

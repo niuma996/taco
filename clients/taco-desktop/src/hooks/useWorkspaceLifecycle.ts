@@ -76,7 +76,8 @@ export interface UseWorkspaceLifecycleApi {
         sessionKind: "main" | "subagent",
         isCurrent?: () => boolean,
     ) => Promise<SnapshotRecovery>;
-    deleteSession: (cwd: string, sid: string) => Promise<void>;
+    /** Delete a session; resolves false when the transcript could not be removed. */
+    deleteSession: (cwd: string, sid: string) => Promise<boolean>;
     renameSession: (cwd: string, sid: string, name: string) => Promise<void>;
     /**
      * True once `initDefaultCwd()` has settled — on success AND on failure.
@@ -973,8 +974,17 @@ export function useWorkspaceLifecycle({
         ],
     );
 
+    /**
+     * Delete a session. Returns whether the transcript is gone — a failed
+     * delete leaves the session in place, and the caller must not act as if
+     * the chat had been closed.
+     *
+     * The workspace that lost its open chat is *not* moved into another one:
+     * deleting a conversation is not a request to read a different one. The
+     * caller decides what the workspace lands on.
+     */
     const deleteSession = useCallback(
-        async (cwd: string, sessionId: string): Promise<void> => {
+        async (cwd: string, sessionId: string): Promise<boolean> => {
             try {
                 await client.sessionDelete({
                     workspace: asWorkspaceId(cwd),
@@ -984,19 +994,12 @@ export function useWorkspaceLifecycle({
                 const msg = `Failed to delete session: ${(err as Error).message}`;
                 console.error("[taco] deleteSession failed", cwd, sessionId, err);
                 pushNotification(msg);
-                return;
+                return false;
             }
-            // workspacesRef is still stale after dispatchWs (sync happens on next render's useEffect),
-            // so filter the remaining list on the old ref to avoid attaching to a just-deleted session.
-            const existing = workspacesRef.current[cwd];
-            const wasActive = existing?.activeSession === sessionId;
-            const remaining = (existing?.sessions ?? []).filter((s) => s.id !== sessionId);
             dispatchWs({ type: "REMOVE_SESSION", cwd, sid: sessionId });
-            if (wasActive && remaining[0]) {
-                await attachSession(cwd, remaining[0].id);
-            }
+            return true;
         },
-        [client, attachSession, dispatchWs, pushNotification, workspacesRef],
+        [client, dispatchWs, pushNotification],
     );
 
     /** Sidebar "load more" handler. Reads the cursor from reducer state and

@@ -551,10 +551,11 @@ describe("useWorkspacesFirstTurn.test.tsx", () => {
             assert.equal(result.current.composerTarget.kind, "session");
         });
 
-        it("selects the next session after deletion without releasing its draft", async () => {
+        it("returns to the new chat screen after deleting the open chat", async () => {
             const client = makeClient();
+            const sessionAttach = vi.fn(async () => ({}));
             Object.assign(client, {
-                sessionAttach: vi.fn(async () => ({})),
+                sessionAttach,
                 sessionHistory: vi.fn(async () => ({ entries: [] })),
             });
             const { result } = await renderWithDrafts(client);
@@ -573,12 +574,39 @@ describe("useWorkspacesFirstTurn.test.tsx", () => {
             await act(async () => {
                 await result.current.deleteSession(CWD, NEW_SID);
             });
+            // Deleting the open chat lands on the new-chat splash, the same
+            // landing a workspace switch gives. Opening another chat here
+            // would drop the user into a conversation they did not ask for.
+            assert.equal(result.current.composerTarget.kind, "draft");
+            assert.equal(sessionAttach.mock.calls.length, 0);
+            // The other chat keeps its own draft: nothing about this delete
+            // touches it.
+            assert.equal(result.current.drafts.input, "");
+        });
+
+        it("keeps the open chat when another one is deleted", async () => {
+            const client = makeClient();
+            Object.assign(client, {
+                sessionAttach: vi.fn(async () => ({})),
+                sessionHistory: vi.fn(async () => ({ entries: [] })),
+            });
+            const { result } = await renderWithDrafts(client);
+            act(() => {
+                result.current.dispatchWs({
+                    type: "ADD_SESSION",
+                    cwd: CWD,
+                    session: { id: "other", createdAt: "2026-01-01T00:00:00Z" },
+                    makeActive: false,
+                });
+            });
+            await act(async () => {
+                await result.current.deleteSession(CWD, "other");
+            });
             assert.deepEqual(result.current.composerTarget, {
                 kind: "session",
                 workspace: CWD,
-                sessionId: "next",
+                sessionId: NEW_SID,
             });
-            assert.equal(result.current.drafts.input, "next draft");
         });
 
         it("keeps the session when the user stops the first turn", async () => {

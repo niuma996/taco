@@ -82,6 +82,7 @@ import { useOwningWorkspaceCwd } from "./hooks/useWorktrees";
 import { useT } from "./i18n/useI18n";
 import { onChannelStatusChangedEvent } from "./lib/channelEvents";
 import type { UiMessage } from "./lib/chat/chatUtils";
+import { getConversationActivity } from "./lib/chat/conversationActivity";
 import type { ConversationTarget } from "./lib/chat/conversationDrafts";
 import { getSessionState, type SessionState } from "./lib/chat/sessionState";
 import { deriveSubagents, subagentDotState } from "./lib/chat/subagentList";
@@ -1242,11 +1243,29 @@ export default function App() {
                     const target = pendingDeleteSession;
                     setPendingDeleteSession(null);
                     if (!target) return;
+                    // The gray-out in the menu catches the session that was
+                    // already running; this catches the one that started a
+                    // turn while the confirmation was open.
+                    const targetWorkspace = workspaces[target.cwd];
+                    if (
+                        targetWorkspace &&
+                        getConversationActivity(targetWorkspace, target.sessionId).running
+                    ) {
+                        pushNotification(t("session.deleteWhileRunning"), { level: "warn" });
+                        return;
+                    }
+                    // The panel on the right belongs to the chat on screen.
+                    // Deleting that chat closes it: a files/tasks panel for a
+                    // transcript that no longer exists has nothing to show.
+                    const closedTheOpenChat =
+                        target.cwd === activeCwd &&
+                        targetWorkspace?.activeSession === target.sessionId;
                     // The sidebar search results are a separate list from the
                     // reducer's page; re-run the query so a deleted row does
                     // not linger as an unopenable ghost.
                     void (async () => {
-                        await deleteSession(target.cwd, target.sessionId);
+                        const deleted = await deleteSession(target.cwd, target.sessionId);
+                        if (deleted && closedTheOpenChat) rightPanel.close();
                         sessionSearches.forWorkspace(target.cwd).refresh();
                         if (target.cwd.startsWith(IM_CWD_PREFIX)) await refreshConversations();
                     })();

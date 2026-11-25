@@ -6,6 +6,7 @@ import { useNow } from "../hooks/useNow";
 import { useT, useUiLanguage } from "../i18n/useI18n";
 import { formatRelativeTime } from "../lib/relativeTime";
 import { IconButton } from "./ui/IconButton";
+import { Tooltip } from "./ui/Tooltip";
 
 export interface SessionListItem {
     /** Stable row key; IM rows use their full conversation cwd. */
@@ -29,6 +30,44 @@ function statusFor(item: SessionListItem): "idle" | "running" | "waiting" | "err
     if (item.error) return "error";
     if (item.incomplete) return "incomplete";
     return item.running ? "running" : "idle";
+}
+
+/**
+ * The delete entry of the actions menu.
+ *
+ * A running session keeps the entry visible but grayed out: the menu says
+ * why instead of leaving a dead action the user has to guess at. The tooltip
+ * rides on the item itself, because a disabled item cannot take focus.
+ */
+function DeleteMenuItem({
+    item,
+    label,
+    blockedReason,
+    onDelete,
+}: {
+    item: SessionListItem;
+    label: string;
+    /** Why the delete is unavailable right now; undefined when it is. */
+    blockedReason?: string;
+    onDelete: (item: SessionListItem) => void;
+}) {
+    const menuItem = (
+        <DropdownMenu.Item
+            className="ui-menu-item session-actions-menu-danger"
+            disabled={blockedReason !== undefined}
+            aria-label={blockedReason ? `${label} — ${blockedReason}` : undefined}
+            onSelect={() => onDelete(item)}
+        >
+            <Trash size={14} aria-hidden="true" />
+            <span className="ui-menu-label">{label}</span>
+        </DropdownMenu.Item>
+    );
+    if (!blockedReason) return menuItem;
+    return (
+        <Tooltip label={blockedReason} side="left" className="ui-tooltip-above-menu">
+            {menuItem}
+        </Tooltip>
+    );
 }
 
 export interface SessionListProps {
@@ -81,6 +120,12 @@ export function SessionList(props: SessionListProps) {
         <ul className={props.className} ref={listRef} onKeyDown={handleListKeyDown}>
             {props.items.map((item, index) => {
                 const status = statusFor(item);
+                const deleteLabel = props.deleteLabel ?? t("session.deleteSession");
+                // Deleting a transcript mid-turn strands whatever the turn
+                // still has to write, so a running session cannot be deleted.
+                const deleteBlockedReason = item.running
+                    ? t("session.deleteWhileRunning")
+                    : undefined;
                 return (
                     <li className={`session-item${item.active ? " active" : ""}`} key={item.key}>
                         <button
@@ -176,16 +221,12 @@ export function SessionList(props: SessionListProps) {
                                             </DropdownMenu.Item>
                                         )}
                                         {props.onDelete && (
-                                            <DropdownMenu.Item
-                                                className="ui-menu-item session-actions-menu-danger"
-                                                onSelect={() => props.onDelete?.(item)}
-                                            >
-                                                <Trash size={14} aria-hidden="true" />
-                                                <span className="ui-menu-label">
-                                                    {props.deleteLabel ??
-                                                        t("session.deleteSession")}
-                                                </span>
-                                            </DropdownMenu.Item>
+                                            <DeleteMenuItem
+                                                item={item}
+                                                label={deleteLabel}
+                                                blockedReason={deleteBlockedReason}
+                                                onDelete={props.onDelete}
+                                            />
                                         )}
                                     </DropdownMenu.Content>
                                 </DropdownMenu.Portal>

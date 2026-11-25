@@ -25,6 +25,7 @@
     "noSearchResults": "没有匹配的聊天",
     "searchFailed": "搜索失败",
     "deleteSession": "删除聊天",
+    "deleteWhileRunning": "会话正在运行，请先停止任务或等待任务完成。",
     "rename": "重命名聊天",
     "moreActions": "聊天操作",
     "renameTitle": "重命名聊天",

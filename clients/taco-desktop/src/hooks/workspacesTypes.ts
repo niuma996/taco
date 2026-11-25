@@ -97,7 +97,8 @@ export interface UseWorkspacesApi {
         sessionKind: "main" | "subagent",
         isCurrent?: () => boolean,
     ) => Promise<SnapshotRecovery>;
-    deleteSession: (cwd: string, sid: string) => Promise<void>;
+    /** Delete a session; resolves false when the transcript could not be removed. */
+    deleteSession: (cwd: string, sid: string) => Promise<boolean>;
     renameSession: (cwd: string, sid: string, name: string) => Promise<void>;
 
     // ── session lifecycle ──
