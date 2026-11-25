@@ -996,7 +996,8 @@
     border-color: var(--error);
 }
 
-.ui-modal-body > .ui-form-field:last-child {
+.ui-modal-body > .ui-form-field:last-child,
+.ui-modal-body > .ui-form-field:has(+ [data-taco-scrollbar]) {
     margin-bottom: 0;
 }
 

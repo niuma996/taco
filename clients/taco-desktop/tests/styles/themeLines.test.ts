@@ -167,7 +167,89 @@ describe("theme separator lines", () => {
         // The card itself takes the shadow line again — the typing band inside
         // is what tells the input area apart from the chat panel.
         assert.match(ruleBody(css, ".input-card"), /border:\s*1px solid var\(--border\)/);
-        assert.match(ruleBody(css, "footer.input textarea"), /background:\s*var\(--bg-card\)/);
+        assert.match(ruleBody(css, ".input-card"), /background:\s*var\(--input-bg\)/);
+        assert.match(
+            ruleBody(css, "footer.input textarea"),
+            /background:\s*var\(--composer-input-bg\)/,
+        );
+    });
+
+    it("gives the composer's typing band its own lighter surface in both themes", () => {
+        for (const scope of [DARK, LIGHT]) {
+            const input = token(scope, "composer-input-bg");
+            const controls = token(scope, "input-bg");
+            assert.notEqual(input, controls);
+            assert.ok(
+                luminance(input) > luminance(controls),
+                `composer input (${input}) should be lighter than controls (${controls})`,
+            );
+        }
+        assert.ok(
+            luminance(token(LIGHT, "composer-input-bg")) > luminance(token(LIGHT, "chat-panel-bg")),
+            "the light typing band should rise above the chat panel",
+        );
+    });
+
+    it("keeps the lower composer opaque and leaves the upper corners transparent", () => {
+        const read = (file: string): string =>
+            readFileSync(
+                resolve(dirname(fileURLToPath(import.meta.url)), `../../src/styles/${file}`),
+                "utf8",
+            );
+        const ruleBody = (css: string, selector: string): string => {
+            const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+            const match = new RegExp(`(?:^|\\n)${escaped}\\s*\\{`).exec(css);
+            if (!match) return "";
+            const open = css.indexOf("{", match.index);
+            return css.slice(open + 1, css.indexOf("}", open));
+        };
+
+        const topbar = ruleBody(read("chatChrome.css"), ".session-info");
+        assert.match(topbar, /background:\s*var\(--pane-list-bg\)/);
+        assert.doesNotMatch(topbar, /backdrop-filter/);
+
+        const composer = read("chatInput.css");
+        const footer = ruleBody(composer, "footer.input");
+        assert.match(footer, /background:\s*transparent/);
+        assert.match(footer, /z-index:\s*3/);
+        assert.doesNotMatch(composer, /backdrop-filter/);
+        const opaqueLowerHalf = ruleBody(composer, ".composer-input-stack");
+        assert.match(opaqueLowerHalf, /linear-gradient\(/);
+        assert.match(opaqueLowerHalf, /transparent/);
+        assert.match(opaqueLowerHalf, /var\(--composer-controls-row-height\)/);
+        assert.match(opaqueLowerHalf, /var\(--chat-panel-bg\)/);
+        assert.match(ruleBody(composer, ".input-controls"), /background:\s*var\(--input-bg\)/);
+        assert.match(ruleBody(composer, ".composer-input-stack > .input-card"), /z-index:\s*1/);
+        assert.match(
+            ruleBody(composer, ".workspace-git-status"),
+            /background:\s*var\(--chat-panel-bg\)/,
+        );
+        assert.match(
+            ruleBody(composer, "footer.input::after"),
+            /background:\s*var\(--chat-panel-bg\)/,
+        );
+    });
+
+    it("keeps the chat pane height-constrained across session switches", () => {
+        const read = (file: string): string =>
+            readFileSync(
+                resolve(dirname(fileURLToPath(import.meta.url)), `../../src/styles/${file}`),
+                "utf8",
+            );
+        const ruleBody = (css: string, selector: string): string => {
+            const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+            const match = new RegExp(`(?:^|\\n)${escaped}\\s*\\{`).exec(css);
+            if (!match) return "";
+            const open = css.indexOf("{", match.index);
+            return css.slice(open + 1, css.indexOf("}", open));
+        };
+
+        assert.match(ruleBody(read("layout.css"), ".main-col"), /min-height:\s*0/);
+        const chat = read("chatChrome.css");
+        assert.match(ruleBody(chat, ".chat-scroll-host"), /min-height:\s*0/);
+        const viewport = ruleBody(chat, ".chat-scroll-host > .chat-scroll-viewport");
+        assert.match(viewport, /min-height:\s*0/);
+        assert.match(viewport, /padding:[^;]+var\(--chat-reading-gutter, 10%\) 0 !important/);
     });
 
     it("sinks the segmented-control track and raises its active segment", () => {
@@ -289,21 +371,24 @@ describe("theme separator lines", () => {
         }
     });
 
-    it("keeps ordinary content shadows soft and free of a ring", () => {
-        for (const scope of [DARK, LIGHT]) {
-            const shadow = token(scope, "card-shadow");
-            assert.doesNotMatch(
-                shadow,
-                /0\s+0\s+0\s+1px/,
-                `card shadow should not draw a hard ring: ${shadow}`,
-            );
-            assert.doesNotMatch(
-                shadow,
-                /rgba\([^)]*,\s*0\.5[0-9]*\)/,
-                `card shadow should stay soft: ${shadow}`,
-            );
-        }
-    });
+    for (const [name, darkLimit, lightLimit] of [
+        ["card-shadow", 0.2, 0.05],
+        ["segment-active-shadow", 0.15, 0.07],
+    ] as const) {
+        it(`keeps --${name} subtle in both themes, especially in light mode`, () => {
+            for (const [scope, limit] of [
+                [DARK, darkLimit],
+                [LIGHT, lightLimit],
+            ] as const) {
+                const shadow = token(scope, name);
+                // One offset, blurred shadow, with no spread or outline layer.
+                const alpha = /^0 [1-9]\d*px [1-9]\d*px rgba\(\d+, \d+, \d+, ([\d.]+)\)$/.exec(
+                    shadow,
+                )?.[1];
+                assert.ok(Number(alpha) <= limit, `${shadow} should stay at or below ${limit}`);
+            }
+        });
+    }
 
     it("keeps the dark theme's content card free of a bright hairline", () => {
         const shadow = token(DARK, "card-shadow");

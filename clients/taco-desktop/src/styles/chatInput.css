@@ -16,9 +16,11 @@ footer.input {
        that free space, pushing the footer to the window bottom — and computes
        to 0 once messages overflow, leaving the scrolling behaviour untouched. */
     margin-top: auto;
-    /* Owns the surface the messages scroll under: opaque so text passing
-       beneath is not visible through the card's gaps. */
-    background: var(--chat-panel-bg);
+    /* Transparent upper corners reveal the message stream; the dock's opaque
+       lower band starts at the controls divider. */
+    background: transparent;
+    /* Message content and its floating scrollbars paint below the composer. */
+    z-index: 3;
     /* No top padding: `main`'s flex gap already separates the last message from
        the card, and a second 0.5rem would read as a seam. Horizontal padding is
        zero because `main`'s gutter already insets this box. */
@@ -28,6 +30,19 @@ footer.input {
     /* Spacing is per-child margins, not a flex gap: the queue bar stays
        mounted so it can collapse, and a gap would reserve room for it even
        while it is collapsed to zero height. */
+}
+
+/* Only the bottom padding below the composer stays solid. */
+footer.input::after {
+    position: absolute;
+    z-index: -1;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    height: var(--space-3);
+    background: var(--chat-panel-bg);
+    content: "";
+    pointer-events: none;
 }
 
 /* Composer notices and queued messages use the same bubble outline. */
@@ -90,18 +105,43 @@ footer.input {
     }
 }
 
-/* Rounded input card: textarea (top half, panel color) + controls row (bottom half, input-bg)
-   in a rounded container with border + large radius; background is transparent,
-   each section sets its own color.
+/* Rounded input card: textarea (top half, panel color) + controls row (bottom
+   half, input-bg) in a rounded container with border and large radius. The card
+   carries a solid backing while each section paints its own visible surface.
    Note: cannot use overflow:hidden to crop corners — model popover and cache popover both
    pop upward and would be clipped by the card's top edge. Each section carries its own outer corners. */
+.composer-input-stack {
+    /* Leave the top corners transparent so the message stream remains visible
+       behind them; from the controls divider down, hide that content behind a
+       solid surface. */
+    background: linear-gradient(
+        to bottom,
+        transparent 0,
+        transparent calc(100% - var(--composer-controls-row-height)),
+        var(--chat-panel-bg) calc(100% - var(--composer-controls-row-height)),
+        var(--chat-panel-bg) 100%
+    );
+    isolation: isolate;
+    position: relative;
+}
+
+.composer-input-stack > .input-card {
+    position: relative;
+    z-index: 1;
+}
+
 .input-card {
     /* Shadow line — see .input-status above. The card's own surface (the
        textarea band) is what tells it apart from the chat panel. */
     border: 1px solid var(--border);
     border-radius: var(--radius-lg);
+    /* Solid backing for the section rounds: the controls row paints its own
+       surface, but content must not show through the antialiased outer corners. */
+    background: var(--input-bg);
     display: flex;
     flex-direction: column;
+    isolation: isolate;
+    position: relative;
     transition:
         border-color var(--motion-duration-fast) var(--motion-ease-standard),
         box-shadow var(--motion-duration-fast) var(--motion-ease-standard);
@@ -118,10 +158,10 @@ footer.input textarea {
     width: 100%;
     resize: none;
     box-sizing: border-box;
-    /* Top half: one step above the chat panel, so the typing area reads as a
-       field even without a bright outline; top corners match the card's
-       outer radius. */
-    background: var(--bg-card);
+    /* Top half: its own raised surface, brighter than the controls row, so the
+       typing area reads as a field even without a bright outline; top corners
+       match the card's outer radius. */
+    background: var(--composer-input-bg);
     border: none;
     border-top-left-radius: var(--radius-lg);
     border-top-right-radius: var(--radius-lg);
@@ -446,8 +486,9 @@ footer.input > .ui-collapse[data-open="true"] {
     flex-wrap: wrap;
     gap: var(--space-1) var(--space-2);
     min-width: 0;
-    margin-top: var(--space-1-5);
-    padding-inline: var(--space-3);
+    margin-top: 0;
+    padding: var(--space-1-5) var(--space-3) 0;
+    background: var(--chat-panel-bg);
     color: var(--fg-dim);
     font-size: var(--text-xs);
 }

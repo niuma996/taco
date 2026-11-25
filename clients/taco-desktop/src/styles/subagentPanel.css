@@ -31,14 +31,17 @@
 
 /* List area is capped so the detail stream always keeps usable height; it
    scrolls on its own once the session has many subagents. */
-.subagent-panel-list {
+.subagent-panel-list-scroll {
     flex: 0 0 auto;
     max-height: 40%;
     overflow-y: auto;
+    border-bottom: 1px solid var(--divider-section);
+}
+
+.subagent-panel-list {
     padding: 4px 8px 8px;
     margin: 0;
     list-style: none;
-    border-bottom: 1px solid var(--divider-section);
 }
 
 .subagent-panel-detail {

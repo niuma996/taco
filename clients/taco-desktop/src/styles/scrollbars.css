@@ -1,0 +1,110 @@
+/* Native fallback for controls and surfaces with their own scroll affordances. */
+:where(*) {
+    scrollbar-width: thin;
+    scrollbar-color: transparent transparent;
+}
+
+:where(*:not(:hover)) {
+    scrollbar-color: transparent transparent;
+}
+
+:where(*:hover) {
+    scrollbar-color: var(--scrollbar-thumb-rest) transparent;
+}
+
+@supports selector(::-webkit-scrollbar) {
+    :where(*) {
+        scrollbar-width: auto;
+        scrollbar-color: auto;
+    }
+
+    ::-webkit-scrollbar {
+        width: var(--scrollbar-size);
+        height: var(--scrollbar-size);
+    }
+
+    ::-webkit-scrollbar-track,
+    ::-webkit-scrollbar-corner {
+        background: transparent;
+    }
+
+    ::-webkit-scrollbar-thumb {
+        background: transparent;
+        border-radius: var(--radius-pill);
+    }
+
+    :not(:hover)::-webkit-scrollbar-thumb {
+        background: transparent;
+    }
+
+    :hover::-webkit-scrollbar-thumb {
+        background: var(--scrollbar-thumb-rest);
+    }
+
+    ::-webkit-scrollbar-thumb:hover {
+        background: var(--scrollbar-thumb-hover);
+    }
+
+    ::-webkit-scrollbar-thumb:active {
+        background: var(--scrollbar-thumb-active);
+    }
+}
+
+.os-scrollbar.os-theme-taco {
+    --os-size: var(--scrollbar-size);
+    --os-padding-axis: var(--space-0-5);
+    --os-handle-border-radius: var(--radius-pill);
+    --os-handle-perpendicular-size: var(--space-1);
+    --os-handle-interactive-area-offset: var(--space-0-5);
+    --os-handle-bg: var(--scrollbar-thumb-rest);
+    --os-handle-bg-hover: var(--scrollbar-thumb-hover);
+    --os-handle-bg-active: var(--scrollbar-thumb-active);
+    box-sizing: border-box;
+    opacity: 0;
+    transition: opacity var(--motion-duration-fast) var(--motion-ease-standard);
+    z-index: 2;
+}
+
+.os-scrollbar.os-theme-taco .os-scrollbar-track,
+.os-scrollbar.os-theme-taco .os-scrollbar-handle {
+    pointer-events: none;
+}
+
+[data-overlayscrollbars]:hover > .os-scrollbar.os-theme-taco.os-scrollbar-visible,
+[data-overlayscrollbars] > .os-scrollbar.os-theme-taco:active {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+[data-overlayscrollbars]:hover
+    > .os-scrollbar.os-theme-taco.os-scrollbar-visible.os-scrollbar-track-interactive
+    .os-scrollbar-track,
+[data-overlayscrollbars]:hover
+    > .os-scrollbar.os-theme-taco.os-scrollbar-visible.os-scrollbar-handle-interactive
+    .os-scrollbar-handle {
+    pointer-events: auto;
+}
+
+/* WKWebView can still reserve the native gutter when only `scrollbar-width`
+   hides it. The custom bar uses the full viewport as its slot, so remove the
+   native track from layout completely on enhanced surfaces. */
+[data-overlayscrollbars],
+[data-overlayscrollbars-viewport] {
+    scrollbar-width: none !important;
+}
+
+[data-overlayscrollbars]::-webkit-scrollbar,
+[data-overlayscrollbars]::-webkit-scrollbar-corner,
+[data-overlayscrollbars-viewport]::-webkit-scrollbar,
+[data-overlayscrollbars-viewport]::-webkit-scrollbar-corner {
+    display: none !important;
+    width: 0 !important;
+    height: 0 !important;
+}
+
+@media (forced-colors: active) {
+    .os-scrollbar.os-theme-taco .os-scrollbar-handle {
+        forced-color-adjust: none;
+        background: ButtonText;
+    }
+}

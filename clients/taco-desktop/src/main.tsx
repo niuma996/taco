@@ -1,3 +1,4 @@
+import "overlayscrollbars/styles/overlayscrollbars.css";
 import { QueryClientProvider } from "@tanstack/react-query";
 import React from "react";
 import ReactDOM from "react-dom/client";
@@ -8,6 +9,7 @@ import { ToastProvider } from "./components/ToastProvider";
 import { bootstrapI18n, default as i18n } from "./i18n/index.ts";
 import { bootMark } from "./lib/bootTrace";
 import { getGlobalConfig, loadClientConfig } from "./lib/globalConfig.ts";
+import { installOverlayScrollbars } from "./lib/overlayScrollbars";
 import { preloadPeleWhenIdle } from "./lib/peleLoader";
 import { createDesktopQueryClient } from "./lib/queries/queryClient";
 import { resolveTheme } from "./lib/theme";
@@ -52,6 +54,9 @@ loadClientConfig();
 const osDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
 const initialTheme = resolveTheme(getGlobalConfig().client.theme, osDark);
 document.documentElement.dataset.theme = initialTheme;
+
+const disposeOverlayScrollbars = installOverlayScrollbars(document.body);
+import.meta.hot?.dispose(disposeOverlayScrollbars);
 
 bootMark("ui.main.react_render_call");
 const queryClient = createDesktopQueryClient();

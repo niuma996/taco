@@ -606,7 +606,12 @@ describe("local workspace Git footer", () => {
     it("places Git status below the input card and hides it for IM", () => {
         renderPane(workspace({}));
         const footer = document.querySelector("footer.input");
-        assert.ok(footer?.querySelector(".input-card + .workspace-git-status"));
+        assert.ok(footer?.querySelector(".composer-dock > .composer-input-stack"));
+        assert.ok(footer?.querySelector(".composer-input-stack > .input-card"));
+        assert.equal(footer?.querySelector(".composer-frost"), null);
+        assert.ok(
+            footer?.querySelector(".composer-dock > .composer-input-stack + .workspace-git-status"),
+        );
         cleanup();
         renderPane(workspace({}), true);
         assert.equal(document.querySelector(".workspace-git-status"), null);

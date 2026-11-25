@@ -128,6 +128,27 @@ describe("useStickToBottom", () => {
         await waitFor(() => assert.equal(g.top, 340));
     });
 
+    it("does not snap while the user grabs the floating scrollbar", async () => {
+        const { el, g } = mount();
+        const bar = document.createElement("div");
+        bar.dataset.tacoScrollbar = "";
+        const handle = bar.appendChild(document.createElement("div"));
+        el.append(bar);
+        handle.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+        grow(el, g, 100);
+        await new Promise((r) => requestAnimationFrame(() => r(null)));
+        await new Promise((r) => requestAnimationFrame(() => r(null)));
+        assert.equal(g.top, 200);
+
+        g.top = 50;
+        el.dispatchEvent(new Event("scroll"));
+        window.dispatchEvent(new PointerEvent("pointerup"));
+        grow(el, g, 100);
+        await new Promise((r) => requestAnimationFrame(() => r(null)));
+        await new Promise((r) => requestAnimationFrame(() => r(null)));
+        assert.equal(g.top, 50);
+    });
+
     it("keeps following when scrollTop moves up without user input", async () => {
         const { el, g } = mount();
         // Content collapsing above the viewport, or another hook restoring a

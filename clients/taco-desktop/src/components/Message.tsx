@@ -326,7 +326,7 @@ function ThinkingBlock({ block }: { block: UiThinkingBlock }) {
                             }`}
                             onScroll={handleScroll}
                         >
-                            {block.thinking}
+                            <span>{block.thinking}</span>
                         </div>
                         {!expanded && showFade && (
                             <div className="thinking-fade" aria-hidden="true" />

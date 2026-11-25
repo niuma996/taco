@@ -411,274 +411,296 @@ export function ChatPane(props: ChatPaneProps) {
                 isIm={isIm}
                 workspaceContext={props.workspaceContext}
             />
-            <main ref={mainRef} aria-busy={loadingSession || undefined}>
-                {showSkeleton ? (
-                    <ChatSkeleton
-                        turns={skeletonTurns(loadingMeta?.messageCount)}
-                        label={t("message.loadingSession")}
-                    />
-                ) : isEmptyChat ? (
-                    <EmptyChatState />
-                ) : (
-                    <>
-                        {windowStart > 0 && (
-                            <Button
-                                variant="ghost"
-                                size="sm"
-                                className="chat-show-earlier"
-                                onClick={showEarlier}
-                            >
-                                {t("message.showEarlier", { count: windowStart })}
-                            </Button>
-                        )}
-                        {messages.slice(windowStart).map((m, offset) => {
-                            // Turn helpers read neighbours, so they take the
-                            // absolute index into the full list.
-                            const i = windowStart + offset;
-                            return (
-                                <Message
-                                    key={m.id}
-                                    m={m}
-                                    isLastInTurn={isLastInTurn(messages, i)}
-                                    isTurnInProgress={isTurnInProgress(messages, i, busy)}
-                                    highlighted={highlightedId === m.id}
-                                    onCommandPermission={onCommandPermission}
-                                    pendingPermissionRequests={ws?.pendingCommandPermissions}
-                                    checkpoint={
-                                        m.kind === "assistant"
-                                            ? checkpointForMessage(checkpoints, m.id)
-                                            : undefined
-                                    }
-                                    onRestoreCheckpoint={onRestoreCheckpoint}
-                                />
-                            );
-                        })}
-                    </>
-                )}
-                {showRunning && (
-                    <div
-                        className="run-indicator"
-                        role="status"
-                        aria-label={t("input.runningIndicator")}
-                    >
-                        <span className="run-indicator__dot" aria-hidden="true" />
-                        <span className="run-indicator__dot" aria-hidden="true" />
-                        <span className="run-indicator__dot" aria-hidden="true" />
-                    </div>
-                )}
-                <footer className="input">
-                    {/* Same column as .input-card so the banner inherits the footer's
-                    padding (including the 10% reading gutter). Shown for both
-                    auto and manual compact; `busy` is not a gate — background
-                    agent-tool activity must not hide a parent-session compact. */}
-                    {compacting && (
-                        <output className="input-status input-status--compacting">
-                            <span className="input-status__dot" aria-hidden="true" />
-                            <span>{t("input.compactingNotice")}</span>
-                        </output>
-                    )}
-                    <QueueBar items={queuedItems} onCancel={onCancelQueued} />
-                    {showSteerBatch && (
-                        <div className="input-steer-actions">
-                            {showSteerHint && (
-                                <p className="input-steer-hint" id={steerHintId}>
-                                    {t("input.steerHint")}
-                                </p>
-                            )}
-                            {!onInterruptAndSendQueued && (
-                                <p className="input-steer-hint">{t("input.steerUnavailable")}</p>
-                            )}
-                            <Button
-                                variant="ghost"
-                                className="input-steer-button"
-                                size="sm"
-                                disabled={!canSendBatch}
-                                loading={batchPending}
-                                onClick={() => void interruptAndSendBatch()}
-                            >
-                                {t("input.interruptAndSendQueued")}
-                            </Button>
-                        </div>
-                    )}
-                    {syncNotice && (
-                        <output
-                            className={
-                                syncNotice === "input.stateSyncIncomplete"
-                                    ? "input-status"
-                                    : "input-status input-status--neutral"
-                            }
-                        >
-                            {t(syncNotice)}
-                        </output>
-                    )}
-                    {!loadingSession && session?.truncated && (
-                        <output className="input-status input-status--neutral">
-                            {t("input.historyTruncated")}
-                        </output>
-                    )}
-                    {props.recoveries?.map((item) => (
-                        <div
-                            key={item.id}
-                            className="input-status input-status--recovery"
-                            role="status"
-                        >
-                            <span>
-                                {t(item.uncertain ? "input.deliveryUnknown" : "input.unsentDraft")}
-                            </span>
-                            <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => props.onRecoverDraft?.(item.id)}
-                            >
-                                {t("input.recoverDraft")}
-                            </Button>
-                        </div>
-                    ))}
-                    <div className="input-card">
-                        {dragging && (
-                            <div className="attachment-drop-hint" aria-hidden="true">
-                                {t("input.dropFiles")}
-                            </div>
-                        )}
-                        {attachments.length > 0 && (
-                            <div className="attachment-bar">
-                                {attachments.map((a, i) => (
-                                    <AttachmentChip
-                                        key={a.id}
-                                        name={a.name}
-                                        size={a.size}
-                                        kind={a.kind}
-                                        previewUrl={a.previewUrl}
-                                        removeLabel={t("input.removeAttachment")}
-                                        removeDisabled={composerLocked}
-                                        onRemove={() => removeAttachment(i)}
-                                    />
-                                ))}
-                            </div>
-                        )}
-                        <textarea
-                            ref={textareaRef}
-                            rows={1}
-                            value={input}
-                            onChange={(e) => onInputChange(e.target.value)}
-                            onPaste={handlePaste}
-                            disabled={composerLocked}
-                            aria-describedby={showSteerHint ? steerHintId : undefined}
-                            onKeyDown={(e) => {
-                                // While an IME composition (CJK) is active, Enter confirms a candidate, not a submit.
-                                // keyCode === 229 is a WebKit legacy fallback for older versions.
-                                if (e.nativeEvent.isComposing || e.keyCode === 229) return;
-                                if (e.key === "Enter" && !e.shiftKey) {
-                                    e.preventDefault();
-                                    if (canSend) {
-                                        submitDraft(onEnter);
-                                    } else if (!e.repeat) {
-                                        void interruptAndSendBatch();
-                                    }
-                                }
-                            }}
-                            placeholder={
-                                compacting
-                                    ? t("input.placeholderCompacting")
-                                    : showInterrupt
-                                      ? t("input.placeholderRunning")
-                                      : t("input.placeholderIdle")
-                            }
+            <div className="chat-scroll-host">
+                <main
+                    className="chat-scroll-viewport"
+                    ref={mainRef}
+                    aria-busy={loadingSession || undefined}
+                >
+                    {showSkeleton ? (
+                        <ChatSkeleton
+                            turns={skeletonTurns(loadingMeta?.messageCount)}
+                            label={t("message.loadingSession")}
                         />
-                        <div className="input-controls">
-                            <button
-                                type="button"
-                                className="prompt-button attach"
-                                aria-label={t("input.attachFiles")}
-                                title={t("input.attachFiles")}
-                                onClick={() => void pick()}
-                                // Unlocked during a run: steer carries attachments too.
-                                // Compaction still locks — its handler refuses new input
-                                // until the compaction settles.
-                                disabled={
-                                    composerLocked || attachments.length >= ATTACHMENT_MAX_COUNT
-                                }
-                            >
-                                <Paperclip size={16} aria-hidden="true" />
-                            </button>
-                            {activeModel && (
-                                <ModelMenu
-                                    value={activeModel}
-                                    options={modelOptions}
-                                    onModelChange={onModelChange}
-                                    thinkingValue={
-                                        activeLevel ??
-                                        defaultThinkingLevelForNewSession(getGlobalConfig().global)
-                                    }
-                                    onThinkingChange={onLevelChange}
-                                    // Model and thinking level are per-session settings:
-                                    // while another session opens, `ws` is still the old one.
-                                    disabled={busy || loadingSession}
-                                    pendingNote={busy}
-                                    onOpen={onRefreshModels}
-                                    compact
-                                />
-                            )}
-                            <CommandPermissionModeSelector client={props.client} />
-                            <div className="input-right">
-                                {!isEmptyChat && (
-                                    <ContextIndicator
-                                        info={contextIndicator.info}
-                                        loading={contextIndicator.loading}
-                                        compacting={contextIndicator.compacting}
-                                        threshold={contextIndicator.threshold}
-                                        onCompact={contextIndicator.onCompact}
-                                        sessionBusy={contextIndicator.sessionBusy}
-                                        className="input-context-indicator"
-                                    />
-                                )}
-                                <button
-                                    type="button"
-                                    className={`prompt-button send-toggle ${showComposerStop ? "stop" : "send"}`}
-                                    aria-label={sendActionLabel}
-                                    title={sendActionLabel}
-                                    onClick={
-                                        showComposerStop
-                                            ? onAbort
-                                            : composerSendsBatch
-                                              ? () => void interruptAndSendBatch()
-                                              : () => submitDraft(onSend)
-                                    }
-                                    disabled={!showComposerStop && !canSend && !batchReady}
+                    ) : isEmptyChat ? (
+                        <EmptyChatState />
+                    ) : (
+                        <>
+                            {windowStart > 0 && (
+                                <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="chat-show-earlier"
+                                    onClick={showEarlier}
                                 >
-                                    {/* Keyed remount replays the swap animation
-                                        on every state change. Filled square:
-                                        an outlined one reads as a tick box. */}
-                                    <span
-                                        key={showComposerStop ? "stop" : "send"}
-                                        className="send-toggle-icon"
-                                    >
-                                        {showComposerStop ? (
-                                            <Square
-                                                size={16}
-                                                fill="currentColor"
-                                                aria-hidden="true"
-                                            />
-                                        ) : (
-                                            <ArrowUp size={16} aria-hidden="true" />
-                                        )}
-                                    </span>
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                    {ws?.cwd && !props.isIm && (
-                        <WorkspaceGitStatus
-                            key={ws.cwd}
-                            client={props.client}
-                            cwd={ws.cwd}
-                            notify={props.notify}
-                            worktreePicker={props.worktreePicker}
-                        />
+                                    {t("message.showEarlier", { count: windowStart })}
+                                </Button>
+                            )}
+                            {messages.slice(windowStart).map((m, offset) => {
+                                // Turn helpers read neighbours, so they take the
+                                // absolute index into the full list.
+                                const i = windowStart + offset;
+                                return (
+                                    <Message
+                                        key={m.id}
+                                        m={m}
+                                        isLastInTurn={isLastInTurn(messages, i)}
+                                        isTurnInProgress={isTurnInProgress(messages, i, busy)}
+                                        highlighted={highlightedId === m.id}
+                                        onCommandPermission={onCommandPermission}
+                                        pendingPermissionRequests={ws?.pendingCommandPermissions}
+                                        checkpoint={
+                                            m.kind === "assistant"
+                                                ? checkpointForMessage(checkpoints, m.id)
+                                                : undefined
+                                        }
+                                        onRestoreCheckpoint={onRestoreCheckpoint}
+                                    />
+                                );
+                            })}
+                        </>
                     )}
-                    {llmDumpDock}
-                </footer>
-            </main>
+                    {showRunning && (
+                        <div
+                            className="run-indicator"
+                            role="status"
+                            aria-label={t("input.runningIndicator")}
+                        >
+                            <span className="run-indicator__dot" aria-hidden="true" />
+                            <span className="run-indicator__dot" aria-hidden="true" />
+                            <span className="run-indicator__dot" aria-hidden="true" />
+                        </div>
+                    )}
+                    <footer className="input">
+                        {/* Same column as .input-card so the banner inherits the footer's
+                        padding (including the 10% reading gutter). Shown for both
+                        auto and manual compact; `busy` is not a gate — background
+                        agent-tool activity must not hide a parent-session compact. */}
+                        {compacting && (
+                            <output className="input-status input-status--compacting">
+                                <span className="input-status__dot" aria-hidden="true" />
+                                <span>{t("input.compactingNotice")}</span>
+                            </output>
+                        )}
+                        <QueueBar items={queuedItems} onCancel={onCancelQueued} />
+                        {showSteerBatch && (
+                            <div className="input-steer-actions">
+                                {showSteerHint && (
+                                    <p className="input-steer-hint" id={steerHintId}>
+                                        {t("input.steerHint")}
+                                    </p>
+                                )}
+                                {!onInterruptAndSendQueued && (
+                                    <p className="input-steer-hint">
+                                        {t("input.steerUnavailable")}
+                                    </p>
+                                )}
+                                <Button
+                                    variant="ghost"
+                                    className="input-steer-button"
+                                    size="sm"
+                                    disabled={!canSendBatch}
+                                    loading={batchPending}
+                                    onClick={() => void interruptAndSendBatch()}
+                                >
+                                    {t("input.interruptAndSendQueued")}
+                                </Button>
+                            </div>
+                        )}
+                        {syncNotice && (
+                            <output
+                                className={
+                                    syncNotice === "input.stateSyncIncomplete"
+                                        ? "input-status"
+                                        : "input-status input-status--neutral"
+                                }
+                            >
+                                {t(syncNotice)}
+                            </output>
+                        )}
+                        {!loadingSession && session?.truncated && (
+                            <output className="input-status input-status--neutral">
+                                {t("input.historyTruncated")}
+                            </output>
+                        )}
+                        {props.recoveries?.map((item) => (
+                            <div
+                                key={item.id}
+                                className="input-status input-status--recovery"
+                                role="status"
+                            >
+                                <span>
+                                    {t(
+                                        item.uncertain
+                                            ? "input.deliveryUnknown"
+                                            : "input.unsentDraft",
+                                    )}
+                                </span>
+                                <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => props.onRecoverDraft?.(item.id)}
+                                >
+                                    {t("input.recoverDraft")}
+                                </Button>
+                            </div>
+                        ))}
+                        <div className="composer-dock">
+                            <div className="composer-input-stack">
+                                <div className="input-card">
+                                    {dragging && (
+                                        <div className="attachment-drop-hint" aria-hidden="true">
+                                            {t("input.dropFiles")}
+                                        </div>
+                                    )}
+                                    {attachments.length > 0 && (
+                                        <div className="attachment-bar">
+                                            {attachments.map((a, i) => (
+                                                <AttachmentChip
+                                                    key={a.id}
+                                                    name={a.name}
+                                                    size={a.size}
+                                                    kind={a.kind}
+                                                    previewUrl={a.previewUrl}
+                                                    removeLabel={t("input.removeAttachment")}
+                                                    removeDisabled={composerLocked}
+                                                    onRemove={() => removeAttachment(i)}
+                                                />
+                                            ))}
+                                        </div>
+                                    )}
+                                    <textarea
+                                        ref={textareaRef}
+                                        rows={1}
+                                        value={input}
+                                        onChange={(e) => onInputChange(e.target.value)}
+                                        onPaste={handlePaste}
+                                        disabled={composerLocked}
+                                        aria-describedby={showSteerHint ? steerHintId : undefined}
+                                        onKeyDown={(e) => {
+                                            // While an IME composition (CJK) is active, Enter confirms a candidate, not a submit.
+                                            // keyCode === 229 is a WebKit legacy fallback for older versions.
+                                            if (e.nativeEvent.isComposing || e.keyCode === 229)
+                                                return;
+                                            if (e.key === "Enter" && !e.shiftKey) {
+                                                e.preventDefault();
+                                                if (canSend) {
+                                                    submitDraft(onEnter);
+                                                } else if (!e.repeat) {
+                                                    void interruptAndSendBatch();
+                                                }
+                                            }
+                                        }}
+                                        placeholder={
+                                            compacting
+                                                ? t("input.placeholderCompacting")
+                                                : showInterrupt
+                                                  ? t("input.placeholderRunning")
+                                                  : t("input.placeholderIdle")
+                                        }
+                                    />
+                                    <div className="input-controls">
+                                        <button
+                                            type="button"
+                                            className="prompt-button attach"
+                                            aria-label={t("input.attachFiles")}
+                                            title={t("input.attachFiles")}
+                                            onClick={() => void pick()}
+                                            // Unlocked during a run: steer carries attachments too.
+                                            // Compaction still locks — its handler refuses new input
+                                            // until the compaction settles.
+                                            disabled={
+                                                composerLocked ||
+                                                attachments.length >= ATTACHMENT_MAX_COUNT
+                                            }
+                                        >
+                                            <Paperclip size={16} aria-hidden="true" />
+                                        </button>
+                                        {activeModel && (
+                                            <ModelMenu
+                                                value={activeModel}
+                                                options={modelOptions}
+                                                onModelChange={onModelChange}
+                                                thinkingValue={
+                                                    activeLevel ??
+                                                    defaultThinkingLevelForNewSession(
+                                                        getGlobalConfig().global,
+                                                    )
+                                                }
+                                                onThinkingChange={onLevelChange}
+                                                // Model and thinking level are per-session settings:
+                                                // while another session opens, `ws` is still the old one.
+                                                disabled={busy || loadingSession}
+                                                pendingNote={busy}
+                                                onOpen={onRefreshModels}
+                                                compact
+                                            />
+                                        )}
+                                        <CommandPermissionModeSelector client={props.client} />
+                                        <div className="input-right">
+                                            {!isEmptyChat && (
+                                                <ContextIndicator
+                                                    info={contextIndicator.info}
+                                                    loading={contextIndicator.loading}
+                                                    compacting={contextIndicator.compacting}
+                                                    threshold={contextIndicator.threshold}
+                                                    onCompact={contextIndicator.onCompact}
+                                                    sessionBusy={contextIndicator.sessionBusy}
+                                                    className="input-context-indicator"
+                                                />
+                                            )}
+                                            <button
+                                                type="button"
+                                                className={`prompt-button send-toggle ${showComposerStop ? "stop" : "send"}`}
+                                                aria-label={sendActionLabel}
+                                                title={sendActionLabel}
+                                                onClick={
+                                                    showComposerStop
+                                                        ? onAbort
+                                                        : composerSendsBatch
+                                                          ? () => void interruptAndSendBatch()
+                                                          : () => submitDraft(onSend)
+                                                }
+                                                disabled={
+                                                    !showComposerStop && !canSend && !batchReady
+                                                }
+                                            >
+                                                {/* Keyed remount replays the swap animation
+                                            on every state change. Filled square:
+                                            an outlined one reads as a tick box. */}
+                                                <span
+                                                    key={showComposerStop ? "stop" : "send"}
+                                                    className="send-toggle-icon"
+                                                >
+                                                    {showComposerStop ? (
+                                                        <Square
+                                                            size={16}
+                                                            fill="currentColor"
+                                                            aria-hidden="true"
+                                                        />
+                                                    ) : (
+                                                        <ArrowUp size={16} aria-hidden="true" />
+                                                    )}
+                                                </span>
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            {ws?.cwd && !props.isIm && (
+                                <WorkspaceGitStatus
+                                    key={ws.cwd}
+                                    client={props.client}
+                                    cwd={ws.cwd}
+                                    notify={props.notify}
+                                    worktreePicker={props.worktreePicker}
+                                />
+                            )}
+                        </div>
+                        {llmDumpDock}
+                    </footer>
+                </main>
+            </div>
             {/* The rail is an overlay of .main-col: it indexes the session's
                 user messages without taking part in the chat's scroll. One
                 user message leaves nothing to jump between, so the rail

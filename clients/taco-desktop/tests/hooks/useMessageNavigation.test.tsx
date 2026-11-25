@@ -435,31 +435,49 @@ describe("useMessageNavigation", () => {
         assert.equal(scrollIntoView.mock.calls.length, 1);
     });
 
-    it("reads a press on the container as a scrollbar, not a click on a message", async () => {
-        const { result, rerender, scroller } = mount({ windowStart: 2 });
-        act(() => result().navigate(entry("a", 0)));
-        rerender({ windowStart: 0 });
-        assert.equal(scrollIntoView.mock.calls.length, 1);
+    it.each([false, true])(
+        "only its own scrollbar cancels a correction (overlay: %s)",
+        async (overlay) => {
+            const { result, rerender, scroller } = mount({ windowStart: 2 });
+            act(() => result().navigate(entry("a", 0)));
+            rerender({ windowStart: 0 });
+            assert.equal(scrollIntoView.mock.calls.length, 1);
 
-        const container = scroller();
-        const target = row(container, "a");
-        // The target's own box changed: the correction is still alive.
-        moveAndEdit(target, 400);
-        await flushMutations();
-        assert.equal(scrollIntoView.mock.calls.length, 2);
+            const container = scroller();
+            const target = row(container, "a");
+            // The target's own box changed: the correction is still alive.
+            moveAndEdit(target, 400);
+            await flushMutations();
+            assert.equal(scrollIntoView.mock.calls.length, 2);
 
-        // A click on the message content is not a scrollbar grab.
-        target.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
-        moveAndEdit(target, 600);
-        await flushMutations();
-        assert.equal(scrollIntoView.mock.calls.length, 3);
+            // A click on the message content is not a scrollbar grab.
+            target.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+            moveAndEdit(target, 600);
+            await flushMutations();
+            assert.equal(scrollIntoView.mock.calls.length, 3);
 
-        // A press on the container itself is the scrollbar.
-        container.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
-        moveAndEdit(target, 800);
-        await flushMutations();
-        assert.equal(scrollIntoView.mock.calls.length, 3);
-    });
+            const nestedBar = document.createElement("div");
+            nestedBar.dataset.tacoScrollbar = "";
+            target.append(nestedBar);
+            nestedBar.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+            moveAndEdit(target, 700);
+            await flushMutations();
+            assert.equal(scrollIntoView.mock.calls.length, 4);
+
+            // Native presses target the viewport; overlays target the handle inside it.
+            let pointerTarget = container as HTMLElement;
+            if (overlay) {
+                const bar = document.createElement("div");
+                bar.dataset.tacoScrollbar = "";
+                pointerTarget = bar.appendChild(document.createElement("div"));
+                container.append(bar);
+            }
+            pointerTarget.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+            moveAndEdit(target, 800);
+            await flushMutations();
+            assert.equal(scrollIntoView.mock.calls.length, 4);
+        },
+    );
 
     it("hands the current item back to the scroll position once the jump settles", async () => {
         vi.useFakeTimers();

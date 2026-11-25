@@ -84,12 +84,8 @@
     --overlay-scrim: rgba(0, 0, 0, 0.6);
     --shadow-color: rgba(0, 0, 0, 0.4);
     --shadow-color-strong: rgba(0, 0, 0, 0.35);
-    /* Content card sitting on --shell-bg. Its edge is a dark hairline like
-       every other line in the dark theme: the card reads as a card because its
-       surface is lighter than the shell, not because a bright line rings it.
-       A black rim is invisible against the near-black shell, which is the
-       point — the elevation comes from the surface, not from an outline. */
-    --card-shadow: 0 2px 8px rgba(0, 0, 0, 0.28);
+    /* Surface contrast defines the main content card; the shadow is secondary. */
+    --card-shadow: 0 1px 6px rgba(0, 0, 0, 0.18);
     --tooltip-bg: rgba(0, 0, 0, 0.6);
     --tooltip-fg: #ffffff;
     /* Switch — two-tone pill: a recessed neutral track when off, the brand
@@ -105,9 +101,8 @@
        well sits *below* the panel, the active pill one step above it. */
     --segment-track: var(--bg);
     --segment-active-bg: var(--bg-card);
-    /* The raised look of the active segment: on a dark surface the lift comes
-       from a deeper shadow. */
-    --segment-active-shadow: 0 1px 3px rgba(0, 0, 0, 0.24);
+    /* The active fill and dot carry selection; the shadow only adds depth. */
+    --segment-active-shadow: 0 1px 2px rgba(0, 0, 0, 0.14);
     /* The pill's edge is an inset line: one shade *below* the surface it sits
        on. A lighter line would outline the pill instead of grounding it. */
     --segment-active-border: #0d1015;
@@ -119,6 +114,9 @@
        either disappeared into the page once the borders became shadow lines.
        A card gets its own step. */
     --bg-card: #20252d;
+    /* Composer typing band — brighter than the controls row, matching the
+       two-tone input card in both themes. */
+    --composer-input-bg: var(--bg-card);
     /* Floating surfaces — menus, popovers, dropdown panels — one step above
        the card they open from, so an open menu never reads as the same
        surface as the control under it. */
@@ -220,6 +218,12 @@
     --space-5: 1.25rem;
     --space-6: 1.5rem;
 
+    /* Scroll chrome shares neutral ink with the active theme, not its accent. */
+    --scrollbar-size: var(--space-1-5);
+    --scrollbar-thumb-rest: color-mix(in srgb, var(--fg-dim) 25%, transparent);
+    --scrollbar-thumb-hover: color-mix(in srgb, var(--fg-dim) 48%, transparent);
+    --scrollbar-thumb-active: color-mix(in srgb, var(--fg-dim) 68%, transparent);
+
     /* Radius scale — macOS HIG continuous-corner inspired. Semantic tiers:
        xs < sm < md < lg; pill for badges/switches; circle for avatars/icons; line for hairline borders. */
     --radius-xs: 3px;
@@ -229,6 +233,8 @@
     --radius-pill: 999px;
     /* One height for every control in the composer row (attach, model, mode, send/stop). */
     --composer-control-height: 1.5rem;
+    /* Control row height including its 0.4rem top/bottom padding and top line. */
+    --composer-controls-row-height: calc(var(--composer-control-height) + 0.8rem + 1px);
     /* One height for a dialog form row (input + icon button + text button). */
     --control-height-md: 2rem;
     --control-height-compact: 1.5rem;
@@ -388,7 +394,7 @@
     --overlay-scrim: rgba(0, 0, 0, 0.6);
     --shadow-color: rgba(43, 38, 32, 0.18);
     --shadow-color-strong: rgba(43, 38, 32, 0.22);
-    --card-shadow: 0 2px 6px rgba(43, 38, 32, 0.08);
+    --card-shadow: 0 1px 4px rgba(43, 38, 32, 0.04);
     --tooltip-bg: #2b2620;
     --tooltip-fg: var(--warm-gray-1);
     /* Switch — same two-tone pill as dark mode; the off track sits just
@@ -400,9 +406,8 @@
        paper the well is the darker warm step, the pill one shade up. */
     --segment-track: var(--input-bg);
     --segment-active-bg: var(--warm-gray-3);
-    /* On paper the lift is a soft shadow, not a drop — a deep one reads as a
-       hole punched through the topbar. */
-    --segment-active-shadow: 0 1px 3px rgba(43, 38, 32, 0.16);
+    /* Keep the pill nearly flat on the light toolbar. */
+    --segment-active-shadow: 0 1px 2px rgba(43, 38, 32, 0.06);
     /* On paper the edge already reads deeper than the surface it outlines. */
     --segment-active-border: var(--border);
     --surface-tint: rgba(0, 0, 0, 0.02);
@@ -412,6 +417,8 @@
     /* On paper a card is already a step below the page, and a float is the
        lighter surface it casts its shadow onto. */
     --bg-card: var(--warm-gray-4);
+    /* The typing band rises above both the chat panel and the controls row. */
+    --composer-input-bg: #fbfaf8;
     --bg-float: var(--warm-gray-1);
     /* Composer chips — one step above --input-bg, matching the dark theme's step. */
     --composer-chip-bg: var(--warm-gray-2);

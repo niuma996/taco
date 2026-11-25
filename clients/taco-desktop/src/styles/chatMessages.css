@@ -374,7 +374,7 @@
    active chat has no messages yet. `main` is already flex column; flex:1
    here lets this block absorb the remaining height and center its content. */
 .empty-chat-state {
-    /* Cancel main's top padding (bar height + 1rem, the frosted .session-info
+    /* Cancel main's top padding (bar height + 1rem, the opaque .session-info
        overlays it) so `justify-content: center` centers on the true pane box
        instead of the padded content box. Only the top: main's bottom padding is
        0, and the sticky footer below supplies the bottom spacing. */

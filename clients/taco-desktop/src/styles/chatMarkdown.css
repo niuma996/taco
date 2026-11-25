@@ -130,7 +130,7 @@
     scrollbar-width: thin;
     scrollbar-color: var(--scrollbar-thumb-rest) transparent;
     --scrollbar-thumb-rest: color-mix(in srgb, var(--fg-dim) 50%, transparent);
-    --scrollbar-thumb-active: var(--fg-dim);
+    --scrollbar-thumb-hover: var(--fg-dim);
 }
 .md-table-scroll::-webkit-scrollbar {
     height: 8px;
@@ -244,7 +244,7 @@
     scrollbar-width: thin;
     scrollbar-color: var(--scrollbar-thumb-rest) transparent;
     --scrollbar-thumb-rest: color-mix(in srgb, var(--fg-dim) 50%, transparent);
-    --scrollbar-thumb-active: var(--fg-dim);
+    --scrollbar-thumb-hover: var(--fg-dim);
 }
 .md-code-block pre::-webkit-scrollbar {
     height: 8px;

@@ -21,18 +21,31 @@ button svg {
     vertical-align: middle;
 }
 
-main {
+.chat-scroll-host {
+    position: relative;
+    display: flex;
     flex: 1;
+    min-height: 0;
+    min-width: 0;
+    overflow: hidden;
+}
+
+.chat-scroll-host > .chat-scroll-viewport {
+    box-sizing: border-box;
+    flex: 1;
+    min-height: 0;
     overflow-y: auto;
     /* Symmetric 10% reading gutter; padding (not margin) so `main`'s background
        still paints edge-to-edge and the scrollbar stays flush against the
        window's right edge (padding does not displace it). Top padding adds a
-       full bar height: the frosted .session-info overlays this strip, and the
+       full bar height: the opaque .session-info overlays this strip, and the
        first message must start below it, not scroll out from under it.
        No bottom padding: the sticky input footer is the last child in flow, so
        it supplies the bottom spacing and the scrollbar reaches the window
        bottom edge. */
-    padding: calc(var(--rail-top-padding) + 1rem) 10% 0 10%;
+    /* OverlayScrollbars owns the viewport's inline padding when the host
+       is separate. Keep our reading gutter on the scrollable box. */
+    padding: calc(var(--rail-top-padding) + 1rem) var(--chat-reading-gutter, 10%) 0 !important;
     display: flex;
     flex-direction: column;
     gap: 0.5rem;
@@ -54,17 +67,12 @@ main {
     box-sizing: border-box;
     padding: 0 1rem;
     border-bottom: 1px solid var(--divider-chat-panel);
-    /* Frosted glass: the bar overlays the top of `main` (negative margin), so
-       scrolling messages pass under it and pick up the blur. z-index keeps it
-       above the message stream; popovers portal to body and are unaffected. */
+    /* The bar overlays the top of `main` (negative margin), so it has to be
+       opaque to keep scrolling messages out of the chrome. */
     position: relative;
     z-index: 5;
     margin-bottom: calc(-1 * var(--rail-top-padding));
-    /* Tier-2 surface made translucent — the blur does the separation, so the
-       tint can be lighter than the old solid --pane-list-bg. */
-    background: color-mix(in srgb, var(--pane-list-bg) 72%, transparent);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
+    background: var(--pane-list-bg);
     font-size: 0.78rem;
     color: var(--fg-dim);
     flex-wrap: nowrap;

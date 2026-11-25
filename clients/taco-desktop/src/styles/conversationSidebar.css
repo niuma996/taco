@@ -106,7 +106,7 @@ aside.conversation-sidebar {
     overflow-y: auto;
     overflow-x: hidden;
     padding-block: 0.15rem 0.6rem;
-    padding-inline: var(--space-1-5) var(--space-0-5);
+    padding-inline: var(--space-1);
 }
 
 .conversation-group {
@@ -204,7 +204,7 @@ aside.conversation-sidebar {
 ul.conversation-channel-list .session-item,
 .conversation-group-body > .session-list-panel .session-item {
     min-height: 44px;
-    margin-inline: var(--space-1) var(--space-0-5);
+    margin-inline: var(--space-1);
 }
 
 .conversation-group-empty {

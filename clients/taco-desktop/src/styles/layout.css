@@ -632,6 +632,7 @@ header.topbar .topbar-picker-group {
     display: flex;
     flex-direction: column;
     flex: 1;
+    min-height: 0;
     min-width: 0;
     overflow: hidden;
     /* Anchor for the overlays that sit inside the reading gutter (the user
@@ -652,8 +653,7 @@ header.topbar .topbar-picker-group {
    on its own. The LLM dump fab's `right` likewise resolves against that
    already-inset box. */
 .layout[data-sidebar-collapsed="true"][data-right-open="false"] main {
-    padding-left: 20%;
-    padding-right: 20%;
+    --chat-reading-gutter: 20%;
 }
 /* Viewport-centered, so it does not inherit main's gutter — cap its width to
    the narrower reading column instead. */

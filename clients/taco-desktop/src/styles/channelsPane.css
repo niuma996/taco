@@ -226,13 +226,6 @@
     max-width: calc(100vw - 4rem);
     max-height: 86vh;
 }
-/* Reserves scrollbar space from the start — when loading renders first (no
-   scrollbar), the content height increase adds the scrollbar without causing
-   layout reflow. Scrolling itself is the shared .ui-modal-body's job. */
-.im-policy-modal .ui-modal-body {
-    scrollbar-gutter: stable;
-}
-
 /* Header — the title carries the scope chip, the message is the lede. */
 .im-policy-modal .ui-modal-title {
     font-size: var(--text-lg);

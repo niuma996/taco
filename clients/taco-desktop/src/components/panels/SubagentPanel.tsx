@@ -100,17 +100,19 @@ export function SubagentPanel({
             ) : shown.length === 0 ? (
                 <div className="subagent-panel-no-match">{t("subagents.noMatch")}</div>
             ) : (
-                <ul className="subagent-panel-list">
-                    {shown.map((entry) => (
-                        <SubagentRow
-                            key={entry.firstToolCallId}
-                            entry={entry}
-                            selected={entry.subSessionId === selectedSubSessionId}
-                            onSelect={onSelect}
-                            onStop={onStopSubagent}
-                        />
-                    ))}
-                </ul>
+                <div className="subagent-panel-list-scroll">
+                    <ul className="subagent-panel-list">
+                        {shown.map((entry) => (
+                            <SubagentRow
+                                key={entry.firstToolCallId}
+                                entry={entry}
+                                selected={entry.subSessionId === selectedSubSessionId}
+                                onSelect={onSelect}
+                                onStop={onStopSubagent}
+                            />
+                        ))}
+                    </ul>
+                </div>
             )}
             <div className="subagent-panel-detail" ref={detailRef}>
                 {selected === null || selected.subSessionId === null ? (

@@ -21,6 +21,7 @@ import type { RefObject } from "react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import type { UserMessageGuideEntry } from "../lib/chat/userMessageGuide";
+import { isScrollbarPress, scrollbarEventTarget } from "../lib/overlayScrollbars";
 
 /** How long a revealed target keeps re-centering while its content grows. */
 const CORRECTION_HOLD_MS = 2000;
@@ -439,23 +440,21 @@ export function useMessageNavigation({
             onUserInput();
         };
         const onPointerDown = (event: PointerEvent): void => {
-            // Only a press on the container itself is the scrollbar. A click
-            // on a message is not a scroll intent and must not end the
-            // correction.
-            if (event.target !== el) return;
+            if (!isScrollbarPress(event, el)) return;
             onUserInput();
         };
         el.addEventListener("wheel", onUserInput, { passive: true });
         el.addEventListener("touchstart", onUserInput, { passive: true });
         el.addEventListener("touchmove", onUserInput, { passive: true });
         el.addEventListener("keydown", onKeyDown);
-        el.addEventListener("pointerdown", onPointerDown, { passive: true });
+        const pointerTarget = scrollbarEventTarget(el);
+        pointerTarget.addEventListener("pointerdown", onPointerDown, { passive: true });
         return () => {
             el.removeEventListener("wheel", onUserInput);
             el.removeEventListener("touchstart", onUserInput);
             el.removeEventListener("touchmove", onUserInput);
             el.removeEventListener("keydown", onKeyDown);
-            el.removeEventListener("pointerdown", onPointerDown);
+            pointerTarget.removeEventListener("pointerdown", onPointerDown);
         };
     }, [enabled, endJump, scrollRef]);
 

@@ -1,5 +1,6 @@
 import type { RefObject } from "react";
 import { useCallback, useLayoutEffect, useRef } from "react";
+import { isScrollbarPress, scrollbarEventTarget } from "../../lib/overlayScrollbars";
 
 const NEAR_BOTTOM_PX = 80;
 
@@ -103,10 +104,8 @@ export function useStickToBottom(
             // the follow back.
             if (DOWNWARD_KEYS.has(e.key)) markInput();
         };
-        // Content covers the container, so a pointerdown whose target is the
-        // container itself is on its scrollbar.
         const onPointerDown = (e: PointerEvent): void => {
-            if (e.target !== el) return;
+            if (!isScrollbarPress(e, el)) return;
             draggingScrollbar = true;
             markInput();
         };
@@ -120,16 +119,17 @@ export function useStickToBottom(
         el.addEventListener("wheel", onWheel, { passive: true });
         el.addEventListener("touchmove", markInput, { passive: true });
         el.addEventListener("keydown", onKeyDown);
-        el.addEventListener("pointerdown", onPointerDown);
+        const pointerTarget = scrollbarEventTarget(el);
+        pointerTarget.addEventListener("pointerdown", onPointerDown);
         window.addEventListener("pointerup", onPointerUp);
         window.addEventListener("pointercancel", onPointerUp);
 
         const schedule = (): void => {
-            if (!stick) return;
+            if (!stick || draggingScrollbar) return;
             if (rafId !== null) return;
             rafId = requestAnimationFrame(() => {
                 rafId = null;
-                if (stick) snap();
+                if (stick && !draggingScrollbar) snap();
             });
         };
         const ro = new ResizeObserver(schedule);
@@ -137,7 +137,10 @@ export function useStickToBottom(
         const observeChildren = (): void => {
             // observe() on an already-observed node is a no-op, and removed
             // nodes drop out of a ResizeObserver on their own.
-            for (const child of el.children) ro.observe(child);
+            for (const child of el.children) {
+                // The thumb changes size with the viewport and never adds content.
+                if (!child.hasAttribute("data-taco-scrollbar")) ro.observe(child);
+            }
         };
         observeChildren();
         const mo = new MutationObserver(() => {
@@ -168,7 +171,7 @@ export function useStickToBottom(
             el.removeEventListener("wheel", onWheel);
             el.removeEventListener("touchmove", markInput);
             el.removeEventListener("keydown", onKeyDown);
-            el.removeEventListener("pointerdown", onPointerDown);
+            pointerTarget.removeEventListener("pointerdown", onPointerDown);
             window.removeEventListener("pointerup", onPointerUp);
             window.removeEventListener("pointercancel", onPointerUp);
             mo.disconnect();
