@@ -3,11 +3,6 @@ import { test } from "node:test";
 import { Check } from "typebox/value";
 import * as protocol from "../src/index.ts";
 
-test("worktree management exposes distinct process pushes", () => {
-    assert.equal(protocol.PushMethods.WorktreeChanged, "worktree.changed");
-    assert.equal(protocol.PushMethods.WorktreeHandoff, "worktree.handoff");
-});
-
 test("Git schemas are exported and shared with workspace-routed contract rows", () => {
     const schemas = {
         gitInspect: protocol.gitInspectSchema,

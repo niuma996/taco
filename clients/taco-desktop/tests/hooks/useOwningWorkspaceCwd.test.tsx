@@ -31,7 +31,6 @@ afterEach(cleanup);
 describe("useOwningWorkspaceCwd", () => {
     it("keeps the owning checkout stable while moving to a linked worktree", async () => {
         const { useOwningWorkspaceCwd } = await import("../../src/hooks/useWorktrees");
-        expect(typeof useOwningWorkspaceCwd).toBe("function");
 
         let completeLinked!: (value: typeof mainList) => void;
         const linkedPath = "/project/.claude/worktrees/settings-visual-refinement";

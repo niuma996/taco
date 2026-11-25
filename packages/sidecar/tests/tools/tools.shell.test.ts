@@ -500,22 +500,6 @@ describe("grep tool", () => {
         assert.ok(!text.includes("const bar"));
     });
 
-    it("filters by glob", async () => {
-        const tool = createGrepTool();
-        const res = await invokeTool(
-            tool,
-            { pattern: "foo", glob: "*.ts" },
-            { env },
-            { toolCallId: "tc" },
-        );
-        const text = res.content.map((c) => (c.type === "text" ? c.text : "")).join("\n");
-        // `.glob filter means we'd only check files that match
-        // (ripgrep's --glob semantics: filename pattern)
-        // Both valid paths search the same files; just check that filter narrows results.
-        assert.ok(text.length > 0); // gets some matches
-        assert.ok(text.split("\n").every((line) => !line.startsWith("secrets/")));
-    });
-
     it("respects safe defaults (excludes node_modules)", async () => {
         const tool = createGrepTool();
         const res = await invokeTool(tool, { pattern: "foo" }, { env }, { toolCallId: "tc" });

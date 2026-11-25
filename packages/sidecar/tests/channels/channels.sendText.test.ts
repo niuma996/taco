@@ -72,15 +72,11 @@ describe("classifySendError", () => {
 });
 
 describe("ChannelRegistry.sendText", () => {
-    function register(
-        registry: ChannelRegistry,
-        handle: Partial<ChannelHandle>,
-        maxMessageLength = 100,
-    ): void {
+    function register(registry: ChannelRegistry, handle: Partial<ChannelHandle>): void {
         registry.register(
             "c1",
             {
-                manifest: { name: "fake", version: "1", capabilities: { maxMessageLength } },
+                manifest: { name: "fake", version: "1", capabilities: { maxMessageLength: 100 } },
                 start: async () => handle as ChannelHandle,
             } as unknown as Channel,
             { push: async () => undefined, close: async () => undefined, ...handle },
@@ -167,13 +163,6 @@ describe("ChannelRegistry.sendText", () => {
         releasePush();
         await sending;
         assert.deepEqual(order, ["push:start", "push:end", "send"]);
-    });
-
-    it("reports the channel's message cap, or undefined when not loaded", () => {
-        const registry = new ChannelRegistry();
-        register(registry, {}, 321);
-        assert.equal(registry.maxMessageLength("c1"), 321);
-        assert.equal(registry.maxMessageLength("nope"), undefined);
     });
 
     it("rechecks the frozen binding after an earlier queued push changes accounts", async () => {

@@ -91,23 +91,6 @@ describe("jobsController", () => {
         });
     });
 
-    test("update() persists + reloads; disabling removes the timer", async () => {
-        await withTmp(async (dir) => {
-            const store = new JobStore(dir);
-            const scheduler = new Scheduler({ store, lockDir: dir, invoke: async () => {} });
-            await scheduler.start();
-            const ctrl = new JobsController(store, scheduler, dir);
-            await ctrl.create(sampleJob("a", { enabled: false }));
-            const stored = await store.get("a");
-            ok(stored);
-            if (stored) {
-                await ctrl.update({ ...stored, enabled: false });
-            }
-            // No timer attached — nothing to assert beyond a clean state.
-            scheduler.stop();
-        });
-    });
-
     test("update() rejects a stale incarnation after delete and recreate with the same id", async () => {
         await withTmp(async (dir) => {
             const store = new JobStore(dir);

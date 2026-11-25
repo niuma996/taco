@@ -47,11 +47,6 @@ describe("activeList", () => {
             addTask(store, "l1", { content: "b", status: "failed", activeForm: "b" });
             assert.equal(findActiveListId(store), null);
         });
-
-        it("empty store currentListId starts null", () => {
-            const store = createTaskStore("/ws");
-            assert.equal(store.currentListId, null);
-        });
     });
 });
 

@@ -245,19 +245,6 @@ describe("useMessageNavigation", () => {
         assert.deepEqual(scrollIntoView.mock.calls[0], [{ block: "center", behavior: "instant" }]);
     });
 
-    it("reads the reduced-motion preference at jump time", () => {
-        let reduce = false;
-        vi.stubGlobal(
-            "matchMedia",
-            vi.fn(() => ({ matches: reduce })),
-        );
-        const { result } = mount({ windowStart: 0 });
-        // The preference changes while the app runs.
-        reduce = true;
-        act(() => result().navigate(entry("b", 1)));
-        assert.deepEqual(scrollIntoView.mock.calls[0], [{ block: "center", behavior: "instant" }]);
-    });
-
     it("keeps a revealed target centered while its content grows", async () => {
         vi.useFakeTimers();
         try {

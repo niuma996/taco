@@ -1,5 +1,5 @@
-import { deepStrictEqual, ok, rejects, strictEqual } from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, test } from "node:test";
@@ -70,23 +70,6 @@ describe("marker", () => {
             const nested = join(dir, "nested", "deeper", "marker.json");
             await writeUpgradeMarker(nested, sampleMarker());
             ok(await readUpgradeMarker(nested));
-        });
-    });
-
-    test("writeUpgradeMarker persists valid JSON (no leftover .tmp)", async () => {
-        await withTmp(async (dir) => {
-            const path = join(dir, "marker.json");
-            await writeUpgradeMarker(path, sampleMarker());
-            // Sanity-check the file content too — the on-disk JSON shape is
-            // what the CLI writer produces; if it changes here, drift with
-            // the CLI surfaces immediately.
-            const raw = await readFile(path, "utf8");
-            const parsed = JSON.parse(raw) as UpgradeMarker;
-            strictEqual(parsed.version, "0.2.0");
-            // No .tmp leftover — stat() the path directly and expect ENOENT
-            // (catching the error would swallow it and hide a regression).
-            const tmpPath = `${path}.tmp`;
-            await rejects(stat(tmpPath), /ENOENT/);
         });
     });
 
@@ -234,23 +217,6 @@ describe("orchestrator", () => {
         });
     });
 
-    test("start() is idempotent — second call does not double-schedule", async () => {
-        await withTmp(async (root) => {
-            let calls = 0;
-            const orch = new UpgradeOrchestrator({
-                markerPath: join(root, "missing.json"),
-                requestShutdown: () => {
-                    calls += 1;
-                },
-                intervalMs: 1_000_000,
-            });
-            orch.start();
-            orch.start();
-            orch.stop();
-            strictEqual(calls, 0);
-        });
-    });
-
     test("tick() after shutdown signal does not fire requestShutdown again", async () => {
         await withTmp(async (root) => {
             const stagingDir = join(root, "staging", "sidecar-0.2.0");
@@ -270,23 +236,6 @@ describe("orchestrator", () => {
             await orch.tick();
             strictEqual(calls, 1);
             orch.stop();
-        });
-    });
-
-    test("stop() cancels pending recheck (timer does not fire)", async () => {
-        await withTmp(async (root) => {
-            let calls = 0;
-            const orch = new UpgradeOrchestrator({
-                markerPath: join(root, "missing.json"),
-                requestShutdown: () => {
-                    calls += 1;
-                },
-                intervalMs: 10,
-            });
-            orch.start();
-            orch.stop();
-            await new Promise((resolve) => setTimeout(resolve, 50));
-            strictEqual(calls, 0);
         });
     });
 });

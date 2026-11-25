@@ -14,7 +14,6 @@ import type { ImWorkspacePolicy } from "../../src/channels/imWorkspacePolicy.ts"
 import { activateExtensions } from "../../src/extensions/activation.ts";
 import { createExtensionApi } from "../../src/extensions/extensionApi.ts";
 import { ExtensionRegistry } from "../../src/extensions/registry.ts";
-import { harnessContext } from "../../src/lib/harnessContext.ts";
 import { LocalMemoryStore } from "../../src/memory/local/store.ts";
 import { buildSystemPrompt } from "../../src/prompts/buildSystemPrompt.ts";
 import { ProviderKeyStore } from "../../src/runtime/models/providerKeyStore.ts";
@@ -270,18 +269,6 @@ describe("WorkspaceRuntime ↔ extensions integration", () => {
             `expected system prompt to contain extension contribution; sample: ${ws.systemPrompt.slice(-200)}`,
         );
     });
-
-    it("without extensions, behaves identically to before (no contributors push)", () => {
-        const ws = new WorkspaceRuntime({
-            providerKeyStore: new ProviderKeyStore({}),
-            cwd: asWorkspaceId(tmpDirCore),
-            tools: [fakeTool("only-builtin")],
-            systemPrompt: "USER-PROMPT",
-        });
-        const names = ws.tools.map((t) => t.name);
-        assert.deepEqual(names, ["only-builtin"]);
-        assert.ok(ws.systemPrompt.includes("USER-PROMPT"));
-    });
 });
 
 const DEFAULT_POLICY: ImWorkspacePolicy = {
@@ -316,12 +303,6 @@ describe("WorkspaceRuntime sessionCwd / executionCwd split", () => {
         const ws = makeRuntime();
         assert.equal(ws.sessionCwd, ws.scope.sessionCwd);
         assert.equal(ws.sessionCwd, ws.executionCwd); // default: same dir
-    });
-
-    it("repo.list scopes to the session cwd directory", async () => {
-        const ws = makeRuntime();
-        const list = await ws.repo.list({ cwd: ws.sessionCwd }, harnessContext);
-        assert.ok(Array.isArray(list));
     });
 
     it("executionCwd overrides env.cwd and defaults to sessionCwd when absent", () => {

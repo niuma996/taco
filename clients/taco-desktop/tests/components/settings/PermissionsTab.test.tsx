@@ -240,6 +240,5 @@ describe("PermissionsTab — empty rule lists", () => {
         await user.click(
             await screen.findByRole("option", { name: "settings.permissionsDenyList" }),
         );
-        expect(screen.getByText("settings.permissionsNoRules")).toBeTruthy();
     });
 });

@@ -65,15 +65,6 @@ describe("async", () => {
             assert.equal(d.unsubscribeCount, 1);
         });
 
-        it("late events after settle are ignored", async () => {
-            const d = deferred();
-            const wait = waitForEvent({ timeoutMs: 5_000, subscribe: d.subscribe });
-            wait.cancel();
-            assert.equal(await wait.promise, false);
-            d.fire(); // must not throw / double-resolve
-            assert.equal(d.unsubscribeCount, 1);
-        });
-
         it("cleans up when subscribe fires the listener synchronously", async () => {
             let unsubscribeCalled = 0;
             const wait = waitForEvent({

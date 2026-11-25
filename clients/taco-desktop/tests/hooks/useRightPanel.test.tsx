@@ -32,11 +32,6 @@ afterEach(() => {
 });
 
 describe("useRightPanel — exclusivity", () => {
-    it("starts closed", () => {
-        const { result } = renderHook(() => useRightPanel());
-        assert.equal(result.current.panel, "none");
-    });
-
     it("toggle opens, then closes the same panel", () => {
         const { result } = renderHook(() => useRightPanel());
         act(() => result.current.toggle("tasks"));

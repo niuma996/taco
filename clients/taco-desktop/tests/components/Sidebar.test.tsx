@@ -1,6 +1,3 @@
-import { readFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -63,18 +60,6 @@ describe("Sidebar session actions", () => {
         expect(document.activeElement).toBe(rowMain);
         await user.tab();
         expect(document.activeElement).toBe(more);
-
-        const css = readFileSync(
-            resolve(dirname(fileURLToPath(import.meta.url)), "../../src/styles/sidebar.css"),
-            "utf8",
-        );
-        const actionRule = (css.match(/\.session-action\s*\{([\s\S]*?)\}/)?.[1] ?? "").replace(
-            /\/\*[\s\S]*?\*\//g,
-            "",
-        );
-        expect(actionRule).toContain("opacity: 0");
-        expect(actionRule).not.toContain("display: none");
-        expect(more.getAttribute("tabindex")).toBeNull();
 
         await user.click(more);
         await user.click(screen.getByRole("menuitem", { name: /session.rename/ }));
@@ -141,30 +126,6 @@ describe("Sidebar session actions", () => {
         expect(document.activeElement).toBe(rows[1]);
         await user.keyboard("{Home}");
         expect(document.activeElement).toBe(rows[0]);
-    });
-
-    it("starts a new chat from the pinned header button", async () => {
-        const onNewSession = vi.fn();
-        render(
-            <Sidebar
-                ws={{
-                    ...createEmptyWorkspace("/repo"),
-                    sessions: [
-                        { id: "session-1", name: "Session", createdAt: "1970-01-01T00:00:00Z" },
-                    ],
-                }}
-                onAttach={() => {}}
-                onDelete={() => {}}
-                onRename={() => {}}
-                onNewSession={onNewSession}
-                search={searchStub()}
-            />,
-        );
-
-        await userEvent
-            .setup({ delay: null })
-            .click(screen.getByRole("button", { name: "session.newChat" }));
-        expect(onNewSession).toHaveBeenCalledOnce();
     });
 
     it("shows the server's matches instead of the loaded sessions while searching", () => {

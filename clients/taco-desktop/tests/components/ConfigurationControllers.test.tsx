@@ -1,11 +1,9 @@
 import type { ToolEntry } from "@taco-ai/protocol";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ConfigurationAgentsController } from "../../src/components/configuration/ConfigurationAgentsController";
 import { ConfigurationSkillsController } from "../../src/components/configuration/ConfigurationSkillsController";
 import { ConfigurationToolsController } from "../../src/components/configuration/ConfigurationToolsController";
 import type { TacoClient } from "../../src/lib/clients/tacoClient";
-import type { AgentsPaneProps } from "../../src/views/AgentsPane";
 import type { SkillsPaneProps } from "../../src/views/SkillsPane";
 import { queryWrapper } from "../helpers/queryWrapper";
 
@@ -33,29 +31,6 @@ vi.mock("../../src/components/ConfigurationScopeBar", () => ({
                     target:{option.value}
                 </button>
             ))}
-        </div>
-    ),
-}));
-
-vi.mock("../../src/views/AgentsPane", () => ({
-    AgentsPane: (props: AgentsPaneProps) => (
-        <div data-testid="agents-view" data-saving={props.saving}>
-            <span>{props.selectedAgentType}</span>
-            <button
-                type="button"
-                onClick={() =>
-                    void props.onSaveAgent({
-                        scope: "workspace",
-                        agentType: "demo",
-                        description: "Edited",
-                        runtime: "standard",
-                        maxTurns: 5,
-                        systemPrompt: "Edited prompt",
-                    })
-                }
-            >
-                save-agent
-            </button>
         </div>
     ),
 }));
@@ -162,29 +137,6 @@ function props(client: TacoClient, active = true) {
 }
 
 describe("configuration page controllers", () => {
-    it("keeps an agent mutation alive while its view and target change", async () => {
-        const fixture = makeClient();
-        const view = render(<ConfigurationAgentsController {...props(fixture.client)} />, {
-            ...queryWrapper(),
-        });
-        await screen.findByText("demo");
-        fireEvent.click(screen.getByRole("button", { name: "save-agent" }));
-        await waitFor(() => expect(fixture.agentsWrite).toHaveBeenCalledTimes(1));
-
-        view.rerender(
-            <ConfigurationAgentsController {...props(fixture.client, false)} activeCwd="/repo-b" />,
-        );
-        expect(screen.queryByTestId("agents-view")).toBeNull();
-        fixture.finishSave();
-        view.rerender(
-            <ConfigurationAgentsController {...props(fixture.client)} activeCwd="/repo-b" />,
-        );
-
-        await screen.findByText("demo");
-        expect(screen.getByTestId("agents-view").getAttribute("data-saving")).toBe("false");
-        expect(screen.getByTestId("scope").getAttribute("data-target")).toBe("/repo-b");
-    });
-
     it("keeps skill search across page and target round trips but resets selection on a new target", async () => {
         const fixture = makeClient();
         const view = render(<ConfigurationSkillsController {...props(fixture.client)} />, {

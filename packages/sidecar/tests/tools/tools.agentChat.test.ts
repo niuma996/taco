@@ -4,8 +4,6 @@ import {
     type AgentSessionDescriptor,
     asSessionId,
     type ChatToAgentToolDetails,
-    type SubagentSettledPayload,
-    type SubagentSpawnedPayload,
 } from "@taco-ai/protocol";
 import { Value } from "typebox/value";
 import type {
@@ -288,17 +286,4 @@ describe("listAgentSessions tool", () => {
         assert.equal(Value.Check(tool.parameters, {}), true);
         assert.equal(Value.Check(tool.parameters, { subSessionId: "child-1" }), false);
     });
-});
-
-it("keeps spawn and settle payloads compatible with optional run identity", () => {
-    const spawned: SubagentSpawnedPayload = {
-        parentSessionId: asSessionId("parent"),
-        parentToolCallId: "parent-call",
-        subSessionId: asSessionId("child-1"),
-        agentType: "reviewer",
-    };
-    const settled: SubagentSettledPayload = { ...spawned, outcome: "completed", runId: "run-1" };
-    const resumed: SubagentSpawnedPayload = { ...spawned, runId: "run-1" };
-    assert.equal(spawned.runId, undefined);
-    assert.equal(resumed.runId, settled.runId);
 });

@@ -47,11 +47,6 @@ describe("filterTools", () => {
             assert.deepEqual(out.sort(), ["glob", "grep", "read"]);
         });
 
-        it("matches the unified shell tool", () => {
-            const out = filterToolsForAgent(available, ["read", "shell"], 1).map((t) => t.name);
-            assert.deepEqual(out.sort(), ["read", "shell"]);
-        });
-
         it("drops names not in available set", () => {
             const out = filterToolsForAgent(available, ["read", "unknown"], 1).map((t) => t.name);
             assert.deepEqual(out, ["read"]);
@@ -600,12 +595,6 @@ describe("readOnlyShellGate", () => {
             assert.ok(reviewer, "expected the reviewer builtin");
             assert.ok(reviewer.tools?.includes("shell"), "reviewer is granted shell");
             assert.equal(READ_ONLY_SHELL_AGENT_TYPES.has("reviewer"), true);
-        });
-
-        it("verification is NOT gated — it must keep a writable shell", () => {
-            // It runs builds and writes ephemeral scripts to /tmp; swapping in the
-            // read-only broker would make the profile unable to do its job.
-            assert.equal(READ_ONLY_SHELL_AGENT_TYPES.has("verification"), false);
         });
 
         it("labels builtin profiles by their real write capability", async () => {

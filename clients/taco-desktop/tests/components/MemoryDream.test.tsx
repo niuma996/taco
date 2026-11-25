@@ -159,16 +159,6 @@ describe("MemoryPane dream controls", () => {
         },
     );
 
-    it("opens schedule settings from the consolidation panel", async () => {
-        const user = userEvent.setup({ delay: null });
-        const dream = actions();
-        renderPane(dream);
-
-        await user.click(screen.getByRole("button", { name: "memory.dream.settings" }));
-        expect(screen.getByText("memory.dream.minHours")).toBeTruthy();
-        expect(dream.onSaveConfig).not.toHaveBeenCalled();
-    });
-
     it("saves memory settings from the expanded settings card", async () => {
         const user = userEvent.setup({ delay: null });
         const dream = actions();
@@ -489,7 +479,6 @@ describe("MemoryPane dream controls", () => {
         fireEvent.click(history?.querySelector("summary") as Element);
         expect(screen.getByText(/memory\.dream\.undoExpired/)).toBeTruthy();
         expect(screen.queryByRole("button", { name: "memory.dream.undo" })).toBeNull();
-        expect(screen.queryByText("memory.dream.undoExpires")).toBeNull();
     });
 
     it("selects an archived topic separately from live topics and restores it", async () => {

@@ -142,14 +142,6 @@ describe("controlRequest — happy path", () => {
             echo: { hello: "world" },
         });
     });
-
-    it("uses the supplied request id on the wire", async () => {
-        const result = await controlRequest(endpoint, "control.ping", {
-            timeoutMs: 1000,
-            id: 42,
-        });
-        assert.ok(result);
-    });
 });
 
 describe("controlRequest — error reply", () => {

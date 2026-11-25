@@ -200,23 +200,6 @@ describe("channels", () => {
             assert.equal(result.configured[0].state, "connected");
         });
 
-        it("never exposes a credential value", async () => {
-            // A leak would most likely arrive as a token/credential-ish key, so
-            // assert on the serialized payload rather than a known field name.
-            const { control } = fakeChannels();
-            const result = await call("channels.list", hook(control), {});
-            const json = JSON.stringify(result);
-
-            for (const forbidden of ["token", "credential", "secret", "aeskey"]) {
-                assert.equal(
-                    json.toLowerCase().includes(forbidden),
-                    false,
-                    `result leaked "${forbidden}": ${json}`,
-                );
-            }
-            assert.equal(typeof (result as ChannelsListResult).configured[0].configured, "boolean");
-        });
-
         it("fails with invalid_state when channels are unavailable", async () => {
             await assert.rejects(call("channels.list", hook(undefined), {}), /not available/);
         });

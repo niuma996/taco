@@ -386,34 +386,6 @@ describe("mcpToolProvider", () => {
             assert.equal(byName.get("mcp__gh__list_issues")?.loading, "deferred");
         });
 
-        it("dedupes colliding provider names across servers", async () => {
-            const handles = new Map<string, McpClientHandle>([
-                [
-                    "a",
-                    new FakeMcpClient("a", [
-                        { name: "tool", inputSchema: { type: "object", properties: {} } },
-                    ]),
-                ],
-                [
-                    "b",
-                    new FakeMcpClient("b", [
-                        { name: "tool", inputSchema: { type: "object", properties: {} } },
-                    ]),
-                ],
-            ]);
-            const provider = await discoverMcpTools({
-                servers: [server("a"), server("b")],
-                clientFactory: factoryFrom(handles),
-                log: silentLogger as unknown as Logger,
-            });
-            const names = provider
-                .candidates()
-                .map((c) => c.name)
-                .sort();
-            // mcp__a__tool and mcp__b__tool are distinct prefixes — no collision.
-            assert.deepEqual(names, ["mcp__a__tool", "mcp__b__tool"]);
-        });
-
         it("dedupes when sanitization collides two raw names within one server", async () => {
             const handles = new Map<string, McpClientHandle>([
                 [

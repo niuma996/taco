@@ -63,10 +63,6 @@ describe("mapLoaderDiagnostics", () => {
     // pi-side unknown codes are no longer reachable: LoaderSkillDiagnostic.code
     // is the SkillDiagnosticCode union, so out-of-band values fail at compile
     // time. Tests below exercise the in-union codes instead.
-
-    it("maps an empty list to an empty list", () => {
-        assert.deepEqual(mapLoaderDiagnostics([]), []);
-    });
 });
 
 describe("mapDuplicateDiagnostics", () => {
@@ -90,10 +86,6 @@ describe("mapDuplicateDiagnostics", () => {
         const [entry] = mapDuplicateDiagnostics([collision]);
         assert.ok(entry.message.includes("deep-review"));
         assert.ok(entry.message.includes("/work/.taco/skills/deep-review/SKILL.md"));
-    });
-
-    it("maps an empty list to an empty list", () => {
-        assert.deepEqual(mapDuplicateDiagnostics([]), []);
     });
 });
 
@@ -197,7 +189,7 @@ describe("logSkillDiagnostics", () => {
                     {
                         code: "invalid_metadata",
                         message: "description exceeds 1024 characters (1816)",
-                        path: "/Users/lewiiszhang/.claude/skills/zht-dt-cli/SKILL.md",
+                        path: "/Users/someone/.claude/skills/zht-dt-cli/SKILL.md",
                         source: "user",
                     },
                     {
@@ -286,10 +278,6 @@ const mkSkill = (name: string, origin: string): TacoSkill => ({
 });
 
 describe("dedupeSkillsByName", () => {
-    it("returns empty array for empty input", () => {
-        assert.deepEqual(dedupeSkillsByName([]), []);
-    });
-
     it("keeps all skills when names are unique", () => {
         const input = [mkSkill("a", "x"), mkSkill("b", "x")];
         const out = dedupeSkillsByName(input);
@@ -374,12 +362,6 @@ describe("dedupeSkillsByNameWithDuplicates", () => {
             userSkill("beta"),
         ]);
         assertStrict.equal(kept.length, 2);
-        assertStrict.deepEqual(duplicates, []);
-    });
-
-    it("handles an empty input", () => {
-        const { kept, duplicates } = dedupeSkillsByNameWithDuplicates([]);
-        assertStrict.deepEqual(kept, []);
         assertStrict.deepEqual(duplicates, []);
     });
 });

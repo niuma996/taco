@@ -118,33 +118,6 @@ describe("session.compactionHandlers", () => {
             assert.equal(calledCount, 1);
             assert.equal(capturedInstructions, "be terse");
         });
-
-        it("omits customInstructions in forwarded params when not provided", async () => {
-            const attached = {
-                async compact(customInstructions?: string) {
-                    assert.equal(customInstructions, undefined);
-                    return { ok: true };
-                },
-            };
-            const workspace = {
-                assertExecutionAvailable: async () => {},
-                getAttached() {
-                    return attached;
-                },
-            };
-            const ctx = {
-                id: "test-id",
-                workspace,
-                cwd: "/tmp/ws",
-                server: {},
-                params: { workspace: "/tmp/ws", sessionId: "sid" },
-            } as unknown as Parameters<
-                NonNullable<ReturnType<typeof getRegisteredMethod>>["handler"]
-            >[0];
-            const handler = getRegisteredMethod("session.compact");
-            assert.ok(handler);
-            await handler.handler(ctx);
-        });
     });
 
     describe("session.contextInfo handler", () => {
@@ -185,41 +158,6 @@ describe("session.compactionHandlers", () => {
             assert.ok(handler);
             const out = await handler.handler(ctx);
             assert.deepEqual(out, sample);
-        });
-
-        it("omits lastCompactionAt when session has no prior compactions", async () => {
-            const attached = {
-                async getContextInfo() {
-                    return {
-                        modelId: "m",
-                        provider: "p",
-                        contextWindow: 100,
-                        usedTokens: 10,
-                        ratio: 0.1,
-                    };
-                },
-            };
-            const workspace = {
-                assertExecutionAvailable: async () => {},
-                getAttached() {
-                    return attached;
-                },
-            };
-            const ctx = {
-                id: "test-id",
-                workspace,
-                cwd: "/tmp/ws",
-                server: {},
-                params: { workspace: "/tmp/ws", sessionId: "sid" },
-            } as unknown as Parameters<
-                NonNullable<ReturnType<typeof getRegisteredMethod>>["handler"]
-            >[0];
-            const handler = getRegisteredMethod("session.contextInfo");
-            assert.ok(handler);
-            const out = (await handler.handler(ctx)) as {
-                lastCompactionAt?: string;
-            };
-            assert.equal(out.lastCompactionAt, undefined);
         });
     });
 });

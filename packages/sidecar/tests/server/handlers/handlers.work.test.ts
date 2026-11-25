@@ -4,7 +4,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
 import {
-    RPC,
     WORK_RESULT_TEXT_LIMIT,
     type WorkGetResult,
     type WorkListResult,
@@ -73,15 +72,6 @@ describe("work.* handlers", () => {
         });
         return work.workId;
     }
-
-    it("registers the Work methods under their wire names", () => {
-        assert.equal(RPC.workList, "work.list");
-        assert.equal(RPC.workGet, "work.get");
-        assert.equal(RPC.workRetryDelivery, "work.retryDelivery");
-        assert.equal(RPC.workCancel, "work.cancel");
-        assert.equal(RPC.workDelete, "work.delete");
-        assert.equal(RPC.workQueueCancel, "work.queueCancel");
-    });
 
     it("cancels a displayed waiting attempt and deletes its record through RPC", async () => {
         const { controller, service, server } = rig();

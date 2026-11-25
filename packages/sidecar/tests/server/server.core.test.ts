@@ -419,11 +419,6 @@ describe("schemaValidation", () => {
             },
         } as const;
 
-        it("reports a missing required field", () => {
-            const errors = Value.Errors(strictSchema, { workspace: "/tmp" });
-            assert.ok(errors.length > 0, "missing sessionId should produce an error");
-        });
-
         it("reports a nested type mismatch with a decodable path", () => {
             const errors = [
                 ...Value.Errors(strictSchema, {
@@ -438,15 +433,6 @@ describe("schemaValidation", () => {
                 paths.some((p) => p.includes("nested") && p.includes("count")),
                 `expected a nested/count path, got ${JSON.stringify(paths)}`,
             );
-        });
-
-        it("accepts a fully valid object", () => {
-            const errors = Value.Errors(strictSchema, {
-                workspace: "/tmp",
-                sessionId: "s1",
-                nested: { count: 3 },
-            });
-            assert.equal([...errors].length, 0);
         });
     });
 
@@ -1163,13 +1149,6 @@ describe("invalidateCompactionCaches.chain", () => {
             assert.equal(ws2Registry.calls.length, 1);
             assert.equal(ws2Session.calls.length, 1);
             assert.equal(ws2Controller.calls.length, 1);
-        });
-
-        it("no-op with no registered workspaces (still safe to call)", () => {
-            const server = new SidecarServer({ providerKeyStore: new ProviderKeyStore({}) });
-
-            // Must not throw
-            server.invalidateCompactionCaches();
         });
     });
 

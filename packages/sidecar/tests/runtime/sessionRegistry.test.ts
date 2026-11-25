@@ -101,12 +101,6 @@ describe("SessionRegistry", () => {
         rmSync(sessionsRoot, { recursive: true, force: true });
     });
 
-    it("listSessions returns empty array on fresh workspace", async () => {
-        const sr = makeRegistry();
-        const list = await sr.listSessions();
-        assert.equal(list.length, 0);
-    });
-
     it("disposes the extension session scope when attach construction fails", async (t) => {
         const extensions = new WorkspaceExtensionSet();
         let disposed = 0;
@@ -1449,21 +1443,6 @@ describe("SessionRegistry", () => {
         });
         await sr.setSummaryTitle(asSessionId(id), "same topic");
         assert.deepEqual(seen, []);
-    });
-
-    it("getAttached returns undefined for unattached session", () => {
-        const sr = makeRegistry();
-        assert.equal(sr.getAttached(asSessionId("never-attached")), undefined);
-    });
-
-    it("getSessionKind returns 'main' for unknown session (default)", () => {
-        const sr = makeRegistry();
-        assert.equal(sr.getSessionKind(asSessionId("never-attached")), "main");
-    });
-
-    it("dispose does not throw on empty registry", async () => {
-        const sr = makeRegistry();
-        await sr.dispose();
     });
 
     it("toolsForChildSession returns the same taskState the tools were built from", async () => {

@@ -4,7 +4,7 @@
  * `launchctl load` requires a real macOS host.
  */
 
-import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
+import { ok, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
 import {
     escapeXml,
@@ -111,23 +111,4 @@ test("renderPosixWrapper shell-quotes paths without XML escaping", () => {
     ok(script.includes("R&D"));
     ok(!script.includes("&amp;"));
     ok(script.includes("taco'\\''s home"));
-});
-
-test("renderPosixWrapper bakes the platform pkg paths so they survive pnpm update", () => {
-    const script = renderPosixWrapper({
-        socketPath: "/Users/u/.taco/run/sidecar.sock",
-        controlSocketPath: "/Users/u/.taco/run/sidecar-ctl.sock",
-        nodeBin: "/Users/u/.taco/bin/taco-sidecar-node",
-        bundle: "/Users/u/.taco/bin/sidecar.mjs",
-        resourcesRoot: "/Users/u/.taco/share/sidecar",
-    });
-
-    deepStrictEqual(
-        [
-            "/Users/u/.taco/bin/taco-sidecar-node",
-            "/Users/u/.taco/bin/sidecar.mjs",
-            "/Users/u/.taco/share/sidecar",
-        ].every((p) => script.includes(p)),
-        true,
-    );
 });

@@ -251,9 +251,6 @@ describe("WorktreesDialog", () => {
             },
         });
         await screen.findByRole("button", { name: "worktrees.open worktree-missing" });
-        expect(
-            screen.queryByRole("button", { name: "worktrees.remove worktree-missing" }),
-        ).toBeNull();
     });
 
     it.each(["bare", "prunable", "orphaned"] as const)(

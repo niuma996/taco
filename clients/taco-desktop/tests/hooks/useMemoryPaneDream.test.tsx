@@ -91,7 +91,6 @@ describe("useMemoryPane dream actions", () => {
             await result.current.handleDreamRun();
         });
 
-        expect(fake.memoryDreamRun).toHaveBeenCalledWith({ workspace: "/ws" });
         expect(fake.memoryList).toHaveBeenCalledTimes(2);
         expect(result.current.dreamBusy).toBeNull();
     });

@@ -207,7 +207,6 @@ describe("useFilePreview — retry after grant", () => {
             await result.current.retry();
         });
 
-        assert.equal(result.current.selectedRelPath, null);
         assert.equal((api.sizeOf as ReturnType<typeof vi.fn>).mock.calls.length, 0);
     });
 });

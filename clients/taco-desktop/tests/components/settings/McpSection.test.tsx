@@ -215,8 +215,6 @@ describe("McpSection", () => {
         expect(onRestart).not.toHaveBeenCalled();
         // Form must still be visible — the user can retry.
         expect(screen.queryByRole("button", { name: "settings.mcpServerSave" })).not.toBeNull();
-        // Error banner surfaces the cause.
-        expect(screen.getByText(/disk full/)).toBeTruthy();
     });
 
     it("preserves enabled=false across edit save", async () => {

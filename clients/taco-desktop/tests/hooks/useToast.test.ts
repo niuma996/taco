@@ -35,12 +35,6 @@ test("dismiss clears immediately", () => {
     assert.equal(m.state(), null);
 });
 
-test("dismiss is a no-op when no toast active", () => {
-    const m = createTestToastManager();
-    m.dismiss();
-    assert.equal(m.state(), null);
-});
-
 test("auto-dismiss after timeout", async () => {
     const m = createToastManager({ defaultDurationMs: 30 });
     m.show("hi");
@@ -65,16 +59,4 @@ test("subscribe receives notifications", () => {
     unsub();
     m.show("after unsub");
     assert.equal(count, 3, "subscriber should be called for show/show/dismiss but not after unsub");
-});
-
-test("subscribe cleanup stops notifications", () => {
-    const m = createTestToastManager();
-    let count = 0;
-    const unsub = m.subscribe(() => {
-        count++;
-    });
-    m.show("a");
-    unsub();
-    m.show("b");
-    assert.equal(count, 1);
 });

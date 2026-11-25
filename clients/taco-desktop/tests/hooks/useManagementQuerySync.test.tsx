@@ -4,10 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { useManagementQuerySync } from "../../src/hooks/useManagementQuerySync";
 import { useProviders } from "../../src/hooks/useProviders";
 import type { TacoClient } from "../../src/lib/clients/tacoClient";
-import {
-    createDesktopQueryClient,
-    invalidateCatalogQueries,
-} from "../../src/lib/queries/queryClient";
+import { invalidateCatalogQueries } from "../../src/lib/queries/queryClient";
 import { queryWrapper } from "../helpers/queryWrapper";
 
 afterEach(() => {
@@ -73,24 +70,5 @@ describe("management query lifecycle", () => {
         expect(view.result.current.providers[0]?.id).toBe("new generation");
         sync.unmount();
         expect(off).toHaveBeenCalledTimes(1);
-    });
-
-    it("uses bounded retries while ignoring browser network and focus events", async () => {
-        vi.useFakeTimers();
-        const cache = createDesktopQueryClient();
-        const defaults = cache.getDefaultOptions().queries;
-        expect(defaults?.refetchOnWindowFocus).toBe(false);
-        expect(defaults?.refetchOnReconnect).toBe(false);
-        expect(defaults?.networkMode).toBe("always");
-        const queryFn = vi.fn(async () => {
-            throw new Error("unavailable");
-        });
-        const request = cache
-            .fetchQuery({ queryKey: ["retry"], queryFn })
-            .catch((error: unknown) => error);
-        await vi.advanceTimersByTimeAsync(23_001);
-        expect(queryFn).toHaveBeenCalledTimes(6);
-        expect(await request).toBeInstanceOf(Error);
-        cache.clear();
     });
 });

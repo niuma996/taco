@@ -314,16 +314,6 @@ describe("Sidebar conversation groups", () => {
         expect(within(groups[1]).queryByText("Matched chat")).toBeNull();
     });
 
-    it("does not show a session total beside a workspace name", () => {
-        const input = props();
-        input.workspaces["/repo/two"] = {
-            ...input.workspaces["/repo/two"],
-            listTotal: 37,
-        };
-        render(<Sidebar {...input} />);
-        expect(within(screen.getByRole("region", { name: "two" })).queryByText("37")).toBeNull();
-    });
-
     it("shows an empty state when an expanded workspace has no sessions", () => {
         const input = props();
         const empty = createEmptyWorkspace("/repo/empty", true);

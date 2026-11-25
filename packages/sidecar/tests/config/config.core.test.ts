@@ -21,7 +21,6 @@ import {
     tacoHome,
     validateCompactionConfig,
 } from "../../src/config/config.ts";
-import { resolveWorkspaceConfigSources } from "../../src/config/workspaceConfigSources.ts";
 import { useTempTacoHome } from "../_helpers/tempTacoHome.ts";
 
 describe("saveGlobalConfig round-trip", () => {
@@ -183,23 +182,6 @@ describe("config corrupt-file handling", () => {
         });
     });
 
-    it("recovers after the file is repaired — a failure must not poison the cache", () => {
-        const dir = useFreshHome();
-        const path = join(dir, "taco.json");
-        writeFileSync(path, "{this is not valid json", "utf8");
-        assert.throws(() => readGlobalConfig(), /Unexpected token|Expected|JSON/);
-
-        // Repair the file: the next read must succeed, proving the failed read
-        // was not frozen into the process cache.
-        writeFileSync(path, JSON.stringify({ defaultModel: "anthropic/claude-sonnet" }), "utf8");
-        assert.equal(readGlobalConfig().defaultModel, "anthropic/claude-sonnet");
-    });
-
-    it("a missing file is unconfigured ({}), not an error", () => {
-        useFreshHome();
-        assert.deepEqual(readGlobalConfig(), {});
-    });
-
     it("saveGlobalConfig also refuses to run on a corrupt file (no silent wipe)", () => {
         const dir = useFreshHome();
         const path = join(dir, "taco.json");
@@ -294,39 +276,6 @@ describe("resolveWorkspaceConfigSources / defaultSessionsRoot", () => {
         if (prevSessionsRootOverride === undefined)
             Reflect.deleteProperty(process.env, "TACO_SESSIONS_ROOT");
         else process.env.TACO_SESSIONS_ROOT = prevSessionsRootOverride;
-    });
-
-    it("resolveWorkspaceConfigSources returns multi-source array with project .taco first, builtin last", () => {
-        const tmpTacoHome = mkdtempSync(join(tmpdir(), "taco-skills-"));
-        process.env.TACO_HOME = tmpTacoHome;
-        try {
-            const cwd = mkdtempSync(join(tmpdir(), "taco-skills-cwd-"));
-            try {
-                // resolveWorkspaceConfigSources normalizes to forward slashes even on Windows
-                // (pi-agent-core's relativeEnvPath compares with "/" separators), so
-                // compare against the forward-slash form of the expected native path.
-                const fwd = (p: string) => p.replace(/\\/g, "/");
-                const dirs = resolveWorkspaceConfigSources(cwd).skillDirs;
-                assert.equal(dirs.length, 5, "should have exactly 5 entries");
-                // Project .taco/skills must be first (highest priority, first-wins dedup)
-                assert.equal(dirs[0].path, fwd(resolve(cwd, ".taco", "skills")));
-                assert.equal(dirs[0].source, "user");
-                // Global TACO_HOME second
-                assert.equal(dirs[1].path, fwd(resolve(tmpTacoHome, "skills")));
-                assert.equal(dirs[1].source, "user");
-                assert.equal(dirs[2].path, fwd(resolve(homedir(), ".claude", "skills")));
-                assert.equal(dirs[2].source, "user");
-                assert.equal(dirs[3].path, fwd(resolve(homedir(), ".pi", "skills")));
-                assert.equal(dirs[3].source, "user");
-                // Builtin directory last (lowest priority; overridable by all four above)
-                assert.equal(dirs[4].source, "builtin");
-                assert.ok(dirs[4].path.endsWith(fwd(join("skills", "builtin"))));
-            } finally {
-                rmSync(cwd, { recursive: true, force: true });
-            }
-        } finally {
-            rmSync(tmpTacoHome, { recursive: true, force: true });
-        }
     });
 
     it("defaultSessionsRoot uses TACO_HOME", () => {

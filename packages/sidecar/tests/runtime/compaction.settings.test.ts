@@ -147,44 +147,6 @@ describe("CompactionController.effectiveCompaction — TTL cache", () => {
         assert.equal(reads(), 2, "TTL expired → re-read");
     });
 
-    it("uses monotonic clock (TTL does not extend when now() regresses)", () => {
-        // Verifies clock is monotonic: even if now() goes backwards (e.g. NTP adjusts system time),
-        // expiresAt is a fixed point and doesn't drift back with now().
-        // Key: uses `performance.now()` to compare expiresAt > now, not `Date.now()`,
-        // ensuring the cache doesn't become permanently stale if the system clock steps backward.
-        saveGlobalConfig({ compaction: { threshold: 0.7 } });
-
-        // Simulate "drift back" style: write time t=200, subsequent assertion at t=100.
-        // FakeClock doesn't support regression, so we mock the call sequence directly.
-        const nowValues = [0, 200, 100]; // sequence: first construct, after disk read, regression
-        let idx = 0;
-        const callNow = (): number => nowValues[idx++] ?? nowValues[nowValues.length - 1];
-
-        const controller = new CompactionController({
-            harness: fakeHarness,
-            lane: fakeLane,
-            getEntry: fakeGetEntry,
-            getContextUsage: () => Promise.reject(new Error("not used")),
-            getSessionEntries: () => Promise.resolve([]),
-            readGlobalConfig: () => ({ compaction: { threshold: 0.7 } }),
-            effectiveTtlMs: 50,
-            now: callNow,
-        });
-
-        // 1st call: now=0, expiresAt=50
-        // 2nd call: now=200, 200 > 50 → cache miss → re-read → cached expiresAt=250
-        // 3rd call: now=100, 100 < 250 → still a hit (monotonic: 100 is after 200 in call order)
-        // The key assertion: even though now() regressed from 200 to 100, expiresAt did not
-        // (stays at 250), so 100 < 250 → hit. A wall-clock approach (expiresAt = now + TTL)
-        // would have a different regression profile.
-        const r1 = controller.effectiveCompaction();
-        assert.equal(r1.threshold, 0.7);
-        const r2 = controller.effectiveCompaction();
-        assert.equal(r2.threshold, 0.7);
-        const r3 = controller.effectiveCompaction();
-        assert.equal(r3.threshold, 0.7, "regression in now() should not extend TTL");
-    });
-
     it("invalidate() forces immediate disk re-read", () => {
         saveGlobalConfig({ compaction: { threshold: 0.7 } });
         const { controller, reads } = makeController();

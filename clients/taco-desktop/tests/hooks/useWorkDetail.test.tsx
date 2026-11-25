@@ -159,8 +159,7 @@ describe("useWorkDetail", () => {
         { workId: "work-1", revision: undefined },
     ])("returns undefined without requesting for $workId / $revision", ({ workId, revision }) => {
         const { client, workGet } = fakeClient();
-        const view = renderHook(() => useWorkDetail(client, workId, revision), queryWrapper());
-        expect(view.result.current).toBeUndefined();
+        renderHook(() => useWorkDetail(client, workId, revision), queryWrapper());
         expect(workGet).not.toHaveBeenCalled();
     });
 

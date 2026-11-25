@@ -13,15 +13,6 @@ import { ProviderIcon } from "../../../src/components/settings/ProviderIcon.tsx"
 afterEach(cleanup);
 
 describe("ProviderIcon", () => {
-    it("renders the vendored brand mark for a known provider", () => {
-        const { container } = render(<ProviderIcon providerId="anthropic" name="Anthropic" />);
-        // Brand marks paint through a CSS mask, not an inline SVG.
-        expect(container.querySelector(".provider-icon")?.getAttribute("style")).toContain(
-            "mask-image",
-        );
-        expect(container.querySelector("svg")).toBeNull();
-    });
-
     it("badges a custom provider with its name's initial", () => {
         const { container } = render(<ProviderIcon providerId="custom:acme" name="Acme Corp" />);
         expect(container.querySelector(".lucide-circle-letter-a")).not.toBeNull();

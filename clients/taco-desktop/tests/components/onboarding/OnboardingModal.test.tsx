@@ -154,7 +154,6 @@ describe("onboarding model integration", () => {
         await user.click(screen.getByRole("button", { name: "onboarding.next" }));
         expect(await screen.findByText("onboarding.doneTitle")).toBeTruthy();
         expect(screen.getByText(MODEL.id)).toBeTruthy();
-        expect(screen.queryByText("settings.liteModelTitle")).toBeNull();
         await user.click(screen.getByRole("button", { name: "onboarding.openTaco" }));
         expect(writeDesktopConfig).toHaveBeenCalledWith({
             onboarding: expect.objectContaining({ status: "completed" }),

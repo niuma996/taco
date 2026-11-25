@@ -662,20 +662,6 @@ describe("wechatChannel", () => {
             // in a new test could exercise it. The other three branches cover
             // the realistic partial-regression scenarios.
         });
-
-        it("does not throw when ingress rejects", async () => {
-            const h = harness();
-            h.ctx.ingress.submit = async () => {
-                throw new Error("router down");
-            };
-            await h.channel.start(h.ctx);
-            await h.bot.deliver({
-                userId: "u1",
-                text: "hi",
-                raw: { message_id: 1, create_time_ms: 1_700_000_000_001 },
-            });
-            // Reaching here without throwing is the assertion.
-        });
     });
 
     describe("WeChatChannel outbound", () => {

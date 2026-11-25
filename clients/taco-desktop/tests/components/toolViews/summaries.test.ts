@@ -204,15 +204,7 @@ describe("summary suppression", () => {
         }
     });
 
-    it("read / edit 保留默认 path 摘要(未声明 summary)", () => {
-        for (const name of ["read", "edit"]) {
-            assert.equal(resolveToolView(name)?.summary, undefined, name);
-        }
-    });
-
     it("shell 注册在真实工具名下(旧的 bash/powershell 从未匹配)", () => {
         assert.ok(resolveToolView("shell")?.body, "shell should have a body");
-        assert.equal(resolveToolView("bash"), undefined);
-        assert.equal(resolveToolView("powershell"), undefined);
     });
 });

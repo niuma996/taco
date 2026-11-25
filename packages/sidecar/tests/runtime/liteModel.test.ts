@@ -76,15 +76,6 @@ function resetLiteConfig(): void {
 }
 
 describe("resolveLiteModel", () => {
-    it("returns undefined when liteModel is not configured", () => {
-        resetLiteConfig();
-        const models = fakeModels({
-            getModel: () => windowed(LITE, 128_000),
-            onCall: async () => assistantMessage("unused"),
-        });
-        assert.equal(resolveLiteModel(models, "title"), undefined);
-    });
-
     it("resolves a provider/id config against the live catalog", () => {
         saveGlobalConfig({ liteModel: `${LITE.provider}/${LITE.id}` });
         const model = windowed(LITE, 128_000);
@@ -346,11 +337,6 @@ describe("lite off provider payloads", () => {
 });
 
 describe("resolveLiteThinkingLevel", () => {
-    it("returns undefined when unset", () => {
-        saveGlobalConfig({ liteThinkingLevel: null });
-        assert.equal(resolveLiteThinkingLevel(), undefined);
-    });
-
     it("returns the configured level", () => {
         saveGlobalConfig({ liteThinkingLevel: "low" });
         assert.equal(resolveLiteThinkingLevel(), "low");

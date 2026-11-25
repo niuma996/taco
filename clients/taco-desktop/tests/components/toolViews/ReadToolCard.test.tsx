@@ -88,12 +88,4 @@ describe("read tool card", () => {
         assert.ok(screen.getByText("ENOENT: no such file or directory"));
         assert.equal(screen.queryByRole("button", { name: "activity.readOpenFile" }), null);
     });
-
-    // expireUnresolvedToolCalls marks a card errored without a resultText.
-    it("renders no body for an errored card with no result text", () => {
-        const { container } = renderCard(readTool({ status: "error", resultText: undefined }));
-
-        assert.equal(container.querySelector(".tool-card-result"), null);
-        assert.equal(screen.queryByRole("button", { name: "activity.readOpenFile" }), null);
-    });
 });

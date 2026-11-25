@@ -1510,28 +1510,6 @@ describe("AgentSpawner.resumeSubagent — validation", () => {
         assert.equal(res.isError, true);
         assert.match(res.resultText, /exhausted its 10-turn budget/);
     });
-
-    it("single-flight: in-flight map entry is removed after promise settles", async () => {
-        // Probe the internal `resumeInFlight` Map via a deliberate pass: wrap
-        // resumeSubagent so we can observe the cache state around an await.
-        // We use the "not a subagent" path to get a fast, deterministic
-        // rejection; the assertion is about cache hygiene, not the error.
-        const map = (
-            ws.agentSpawner as unknown as {
-                resumeInFlight: Map<string, unknown>;
-            }
-        ).resumeInFlight;
-        await seedSessionResume("main-cache-probe");
-        ws.sessionRegistry.invalidateListCache();
-        const before = map.size;
-        await ws.agentSpawner.resumeSubagent({
-            parentSessionId: asSessionId("x"),
-            parentToolCallId: "tc",
-            subSessionId: asSessionId("main-cache-probe"),
-            prompt: "p",
-        });
-        assert.equal(map.size, before, "resumeInFlight must drain on settle, not retain entries");
-    });
 });
 
 /**

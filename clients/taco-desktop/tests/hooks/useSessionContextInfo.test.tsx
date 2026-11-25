@@ -67,16 +67,4 @@ describe("useSessionContextInfo", () => {
         });
         expect(result.current.info?.modelId).toBe("model-b");
     });
-
-    it("shows the snapshot of the session it was fetched for", async () => {
-        const { client, pending } = makeClient();
-        const { result } = renderHook(() => useSessionContextInfo(client, "/tmp/ws", "session-a"));
-
-        await act(async () => {
-            pending.get("session-a")?.(snapshot("model-a", "provider-a"));
-            await Promise.resolve();
-        });
-        expect(result.current.info?.modelId).toBe("model-a");
-        expect(result.current.info?.provider).toBe("provider-a");
-    });
 });

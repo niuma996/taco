@@ -211,19 +211,6 @@ describe("ToolCardShell raw args", () => {
         assert.equal(container.querySelector(".tool-card-raw-toggle"), null);
     });
 
-    it("falls back to String() for unserialisable args", async () => {
-        const cyclic: Record<string, unknown> = { name: "loop" };
-        cyclic.self = cyclic;
-
-        const { container } = render(<ToolCardShell tool={call({ args: cyclic })} />);
-        await userEvent
-            .setup({ delay: null })
-            .click(container.querySelector(".tool-card-raw-toggle") as Element);
-
-        // JSON.stringify throws on the cycle; the card must still show something.
-        assert.ok((container.querySelector(".tool-card-raw")?.textContent ?? "").length > 0);
-    });
-
     it("highlights object args as JSON", async () => {
         highlightCalls.length = 0;
         const { container } = render(<ToolCardShell tool={call({ args: { path: "a.ts" } })} />);

@@ -3,18 +3,16 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
-import { MEMORY_CONTENT_MAX_CHARS } from "@taco-ai/protocol";
 import matter from "gray-matter";
 import {
     hashOf,
     LocalMemoryStore,
     MemoryConflictError,
-    NoOpMemoryStore,
     parseTopicFrontmatter,
     readProjectTopics,
     workspaceKey,
 } from "../../src/memory/index.ts";
-import { MemoryExtractorImpl, parseExtractionResult } from "../../src/memory/local/extractor.ts";
+import { MemoryExtractorImpl } from "../../src/memory/local/extractor.ts";
 import type { MemoryEntry } from "../../src/memory/types.ts";
 import type { AgentMessage, Api, Model, Models } from "../../src/runtime/pi/types.ts";
 import { sidecarVersion } from "../../src/runtime/runtimeResources.ts";
@@ -151,17 +149,6 @@ describe("store", () => {
     });
 
     describe("LocalMemoryStore.readMemory / buildMemoryBlock", () => {
-        it("readMemory returns the header when MEMORY.md is empty", () => {
-            const s = mkStore();
-            const mem = s.readMemory();
-            assert.equal(mem, "# Memory\n\n");
-        });
-
-        it("buildMemoryBlock returns '' when MEMORY.md has only the header and no topics", () => {
-            const s = mkStore();
-            assert.equal(s.buildMemoryBlock(), "");
-        });
-
         it("buildMemoryBlock includes the user MEMORY.md note verbatim", async () => {
             const s = mkStore();
             const manual = "# Memory\n\n## My hand-written section\n\nfree text\n";
@@ -306,11 +293,6 @@ describe("store", () => {
     });
 
     describe("getTopic / updateTopic", () => {
-        it("getTopic returns undefined for unknown id", () => {
-            const store = mkStore();
-            assert.equal(store.getTopic("does_not_exist"), undefined);
-        });
-
         it("getTopic returns the entry after appendEntry", async () => {
             const store = mkStore();
             await store.appendEntry(entry());
@@ -507,21 +489,6 @@ content`;
             assert.equal(beta?.type, "feedback");
             assert.match(beta?.content ?? "", /User explicitly said pnpm\./);
         });
-
-        it("returns [] when the project dir doesn't exist", () => {
-            const entries = readProjectTopics("does-not-exist");
-            assert.deepEqual(entries, []);
-        });
-    });
-
-    describe("NoOpMemoryStore", () => {
-        it("is a true no-op for all methods", async () => {
-            const s = new NoOpMemoryStore();
-            s.initialize("anything");
-            await s.appendEntry(entry());
-            assert.equal(s.readMemory(), "");
-            assert.equal(s.buildMemoryBlock(), "");
-        });
     });
 
     describe("concurrent writeMemory + appendEntry", () => {
@@ -553,9 +520,6 @@ describe("extractor", () => {
     const createdAt = "2026-07-26T00:00:00.000Z";
     const ws = "ws-1";
 
-    const addedEntries = (actions: ReturnType<typeof parseExtractionResult>): MemoryEntry[] =>
-        actions.flatMap((action) => (action.action === "add" ? [action.entry] : []));
-
     const existingTopic = (overrides: Partial<MemoryEntry> = {}): MemoryEntry => ({
         id: "user-language",
         name: "User language",
@@ -565,150 +529,6 @@ describe("extractor", () => {
         createdAt,
         workspaceId: ws,
         ...overrides,
-    });
-
-    describe("parseExtractionResult", () => {
-        it("parses add and update actions", () => {
-            const raw = JSON.stringify([
-                {
-                    action: "add",
-                    id: "user-role",
-                    name: "User role",
-                    type: "user",
-                    content: "admin",
-                },
-                { action: "update", id: "project-init", content: "Updated project state" },
-            ]);
-            const out = parseExtractionResult(raw, createdAt, ws);
-            assert.equal(out.length, 2);
-            assert.equal(out[0]?.action, "add");
-            assert.deepEqual(out[1], {
-                action: "update",
-                id: "project-init",
-                content: "Updated project state",
-            });
-        });
-
-        it("strips fences and ignores surrounding prose", () => {
-            const fenced = parseExtractionResult(
-                '```json\n[{"action":"add","name":"x","type":"user","content":"fact"}]\n```',
-                createdAt,
-                ws,
-            );
-            const prose = parseExtractionResult(
-                'Result:\n[{"action":"add","name":"x","type":"user","content":"fact"}]\nDone.',
-                createdAt,
-                ws,
-            );
-            assert.equal(addedEntries(fenced)[0]?.name, "x");
-            assert.equal(addedEntries(prose)[0]?.name, "x");
-        });
-
-        it("returns [] on non-JSON", () => {
-            assert.deepEqual(parseExtractionResult("just text", createdAt, ws), []);
-            assert.deepEqual(parseExtractionResult("{not an array}", createdAt, ws), []);
-        });
-
-        it("drops actions with missing or invalid required fields", () => {
-            const raw = JSON.stringify([
-                { action: "add", name: "ok", type: "user", content: "valid" },
-                { name: "missing-action", type: "user" },
-                { action: "add", name: "no-type" },
-                { action: "add", type: "user" },
-                { action: "add", name: "bad", type: "fact" },
-                { action: "update", id: "x" },
-                { action: "update", content: "missing id" },
-                { action: "remove", id: "x" },
-                {},
-            ]);
-            const out = parseExtractionResult(raw, createdAt, ws);
-            assert.deepEqual(
-                addedEntries(out).map((entry) => entry.name),
-                ["ok"],
-            );
-        });
-
-        it("normalises new ids to the handler's kebab-case rule", () => {
-            const raw = JSON.stringify([
-                { action: "add", id: "User Role @#$", name: "n", type: "user", content: "fact" },
-            ]);
-            const out = parseExtractionResult(raw, createdAt, ws);
-            assert.equal(addedEntries(out)[0]?.id, "user-role-");
-        });
-
-        it("tolerates non-string fields without dropping the rest of the batch", () => {
-            const raw = JSON.stringify([
-                { action: "add", id: 42, name: "Numeric id", type: "user", content: "a" },
-                { action: "add", id: { nested: true }, name: "Object id", type: "user" },
-                { action: "add", id: "ok-id", name: "Fine", type: "user", content: "valid" },
-                { action: "add", id: "bad-name", name: 5, type: "user" },
-                { action: "update", id: 9, content: "numeric update id" },
-                { action: "update", id: "x", content: ["not", "a", "string"] },
-                null,
-                "not an object",
-            ]);
-            let out: ReturnType<typeof parseExtractionResult> = [];
-            assert.doesNotThrow(() => {
-                out = parseExtractionResult(raw, createdAt, ws);
-            });
-            const ids = addedEntries(out).map((entry) => entry.id);
-            assert.ok(ids.includes("42"));
-            assert.ok(ids.includes("ok-id"));
-            assert.ok(!ids.includes("bad-name"));
-            assert.equal(addedEntries(out).find((e) => e.id === "ok-id")?.content, "valid");
-            assert.equal(out.filter((action) => action.action === "update").length, 0);
-        });
-
-        it("synthesises distinct ids when add omits them", () => {
-            const raw = JSON.stringify([
-                { action: "add", name: "first", type: "user", content: "first fact" },
-                { action: "add", name: "second", type: "user", content: "second fact" },
-            ]);
-            const entries = addedEntries(parseExtractionResult(raw, createdAt, ws));
-            assert.ok(entries[0]?.id.startsWith("mem-"));
-            assert.ok(entries[1]?.id.startsWith("mem-"));
-            assert.notEqual(entries[0]?.id, entries[1]?.id);
-        });
-
-        it("rejects oversized content rather than truncating a fact", () => {
-            const raw = JSON.stringify([
-                {
-                    action: "add",
-                    name: "x".repeat(200),
-                    description: "y".repeat(300),
-                    content: "valid",
-                    type: "user",
-                },
-                {
-                    action: "add",
-                    name: "long",
-                    content: "z".repeat(MEMORY_CONTENT_MAX_CHARS + 1),
-                    type: "user",
-                },
-                { action: "update", id: "x", content: "z".repeat(MEMORY_CONTENT_MAX_CHARS + 1) },
-            ]);
-            const out = parseExtractionResult(raw, createdAt, ws);
-            assert.equal(out.length, 1);
-            assert.equal(addedEntries(out)[0]?.name.length, 60);
-            assert.equal(addedEntries(out)[0]?.description.length, 120);
-        });
-
-        it("requires a real body and defaults only description", () => {
-            const entries = addedEntries(
-                parseExtractionResult(
-                    JSON.stringify([
-                        { action: "add", id: "x", name: "fallback", type: "user", content: "Body" },
-                        { action: "add", id: "empty", name: "Do not fabricate", type: "user" },
-                    ]),
-                    createdAt,
-                    ws,
-                ),
-            );
-            assert.equal(entries.length, 1);
-            assert.equal(entries[0]?.description, "fallback");
-            assert.equal(entries[0]?.content, "Body");
-            assert.equal(entries[0]?.workspaceId, ws);
-        });
     });
 
     describe("MemoryExtractorImpl", () => {

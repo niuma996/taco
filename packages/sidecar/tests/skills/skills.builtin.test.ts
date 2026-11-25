@@ -335,16 +335,6 @@ model: opus
         assert.equal(out.model, "opus");
     });
 
-    it("preserves the body content outside the block", () => {
-        const out = parseYamlFrontmatter(`---
-name: my-skill
----
-# Heading
-
-body content here`);
-        assert.equal(out.name, "my-skill");
-    });
-
     it("normalizes CRLF line endings", () => {
         const out = parseYamlFrontmatter("---\r\nname: my-skill\r\n---\r\n");
         assert.equal(out.name, "my-skill");

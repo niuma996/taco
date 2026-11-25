@@ -36,7 +36,6 @@ describe("FormField", () => {
         );
         const labelId = label.id;
         const groupId = group.id;
-        expect(groupId).toBeTruthy();
 
         rerender(field());
         expect(screen.getByRole("group", { name: "Models" }).id).toBe(groupId);
@@ -108,8 +107,6 @@ describe("FormField", () => {
         const { rerender } = render(fields("Initial hint"));
         const first = screen.getByRole("textbox", { name: "First" });
         const second = screen.getByRole("textbox", { name: "Second" });
-        expect(first.id).toBeTruthy();
-        expect(second.id).toBeTruthy();
         expect(second.id).not.toBe(first.id);
         const firstId = first.id;
         const secondId = second.id;
@@ -133,8 +130,6 @@ describe("FormField", () => {
         expect(input.id).toBe("account");
         const hint = screen.getByText("Account hint");
         const error = screen.getByRole("status");
-        expect(hint.id).toBeTruthy();
-        expect(error.id).toBeTruthy();
         expect(hint.id).not.toBe(error.id);
         expect(input.getAttribute("aria-describedby")?.split(/\s+/)).toEqual([
             "external-help",

@@ -170,7 +170,7 @@ it("records a rejected legacy dispatch as failure while acknowledging its durabl
 });
 
 it("does not redispatch a legacy batch with an ambiguous pre-restart outcome", async (t) => {
-    const { ctx, inbox, msg, requests, restart } = await rig(t);
+    const { inbox, msg, requests, restart } = await rig(t);
     const message = msg("a");
     const receipt = (
         await inbox.accept({
@@ -184,7 +184,6 @@ it("does not redispatch a legacy batch with an ambiguous pre-restart outcome", a
     await inbox.claimBatch(batch.batchId, { workspace: receipt.workspace, sessionId: "original" });
     assert.equal((await restart().ingress.submit(message)).sessionId, "original");
     assert.equal(requests.filter((req) => req.method === RPC.sessionPrompt).length, 0);
-    assert.ok(ctx.ingress);
 });
 
 it("replays a Work handoff interrupted before durable enqueue", async (t) => {

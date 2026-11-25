@@ -86,27 +86,6 @@ describe("SubagentPanel — 列表", () => {
         vi.clearAllMocks();
     });
 
-    it("open=false 时不渲染", () => {
-        const { container } = render(
-            <SubagentProvider
-                cwd="/proj"
-                loadSubagentHistory={async () => {}}
-                liveMessagesFor={() => []}
-                historyMessagesFor={() => []}
-                openInPanel={() => {}}
-            >
-                <SubagentPanel
-                    messages={[asst("m1", [agentTool()])]}
-                    open={false}
-                    selectedSubSessionId={null}
-                    onSelect={() => {}}
-                    onClose={() => {}}
-                />
-            </SubagentProvider>,
-        );
-        assert.equal(container.querySelector(".subagent-panel"), null);
-    });
-
     it("从 messages 派生并渲染行", () => {
         renderPanel();
         assert.ok(screen.getByText("Explore"));
@@ -150,13 +129,6 @@ describe("SubagentPanel — 列表", () => {
             assert.ok(screen.getByText("subagents.noMatch"));
         });
         assert.equal(screen.queryByText("subagents.empty"), null);
-    });
-
-    it("关闭按钮触发 onClose", async () => {
-        const onClose = vi.fn();
-        renderPanel({ onClose });
-        await userEvent.click(screen.getByRole("button", { name: "app.dismiss" }));
-        assert.equal(onClose.mock.calls.length, 1);
     });
 });
 

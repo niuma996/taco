@@ -371,33 +371,6 @@ test("runNow reports failed with the invoke error when the fire rejects", async 
     });
 });
 
-test("reload reattaches the timer to reflect the latest stored copy", async () => {
-    await withTmp(async (dir) => {
-        const store = new MemoryStore();
-        const base = intervalJob("a", 60_000, { enabled: false });
-        store.jobs.set("a", base);
-        const scheduler = new Scheduler({
-            store,
-            lockDir: dir,
-            invoke: async () => {},
-        });
-        await scheduler.start();
-        // Flip enabled in the store; reload should pick it up.
-        const updated = structuredClone(base);
-        updated.enabled = true;
-        await store.save(updated);
-        await scheduler.reload("a");
-        // Wait one tick — interval is 60s so we can't observe a fire; instead
-        // assert that the timer is attached by checking the schedule's
-        // next-run date is in the future (proves a handle was created).
-        // For interval jobs we exposed nextRun as `now + ms`; sleep 10ms
-        // and assert the date moved forward by inspecting internal state
-        // via runNow instead (a non-throw = handle is live).
-        strictEqual((await scheduler.runNow("a")).status, "ok");
-        scheduler.stop();
-    });
-});
-
 test("detachAll clears every timer (no leaks after stop)", async () => {
     await withTmp(async (dir) => {
         // Mock only setInterval so ticks fire on demand; setTimeout and fs

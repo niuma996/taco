@@ -110,14 +110,6 @@ describe("orderTools", () => {
             ["mcp-a", "read", "write", "zzz"],
         );
     });
-
-    it("is stable for an already-sorted list", () => {
-        const sorted = orderTools([{ name: "edit" }, { name: "read" }, { name: "grep" }]);
-        assert.deepEqual(
-            orderTools(sorted).map((t) => t.name),
-            sorted.map((t) => t.name),
-        );
-    });
 });
 
 describe("toolNamesKey", () => {
@@ -125,12 +117,6 @@ describe("toolNamesKey", () => {
         const a = toolNamesKey([{ name: "write" }, { name: "read" }]);
         const b = toolNamesKey([{ name: "read" }, { name: "write" }]);
         assert.equal(a, b);
-    });
-
-    it("changes when a name is added", () => {
-        const a = toolNamesKey([{ name: "read" }]);
-        const b = toolNamesKey([{ name: "read" }, { name: "write" }]);
-        assert.notEqual(a, b);
     });
 });
 

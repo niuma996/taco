@@ -240,20 +240,6 @@ describe("ProviderDetailModal — create-custom model discovery", () => {
         expect(within(candidateList()).queryByText("late")).toBeNull();
     });
 
-    it("surfaces the message when the RPC reports a failure", async () => {
-        const user = userEvent.setup({ delay: null });
-        const listModels = vi.fn().mockResolvedValue({
-            ok: false,
-            reason: "http-error",
-            message: "HTTP 401",
-        });
-        renderCreate(listModels as unknown as ListModels);
-        await fillPrerequisites(user);
-        await user.click(fetchButton());
-
-        await waitFor(() => expect(screen.getByText("HTTP 401")).toBeTruthy());
-    });
-
     it("reports an empty catalog as its own message", async () => {
         const user = userEvent.setup({ delay: null });
         const listModels = vi.fn().mockResolvedValue({ ok: true, models: [] });

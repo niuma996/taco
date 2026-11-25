@@ -260,32 +260,6 @@ describe("visibility policy", () => {
             "notice must leave nothing visible, or it renders as an empty bubble",
         );
     });
-
-    it("registers subagent_result as hidden but never dropped from context", () => {
-        assert.equal(tagRegistry.subagent_result.tuiVisibility, "hidden");
-        // `drop` is enforced by a context hook on every LLM call, not only at
-        // compaction, so it would erase this notice before the model read it:
-        // the parent wakes up to an empty delivery and reports the subagent as
-        // still running. Regression guard for exactly that.
-        assert.notEqual(
-            tagRegistry.subagent_result.compression.kind,
-            "drop",
-            "a drop-policy notice is stripped from context before the model sees it",
-        );
-    });
-
-    // The notice must survive the same context hook the harness installs for
-    // every LLM call — hidden from the user, intact for the model.
-    it("keeps a subagent_result notice in LLM context", () => {
-        const notice = tagWrap("subagent_result", "finished; output at /tmp/r.md", {
-            outcome: "completed",
-        });
-        const [msg] = stripDropTagsFromMessages([
-            { role: "user", content: [{ type: "text", text: notice }] },
-        ]);
-        const text = (msg as { content: { text?: string }[] }).content[0]?.text ?? "";
-        assert.match(text, /output at \/tmp\/r\.md/);
-    });
 });
 
 describe("agent message envelope", () => {

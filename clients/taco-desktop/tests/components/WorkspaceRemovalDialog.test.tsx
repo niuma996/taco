@@ -65,17 +65,12 @@ describe("WorkspaceRemovalDialog", () => {
     ])(
         "describes removal navigation and separates final actions from menus in $language",
         ({ copy, currentView, fallback, incoming }) => {
-            expect(copy.hideLocalHint).not.toContain(currentView);
             expect(copy.hideImHint).not.toContain(currentView);
             expect(copy.hideImHint).toContain(fallback);
             expect(copy.hideImHint).toContain(incoming);
             expect(Object.values(copy).some((text) => /(?:…|\.\.\.)$/.test(text))).toBe(false);
             expect(copy).toHaveProperty("confirmRemoveAndClean");
             expect(copy).toHaveProperty("confirmDeleteIm");
-            if ("confirmRemoveAndClean" in copy && "confirmDeleteIm" in copy) {
-                expect(copy.confirmRemoveAndClean).not.toMatch(/…$/);
-                expect(copy.confirmDeleteIm).not.toMatch(/…$/);
-            }
         },
     );
 

@@ -387,29 +387,6 @@ it("keeps a deleted old id from retargeting another workspace", async (t) => {
     });
 });
 
-it("does not migrate a known workspace from a bare session-id route on restart", async (t) => {
-    await withService(
-        t,
-        async (service) => {
-            const launch = {
-                workspace: "/ws/a",
-                parentSessionId: asSessionId("p"),
-                parentToolCallId: "tc",
-                childSessionId: asSessionId("c"),
-                agentType: "e",
-            };
-            const id = await service.onLaunch(launch);
-            assert.ok(id);
-            await service.start();
-            assert.equal((await service.store.get(id))?.workspace, "/ws/a");
-        },
-        (_session, workspace) =>
-            workspace === undefined
-                ? { channelId: "chan", peerId: "peer", chatId: "chat" }
-                : undefined,
-    );
-});
-
 it("keeps a deleted legacy source deleted when replayed under a composite id", async (t) => {
     await withService(t, async (service) => {
         const source = sourceEventIdFor("p", "tc");

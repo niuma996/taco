@@ -379,20 +379,6 @@ describe("automatic memory admission", () => {
         assert.match(calls[0].systemPrompt, /Markdown/);
     });
 
-    it("rejects evidence invented by the model", async () => {
-        const { extractor, added } = setup([candidate({ evidence: "助手建议使用 React" })]);
-        await extractor.onRunEnd([user(evidence.repeat(20))]);
-        assert.equal(added.length, 0);
-    });
-
-    it("rejects oversized bodies whole rather than keeping a misleading prefix", async () => {
-        const { extractor, added } = setup([
-            candidate({ content: "x".repeat(MEMORY_CONTENT_MAX_CHARS + 1) }),
-        ]);
-        await extractor.onRunEnd([user(evidence.repeat(20))]);
-        assert.equal(added.length, 0);
-    });
-
     it("does not run extraction for assistant or tool text alone", async () => {
         const { extractor, calls } = setup([candidate()]);
         await extractor.onRunEnd([

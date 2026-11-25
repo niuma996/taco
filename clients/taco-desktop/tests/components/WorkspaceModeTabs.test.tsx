@@ -24,26 +24,6 @@ describe("WorkspaceModeTabs", () => {
         assert.deepEqual(onModeChange.mock.calls, [["workspace"]]);
     });
 
-    it("drops the underline in favour of a rounded selected segment", () => {
-        const { rerender } = render(<WorkspaceModeTabs mode="workspace" onModeChange={() => {}} />);
-
-        // Compared as a boolean: handing a DOM node to assert.equal makes the
-        // failure message serialize the whole element graph.
-        assert.equal(
-            document.querySelector(".workspace-mode-tabs__underline") === null,
-            true,
-            "the underline element is gone",
-        );
-
-        rerender(<WorkspaceModeTabs mode="im" onModeChange={() => {}} />);
-
-        assert.equal(
-            document.querySelector(".workspace-mode-tabs__underline") === null,
-            true,
-            "the underline element is gone",
-        );
-    });
-
     it("puts a colour dot in front of the label of the selected segment", () => {
         const { rerender } = render(<WorkspaceModeTabs mode="workspace" onModeChange={() => {}} />);
 

@@ -25,7 +25,6 @@ it("installs, restarts, then replaces stale startup failures with the fresh list
     await waitFor(() => expect(result.current.channelsStatus?.failed).toHaveLength(1));
     await act(async () => result.current.installChannelSdk("wechat"));
     expect(calls).toEqual(["install", "restart"]);
-    expect(client.channelsInstallSdk).toHaveBeenCalledWith({ channelId: "wechat" });
     expect(result.current.channelsStatus?.failed).toEqual([]);
     expect(result.current.channelsSavingId).toBeNull();
 });

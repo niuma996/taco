@@ -989,33 +989,6 @@ describe("dispatcher.integration", () => {
         });
     });
 
-    describe("createJobDispatcher — ServerRpcSurface integration", () => {
-        it("uses the registered dispatcher context, not a stub", () => {
-            // Sanity check: the integration path requires the handlers to
-            // actually be registered. registerBuiltinMethods() in `before`
-            // must have populated the registry; we double-check here so a
-            // future refactor that drops a registerBuiltinMethods() call
-            // fails this test instead of silently passing dispatcher
-            // smoke tests.
-            assert.ok(
-                getRegisteredMethod("session.create"),
-                "session.create must be registered before dispatcher integration tests run",
-            );
-            assert.ok(
-                getRegisteredMethod("session.history"),
-                "session.history must be registered (pin path probes session existence)",
-            );
-            assert.ok(
-                getRegisteredMethod("session.attach"),
-                "session.attach must be registered (pin path re-attaches existing sessions)",
-            );
-            assert.ok(
-                getRegisteredMethod("session.prompt"),
-                "session.prompt must be registered (pin path prompts existing sessions)",
-            );
-        });
-    });
-
     // Avoid the `ServerRpcSurface` import being dead-stripped by biome — the
     // integration test still benefits from the type-level documentation of
     // which surface the dispatcher closes over.

@@ -41,12 +41,6 @@ describe("subagentDelivery", () => {
     describe("deliverSubagentResult", () => {
         const parentSessionId = asSessionId("parent-1");
 
-        it("does nothing when the parent session is not attached", async () => {
-            const registry = registryFor(undefined);
-            await deliverSubagentResult(registry, parentSessionId, "hello");
-            // No throw is the assertion — there is nothing else to observe.
-        });
-
         it("delivers directly via prompt() when the parent is idle", async () => {
             let promptedWith: string | undefined;
             const attached: FakeAttached = {

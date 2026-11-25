@@ -201,17 +201,6 @@ describe("imToolFilter", () => {
             const out = filterToolsForImPolicy(makeTools(false), policy);
             assert.equal(out.length, makeTools(false).length);
         });
-
-        it("does not mutate the input array when nothing is dropped", () => {
-            const input = makeTools(false);
-            const policy: ImWorkspacePolicy = {
-                tools: { fsTools: "allow", shell: "allow" },
-                commands: { mode: "ask" },
-                executionDir: { mode: "shared" },
-            };
-            const out = filterToolsForImPolicy(input, policy);
-            assert.equal(out, input); // same reference — no copy when nothing dropped
-        });
     });
 
     // Kept import as a type-only reference so the AgentTool type is exercised

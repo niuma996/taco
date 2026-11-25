@@ -10,11 +10,11 @@
  *  - Slider: discrete steps, arrow-key stepping, commit semantics, marks overlay.
  *  - Switch: role="switch" / aria-checked / disabled behaviour. labelledBy names it from visible text and does not also set aria-label.
  *  - Tag: size / tone modifier classes, className merge, native span props.
- *  - TextInput: `.ui-input` class, className merge, React 19 ref-as-prop.
+ *  - TextInput: `.ui-input` class, className merge.
  */
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { createRef, type RefObject, useState } from "react";
+import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { Button } from "../../../src/components/ui/Button";
@@ -43,13 +43,6 @@ describe("Button", () => {
         expect(button.querySelector("svg.spin")).not.toBeNull();
         await userEvent.setup({ delay: null }).click(button);
         expect(onClick).not.toHaveBeenCalled();
-    });
-
-    it("preserves a caller-provided aria-busy when loading is not set", () => {
-        render(<Button aria-busy={true}>Remove</Button>);
-        expect(screen.getByRole("button", { name: "Remove" }).getAttribute("aria-busy")).toBe(
-            "true",
-        );
     });
 });
 
@@ -194,14 +187,6 @@ describe("Select", () => {
 // ─── Slider ─────────────────────────────────────────────────────────────────
 
 describe("Slider", () => {
-    it("renders a slider with the expected value and min/max", () => {
-        render(<Slider value={3} min={0} max={6} step={1} ariaLabel="Level" />);
-        const slider = screen.getByRole("slider", { name: "Level" });
-        expect(slider.getAttribute("aria-valuenow")).toBe("3");
-        expect(slider.getAttribute("aria-valuemin")).toBe("0");
-        expect(slider.getAttribute("aria-valuemax")).toBe("6");
-    });
-
     it("steps by the step amount on ArrowRight and reports via onValueChange", async () => {
         const user = userEvent.setup({ delay: null });
         const onValueChange = vi.fn();
@@ -264,11 +249,6 @@ describe("Slider", () => {
         expect(overlay?.getAttribute("aria-hidden")).toBe("true");
         expect(screen.getByTestId("mark-l").style.left).toBe("0%");
         expect(screen.getByTestId("mark-r").style.left).toBe("100%");
-    });
-
-    it("omits the marks overlay entirely when no marks are given", () => {
-        render(<Slider value={0} min={0} max={6} step={1} ariaLabel="Level" />);
-        expect(document.querySelector(".ui-slider-marks")).toBeNull();
     });
 });
 
@@ -353,12 +333,6 @@ describe("TextInput", () => {
     it("merges an extra className after ui-input", () => {
         render(<TextInput className="extra" />);
         expect((screen.getByRole("textbox") as HTMLInputElement).className).toBe("ui-input extra");
-    });
-
-    it("forwards the ref prop (React 19)", () => {
-        const ref: RefObject<HTMLInputElement | null> = createRef<HTMLInputElement | null>();
-        render(<TextInput ref={ref} />);
-        expect(ref.current).toBeInstanceOf(HTMLInputElement);
     });
 
     it("fires onChange with the typed value", async () => {

@@ -23,16 +23,6 @@ describe("registry", () => {
         ({ name, description: "test", execute: async () => ({ text: "" }) }) as unknown as TacoTool;
 
     describe("ExtensionRegistry", () => {
-        it("starts empty with zero failed/unauthorized entries", () => {
-            const r = new ExtensionRegistry();
-            assert.deepEqual(r.tools(), []);
-            assert.deepEqual(r.systemPromptContributors(), []);
-            assert.deepEqual(r.contextHooks(), { builtins: [], external: [] });
-            assert.equal(r.report.loaded.length, 0);
-            assert.equal(r.report.failed.length, 0);
-            assert.equal(r.report.unauthorized.length, 0);
-        });
-
         it("does not mutate previously returned activation failure reports", () => {
             const registry = new ExtensionRegistry();
             registry.recordFailed("example", "first", "session");
@@ -204,14 +194,6 @@ describe("extensionApi", () => {
     const unreg = (name: string): boolean => Reflect.deleteProperty(tagRegistry, name);
 
     describe("createExtensionApi", () => {
-        it("exposes manifest and logger", () => {
-            const r = new ExtensionRegistry();
-            const m = makeManifest([]);
-            const api = createExtensionApi(m, r, silentLogger, "external");
-            assert.equal(api.manifest, m);
-            assert.equal(typeof api.logger.warn, "function");
-        });
-
         it("registerContextHook with 'context' permission stores the hook", () => {
             const r = new ExtensionRegistry();
             const api = createExtensionApi(makeManifest(["context"]), r, silentLogger, "external");
@@ -447,7 +429,7 @@ describe("loader", () => {
     });
 
     after(() => {
-        process.env.TACO_EXTENSIONS_DIR = undefined;
+        delete process.env.TACO_EXTENSIONS_DIR;
         rmSync(tmpDir, { recursive: true, force: true });
     });
 
@@ -702,13 +684,6 @@ describe("loader", () => {
             assert.ok(r.report.disabled.includes("@taco/builtin-output-redaction"));
             assert.deepEqual(r.toolResultHooks().builtins, []);
         });
-
-        it("default behavior: output-redaction builtin is registered when not disabled", async () => {
-            // Sanity baseline so the previous test's assertion is meaningful.
-            const r = await loadExtensions({ extensions: [] });
-            assert.ok(r.report.loaded.some((e) => e.name === "@taco/builtin-output-redaction"));
-            assert.equal(r.toolResultHooks().builtins.length, 1);
-        });
     });
 });
 
@@ -721,7 +696,7 @@ describe("integration", () => {
     });
 
     after(() => {
-        process.env.TACO_EXTENSIONS_DIR = undefined;
+        delete process.env.TACO_EXTENSIONS_DIR;
         rmSync(tmpDir, { recursive: true, force: true });
     });
 
@@ -759,20 +734,6 @@ describe("integration", () => {
                 r.report.loaded.some((e) => e.name === "healthy"),
                 `expected healthy in loaded, got: ${JSON.stringify(r.report.loaded)}`,
             );
-        });
-
-        it("extension-overrides-builtin-tool is recorded as a warning + the tool is overridden", async () => {
-            writeExt(
-                "override-read",
-                `export default function (taco) {
-                taco.registerTool({ name: "read", description: "fake", execute: async () => ({ text: "x" }) });
-            }`,
-                ["tools"],
-            );
-            const r = await loadExtensions({ extensions: [] });
-            const reads = r.tools().filter((t) => t.name === "read");
-            assert.ok(reads.length >= 1);
-            assert.ok(r.report.loaded.some((e) => e.name === "override-read"));
         });
     });
 

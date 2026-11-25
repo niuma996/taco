@@ -278,43 +278,7 @@ describe("SchedulesTab — listError vs actionError separation", () => {
     });
 });
 
-describe("SchedulesTab — table layout smoke", () => {
-    it("renders all five columns with their header labels when jobs are present", async () => {
-        // Layout smoke — guard against accidental column drops in the
-        // colgroup refactor. Each column is referenced by a class so a
-        // missing <col> would surface here.
-        const client = makeClient({
-            list: () => Promise.resolve({ jobs: [sampleJob("row-a"), sampleJob("row-b")] }),
-        });
-        const { container } = render(<SchedulesTab client={client} onOpenSession={noop} />);
-
-        await waitFor(() => {
-            expect(screen.getByText("row-a")).toBeTruthy();
-        });
-
-        const cols = container.querySelectorAll(".schedules-table col");
-        expect(cols).toHaveLength(6);
-
-        // Header cells render with the column keys.
-        expect(screen.getByText("schedules.columnName")).toBeTruthy();
-        expect(screen.getByText("schedules.columnSchedule")).toBeTruthy();
-        expect(screen.getByText("schedules.columnCommand")).toBeTruthy();
-        expect(screen.getByText("schedules.columnLastRun")).toBeTruthy();
-        expect(screen.getByText("schedules.columnEnabled")).toBeTruthy();
-        expect(screen.getByText("schedules.columnActions")).toBeTruthy();
-    });
-});
-
 describe("SchedulesTab — modal add / edit flow", () => {
-    it("renders the + New schedule header button on mount", () => {
-        const client = makeClient();
-        render(<SchedulesTab client={client} onOpenSession={noop} />);
-        // The button is the only entry-point into the add flow now
-        // (no more inline form). Asserting on its accessible name
-        // doubles as a smoke test that the i18n key survives.
-        expect(screen.getByRole("button", { name: "schedules.addButton" })).toBeTruthy();
-    });
-
     it("opens the create dialog and submits the form to jobs.create", async () => {
         const createSpy = vi.fn(({ job }: Record<string, unknown>) =>
             Promise.resolve({ job: { id: "new", ...(job as object) } }),

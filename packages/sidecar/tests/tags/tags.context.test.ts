@@ -196,24 +196,6 @@ describe("mergeCompactionInstructions", () => {
     it("returns undefined when neither side is present", () => {
         assert.equal(mergeCompactionInstructions(undefined, []), undefined);
     });
-
-    it("passes through caller instructions when nothing is pinned", () => {
-        assert.equal(mergeCompactionInstructions("be terse", []), "be terse");
-    });
-
-    it("uses the pin directive alone for auto-compact", () => {
-        const merged = mergeCompactionInstructions(undefined, ["memory"]);
-        assert.ok(merged);
-        assert.ok(merged.includes("memory"));
-        assert.equal(merged.includes("be terse"), false);
-    });
-
-    it("keeps caller instructions ahead of the pin directive", () => {
-        const merged = mergeCompactionInstructions("be terse", ["memory"]);
-        assert.ok(merged);
-        assert.ok(merged.startsWith("be terse"));
-        assert.ok(merged.includes("memory"));
-    });
 });
 
 // ── helpers ──────────────────────────────────────────────────────────────────

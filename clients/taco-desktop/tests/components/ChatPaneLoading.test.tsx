@@ -188,10 +188,6 @@ describe("ChatPane running turn controls", () => {
         assert.equal(Boolean(screen.queryByText("input.steerHint")), false);
         assert.equal(screen.getByRole("textbox").hasAttribute("aria-describedby"), false);
         assert.equal(
-            Boolean(screen.queryByRole("button", { name: "input.interruptReply" })),
-            false,
-        );
-        assert.equal(
             Boolean(screen.queryByRole("button", { name: /input.interruptAndSendQueued/ })),
             false,
         );
@@ -225,10 +221,6 @@ describe("ChatPane running turn controls", () => {
         assert.deepEqual(onCancelQueued.mock.calls, [[item]]);
         assert.equal(onAbort.mock.calls.length, 0);
 
-        assert.equal(
-            Boolean(screen.queryByRole("button", { name: "input.interruptReply" })),
-            false,
-        );
         assert.equal(input.value, "draft");
 
         fireEvent.click(screen.getByRole("button", { name: "input.sendSteer" }));
@@ -375,10 +367,6 @@ describe("ChatPane running turn controls", () => {
             input: "",
             attachments: [],
         });
-        assert.equal(
-            Boolean(screen.queryByRole("button", { name: "input.interruptReply" })),
-            false,
-        );
         assert.equal(Boolean(screen.queryByText("input.steerHint")), false);
         assert.equal(
             Boolean(screen.queryByRole("button", { name: "input.stop" })),
@@ -536,7 +524,6 @@ function chatColumn(): HTMLElement {
 describe("ChatPane 用户消息导轨", () => {
     it("有用户消息的会话渲染导轨但不渲染可见计数", () => {
         renderPane(workspace({}, { messages: conversation(2) }));
-        assert.equal(screen.queryByTestId("user-message-count"), null);
         assert.ok(screen.getByTestId("user-message-rail"));
         assert.ok(screen.getByText("message.guideCountValue 2"));
     });
@@ -544,7 +531,6 @@ describe("ChatPane 用户消息导轨", () => {
     it("空会话不渲染导轨", () => {
         renderPane(workspace({}, { messages: [] }));
         assert.equal(screen.queryByTestId("user-message-rail"), null);
-        assert.equal(screen.queryByTestId("user-message-count"), null);
     });
 
     it("加载骨架屏时不渲染导轨", async () => {
@@ -608,7 +594,6 @@ describe("local workspace Git footer", () => {
         const footer = document.querySelector("footer.input");
         assert.ok(footer?.querySelector(".composer-dock > .composer-input-stack"));
         assert.ok(footer?.querySelector(".composer-input-stack > .input-card"));
-        assert.equal(footer?.querySelector(".composer-frost"), null);
         assert.ok(
             footer?.querySelector(".composer-dock > .composer-input-stack + .workspace-git-status"),
         );

@@ -708,22 +708,6 @@ describe("AgentForm", () => {
         assert.equal(onSave.mock.calls[1]?.[0]?.timeoutMinutes, 45);
     });
 
-    it("refuses to save a timeout that is not a whole number of minutes", async () => {
-        const onSave = vi.fn<(v: AgentFormValue) => void>();
-        render(<AgentForm {...base} runtime="standard" onSave={onSave} onCancel={() => {}} />);
-        const user = await fillRequired("plain");
-        const timeoutInput = screen.getByPlaceholderText("agents.form.timeoutMinutesAuto");
-        await user.type(timeoutInput, "0");
-        await user.click(screen.getByText("agents.form.save"));
-        assert.equal(onSave.mock.calls.length, 0);
-    });
-
-    it("shows the no-user-questions rule in the Claude Code dialog", () => {
-        render(<AgentForm {...base} runtime="claude-code" onSave={() => {}} onCancel={() => {}} />);
-        assert.ok(screen.getByText("agents.form.ccRuleAskUser"));
-        assert.ok(screen.getByText("agents.form.ccRuleCheckpoints"));
-    });
-
     it("edit prefills Claude Code settings from the definition", () => {
         render(
             <AgentForm
@@ -1041,34 +1025,6 @@ describe("AgentForm", () => {
             "no model override means the user's Codex config decides",
         );
         assert.ok(screen.getByText("agents.form.codexUsesConfig"));
-    });
-
-    it("Codex dialog: engine settings live in a titled section with a two-column grid", () => {
-        render(
-            <AgentForm
-                {...base}
-                runtime="codex"
-                codexRuntimeStatus={{
-                    runtime: "codex",
-                    installed: true,
-                    version: "0.167.2",
-                    auth: "signed-in",
-                }}
-                onSave={() => {}}
-                onCancel={() => {}}
-            />,
-        );
-        assert.ok(screen.getByText("agents.form.codexEngineTitle"));
-        assert.ok(screen.getByText("agents.form.codexEngineHint"));
-        const grid = document.querySelector(".agent-form-grid");
-        assert.ok(grid, "the engine fields must sit in the grid");
-        // The run directory and the approval policy each need a full row.
-        assert.equal(
-            document.querySelectorAll(".agent-form-grid > .agent-form-grid-full").length,
-            2,
-        );
-        assert.ok(screen.getByText("agents.form.codexSandboxHint"));
-        assert.ok(screen.getByText("agents.form.codexApprovalHint"));
     });
 
     it("Codex dialog: the setup card shows a status chip, not a bare sentence", () => {

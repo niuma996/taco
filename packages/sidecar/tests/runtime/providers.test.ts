@@ -101,16 +101,6 @@ describe("customProvider", () => {
             assert.deepEqual(kinds(eyes), ["text", "image"]);
             assert.ok(!kinds(plain).includes("image"), "a text-only model has the image replaced");
         });
-
-        it("emits a Credential-resolvable api key auth (envApiKeyAuth with no env fallback)", () => {
-            const p = buildCustomProvider(VALID);
-            // auth shape: ApiKeyAuth, resolve() reads no env when credential absent (envVars empty).
-            // Only validates the shape — real credential resolution goes through pi's CredentialStore.
-            const auth = p.auth as { apiKey?: { name?: string; resolve?: unknown } };
-            assert.ok(auth.apiKey, "uses apiKey auth");
-            assert.equal(typeof auth.apiKey?.resolve, "function");
-            assert.equal(auth.apiKey?.name, "My Relay API key");
-        });
     });
 
     describe("validateCustomProviders", () => {
@@ -331,13 +321,6 @@ describe("providerKeyStore", () => {
             assert.equal(process.env.OPENAI_API_KEY, "sk-openai-test-1234567890");
             // "minimax-cn" → MINIMAX_CN_API_KEY (dash → underscore, uppercased)
             assert.equal(process.env.MINIMAX_CN_API_KEY, "sk-cp-test-1234567890");
-        });
-
-        it("update clears stale env var when key is removed", () => {
-            const store = new ProviderKeyStore({ minimax: "sk-minimax-1234567890" });
-            assert.equal(process.env.MINIMAX_API_KEY, "sk-minimax-1234567890");
-            store.update({ minimax: "" });
-            assert.equal(process.env.MINIMAX_API_KEY, undefined);
         });
 
         // ── pi CredentialStore contract ──

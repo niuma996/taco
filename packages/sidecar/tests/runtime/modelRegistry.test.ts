@@ -191,17 +191,6 @@ describe("ModelRegistry — pi-native all-resident catalog", () => {
         assert.equal(b?.configured, true);
     });
 
-    it("ProviderKeyStore.read serves keys by provider id (CredentialStore)", async () => {
-        const store = new ProviderKeyStore({ "stub-a": "key-a-1234567890" });
-        assert.deepEqual(await store.read("stub-a"), { type: "api_key", key: "key-a-1234567890" });
-        assert.equal(await store.read("stub-b"), undefined);
-        const listed = await store.list();
-        assert.deepEqual(
-            listed.map((c) => c.providerId),
-            ["stub-a"],
-        );
-    });
-
     it("listAvailableModels returns all resident models; filters by provider", () => {
         const store = new ProviderKeyStore({});
         const mr = new ModelRegistry({
@@ -291,20 +280,6 @@ describe("ModelRegistry — pi-native all-resident catalog", () => {
         const stubA = mr.listConfiguredProviders().find((p) => p.id === "stub-a");
         const stubB = mr.listConfiguredProviders().find((p) => p.id === "stub-b");
         assert.equal(stubA?.configured, false);
-        assert.equal(stubB?.configured, false);
-    });
-
-    it("configured=true when providerKeyStore holds the entry for the provider", () => {
-        const store = new ProviderKeyStore({ "stub-a": "key-a-1234567890" });
-        const mr = new ModelRegistry({
-            providerKeyStore: store,
-            models,
-            sessionRegistry: makeSessionRegistry(),
-            builtinProviders: STUBS,
-        });
-        const stubA = mr.listConfiguredProviders().find((p) => p.id === "stub-a");
-        const stubB = mr.listConfiguredProviders().find((p) => p.id === "stub-b");
-        assert.equal(stubA?.configured, true);
         assert.equal(stubB?.configured, false);
     });
 

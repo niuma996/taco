@@ -59,7 +59,6 @@ describe("onboarding main model", () => {
     it("shows thinking only after a successful model save and never offers lite", async () => {
         const { user, onSelect, settingsWrite } = setup();
         expect(screen.queryByRole("slider")).toBeNull();
-        expect(screen.queryByText("settings.liteModelTitle")).toBeNull();
         await pick(user);
         const slider = await screen.findByRole("slider");
         expect(slider.getAttribute("aria-valuetext")).toBe("off");

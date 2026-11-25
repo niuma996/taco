@@ -308,17 +308,6 @@ describe("registry", () => {
             assert.equal(calls.length, 5);
         });
 
-        it("trackWorkspace associates im workspaces with a channel", () => {
-            const registry = new ChannelRegistry();
-            registry.trackWorkspace("mock-1", "im://mock-1/u1/c1");
-            // Internal association asserted indirectly via stop cleanup; P0 only verifies no throw
-        });
-
-        it("push silently ignores non-existent channelId", () => {
-            const registry = new ChannelRegistry();
-            registry.push("nonexistent", frame("x")); // must not throw
-        });
-
         it("validateChannelInstanceId rejects invalid channelIds", () => {
             assert.equal(
                 validateChannelInstanceId({

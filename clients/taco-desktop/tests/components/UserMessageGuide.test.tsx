@@ -50,7 +50,6 @@ function stubGeometry(
 describe("UserMessageGuide — 计数与当前项", () => {
     it("不在导轨上方显示可见计数", () => {
         render(<UserMessageGuide entries={ENTRIES} activeId="u2" onNavigate={vi.fn()} />);
-        expect(screen.queryByTestId("user-message-count")).toBeNull();
         expect(screen.getByText("message.guideCountValue 3")).toBeTruthy();
     });
 

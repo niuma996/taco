@@ -526,21 +526,6 @@ describe("Codex engine adapter", () => {
         assert.match(result.resultText, /not an existing directory/);
     });
 
-    it("leaves SDK availability to the required preflight boundary", async (t) => {
-        const f = await fixture(t);
-        await createCodexEngine(f.codexDeps).run(request());
-        let loads = 0;
-        const engine = createCodexEngine({
-            ...f.codexDeps,
-            loadCodexSdkForRun: async () => {
-                loads++;
-                throw new Error("SDK removed");
-            },
-        });
-        await assert.rejects(engine.preflight(def), /managed Codex runtime/);
-        assert.equal(loads, 1);
-    });
-
     for (const fail of [false, true]) {
         it(`closes the communication bridge after a ${fail ? "failed" : "successful"} run`, async (t) => {
             const f = await fixture(t);

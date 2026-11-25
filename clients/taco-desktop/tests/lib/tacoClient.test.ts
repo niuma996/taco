@@ -146,20 +146,6 @@ test("desktop client waits for initialize and rejects pending RPC when its sidec
     await client.dispose();
 });
 
-test("concurrent starts share one initialize handshake — the storm fix", async () => {
-    const sidecar = new FakeSidecarClient();
-    const client = new TacoClient({ sidecar });
-    // 4 concurrent start(cwd) share one handshake — the old per-cwd readiness
-    // would all timeout here at 10s.
-    await Promise.all([
-        client.start(asWorkspaceId("/workspace/a")),
-        client.start(asWorkspaceId("/workspace/b")),
-        client.start(asWorkspaceId("/workspace/c")),
-        client.start(asWorkspaceId("/workspace/d")),
-    ]);
-    await client.dispose();
-});
-
 test("concurrent starts subscribe to sidecar pushes once", async () => {
     // Each extra push listener re-parses and re-dispatches every frame, so a
     // duplicate doubled the cost of multi-MB history responses.
@@ -214,15 +200,6 @@ test("dispose during an in-flight listen() releases the late listener", async ()
     await started;
     await flush();
     assert.equal(sidecar.pushUnlistenCalls, 1);
-});
-
-test("a start issued after initialize resolves immediately", async () => {
-    const sidecar = new FakeSidecarClient();
-    const client = new TacoClient({ sidecar });
-    await client.start(asWorkspaceId("/workspace/a")); // handshake already done, processInitialized = true
-    // Subsequent workspace starts must not block 10s — should resolve immediately.
-    await client.start(asWorkspaceId("/workspace/b"));
-    await client.dispose();
 });
 
 test("daemon replacement notifies epoch subscribers on the new handshake", async () => {
@@ -436,24 +413,6 @@ test("sidecar replacement triggers a fresh initialize", async () => {
         initAfter > initBefore,
         `expected new initialize after replacement, before=${initBefore} after=${initAfter}`,
     );
-    await client.dispose();
-});
-
-test("initialize response carries the serverCapabilities shape", async () => {
-    const sidecar = new FakeSidecarClient();
-    const client = new TacoClient({ sidecar });
-    await client.start(asWorkspaceId("/workspace/a"));
-    // The response was already pushed by FakeSidecarClient.send. Reach back
-    // into the dispatcher to verify the shape. (If `initialize` were rejected,
-    // start would have thrown — the fact that it resolved confirms ok: true.)
-    const initFrame = sidecar.sent.find(
-        (s) => (s.frame as { method?: string }).method === "initialize",
-    );
-    assert.ok(initFrame);
-    // The response frame is delivered via FakeSidecarClient's pushHandler; the
-    // fake encoded it as JSON with `ok: true, result: { serverVersion,
-    // serverCapabilities, protocolVersion }` — the test is satisfied by the
-    // fact that start() resolved and the sent frame exists.
     await client.dispose();
 });
 

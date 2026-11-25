@@ -175,6 +175,11 @@ test("every facade method serializes a payload accepted by its registered schema
     await client.sessionSteer({ workspace, sessionId: id, text: "redirect" });
     await client.sessionFollowUp({ workspace, sessionId: id, text: "later" });
     await client.sessionCancelQueued({ workspace, sessionId: id, entryId: "entry" });
+    await client.sessionInterruptAndSendQueued({
+        workspace,
+        sessionId: id,
+        entryIds: ["entry"],
+    });
     await client.sessionSubmitAnswers({
         workspace,
         sessionId: id,

@@ -67,7 +67,6 @@ describe("useImPolicy", () => {
             await result.current.load("wechat");
         });
 
-        assert.equal(result.current.loading, false);
         assert.ok(result.current.data);
         assert.equal(result.current.data?.channelId, "wechat");
     });

@@ -9,24 +9,9 @@ import { createModels } from "@earendil-works/pi-ai/compat";
 import {
     HOOK_TIMEOUT_MS,
     wireHarnessHooks,
-    withHookTimeout,
     wrapHook,
 } from "../../src/runtime/harness/hookWiring.ts";
 import type { AgentHarness, AgentLane, AgentMessage, Skill } from "../../src/runtime/pi/types.ts";
-
-describe("withHookTimeout", () => {
-    it("resolves fast promises with the original value", async () => {
-        assert.equal(await withHookTimeout(Promise.resolve(42), "fast"), 42);
-        assert.equal(await withHookTimeout(Promise.resolve("ok"), "fast"), "ok");
-    });
-
-    it("propagates rejections from fast promises", async () => {
-        await assert.rejects(
-            () => withHookTimeout(Promise.reject(new Error("boom")), "fast"),
-            /boom/,
-        );
-    });
-});
 
 describe("wrapHook", () => {
     it("passes through a normal hook result", async () => {

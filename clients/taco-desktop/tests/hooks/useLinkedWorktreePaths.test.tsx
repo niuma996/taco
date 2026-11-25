@@ -10,7 +10,6 @@ afterEach(cleanup);
 describe("useLinkedWorktreePaths", () => {
     it("derives hidden paths from each workspace's own Git identity", async () => {
         const { useLinkedWorktreePaths } = await import("../../src/hooks/useGitWorkspace");
-        expect(typeof useLinkedWorktreePaths).toBe("function");
 
         const main: GitInspectResult = {
             status: "repository",
