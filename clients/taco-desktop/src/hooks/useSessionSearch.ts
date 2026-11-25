@@ -2,7 +2,7 @@
  * useSessionSearch — server-side session search for the sidebar.
  *
  * The sidebar list is paginated: the server hands out one page at a time
- * (30 of 128 rows in a busy workspace), so filtering the rows the client
+ * (10 of 128 rows in a busy workspace), so filtering the rows the client
  * already holds would only ever match that first page. The query therefore
  * goes to the server, which filters the whole workspace before slicing — and
  * the cursor it returns pages through the matches, not through the

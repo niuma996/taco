@@ -64,7 +64,7 @@ export interface SessionMeta {
 }
 
 /** Default page size for `session.list` when the caller omits `limit`. */
-export const SESSION_LIST_DEFAULT_LIMIT = 30;
+export const SESSION_LIST_DEFAULT_LIMIT = 10;
 
 /** Upper bound the server clamps `limit` to, so one call cannot read unbounded. */
 export const SESSION_LIST_MAX_LIMIT = 200;

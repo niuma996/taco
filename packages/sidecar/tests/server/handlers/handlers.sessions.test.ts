@@ -720,13 +720,29 @@ describe("session.list", () => {
         });
 
         it("walks pages via the cursor without repeating or skipping entries", async () => {
-            const first = await callList(45, {});
-            const second = await callList(45, { cursor: first.nextCursor });
-            assert.equal(second.sessions.length, 15);
-            assert.equal(second.total, 45);
-            assert.equal(second.nextCursor, undefined, "tail page has no further cursor");
+            // Page sizes derive from the default limit: full pages, then the remainder.
+            const pages: Array<Awaited<ReturnType<typeof callList>>> = [];
+            let cursor: { updatedAt: string; id: string } | undefined;
+            for (;;) {
+                const res = await callList(45, cursor ? { cursor } : {});
+                pages.push(res);
+                assert.equal(res.total, 45);
+                if (!res.nextCursor) break;
+                cursor = res.nextCursor;
+                assert.ok(pages.length <= 45, "cursor must advance or this never terminates");
+            }
+            const expectedPages = Math.ceil(45 / SESSION_LIST_DEFAULT_LIMIT);
+            assert.equal(pages.length, expectedPages);
+            for (const [i, page] of pages.entries()) {
+                const expected =
+                    i < expectedPages - 1
+                        ? SESSION_LIST_DEFAULT_LIMIT
+                        : 45 % SESSION_LIST_DEFAULT_LIMIT;
+                assert.equal(page.sessions.length, expected);
+            }
+            assert.equal(pages.at(-1)?.nextCursor, undefined, "tail page has no further cursor");
 
-            const ids = [...first.sessions, ...second.sessions].map((s) => s.id);
+            const ids = pages.flatMap((page) => page.sessions.map((s) => s.id));
             assert.equal(new Set(ids).size, 45, "pages together cover every session exactly once");
         });
 
