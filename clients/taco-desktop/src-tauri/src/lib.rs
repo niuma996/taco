@@ -1500,8 +1500,10 @@ fn control_socket_present(control: &std::path::Path) -> bool {
 /// - **Windows / Linux**: `decorations:false` frameless, sharp corners, and
 ///   the React WindowControls supplies min/max/close buttons at the top-right.
 fn build_main_window(app: &tauri::App) -> Result<(), tauri::Error> {
+    let is_dev = tauri::is_dev();
+    let title = if is_dev { "Taco · Dev" } else { "Taco" };
     let builder = tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::default())
-        .title("Taco")
+        .title(title)
         .theme(Some(tauri::Theme::Dark))
         .inner_size(1200.0, 800.0)
         .min_inner_size(800.0, 600.0)
@@ -1516,6 +1518,19 @@ fn build_main_window(app: &tauri::App) -> Result<(), tauri::Error> {
     let builder = builder.decorations(false);
 
     let window = builder.build()?;
+    if is_dev {
+        let executable = std::env::current_exe().unwrap_or_default();
+        eprintln!(
+            "taco-dev: pid={} executable={} dev_url={}",
+            std::process::id(),
+            executable.display(),
+            app.config()
+                .build
+                .dev_url
+                .as_ref()
+                .map_or("none", |url| url.as_str())
+        );
+    }
 
     // Close button (or OS close gesture) hides instead of quitting. The
     // OS quit path goes through `RunEvent::ExitRequested` which uses

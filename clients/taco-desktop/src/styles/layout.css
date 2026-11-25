@@ -53,6 +53,16 @@ header.topbar {
     padding-left: 0;
 }
 
+.topbar-dev-badge {
+    flex: none;
+    padding: var(--space-0-5) var(--space-1-5);
+    border-radius: var(--radius-pill);
+    background: var(--bg-card);
+    color: var(--fg);
+    font-size: 0.7rem;
+    font-weight: 600;
+}
+
 /* Drag region in the topbar (header + drag-spacer via data-tauri-drag-region) enables window
    dragging + double-click maximize; interactive children omit the attribute so they don't interfere. */
 header.topbar .drag-spacer {

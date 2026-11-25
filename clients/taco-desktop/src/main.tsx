@@ -20,6 +20,11 @@ import "./styles.css";
 // `setup.done` and React mounting — in dev that span also covers Vite's module
 // graph transform, which is invisible from both the Rust and React sides.
 bootMark("ui.main.module_eval");
+if (import.meta.env.DEV) {
+    document.documentElement.dataset.build = "vite-dev";
+    document.title = "Taco · Dev";
+    bootMark("ui.dev.ready", window.location.origin);
+}
 
 // Mermaid diagrams render synchronously once Pele is in; fetch its chunk while
 // idle so the first diagram does not paint as source and then grow.

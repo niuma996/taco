@@ -789,6 +789,7 @@ export default function App() {
                             onModeChange={selectConversationMode}
                         />
                     </div>
+                    {import.meta.env.DEV && <span className="topbar-dev-badge">Dev</span>}
                     {/* ContextIndicator moved to ChatPane input-controls */}
                     {activeCwd && activeSid && (
                         <PlanModeIndicator

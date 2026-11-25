@@ -85,6 +85,23 @@ Run in order:
    sidecar source (debug builds), so edits take effect without
    re-staging.
 
+### Verify the desktop development window
+
+- From the checkout you are testing, run `pnpm dev:desktop`. The native
+  window is titled **Taco · Dev**, and the top bar shows a **Dev** badge
+  only when the Vite frontend has actually loaded.
+- Check the `taco-dev:` line in the same terminal. Its PID must still be
+  running, its executable must be under this checkout's `src-tauri/target/`,
+  and its dev URL must be `http://localhost:1420/`. To check a port conflict
+  on macOS, use `lsof -nP -iTCP:1420 -sTCP:LISTEN`, then
+  `lsof -a -p <vite-pid> -d cwd` to verify the Vite checkout.
+- Before using a captured window as evidence, check both the **Dev** badge
+  and the WebView URL (`http://localhost:1420/`, not `tauri://localhost`).
+  Do not select a window by `Taco` alone: app lookup can launch an old bundle.
+  If the dev launcher exits instead of printing a new PID, check for a
+  previously launched dev bundle. Quit only the conflicting instance and
+  rerun the command; do not kill all Taco processes by name.
+
 ### PR description
 
 Use this template:
