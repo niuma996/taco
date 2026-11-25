@@ -534,10 +534,11 @@ function chatColumn(): HTMLElement {
 }
 
 describe("ChatPane 用户消息导轨", () => {
-    it("有用户消息的会话渲染导轨和计数", () => {
+    it("有用户消息的会话渲染导轨但不渲染可见计数", () => {
         renderPane(workspace({}, { messages: conversation(2) }));
-        assert.equal(screen.getByTestId("user-message-count").textContent, "2");
+        assert.equal(screen.queryByTestId("user-message-count"), null);
         assert.ok(screen.getByTestId("user-message-rail"));
+        assert.ok(screen.getByText("message.guideCountValue 2"));
     });
 
     it("空会话不渲染导轨", () => {

@@ -18,7 +18,7 @@
     width: 100%;
     min-height: 126px;
     padding: var(--space-2-5);
-    background: var(--bg-elevated);
+    background: var(--bg-card);
     border: 1px solid var(--border);
     color: var(--fg);
     font-size: var(--text-base);
@@ -387,7 +387,7 @@
     font-size: var(--text-xs);
     line-height: var(--leading-normal);
     color: var(--fg-dim);
-    background: var(--bg-elevated);
+    background: var(--bg-card);
     border: 1px solid var(--border-subtle);
     border-radius: var(--radius-pill);
 }

@@ -92,7 +92,7 @@
     width: 100%;
     min-width: 0;
     padding: var(--space-2-5);
-    background: var(--bg-elevated);
+    background: var(--bg-card);
     border: 1px solid var(--border);
     color: var(--fg);
     font-size: var(--text-base);

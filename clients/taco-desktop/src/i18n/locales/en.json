@@ -1023,6 +1023,7 @@
     "guideLabel": "User message navigation",
     "guideCountValue": "{{count}} user messages",
     "guideItem": "Jump to user message {{index}}",
+    "guidePreviewAction": "Open user message {{index}}",
     "guidePosition": "{{index}} of {{total}}",
     "guideImageOnly": "Image message",
     "guideEmpty": "Empty message",

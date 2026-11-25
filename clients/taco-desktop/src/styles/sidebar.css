@@ -324,6 +324,15 @@ ul.conversation-channel-list .session-item.active {
     color: var(--danger);
 }
 
+/* The danger tone is for the moment the delete can actually happen. A
+   grayed entry must not flash red under the cursor. */
+.session-actions-menu-danger[data-disabled],
+.session-actions-menu-danger[data-disabled]:hover,
+.session-actions-menu-danger[data-disabled]:focus-visible,
+.session-actions-menu-danger[data-disabled][data-highlighted] {
+    color: var(--fg-dim);
+}
+
 /* Empty search result — a quiet line where the rows would be. */
 .session-empty {
     padding: 0.6rem 0.5rem;
@@ -402,9 +411,12 @@ button svg > * {
 }
 
 .ui-divider.activity-rail-divider {
-    /* Divider below chat button: aligns with the hover/active square blocks. */
+    /* Divider below chat button: aligns with the hover/active square blocks.
+       A raised edge: it cuts a column out of the rail rather than splitting
+       two surfaces, so it keeps the light line. */
     width: 36px;
     margin: 2px 0;
+    background: var(--border-raised);
 }
 
 /* Settings pinned to bottom via margin-top:auto. Separator line above. */
@@ -423,6 +435,7 @@ button svg > * {
     /* Divider above settings: same width as the top divider, centered. */
     width: 36px;
     margin-bottom: 2px;
+    background: var(--border-raised);
 }
 
 /* Each item: min-height for the bg block; content (icon) centered. */

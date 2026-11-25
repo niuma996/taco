@@ -171,20 +171,19 @@ header.topbar .topbar-picker-group {
     min-width: 0;
 }
 
-/* Directory / IM switch in the topbar: plain text segments on an equal-width
-   grid plus one accent underline that slides between them. No track, no
-   border — the underline is the only chrome, so the bar stays flat. */
+/* Directory / IM switch in the topbar: two equal-width segments. The
+   selected one is a rounded, slightly raised surface with a colour dot in
+   front of its label. No underline, no track — the pill is the whole
+   chrome, so the bar stays flat. */
 .workspace-mode-tabs {
-    --tab-gap: var(--space-3);
-    position: relative;
     /* Grid with equal columns: in an auto-width container every column sizes
-       to the widest label, so both segments — and the underline — are the same
-       length in any language. */
+       to the widest label, so both segments are the same length in any
+       language. */
     display: inline-grid;
     grid-auto-flow: column;
     grid-auto-columns: 1fr;
     align-items: center;
-    gap: var(--tab-gap);
+    gap: var(--space-1);
     flex: 0 0 auto;
     -webkit-app-region: no-drag;
 }
@@ -193,47 +192,73 @@ header.topbar .topbar-picker-group {
     display: inline-flex;
     align-items: center;
     justify-content: center;
+    gap: var(--space-1-5);
     /* Height keeps a 24px-tall click target; the column sets the width. */
     height: var(--composer-control-height);
-    padding: 0;
-    border: 0;
-    border-radius: var(--radius-xs);
+    padding: 0 var(--space-2);
+    /* The border is transparent until the segment is selected, so raising the
+       pill never shifts the labels. */
+    border: 1px solid transparent;
+    /* Fully rounded ends: on a 24px-tall segment the pill radius resolves to
+       half the height, so the left and right ends are half-circles. */
+    border-radius: var(--radius-pill);
     font-size: var(--text-sm);
     white-space: nowrap;
     background: transparent;
     color: var(--fg-dim);
     cursor: pointer;
-    transition: color var(--motion-duration-fast) var(--motion-ease-standard);
+    transition:
+        background-color var(--motion-duration-fast) var(--motion-ease-standard),
+        color var(--motion-duration-fast) var(--motion-ease-standard),
+        border-color var(--motion-duration-fast) var(--motion-ease-standard),
+        box-shadow var(--motion-duration-fast) var(--motion-ease-standard);
 }
 
 .workspace-mode-tab:hover:not(.workspace-mode-tab--active) {
     color: var(--fg);
 }
 
-/* Active segment is the neutral bright tone — the accent stays on the
-   underline, so the bar carries colour in exactly one place. */
+/* Selected segment: a flat raised pill. The surface and the shadow are
+   theme tokens, so the dark theme reads as a deeper shadow and the light
+   theme as a softer one. */
 .workspace-mode-tab--active {
     color: var(--fg);
+    background: var(--segment-active-bg);
+    border-color: var(--segment-active-border);
+    box-shadow: var(--segment-active-shadow);
 }
 
-/* The sliding underline: one column wide (so its length never changes) and
-   moved by the active index, with the grid gap added to the travel. */
-.workspace-mode-tabs__underline {
-    position: absolute;
-    bottom: 0;
-    left: 0;
-    width: calc((100% - (var(--tab-count) - 1) * var(--tab-gap)) / var(--tab-count));
-    height: 2px;
-    border-radius: var(--radius-pill);
+/* The colour dot in front of the label. The slot stays in the layout when
+   the segment is not selected — an empty placeholder of the same size — so
+   both segments keep one length and the control never resizes when the
+   selection moves. */
+.workspace-mode-tab__dot {
+    width: 6px;
+    height: 6px;
+    flex: 0 0 auto;
+    border-radius: var(--radius-circle);
+    background: transparent;
+    opacity: 0;
+    transition: opacity var(--motion-duration-fast) var(--motion-ease-standard);
+}
+
+.workspace-mode-tab--active .workspace-mode-tab__dot {
+    opacity: 1;
+}
+
+/* Workspace carries the brand orange, the channel chat the accent blue — the
+   same split the activity rail uses. */
+.workspace-mode-tab--workspace .workspace-mode-tab__dot {
+    background: var(--brand-orange);
+}
+
+.workspace-mode-tab--im .workspace-mode-tab__dot {
     background: var(--accent);
-    pointer-events: none;
-    transform: translateX(calc(var(--tab-index) * (100% + var(--tab-gap))));
-    transition: transform var(--motion-duration-base) var(--motion-ease-out);
 }
 
 .workspace-mode-tab:focus-visible {
     outline: 2px solid var(--accent);
-    outline-offset: 1px;
+    outline-offset: 2px;
 }
 
 .topbar-workspace-select {
@@ -304,7 +329,7 @@ header.topbar .topbar-picker-group {
 /* menu / item rendered by Radix <DropdownMenu.Portal> into body end,
    not part of the header.topbar tree — scoped only by class names. */
 .topbar-workspace-menu {
-    background: var(--input-bg);
+    background: var(--bg-float);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     box-shadow: 0 6px 18px var(--shadow-color);
@@ -428,7 +453,7 @@ header.topbar .topbar-picker-group {
 /* Same chrome as .topbar-workspace-menu, but without the pane-width cap —
    these menus are short labels (English / 中文 / Light / Dark / System). */
 .topbar-quick-menu {
-    background: var(--input-bg);
+    background: var(--bg-float);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     box-shadow: 0 6px 18px var(--shadow-color);
@@ -577,9 +602,9 @@ header.topbar .topbar-picker-group {
     border-radius: var(--radius-lg);
     /* Top inset stays small — the topbar already separates the card from the
        window edge, and a full gutter there reads as an empty band. The left
-       gutter is tighter than the rest: the rail's own padding already separates
-       the card from the icons, and a full gutter there reads as a wide gap. */
-    margin: 2px 8px 8px 4px;
+       edge starts where the activity rail ends: the rail's 36px hover blocks
+       therefore have the same visual gap to the window and to this card. */
+    margin: 2px 8px 8px 0;
     box-shadow: var(--card-shadow);
     /* Third tier (rail/topbar → list column → content). Panes without a list
        column fall through to this directly and read as two tiers. */
@@ -795,7 +820,7 @@ button.topbar-context-indicator {
     align-items: center;
     gap: 0.25rem;
     padding: 0.15rem 0.4rem;
-    border: 1px solid color-mix(in srgb, var(--fg) 22%, transparent);
+    border: 1px solid var(--border);
     border-radius: var(--radius-xs);
     background: transparent;
     color: var(--fg);
@@ -867,7 +892,7 @@ button.topbar-context-indicator {
        panels don't start their headers at different heights. */
     padding: 8px 12px 12px;
     overflow-y: auto;
-    border-left: 1px solid var(--divider-panel);
+    border-left: 1px solid var(--divider-chat-panel);
     background: var(--bg-secondary);
     font-size: 13px;
     line-height: 1.4;

@@ -48,16 +48,9 @@ function stubGeometry(
 }
 
 describe("UserMessageGuide — 计数与当前项", () => {
-    it("显示用户消息总数", () => {
+    it("不在导轨上方显示可见计数", () => {
         render(<UserMessageGuide entries={ENTRIES} activeId="u2" onNavigate={vi.fn()} />);
-        expect(screen.getByTestId("user-message-count").textContent).toBe("3");
-    });
-
-    it("向读屏软件说明计数含义", () => {
-        render(<UserMessageGuide entries={ENTRIES} activeId="u2" onNavigate={vi.fn()} />);
-        // The visible count stays the plain number.
-        expect(screen.getByTestId("user-message-count").textContent).toBe("3");
-        // The meaning of the number is available to assistive technology.
+        expect(screen.queryByTestId("user-message-count")).toBeNull();
         expect(screen.getByText("message.guideCountValue 3")).toBeTruthy();
     });
 
@@ -197,6 +190,63 @@ describe("UserMessageGuide — 悬停预览", () => {
         expect(within(preview).getByTestId("user-message-preview-notice").textContent).toBe(
             "message.guideTruncated",
         );
+    });
+
+    it("点击预览卡片跳转到对应消息", async () => {
+        const user = userEvent.setup({ delay: null });
+        const onNavigate = vi.fn();
+        render(<UserMessageGuide entries={ENTRIES} activeId="u2" onNavigate={onNavigate} />);
+
+        await user.hover(marker(2));
+        const preview = await screen.findByTestId("user-message-preview-u2");
+        await user.click(
+            within(preview).getByRole("button", { name: "message.guidePreviewAction 2" }),
+        );
+
+        expect(onNavigate).toHaveBeenCalledTimes(1);
+        expect(onNavigate.mock.calls[0]?.[0].id).toBe("u2");
+    });
+
+    it("预览卡片支持 Enter 跳转到对应消息", async () => {
+        const user = userEvent.setup({ delay: null });
+        const onNavigate = vi.fn();
+        render(<UserMessageGuide entries={ENTRIES} activeId="u2" onNavigate={onNavigate} />);
+
+        await user.hover(marker(1));
+        const preview = await screen.findByTestId("user-message-preview-u1");
+        const action = within(preview).getByRole("button", {
+            name: "message.guidePreviewAction 1",
+        });
+        action.focus();
+        fireEvent.keyDown(action, { key: "Enter" });
+
+        expect(onNavigate).toHaveBeenCalledTimes(1);
+        expect(onNavigate.mock.calls[0]?.[0].id).toBe("u1");
+    });
+
+    it("快速切换标记时只保留一个预览", async () => {
+        const user = userEvent.setup({ delay: null });
+        render(<UserMessageGuide entries={ENTRIES} activeId="u2" onNavigate={vi.fn()} />);
+
+        await user.hover(marker(2));
+        await screen.findByTestId("user-message-preview-u2");
+        await user.hover(marker(1));
+
+        expect(screen.queryByTestId("user-message-preview-u2")).toBeNull();
+        expect(await screen.findByTestId("user-message-preview-u1")).toBeTruthy();
+    });
+
+    it("导轨滚动时关闭当前预览", async () => {
+        const user = userEvent.setup({ delay: null });
+        render(<UserMessageGuide entries={ENTRIES} activeId="u2" onNavigate={vi.fn()} />);
+
+        await user.hover(marker(1));
+        await screen.findByTestId("user-message-preview-u1");
+        fireEvent.scroll(screen.getByTestId("user-message-rail"));
+
+        await waitFor(() => {
+            expect(screen.queryByTestId("user-message-preview-u1")).toBeNull();
+        });
     });
 });
 

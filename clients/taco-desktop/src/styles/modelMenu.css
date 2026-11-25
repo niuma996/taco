@@ -58,7 +58,7 @@
     position: sticky;
     top: 0;
     padding: 0.4rem;
-    background: var(--bg-elevated);
+    background: var(--bg-float);
     border-bottom: 1px solid var(--divider-section);
     z-index: 1;
 }

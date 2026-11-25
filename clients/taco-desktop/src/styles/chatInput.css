@@ -38,6 +38,8 @@ footer.input {
     gap: var(--space-2);
     box-sizing: border-box;
     padding: var(--space-1) var(--space-1-5) var(--space-1) var(--space-2-5);
+    /* Shadow line: the bubble's own surface (--bg-card) is what separates it
+       from the panel, the line only closes the shape. */
     border: 1px solid var(--border);
     border-radius: var(--radius-lg);
     font-size: 0.82rem;
@@ -48,7 +50,7 @@ footer.input {
     width: 100%;
     border-color: color-mix(in srgb, var(--warning) 30%, var(--border));
     color: var(--warning);
-    background: color-mix(in srgb, var(--warning) 8%, transparent);
+    background: color-mix(in srgb, var(--warning) 8%, var(--bg-card));
     margin-bottom: var(--space-2);
     animation: ui-enter var(--motion-duration-fast) var(--motion-ease-out);
 }
@@ -94,6 +96,8 @@ footer.input {
    Note: cannot use overflow:hidden to crop corners — model popover and cache popover both
    pop upward and would be clipped by the card's top edge. Each section carries its own outer corners. */
 .input-card {
+    /* Shadow line — see .input-status above. The card's own surface (the
+       textarea band) is what tells it apart from the chat panel. */
     border: 1px solid var(--border);
     border-radius: var(--radius-lg);
     display: flex;
@@ -114,8 +118,10 @@ footer.input textarea {
     width: 100%;
     resize: none;
     box-sizing: border-box;
-    /* Top half: panel color (light), consistent with chat area; top corners match the card's outer radius. */
-    background: var(--chat-panel-bg);
+    /* Top half: one step above the chat panel, so the typing area reads as a
+       field even without a bright outline; top corners match the card's
+       outer radius. */
+    background: var(--bg-card);
     border: none;
     border-top-left-radius: var(--radius-lg);
     border-top-right-radius: var(--radius-lg);
@@ -355,7 +361,7 @@ footer.input > .ui-collapse[data-open="true"] {
 }
 
 .queue-bar__row {
-    background: var(--input-bg);
+    background: var(--bg-card);
 }
 
 .queue-bar__kind {

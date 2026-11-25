@@ -316,7 +316,7 @@
     padding: var(--space-3) var(--space-4);
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
-    background: var(--bg-elevated);
+    background: var(--bg-card);
     color: var(--fg);
     font: inherit;
     text-align: left;
@@ -455,7 +455,9 @@
     justify-content: space-between;
     gap: var(--space-2);
     padding: var(--space-1) var(--space-2);
-    background: var(--input-bg);
+    /* A control that sits on the page: the card step, not the field step —
+       otherwise the trigger dissolves into the pane it lives in. */
+    background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     color: var(--fg);
@@ -487,7 +489,7 @@
     color: var(--fg-dim);
 }
 .ui-select-content {
-    background: var(--input-bg);
+    background: var(--bg-float);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     box-shadow: 0 6px 18px var(--shadow-color);
@@ -558,7 +560,7 @@
 .ui-menu {
     min-width: 148px;
     padding: var(--space-1);
-    background: var(--bg-elevated);
+    background: var(--bg-float);
     color: var(--fg);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
@@ -599,6 +601,19 @@
 .ui-menu-item[data-highlighted] {
     background: var(--hover-overlay);
     color: var(--fg);
+}
+/* A disabled entry keeps its place in the menu but takes no highlight: the
+   grayed label and the resting cursor are what say "not now". */
+.ui-menu-item[data-disabled] {
+    color: var(--fg-dim);
+    opacity: 0.55;
+    cursor: not-allowed;
+}
+.ui-menu-item[data-disabled]:hover,
+.ui-menu-item[data-disabled]:focus-visible,
+.ui-menu-item[data-disabled][data-highlighted] {
+    background: transparent;
+    color: var(--fg-dim);
 }
 .ui-menu-label {
     flex: 1;
@@ -893,12 +908,17 @@
 .ui-tooltip[data-state="closed"] {
     animation: ui-fade-out 80ms var(--motion-ease-out);
 }
+/* A tooltip that explains a menu entry is portaled to the body, not nested
+   in the menu, so it needs to outrank the menu it belongs to. */
+.ui-tooltip-above-menu {
+    z-index: 400;
+}
 
 /* PopoverPanel — the anchored panel the topbar's menus hang off. The title
    row and the scrolling body are the same for every panel, so the surface
    chrome lives here once. */
 .ui-popover-panel {
-    background: var(--bg-elevated);
+    background: var(--bg-float);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     box-shadow: 0 6px 18px var(--shadow-color);
@@ -1047,7 +1067,8 @@
     padding: var(--space-1);
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
-    background: var(--input-bg);
+    /* Recessed well — the active pill is what stands out. */
+    background: var(--segment-track);
     max-width: 100%;
 }
 

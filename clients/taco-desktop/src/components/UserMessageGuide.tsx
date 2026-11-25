@@ -44,10 +44,11 @@ interface GuidePreviewProps {
     /** 1-based position of the entry in the rail. */
     index: number;
     total: number;
+    onNavigate: (entry: UserMessageGuideEntry) => void;
 }
 
 /** Hover card body — the message text, its images and the truncation notice. */
-function GuidePreview({ entry, index, total }: GuidePreviewProps) {
+function GuidePreview({ entry, index, total, onNavigate }: GuidePreviewProps) {
     const { t } = useT();
     const truncated = entry.text.length > PREVIEW_TEXT_LIMIT;
     // slice keeps the newlines of the retained part — the preview wraps the
@@ -56,63 +57,76 @@ function GuidePreview({ entry, index, total }: GuidePreviewProps) {
     const images = entry.images.slice(0, PREVIEW_IMAGE_LIMIT);
 
     return (
-        <div className="user-message-guide__preview-body">
-            <div className="user-message-guide__preview-position">
-                {t("message.guidePosition", { index, total })}
-            </div>
-            {shownText ? (
-                <div
-                    className="user-message-guide__preview-text"
-                    data-testid="user-message-preview-text"
-                >
-                    {shownText}
+        <>
+            <button
+                type="button"
+                className="user-message-guide__preview-action"
+                aria-label={t("message.guidePreviewAction", { index })}
+                onClick={() => onNavigate(entry)}
+                onKeyDown={(event) => {
+                    if (event.key !== "Enter" && event.key !== " ") return;
+                    event.preventDefault();
+                    onNavigate(entry);
+                }}
+            />
+            <div className="user-message-guide__preview-body">
+                <div className="user-message-guide__preview-position">
+                    {t("message.guidePosition", { index, total })}
                 </div>
-            ) : (
-                <div
-                    className="user-message-guide__preview-fallback"
-                    data-testid="user-message-preview-fallback"
-                >
-                    {entry.images.length > 0
-                        ? t("message.guideImageOnly")
-                        : entry.attachments.length > 0
-                          ? t("message.guideFilesOnly", { count: entry.attachments.length })
-                          : t("message.guideEmpty")}
-                </div>
-            )}
-            {entry.attachments.length > 0 && entry.text !== "" && (
-                <div className="user-message-guide__preview-image-count">
-                    {t("message.guideFileCount", { count: entry.attachments.length })}
-                </div>
-            )}
-            {entry.images.length > 0 && (
-                <>
-                    <div className="user-message-guide__preview-images">
-                        {images.map((image, i) => (
-                            <img
-                                key={`${image.mimeType}-${image.data.slice(0, 8)}-${i}`}
-                                className="user-message-guide__preview-image"
-                                src={`data:${image.mimeType};base64,${image.data}`}
-                                alt=""
-                            />
-                        ))}
-                    </div>
+                {shownText ? (
                     <div
-                        className="user-message-guide__preview-image-count"
-                        data-testid="user-message-preview-image-count"
+                        className="user-message-guide__preview-text"
+                        data-testid="user-message-preview-text"
                     >
-                        {t("message.guideImageCount", { count: entry.images.length })}
+                        {shownText}
                     </div>
-                </>
-            )}
-            {truncated && (
-                <div
-                    className="user-message-guide__preview-notice"
-                    data-testid="user-message-preview-notice"
-                >
-                    {t("message.guideTruncated")}
-                </div>
-            )}
-        </div>
+                ) : (
+                    <div
+                        className="user-message-guide__preview-fallback"
+                        data-testid="user-message-preview-fallback"
+                    >
+                        {entry.images.length > 0
+                            ? t("message.guideImageOnly")
+                            : entry.attachments.length > 0
+                              ? t("message.guideFilesOnly", { count: entry.attachments.length })
+                              : t("message.guideEmpty")}
+                    </div>
+                )}
+                {entry.attachments.length > 0 && entry.text !== "" && (
+                    <div className="user-message-guide__preview-image-count">
+                        {t("message.guideFileCount", { count: entry.attachments.length })}
+                    </div>
+                )}
+                {entry.images.length > 0 && (
+                    <>
+                        <div className="user-message-guide__preview-images">
+                            {images.map((image, i) => (
+                                <img
+                                    key={`${image.mimeType}-${image.data.slice(0, 8)}-${i}`}
+                                    className="user-message-guide__preview-image"
+                                    src={`data:${image.mimeType};base64,${image.data}`}
+                                    alt=""
+                                />
+                            ))}
+                        </div>
+                        <div
+                            className="user-message-guide__preview-image-count"
+                            data-testid="user-message-preview-image-count"
+                        >
+                            {t("message.guideImageCount", { count: entry.images.length })}
+                        </div>
+                    </>
+                )}
+                {truncated && (
+                    <div
+                        className="user-message-guide__preview-notice"
+                        data-testid="user-message-preview-notice"
+                    >
+                        {t("message.guideTruncated")}
+                    </div>
+                )}
+            </div>
+        </>
     );
 }
 
@@ -125,6 +139,12 @@ export const UserMessageGuide = memo(function UserMessageGuide({
     const railRef = useRef<HTMLDivElement | null>(null);
     const markersRef = useRef(new Map<string, HTMLButtonElement>());
     const [focusIndex, setFocusIndex] = useState(0);
+    /**
+     * Only one preview exists at a time. Letting every marker keep its own
+     * HoverCard leaves the previous card mounted through its exit animation,
+     * so fast pointer moves can stack two portals over each other.
+     */
+    const [previewId, setPreviewId] = useState<string | null>(null);
 
     const activeIndex = useMemo(
         () => entries.findIndex((entry) => entry.id === activeId),
@@ -197,21 +217,43 @@ export const UserMessageGuide = memo(function UserMessageGuide({
         [entries, onNavigate],
     );
 
+    const handlePreviewClose = useCallback((id: string) => {
+        setPreviewId((current) => (current === id ? null : current));
+    }, []);
+
+    const closePreview = useCallback(() => {
+        setPreviewId(null);
+    }, []);
+
+    const navigateFromPreview = useCallback(
+        (entry: UserMessageGuideEntry) => {
+            setPreviewId(null);
+            onNavigate(entry);
+        },
+        [onNavigate],
+    );
+
     return (
         <nav className="user-message-guide" aria-label={t("message.guideLabel")}>
             <span className="sr-only">
                 {t("message.guideCountValue", { count: entries.length })}
             </span>
             <div
-                className="user-message-guide__count"
-                data-testid="user-message-count"
-                aria-hidden="true"
+                className="user-message-guide__rail"
+                data-testid="user-message-rail"
+                ref={railRef}
+                onScroll={closePreview}
             >
-                {entries.length}
-            </div>
-            <div className="user-message-guide__rail" data-testid="user-message-rail" ref={railRef}>
                 {entries.map((entry, index) => (
-                    <HoverCard.Root key={entry.id} openDelay={0}>
+                    <HoverCard.Root
+                        key={entry.id}
+                        open={previewId === entry.id}
+                        onOpenChange={(open) => {
+                            if (!open) handlePreviewClose(entry.id);
+                        }}
+                        openDelay={0}
+                        closeDelay={0}
+                    >
                         <HoverCard.Trigger asChild>
                             <button
                                 type="button"
@@ -219,6 +261,8 @@ export const UserMessageGuide = memo(function UserMessageGuide({
                                 aria-label={t("message.guideItem", { index: index + 1 })}
                                 aria-current={activeId === entry.id ? "location" : undefined}
                                 tabIndex={index === focusIndex ? 0 : -1}
+                                onFocus={() => setPreviewId(entry.id)}
+                                onPointerEnter={() => setPreviewId(entry.id)}
                                 onClick={() => onNavigate(entry)}
                                 onKeyDown={(event) => handleKeyDown(event, index)}
                                 ref={(el) => {
@@ -226,25 +270,28 @@ export const UserMessageGuide = memo(function UserMessageGuide({
                                     else markersRef.current.delete(entry.id);
                                 }}
                             >
-                                <span className="user-message-guide__dot" />
+                                <span className="user-message-guide__line" />
                             </button>
                         </HoverCard.Trigger>
-                        <HoverCard.Portal>
-                            <HoverCard.Content
-                                className="user-message-guide__preview"
-                                data-testid={`user-message-preview-${entry.id}`}
-                                side="right"
-                                align="start"
-                                sideOffset={8}
-                                collisionPadding={8}
-                            >
-                                <GuidePreview
-                                    entry={entry}
-                                    index={index + 1}
-                                    total={entries.length}
-                                />
-                            </HoverCard.Content>
-                        </HoverCard.Portal>
+                        {previewId === entry.id && (
+                            <HoverCard.Portal>
+                                <HoverCard.Content
+                                    className="user-message-guide__preview"
+                                    data-testid={`user-message-preview-${entry.id}`}
+                                    side="right"
+                                    align="start"
+                                    sideOffset={8}
+                                    collisionPadding={8}
+                                >
+                                    <GuidePreview
+                                        entry={entry}
+                                        index={index + 1}
+                                        total={entries.length}
+                                        onNavigate={navigateFromPreview}
+                                    />
+                                </HoverCard.Content>
+                            </HoverCard.Portal>
+                        )}
                     </HoverCard.Root>
                 ))}
             </div>

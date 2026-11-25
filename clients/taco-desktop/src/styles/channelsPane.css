@@ -21,6 +21,10 @@
     display: flex;
     flex-direction: column;
     gap: var(--section-gap);
+    /* The first section heading follows the hint box, which sits outside this
+       group — without the extra step the heading crowds it, while the
+       headings inside the group get a full --section-gap. */
+    margin-top: var(--space-2);
 }
 .channels-section {
     display: flex;
@@ -106,7 +110,7 @@
     padding: var(--space-2-5) var(--space-4);
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
-    background: var(--surface-tint);
+    background: var(--bg-card);
     color: var(--fg);
     font: inherit;
     text-align: left;
@@ -291,7 +295,7 @@
     padding: var(--space-3);
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
-    background: var(--input-bg);
+    background: var(--bg-card);
     min-inline-size: 0;
 }
 /* The only state cue left: an accent edge while this layer overrides the parent. */

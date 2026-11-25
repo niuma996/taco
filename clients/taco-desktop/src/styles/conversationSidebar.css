@@ -7,7 +7,7 @@ aside.conversation-sidebar {
     display: flex;
     flex-direction: column;
     overflow: hidden;
-    border-right: 1px solid var(--divider-panel);
+    border-right: 1px solid var(--divider-chat-panel);
     background: var(--pane-list-bg);
     transition:
         width var(--motion-duration-slow) var(--motion-ease-standard),
@@ -105,7 +105,8 @@ aside.conversation-sidebar {
     min-height: 0;
     overflow-y: auto;
     overflow-x: hidden;
-    padding: 0.15rem 0.35rem 0.6rem;
+    padding-block: 0.15rem 0.6rem;
+    padding-inline: var(--space-1-5) var(--space-0-5);
 }
 
 .conversation-group {
@@ -176,14 +177,9 @@ aside.conversation-sidebar {
     overflow: visible;
 }
 
-.conversation-channel-list .session-item {
-    min-height: 44px;
-    margin-inline: 0.15rem;
-}
-
 .conversation-group-body {
     min-width: 0;
-    padding: 0 0.15rem 0.2rem;
+    padding-block-end: 0.2rem;
 }
 
 .conversation-group-body > .session-list-panel {
@@ -205,9 +201,10 @@ aside.conversation-sidebar {
     overflow: visible;
 }
 
+ul.conversation-channel-list .session-item,
 .conversation-group-body > .session-list-panel .session-item {
     min-height: 44px;
-    margin-inline: 0.15rem;
+    margin-inline: var(--space-1) var(--space-0-5);
 }
 
 .conversation-group-empty {

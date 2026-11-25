@@ -1,13 +1,16 @@
 /**
  * WorkspaceModeTabs — the workspace / channel-chat switch in the topbar.
  *
- * Plain-text segments on an equal-width grid plus a single accent underline
- * that slides between them. Every segment gets the same line length (one
- * column), so the line never changes size — it only travels — and a third
- * segment later needs no change to the switch itself.
+ * Two equal-width segments. The selected one is a rounded, slightly raised
+ * surface with a colour dot in front of its label — brand orange for the
+ * workspace, accent blue for the channel chat. No underline and no track:
+ * the pill is the whole chrome.
+ *
+ * Every segment carries the dot slot, visible or not, so both segments keep
+ * the same length and the control never resizes when the selection moves.
  */
 
-import type { CSSProperties, KeyboardEvent } from "react";
+import type { KeyboardEvent } from "react";
 import { useT } from "../i18n/useI18n";
 
 export type WorkspaceMode = "workspace" | "im";
@@ -23,11 +26,6 @@ export function WorkspaceModeTabs({ mode, onModeChange }: WorkspaceModeTabsProps
         { value: "workspace", label: t("workspaceMode.workspace") },
         { value: "im", label: t("workspaceMode.im") },
     ];
-    const activeIndex = Math.max(
-        0,
-        tabs.findIndex((tab) => tab.value === mode),
-    );
-
     // Arrow keys move between the two segments, as a radio group does.
     const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
         if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
@@ -41,14 +39,6 @@ export function WorkspaceModeTabs({ mode, onModeChange }: WorkspaceModeTabsProps
             role="radiogroup"
             aria-label={t("workspaceMode.label")}
             onKeyDown={onKeyDown}
-            // The underline's length and travel are pure CSS: one column wide,
-            // moved by the active index.
-            style={
-                {
-                    "--tab-count": tabs.length,
-                    "--tab-index": activeIndex,
-                } as CSSProperties
-            }
         >
             {tabs.map(({ value, label }) => {
                 const active = value === mode;
@@ -62,14 +52,17 @@ export function WorkspaceModeTabs({ mode, onModeChange }: WorkspaceModeTabsProps
                         aria-label={label}
                         title={label}
                         tabIndex={active ? 0 : -1}
-                        className={`workspace-mode-tab${active ? " workspace-mode-tab--active" : ""}`}
+                        className={`workspace-mode-tab workspace-mode-tab--${value}${active ? " workspace-mode-tab--active" : ""}`}
                         onClick={() => onModeChange(value)}
                     >
-                        {label}
+                        {/* The dot slot is in the layout even when the segment
+                            is not selected — an empty placeholder of the same
+                            size — so the two segments keep one length. */}
+                        <span className="workspace-mode-tab__dot" aria-hidden="true" />
+                        <span className="workspace-mode-tab__label">{label}</span>
                     </button>
                 );
             })}
-            <span className="workspace-mode-tabs__underline" aria-hidden="true" />
         </div>
     );
 }

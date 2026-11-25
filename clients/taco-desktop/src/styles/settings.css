@@ -170,7 +170,7 @@
     padding: 0.65rem var(--space-3);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
-    background: var(--input-bg);
+    background: var(--bg-card);
 }
 .permission-builtin summary {
     cursor: pointer;
@@ -274,7 +274,7 @@
     padding: var(--space-4);
     border: 1px solid var(--border);
     border-radius: var(--radius-lg);
-    background: var(--bg-elevated);
+    background: var(--bg-card);
     color: var(--fg);
     font: inherit;
     font-weight: var(--weight-normal);
@@ -391,7 +391,7 @@
     padding: 1.25rem;
     border: 1px solid var(--border);
     border-radius: var(--radius-lg);
-    background: var(--bg-elevated);
+    background: var(--bg-card);
     min-width: 0;
 }
 .model-config-card h4 {
@@ -821,7 +821,7 @@
     flex-direction: column;
     gap: var(--space-3);
     padding: var(--space-4);
-    background: var(--bg-elevated);
+    background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
 }
@@ -985,7 +985,7 @@
    better and lets the row's own accents stand out. */
 .schedules-cell-schedule code,
 .schedules-cell-command code {
-    background: var(--bg-elevated);
+    background: var(--bg-card);
     color: var(--fg);
     border: 1px solid var(--border);
     display: inline-block;

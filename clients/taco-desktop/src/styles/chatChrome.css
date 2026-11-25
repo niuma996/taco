@@ -53,7 +53,7 @@ main {
     height: var(--rail-top-padding);
     box-sizing: border-box;
     padding: 0 1rem;
-    border-bottom: 1px solid var(--divider-panel);
+    border-bottom: 1px solid var(--divider-chat-panel);
     /* Frosted glass: the bar overlays the top of `main` (negative margin), so
        scrolling messages pass under it and pick up the blur. z-index keeps it
        above the message stream; popovers portal to body and are unaffected. */
@@ -269,7 +269,7 @@ button.session-info-context.switchable[data-state="open"] {
     min-width: 200px;
     max-width: calc(100vw - 16px);
     padding: 8px 10px;
-    background: var(--bg-elevated);
+    background: var(--bg-float);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     box-shadow: 0 6px 18px var(--shadow-color);

@@ -52,7 +52,7 @@
 }
 .toast-card {
     pointer-events: auto;
-    background: var(--bg-elevated);
+    background: var(--bg-float);
     border: 1px solid var(--accent);
     border-radius: var(--radius-lg);
     box-shadow: 0 8px 32px var(--shadow-color-strong);
@@ -114,7 +114,7 @@
     align-items: center;
     gap: 0.3rem;
     padding: 0.45rem 0.6rem;
-    background: var(--bg-elevated);
+    background: var(--bg-float);
     color: var(--fg-dim);
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
@@ -158,7 +158,7 @@
     max-height: 60vh;
     display: flex;
     flex-direction: column;
-    background: var(--bg-elevated);
+    background: var(--bg-float);
     color: var(--fg);
     border: 1px solid var(--border);
     border-radius: var(--radius-lg);
@@ -232,13 +232,13 @@
     flex-direction: column;
     gap: 0.35rem;
 }
-/* One bordered block per dump line. Role-tinted left edge + badge via --line-role;
-   unmapped roles fall back to the neutral border/dim colors. */
+/* One quiet block per dump line. Role color stays in the label and a hairline,
+   so the debug surface keeps hierarchy without a thick colored rail. */
 .llm-dump-line {
     border: 1px solid var(--border);
-    border-left: 3px solid var(--line-role, var(--border-strong));
+    border-left: 1px solid var(--line-role, var(--border-strong));
     border-radius: var(--radius-sm);
-    background: var(--bg-elevated);
+    background: var(--bg-float);
     padding: 0.35rem 0.5rem;
 }
 .llm-dump-line--system {
@@ -409,7 +409,7 @@ html *:hover {
     box-sizing: border-box;
     padding: 2.25rem 2.5rem 2rem;
     border-radius: var(--radius-lg);
-    background: var(--bg-elevated);
+    background: var(--bg-float);
     box-shadow:
         0 4px 12px var(--shadow-color),
         0 24px 64px var(--shadow-color-strong);
@@ -748,7 +748,7 @@ html *:hover {
     /* Top inset matches .subagent-panel's header padding — see .task-panel. */
     padding: 8px 12px 12px;
     background: var(--bg);
-    border-left: 1px solid var(--divider-panel);
+    border-left: 1px solid var(--divider-chat-panel);
     overflow: hidden;
 }
 .files-drawer-body {
@@ -796,7 +796,7 @@ html *:hover {
     flex-direction: column;
     min-height: 0;
     color: var(--fg);
-    background: var(--bg-elevated);
+    background: var(--bg-float);
 }
 /* Toolbar: full relPath (ellipsis) + optional markdown rendered/source toggle. */
 .files-preview-toolbar {
