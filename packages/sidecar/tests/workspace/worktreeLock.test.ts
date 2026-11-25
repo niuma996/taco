@@ -21,30 +21,43 @@ test("serializes same-repository mutations across lock contenders", async () => 
     await fixture(async (commonDir) => {
         const events: string[] = [];
         let releaseFirst!: () => void;
+        let markFirstStarted!: () => void;
         const firstHeld = new Promise<void>((resolve) => {
             releaseFirst = resolve;
+        });
+        const firstStarted = new Promise<void>((resolve) => {
+            markFirstStarted = resolve;
         });
         const first = withWorktreeMutationLock(
             commonDir,
             async () => {
                 events.push("first-start");
+                markFirstStarted();
                 await firstHeld;
                 events.push("first-end");
             },
-            { retryMs: 1, timeoutMs: 500 },
+            { retryMs: 1, timeoutMs: 5000 },
         );
-        await new Promise((resolve) => setTimeout(resolve, 10));
+        await firstStarted;
         const second = withWorktreeMutationLock(
             commonDir,
             async () => {
                 events.push("second");
             },
-            { retryMs: 1, timeoutMs: 500 },
+            { retryMs: 1, timeoutMs: 5000 },
         );
-        await new Promise((resolve) => setTimeout(resolve, 10));
-        assert.deepEqual(events, ["first-start"]);
-        releaseFirst();
-        await Promise.all([first, second]);
+        try {
+            const candidatePrefix = `.taco-worktree.lock-${process.pid}-`;
+            const deadline = Date.now() + 4000;
+            while (!(await readdir(commonDir)).some((name) => name.startsWith(candidatePrefix))) {
+                assert.ok(Date.now() < deadline, "second lock contender did not start");
+                await new Promise((resolve) => setTimeout(resolve, 10));
+            }
+            assert.deepEqual(events, ["first-start"]);
+        } finally {
+            releaseFirst();
+            await Promise.all([first, second]);
+        }
         assert.deepEqual(events, ["first-start", "first-end", "second"]);
     });
 });

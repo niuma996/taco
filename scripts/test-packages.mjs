@@ -1,37 +1,17 @@
 #!/usr/bin/env node
 /**
- * Runs the node:test package suite.
+ * Runs the node:test package suite with two measured safeguards.
  *
- * Two knobs, both measured rather than guessed.
+ * One worker per core over-subscribes this subprocess-heavy suite. On a 10-core
+ * box: 6 workers took 106–138 s with watcher failures 0/3; 10 took 96–146 s with
+ * failures 1/3; 14 took 256 s with 4 failures; 20 took 4507 s with 16 failures.
+ * The computed cap leaves subprocess headroom and scales down for small CI runners.
  *
- * 1. A CONCURRENCY CAP. node's default is `os.availableParallelism()` — one
- *    worker per core. That over-subscribes this suite: most of its cost is
- *    real subprocess spawns (git, daemons, the CLI's own binaries) and each
- *    worker forks children of its own. Measured on a 10-core box:
+ * workspace.policies runs serially because its real chokidar watcher needs an
+ * idle machine to receive filesystem events reliably under the full suite.
  *
- *      concurrency 10 (default) → 96–146 s wall, watcher case failed 1/3
- *      concurrency  6           → 106–138 s wall, watcher case failed 0/3
- *      concurrency 14           → 256 s wall,   4 failures
- *      concurrency 20           → 4507 s wall, 16 failures
- *
- *    So the cliff is over-subscription, not raw core count. The cap leaves
- *    headroom for the subprocess churn while still using the machine. It is
- *    computed rather than hardcoded, because a CI runner with 2 or 4 cores
- *    must not be handed a 6-worker cap — that would put it back on the
- *    over-subscribed side of the cliff.
- *
- * 2. A SERIAL SLOT for the fs-event-sensitive file. `workspace.policies.test.ts`
- *    drives a real chokidar watcher and asserts that the OS delivered a
- *    filesystem event. That is a property of the machine, not of the code:
- *    under load the event is sometimes never delivered, and the case then
- *    burns its whole timeout. Running it alone, after the parallel batch, on
- *    an otherwise idle machine removes the contention. Node 22 has no
- *    file-level exclude flag, so the file list is enumerated here.
- *
- * `--shard 1/2` splits the suite across N runners. The shards are
- * independent processes, so two CI runners finish in about half the wall
- * clock of one: measured 96.6 s for the whole suite vs 57.7 s and 54.6 s
- * for the two halves side by side.
+ * --shard 1/2 splits the parallel batch; the serial slot runs only on shard one.
+ * Two measured halves took 57.7 s and 54.6 s versus 96.6 s for the whole suite.
  */
 import { spawn } from "node:child_process";
 import { readdirSync } from "node:fs";

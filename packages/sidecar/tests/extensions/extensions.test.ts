@@ -13,7 +13,7 @@ import type {
     ToolResultEvent,
 } from "../../src/extensions/types.ts";
 import type { AgentHarnessTool, ExecutionToolContext } from "../../src/runtime/pi/types.ts";
-import { tagRegistry } from "../../src/tags/registry.ts";
+import { tagRegistry, unregisterExtensionTag } from "../../src/tags/registry.ts";
 import type { TagSpec } from "../../src/tags/types.ts";
 import { fileAccessOf } from "../../src/tools/fileAccess.ts";
 import type { TacoTool } from "../../src/tools/index.ts";
@@ -121,6 +121,40 @@ describe("registry", () => {
             r.recordDisabled("ext-x");
             r.recordDisabled("ext-y");
             assert.deepEqual(r.report.disabled, ["ext-x", "ext-y"]);
+        });
+
+        it("rollback preserves tags registered by other registries", () => {
+            const registry = new ExtensionRegistry();
+            const other = new ExtensionRegistry();
+            const checkpoint = registry.checkpoint();
+            const makeTag = (name: string): TagSpec => ({
+                name,
+                scope: "user-context",
+                compression: { kind: "pin" },
+                tuiVisibility: "hidden",
+                parser: { kind: "xml-balanced" },
+                description: name,
+            });
+            try {
+                assert.equal(
+                    other.addExtensionTag("other", "rollback_other", makeTag("rollback_other")),
+                    true,
+                );
+                assert.equal(
+                    registry.addExtensionTag(
+                        "partial",
+                        "rollback_partial",
+                        makeTag("rollback_partial"),
+                    ),
+                    true,
+                );
+                registry.rollback(checkpoint);
+                assert.equal(Object.hasOwn(tagRegistry, "rollback_other"), true);
+                assert.equal(Object.hasOwn(tagRegistry, "rollback_partial"), false);
+            } finally {
+                unregisterExtensionTag("rollback_other");
+                unregisterExtensionTag("rollback_partial");
+            }
         });
 
         it("rolls back builtin registration when its register callback throws", async () => {

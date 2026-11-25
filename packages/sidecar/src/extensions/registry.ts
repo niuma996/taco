@@ -10,7 +10,7 @@
  */
 
 import type { ExtensionContributionSummary, ExtensionDisabledEntry } from "@taco-ai/protocol";
-import { registerExtensionTag, tagRegistry, unregisterExtensionTag } from "../tags/registry.ts";
+import { registerExtensionTag, unregisterExtensionTag } from "../tags/registry.ts";
 import type { TagSpec } from "../tags/types.ts";
 import type { ExtensionFileAccessEntry, FileAccess } from "../tools/fileAccess.ts";
 import {
@@ -106,7 +106,6 @@ export interface ExtensionRegistryCheckpoint {
     readonly sessionActivators: number;
     readonly extensionSkillDirs: number;
     readonly extensionTagIndex: ReadonlyMap<string, ReadonlySet<string>>;
-    readonly tagNames: ReadonlySet<string>;
     readonly extensionFileAccess: ReadonlyMap<string, ExtensionFileAccessEntry>;
     readonly contributions: ReadonlyMap<string, ExtensionContributionSummary>;
 }
@@ -156,8 +155,8 @@ export class ExtensionRegistry {
     }
 
     checkpoint(): ExtensionRegistryCheckpoint {
-        // Loading is serial and every contribution is append-only. The global
-        // snapshots cover the two registries whose entries live outside this object.
+        // Loading is serial and every contribution is append-only. File-access
+        // entries also need a snapshot because they live outside this object.
         return {
             tools: this._tools.length,
             toolCandidates: this._toolCandidates.length,
@@ -173,7 +172,6 @@ export class ExtensionRegistry {
             extensionTagIndex: new Map(
                 [...this._extensionTagIndex].map(([name, tags]) => [name, new Set(tags)]),
             ),
-            tagNames: new Set(Object.keys(tagRegistry)),
             extensionFileAccess: extensionFileAccessSnapshot(),
             contributions: new Map(
                 [...this._contributions].map(([name, value]) => [
@@ -202,12 +200,15 @@ export class ExtensionRegistry {
         this._workspaceActivators.length = checkpoint.workspaceActivators;
         this._sessionActivators.length = checkpoint.sessionActivators;
         this._extensionSkillDirs.length = checkpoint.extensionSkillDirs;
+        for (const [extName, tags] of this._extensionTagIndex) {
+            const previous = checkpoint.extensionTagIndex.get(extName);
+            for (const name of tags) {
+                if (!previous?.has(name)) unregisterExtensionTag(name);
+            }
+        }
         this._extensionTagIndex.clear();
         for (const [name, tags] of checkpoint.extensionTagIndex) {
             this._extensionTagIndex.set(name, new Set(tags));
-        }
-        for (const name of Object.keys(tagRegistry)) {
-            if (!checkpoint.tagNames.has(name)) unregisterExtensionTag(name);
         }
         restoreExtensionFileAccess(checkpoint.extensionFileAccess);
         this._contributions.clear();
