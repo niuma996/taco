@@ -71,6 +71,12 @@ import type {
 import { findBranchEntries, findBranchTipId } from "./sessionBranch.ts";
 import { readSessionFacts, type SessionFacts, writeSessionFactsIfAbsent } from "./sessionFacts.ts";
 import { resolveSessionByPrefix, SessionNotFoundError } from "./sessionLookup.ts";
+import {
+    loadSessionMetadataIndex,
+    type PersistedSessionMetadata,
+    saveSessionMetadataIndex,
+    sessionMetadataIndexPath,
+} from "./sessionMetadataIndex.ts";
 import { readLegacyFactsFromPath, readSessionMetadataFromDisk } from "./sessionMetadataReader.ts";
 import { buildSessionTaskState, type SessionTaskState } from "./sessionTaskState.ts";
 import { type TitleSource, writeTitleSource } from "./sessionTitleSource.ts";
@@ -366,6 +372,17 @@ export class SessionRegistry extends EventEmitter {
 
     /** sessionId → message records in the file. Same scan; see getSessionMessageCount. */
     private readonly _messageCountCache = new Map<SessionId, number>();
+
+    /**
+     * Disk-backed copy of the scan caches above, loaded lazily and validated
+     * per entry against the session file's current mtime, so a cold daemon
+     * only rescans files that changed since the last run. See
+     * sessionMetadataIndex.ts for the trust model.
+     */
+    private _metadataIndexPromise: Promise<Map<SessionId, PersistedSessionMetadata>> | undefined;
+    private _metadataIndex: Map<SessionId, PersistedSessionMetadata> | undefined;
+    private _metadataIndexSaveTimer: ReturnType<typeof setTimeout> | undefined;
+    private _metadataIndexDirty = false;
 
     /** Currently attached session map. */
     private readonly attached = new Map<SessionId, AttachedSession>();
@@ -905,6 +922,21 @@ export class SessionRegistry extends EventEmitter {
     /** One JSONL scan fills name, facts, activity, title-source and count caches together. */
     private async hydrateSessionMetadata(sessionId: SessionId): Promise<void> {
         const meta = await this.openSession(sessionId);
+        // Persisted index hit: every mutation path bumps the file mtime, so an
+        // entry recorded with the file's current mtime cannot be stale. meta
+        // comes from repo.list / fileInfo captured before this scan would run,
+        // so its mtime is never newer than the content — a mid-scan mutation
+        // lands in the safe direction (mismatch → rescan next time).
+        const index = await this.metadataIndex();
+        const persisted = index.get(sessionId);
+        if (persisted && persisted.modifiedAt === meta.modifiedAt) {
+            this._nameCache.set(sessionId, persisted.name);
+            this._factsCache.set(sessionId, persisted.facts);
+            this._activityCache.set(sessionId, persisted.activityAt);
+            this._messageCountCache.set(sessionId, persisted.messageCount);
+            this._titleSourceCache.set(sessionId, persisted.titleSource);
+            return;
+        }
         const { name, facts, activityAt, titleSource, messageCount } =
             await readSessionMetadataFromDisk(meta.path);
         this._nameCache.set(sessionId, name);
@@ -912,6 +944,56 @@ export class SessionRegistry extends EventEmitter {
         this._activityCache.set(sessionId, activityAt);
         this._messageCountCache.set(sessionId, messageCount);
         this._titleSourceCache.set(sessionId, titleSource);
+        index.set(sessionId, {
+            name,
+            facts,
+            activityAt,
+            titleSource,
+            messageCount,
+            modifiedAt: meta.modifiedAt,
+        });
+        this.scheduleMetadataIndexSave();
+    }
+
+    private metadataIndex(): Promise<Map<SessionId, PersistedSessionMetadata>> {
+        // Single shared promise: session.list hydrates every session
+        // concurrently, and each must await the same one-file read rather
+        // than pile up N reads of the same index.
+        this._metadataIndexPromise ??= loadSessionMetadataIndex(
+            sessionMetadataIndexPath(this.sessionsRoot, this.sessionCwd),
+        ).then((map) => {
+            this._metadataIndex = map;
+            return map;
+        });
+        return this._metadataIndexPromise;
+    }
+
+    /**
+     * Debounced, unref'd persist: a session.list scan marks hundreds of
+     * entries dirty in one tick, and the daemon must be able to exit without
+     * flushing (a lost write only means the next cold start rescans).
+     */
+    private scheduleMetadataIndexSave(): void {
+        this._metadataIndexDirty = true;
+        if (this._metadataIndexSaveTimer) return;
+        this._metadataIndexSaveTimer = setTimeout(() => {
+            this._metadataIndexSaveTimer = undefined;
+            if (!this._metadataIndexDirty || !this._metadataIndex) return;
+            this._metadataIndexDirty = false;
+            // Prune entries whose session file is gone — deletes never rewrite
+            // the file, so mtime validation alone keeps them forever. The
+            // cached list is the full set when present; without it we keep
+            // everything rather than risk dropping live entries.
+            const keepIds = this._metadataCache
+                ? new Set<string>(this._metadataCache.map((m) => m.id))
+                : undefined;
+            void saveSessionMetadataIndex(
+                sessionMetadataIndexPath(this.sessionsRoot, this.sessionCwd),
+                this._metadataIndex,
+                keepIds,
+            ).catch((err) => log.warn("failed to persist session metadata index", err));
+        }, 250);
+        this._metadataIndexSaveTimer.unref?.();
     }
 
     /** Get the full chat tree history (from session leaf up to root). */
